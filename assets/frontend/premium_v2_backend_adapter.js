@@ -260,7 +260,7 @@
     if (error) console.error('[Ryu backend]', text);
   };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
-  let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, profileEditOriginalName = '', activeJob = null, activeJobType = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, chapterListEpoch = 0, chapterSelectionEpoch = 0, cueListEpoch = 0, cueSearchTimer = null, previewAudio = null, lastVoicePreviewPath = null, lastVoicePreviewProfileName = '', lastVoicePreviewChapterNumber = null, lastVoicePreviewChapterTitle = '', voicePreviewValid = false, voicePreviewEpoch = 0, previewVolume = 0.85, voiceAssignmentEpoch = 0, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8, productionFullJobId = null, productionPreviewJobId = null, productionJobSnapshots = {full:null,preview:null}, productionJobMonitors = {full:null,preview:null}, productionMonitorEpochs = {full:0,preview:0}, productionPreviewRequestProjectFolder = '', productionPreviewSelectionProjectFolder = '', productionPreviewSelectedChapter = null, productionPreviewSelectedChapterId = '', productionPreviewRequestChapterNumber = 0, productionPreviewRequestChapterId = '';
+  let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, profileEditOriginalName = '', activeJob = null, activeJobType = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, chapterListEpoch = 0, chapterSelectionEpoch = 0, cueListEpoch = 0, cueSearchTimer = null, previewAudio = null, lastVoicePreviewPath = null, lastVoicePreviewProfileName = '', lastVoicePreviewChapterNumber = null, lastVoicePreviewChapterTitle = '', voicePreviewValid = false, voicePreviewEpoch = 0, previewVolume = 0.85, voiceAssignmentEpoch = 0, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8, productionFullJobId = null, productionPreviewJobId = null, productionJobSnapshots = {full:null,preview:null}, productionJobMonitors = {full:null,preview:null}, productionMonitorEpochs = {full:0,preview:0}, productionPreviewRequestProjectFolder = '', productionPreviewSelectionProjectFolder = '', productionPreviewSelectedChapter = null, productionPreviewSelectedChapterId = '', productionPreviewSelectedChapterSignature = '', productionPreviewRequestChapterNumber = 0, productionPreviewRequestChapterId = '';
   let elevenCandidates = [], selectedElevenCandidate = null, elevenDesignSeed = 7300;
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], pronunciationEnabled = true, activePronunciationSeries = '', lastPronunciationPreview = null, pronunciationRowPreviewState = new Map(), pronunciationSelectionKeys = new Set(), selectedSoundPath = null, selectedCuePath = null, pendingCueSlot = null, pendingCueAssignments = Object.create(null), cueChangesDirty = false, cueSaveError = '', cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null, chapterBgmDraftDirty = false, mixLevelsDirty = false, soundPreviewKind = null, soundPreviewPath = null;
   let chapterBgmCandidateTrackPath = null, chapterBgmCandidateChapter = null, chapterBgmSavePromise = null, cueSavePromise = null;
@@ -5014,6 +5014,7 @@
       productionPreviewSelectionProjectFolder = projectFolder;
       productionPreviewSelectedChapter = null;
       productionPreviewSelectedChapterId = '';
+      productionPreviewSelectedChapterSignature = '';
       if (previousFolder && previousFolder !== projectFolder) {
         // A completed preview belongs to its original project. Clear only the
         // playable UI reference; keep the durable job ID so an active original
@@ -5030,24 +5031,43 @@
     const currentNumber = Number(productionPreviewSelectedChapter || 0);
     const currentRow = rows.find(chapter => Number(chapter.number) === currentNumber);
     const currentId = String(currentRow?.chapter_id || currentRow?.id || '');
-    if (currentRow && productionPreviewSelectedChapterId && currentId &&
-        productionPreviewSelectedChapterId !== currentId) {
-      // Chapter numbers can be reused after deletion/reordering. A changed
-      // stable chapter ID invalidates any preview previously associated with it.
+    const currentSignature = currentRow ? JSON.stringify([
+      Number(currentRow.number), currentId, String(currentRow.title || ''), String(currentRow.text || '')
+    ]) : '';
+    if (productionPreviewSelectedChapter && !currentRow) {
+      // Deleting/re-numbering the selected chapter invalidates its old preview,
+      // even when the replacement chapter has no stable ID.
       invalidateVoicePreview();
       productionPreviewSelectedChapter = null;
       productionPreviewSelectedChapterId = '';
+      productionPreviewSelectedChapterSignature = '';
+    } else if (currentRow && (
+      (productionPreviewSelectedChapterId && currentId && productionPreviewSelectedChapterId !== currentId) ||
+      (productionPreviewSelectedChapterSignature && currentSignature !== productionPreviewSelectedChapterSignature)
+    )) {
+      // Chapter numbers can be reused, and saved text/title can change while
+      // retaining the same ID. Neither case may keep stale playable audio.
+      invalidateVoicePreview();
+      productionPreviewSelectedChapter = null;
+      productionPreviewSelectedChapterId = '';
+      productionPreviewSelectedChapterSignature = '';
     }
     if (!rows.length) {
       productionPreviewSelectedChapter = null;
       productionPreviewSelectedChapterId = '';
+      productionPreviewSelectedChapterSignature = '';
     } else if (!currentRow || !productionPreviewSelectedChapter) {
       const studioNumber = Number(window.ryuPremiumSelectedChapter || 0);
       const fallback = rows.find(chapter => Number(chapter.number) === studioNumber) || rows[0];
       productionPreviewSelectedChapter = Number(fallback.number);
       productionPreviewSelectedChapterId = String(fallback.chapter_id || fallback.id || '');
-    } else if (!productionPreviewSelectedChapterId) {
-      productionPreviewSelectedChapterId = currentId;
+      productionPreviewSelectedChapterSignature = JSON.stringify([
+        Number(fallback.number), productionPreviewSelectedChapterId,
+        String(fallback.title || ''), String(fallback.text || '')
+      ]);
+    } else {
+      if (!productionPreviewSelectedChapterId) productionPreviewSelectedChapterId = currentId;
+      if (!productionPreviewSelectedChapterSignature) productionPreviewSelectedChapterSignature = currentSignature;
     }
 
     const signature = JSON.stringify(rows.map(chapter => [
@@ -5104,6 +5124,10 @@
         if (chapterNumber === Number(productionPreviewSelectedChapter)) return;
         productionPreviewSelectedChapter = chapterNumber;
         productionPreviewSelectedChapterId = String(chapter.chapter_id || chapter.id || '');
+        productionPreviewSelectedChapterSignature = JSON.stringify([
+          chapterNumber, productionPreviewSelectedChapterId,
+          String(chapter.title || ''), String(chapter.text || '')
+        ]);
         invalidateVoicePreview();
         if ($('productionPreviewStatus')) {
           $('productionPreviewStatus').textContent =
