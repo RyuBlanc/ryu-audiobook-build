@@ -174,6 +174,19 @@ def prepare_chapter_plan(
             )
         if matching_dirs:
             chapter_dir = matching_dirs[0]
+        elif chapter_dir.exists():
+            # Never adopt a same-number/title folder whose saved identity belongs
+            # to another chapter. The new chapter gets an identity-scoped folder,
+            # while the previous chapter's checkpoint remains untouched.
+            saved_identity = ""
+            try:
+                saved_identity = str(
+                    json.loads((chapter_dir / "narration.json").read_text(encoding="utf-8")).get("chapter_id") or ""
+                ).strip()
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                pass
+            if saved_identity != chapter_id:
+                chapter_dir = output_root / f"{chapter.number:03d}_{safe_name(chapter.title)}_{chapter_id}"
     chunks_dir = chapter_dir / "chunks"
     chunks_dir.mkdir(parents=True, exist_ok=True)
 

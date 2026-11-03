@@ -59,6 +59,33 @@ class Stage53CheckpointCompatibilityTests(unittest.TestCase):
             "The third sentence finishes this test chapter.",
         )
 
+    def test_new_chapter_identity_does_not_adopt_same_number_and_title_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "working_audio"
+            original = Chapter(1, "Chapter One", "Identical source text.", chapter_id="chapter-identity-a")
+            original_provider = RecordingLocalProvider()
+            original_result = generate_chapter(
+                original, original_provider, "saved-voice-id", root,
+                narration_speed=1.0, pacing_profile="off",
+            )
+            self.assertGreater(len(original_provider.calls), 0)
+
+            replacement = Chapter(1, "Chapter One", "Identical source text.", chapter_id="chapter-identity-b")
+            replacement_provider = RecordingLocalProvider()
+            replacement_result = generate_chapter(
+                replacement, replacement_provider, "saved-voice-id", root,
+                narration_speed=1.0, pacing_profile="off",
+            )
+
+            self.assertNotEqual(original_result.output_path, replacement_result.output_path)
+            self.assertNotEqual(original_result.output_path.name, replacement_result.output_path.name)
+            self.assertGreater(
+                len(replacement_provider.calls), 0,
+                "a different stable chapter identity must not reuse another chapter's audio",
+            )
+            self.assertTrue((original_result.output_path / "narration.json").is_file())
+            self.assertTrue((replacement_result.output_path / "narration.json").is_file())
+
     def test_unchanged_saved_profile_reuses_valid_checkpoint_wav_chunks(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "working_audio"
