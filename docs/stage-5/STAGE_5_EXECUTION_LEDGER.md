@@ -613,3 +613,18 @@ To close the remaining PROD-15 Save As evidence gap, the branch now also contain
 - `fdf1316b112b0fb0da6e9558cf4cc52db04639ba`: Windows harness asserts non-empty copied M4A, ISO BMFF `ftyp` marker and named packaged check.
 
 A separate artifact-checkpoint push is now being queued against the latest branch SHA. Build Windows App concurrency is keyed by `github.run_id` with `cancel-in-progress: false`, so this new run must not cancel or replace active #2164. Both runs' results are recorded independently. The Save As-inclusive candidate is the authoritative Stage 5.2 final package gate after #2164's installer artifact run has completed; it must pass its tests/build, packaged Save As and preview matrix, state/restart validator and installer/hash/Defender/artifact uploads.
+
+
+## #2164 packaged Stage 5.2 checkpoint result — 3 November 2026
+
+Run [#2164](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41629135150), run ID `41629135150`, exact head `d99194a458daf488ee6f8665e5aeba20629ea28a`, completed with overall `success`.
+
+- Tests job `125893921490`: SUCCESS; 1,103 tests in 43.637 seconds, with Premium V2 JavaScript syntax and isolated native Qt lifecycle checks passed.
+- Build job `125894932018`: SUCCESS; installer JS syntax, frozen Windows application build, frozen EXE verification, bundled voice/critical module verification, packaged Sound Design/Production Preview acceptance, Inno Setup core installer, functional HTML installer, original logo verification, SHA-256 generation, Microsoft Defender scan, and all artifact uploads passed.
+- The packaged acceptance passed after restoring the fixture's original enabled Chapter-Based BGM state after Voice Only preview/cancellation tests. This confirms the #2162 post-run validator failure was corrected.
+- Installer artifact `Ryu-Audiobook-Installer-2164`: ID `13228886083`, 884,137,230 bytes.
+- SHA-256 manifest `Ryu-Audiobook-Release-SHA256-2164`: ID `13228806574`, 781 bytes.
+- Portable application artifact `Ryu-Audiobook-Portable-2164`: ID `13228990522`, 1,367,574,308 bytes.
+- The optional Publish verified installer release step was skipped by workflow policy. It is not a failed build/upload job; all three requested artifacts were uploaded successfully.
+
+This is the first full packaged success after the #2162 failure. It does not include the later PROD-15 Save As click-and-copy acceptance addition; that is being verified on the separate #2165 exact-head package run. Therefore, #2164 is recorded as a successful prerequisite package checkpoint, not yet the final Stage 5.2 closure SHA.
