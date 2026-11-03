@@ -182,14 +182,23 @@ class Stage53LiveGenerationIntegrationTests(unittest.TestCase):
             # the same narration again.
             bridge.finished_event.clear()
             local_provider.calls.clear()
-            retry_result = bridge._production_generate_book(
-                {"output_path": str(output), "profile_name": "Another Transient Voice"}
-            )
-            self.assertNotEqual(retry_result["job_id"], result["job_id"])
-            self.assertTrue(
-                bridge.finished_event.wait(15),
-                "the retry GenerationManager did not reach its completion callback",
-            )
+            with (
+                patch.object(host, "provider_from_profile", return_value=(local_provider, profile.voice_id)),
+                patch.object(host, "load_profiles", return_value=[]),
+                patch.object(host, "_effective_pronunciation_dictionary", return_value=[]),
+                patch("app.audio.library.effective_background_audio_mode", return_value="off"),
+                patch("app.audio.library.validate_saved_audio_paths"),
+                patch("app.tts.manager.validate_cover", return_value=cover),
+                patch("app.tts.manager.assemble_m4b", side_effect=assemble_local_fixture),
+            ):
+                retry_result = bridge._production_generate_book(
+                    {"output_path": str(output), "profile_name": "Another Transient Voice"}
+                )
+                self.assertNotEqual(retry_result["job_id"], result["job_id"])
+                self.assertTrue(
+                    bridge.finished_event.wait(15),
+                    "the retry GenerationManager did not reach its completion callback",
+                )
             self.assertEqual(local_provider.calls, [])
             self.assertTrue(output.is_file())
             self.assertGreater(output.stat().st_size, 1024)
