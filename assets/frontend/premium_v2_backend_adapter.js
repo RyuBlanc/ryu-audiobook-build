@@ -801,7 +801,8 @@
       const text = dashboardText(node.textContent);
       const buttons = [...node.querySelectorAll('button,[role="button"],a')];
       if (text.includes('current chapter') && text.includes('processing stage') &&
-          buttons.some(button => ['view job','pause','resume'].includes(dashboardText(button.textContent)))) return node;
+          buttons.some(button => button.dataset.dashboardGenerationControl === '1' ||
+            ['view job','pause','resume'].includes(dashboardText(button.textContent)))) return node;
       node = node.parentElement;
     }
     return null;
@@ -836,7 +837,9 @@
     const fill = card.querySelector('.progress i,.progress-fill,.progress-bar-fill,[role="progressbar"],progress,[style*="width:"]');
     const buttons = [...card.querySelectorAll('button,[role="button"],a')];
     const view = buttons.find(button => dashboardText(button.textContent) === 'view job');
-    const control = buttons.find(button => ['pause','resume'].includes(dashboardText(button.textContent)));
+    const control = buttons.find(button => button.dataset.dashboardGenerationControl === '1' ||
+      ['pause','resume'].includes(dashboardText(button.textContent)));
+    if (control) control.dataset.dashboardGenerationControl = '1';
     if (!job) {
       const selectedProject = dashboardProject || null;
       setDashboardRow(card, 'current chapter', selectedProject
@@ -881,10 +884,18 @@
       writeAttributeIfChanged(view, 'data-dashboard-job-id', job.job_id || '');
     }
     if (control) {
-      const paused = ['paused','pause_requested'].includes(String(job.state || '').toLowerCase());
-      writeTextIfChanged(control, paused ? 'Resume' : 'Pause');
-      writeBooleanIfChanged(control, 'disabled', !['running','paused'].includes(String(job.state || '').toLowerCase()));
-      writeAttributeIfChanged(control, 'data-dashboard-generation-action', paused ? 'resume' : 'pause');
+      const controlState = String(job.state || '').toLowerCase();
+      const controlAction = controlState === 'running' ? 'pause' :
+        controlState === 'paused' ? 'resume' : '';
+      const controlLabel = controlState === 'pause_requested' ? 'Pausing…' :
+        controlState === 'cancel_requested' ? 'Cancelling…' :
+        controlState === 'queued' ? 'Queued…' :
+        controlState === 'retrying' ? 'Retrying…' :
+        controlState === 'paused' ? 'Resume' : 'Pause';
+      writeTextIfChanged(control, controlLabel);
+      writeBooleanIfChanged(control, 'disabled', !controlAction);
+      if (controlAction) writeAttributeIfChanged(control, 'data-dashboard-generation-action', controlAction);
+      else if (control.dataset.dashboardGenerationAction) delete control.dataset.dashboardGenerationAction;
       writeAttributeIfChanged(control, 'data-dashboard-job-id', job.job_id || '');
     }
   }
@@ -5753,6 +5764,37 @@
       refreshSoundCues().catch(error => message(error?.message || String(error), true));
     }, 160);
   }
+  function backgroundGenerationJobActions(job, id, action) {
+    const state = String(job.state || 'unknown').toLowerCase();
+    const type = String(job.type || '').toLowerCase();
+    const isGeneration = type === 'audiobook-generation';
+    const canCancelImport = type === 'import';
+    const canCancelPreview = ['voice-preview','production-preview','sound-design-preview'].includes(type);
+    const actions = [];
+    if (isGeneration && state === 'running') {
+      actions.push(action('pause','Pause','secondary'));
+    } else if (isGeneration && state === 'pause_requested') {
+      actions.push('<small class="muted" role="status" aria-live="polite">Pausing at the next chapter boundary…</small>');
+    } else if (isGeneration && state === 'paused') {
+      actions.push(action('resume','Resume',''));
+    }
+    if (state === 'cancel_requested') {
+      actions.push('<small class="muted" role="status" aria-live="polite">Cancelling…</small>');
+    } else if (state === 'queued' ||
+        (isGeneration && ['running','paused','pause_requested'].includes(state)) ||
+        (canCancelImport && state === 'running') ||
+        (canCancelPreview && ['queued','running'].includes(state))) {
+      actions.push(action('cancel','Cancel','ghost'));
+    }
+    if (state === 'failed' && job.recoverable) {
+      actions.push('<small>Retry from Production Studio to revalidate saved project settings.</small>');
+    }
+    if (['running','pause_requested'].includes(state) && !isGeneration && !canCancelImport && !canCancelPreview) {
+      actions.push('<small>Cancellation and pause are not supported for this operation.</small>');
+    }
+    return actions.join('');
+  }
+
   let backendJobFilter = 'active';
   async function refreshJobs() {
     // Multiple callers share one in-flight refresh so the 1.5s heartbeat, job
@@ -5786,14 +5828,7 @@
         box.innerHTML = jobs.map(j => {
           const id = esc(j.job_id || ''), state = String(j.state || 'unknown');
           const action = (name,label,cls) => '<button class="btn small ' + cls + '" data-job-action="' + name + '" data-job-id="' + id + '">' + label + '</button>';
-          const canControlGeneration = j.type === 'audiobook-generation';
-          const canCancelImport = j.type === 'import';
-          const canCancelPreview = ['voice-preview','production-preview','sound-design-preview'].includes(j.type);
-          const actions = (canControlGeneration && ['running','pause_requested'].includes(state) ? action('pause','Pause','secondary') : '') +
-            (canControlGeneration && ['paused','pause_requested'].includes(state) ? action('resume','Resume','') : '') +
-            ((state === 'queued' || (canControlGeneration && ['running','paused','pause_requested','cancel_requested'].includes(state)) || (canCancelImport && ['running','cancel_requested'].includes(state)) || (canCancelPreview && ['queued','running','cancel_requested'].includes(state))) ? action('cancel','Cancel','ghost') : '') +
-            (state === 'failed' && j.recoverable ? '<small>Retry by restarting this operation from its screen.</small>' : '') +
-            (['running','pause_requested'].includes(state) && !canControlGeneration && !canCancelImport && !canCancelPreview ? '<small>Cancellation and pause are not supported for this operation.</small>' : '');
+          const actions = backgroundGenerationJobActions(j, id, action);
           return '<article class="job-row" data-backend-job="' + id + '">' +
             '<b data-job-title>' + esc(j.title || j.type || id) + '</b>' +
             '<p data-job-stage>' + esc(j.stage || j.message || state) + '</p>' +

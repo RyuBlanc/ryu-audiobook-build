@@ -79,6 +79,91 @@
     };
   }
 
+  async function runStage53JobUiAcceptance() {
+    const jobId = "stage53-ui-state-job";
+    const stage53 = {
+      commands: [],
+      rows: [{
+        job_id: jobId, id: jobId, type: "audiobook-generation",
+        title: "Stage 5.3 UI State Acceptance", state: "running",
+        progress: 32, stage: "Rendering acceptance chapter",
+        project_folder: String(config.project_folder || ""), recoverable: false
+      }]
+    };
+    window.__RYU_STAGE53_JOB_UI_ACCEPTANCE__ = stage53;
+    const jobsButton = document.querySelector("#backgroundJobsButton");
+    const modal = document.querySelector("#backgroundJobsModal");
+    const rowSelector = '[data-backend-job="' + jobId + '"]';
+    must(jobsButton && modal, "Background Jobs controls are unavailable in the packaged app.");
+    const refreshSyntheticJobs = async state => {
+      stage53.rows[0].state = state;
+      jobsButton.click();
+      await waitFor("Background Jobs " + state + " state", function () {
+        const row = document.querySelector(rowSelector);
+        const label = row && row.querySelector("[data-job-state]");
+        return Boolean(row && label && label.textContent.toLowerCase().startsWith(state));
+      }, 12000);
+      return document.querySelector(rowSelector);
+    };
+    const actionNames = row => Array.from(row.querySelectorAll("[data-job-action]"))
+      .map(button => String(button.dataset.jobAction || ""));
+    let row = await refreshSyntheticJobs("running");
+    must(JSON.stringify(actionNames(row)) === JSON.stringify(["pause","cancel"]),
+      "Running generation must expose Pause and Cancel only: " + JSON.stringify(actionNames(row)));
+    row.querySelector('[data-job-action="pause"]').click();
+    await waitFor("Pause request command", () => stage53.commands.some(item => item.command === "job.pause"), 5000);
+    row = await refreshSyntheticJobs("pause_requested");
+    must(JSON.stringify(actionNames(row)) === JSON.stringify(["cancel"]),
+      "A pending pause must not expose a misleading Resume control: " + JSON.stringify(actionNames(row)));
+    must(row.textContent.includes("Pausing at the next chapter boundary"),
+      "Background Jobs must communicate the pending safe-boundary pause.");
+    row = await refreshSyntheticJobs("paused");
+    must(JSON.stringify(actionNames(row)) === JSON.stringify(["resume","cancel"]),
+      "Paused generation must expose Resume and Cancel only: " + JSON.stringify(actionNames(row)));
+    row.querySelector('[data-job-action="resume"]').click();
+    await waitFor("Resume command", () => stage53.commands.some(item => item.command === "job.resume"), 5000);
+    row = await refreshSyntheticJobs("running");
+    row.querySelector('[data-job-action="cancel"]').click();
+    await waitFor("Cancel command", () => stage53.commands.some(item => item.command === "job.cancel"), 5000);
+    row = await refreshSyntheticJobs("cancel_requested");
+    must(actionNames(row).length === 0 && row.textContent.includes("Cancelling…"),
+      "A pending cancellation must show its state and disable further actions.");
+    record("stage53_background_job_state_controls", true,
+      "Packaged Background Jobs shows mutually exclusive running/pause-pending/paused/cancel-pending controls and dispatches the real bridge command names.");
+
+    modal.classList.remove("show");
+    must(typeof window.go === "function", "Dashboard navigation is unavailable for Stage 5.3 job-state acceptance.");
+    window.go("dashboard");
+    await waitFor("Dashboard page", function () {
+      const page = document.querySelector("#dashboard");
+      return Boolean(page && page.classList.contains("active"));
+    }, 12000);
+    const dashboardControl = () => document.querySelector('#dashboard [data-dashboard-generation-control="1"]');
+    const dashboardCases = [
+      ["running","Pause",false,"pause"],
+      ["pause_requested","Pausing…",true,""],
+      ["paused","Resume",false,"resume"],
+      ["cancel_requested","Cancelling…",true,""]
+    ];
+    for (const [state,label,disabled,action] of dashboardCases) {
+      await refreshSyntheticJobs(state);
+      await waitFor("Dashboard control " + state, function () {
+        const control = dashboardControl();
+        return Boolean(control && control.textContent.trim() === label);
+      }, 12000);
+      const control = dashboardControl();
+      must(Boolean(control.disabled) === disabled,
+        "Dashboard " + state + " control disabled state was incorrect.");
+      must(String(control.dataset.dashboardGenerationAction || "") === action,
+        "Dashboard " + state + " control advertised an incorrect action.");
+    }
+    record("stage53_dashboard_job_state_controls", true,
+      "Dashboard pause/resume control remains discoverable across polls and accurately shows Pause, Pausing, Resume and Cancelling states.");
+    modal.classList.remove("show");
+    delete window.__RYU_STAGE53_JOB_UI_ACCEPTANCE__;
+    window.go("production");
+  }
+
   try {
     const bridge = window.ryuBackend;
     must(bridge && typeof bridge.invoke === "function", "The native desktop bridge is unavailable.");
@@ -122,6 +207,17 @@
         if (command === "project.metadata.save" && config.fail_next_metadata_save === true) {
           config.fail_next_metadata_save = false;
           return Promise.resolve({success:false,error:{message:"Deterministic packaged-acceptance metadata-save failure."}});
+        }
+        const stage53Ui = window.__RYU_STAGE53_JOB_UI_ACCEPTANCE__;
+        if (stage53Ui && command === "job.list") {
+          return Promise.resolve({success:true,data:stage53Ui.rows});
+        }
+        if (stage53Ui && ["job.pause","job.resume","job.cancel"].includes(command)) {
+          stage53Ui.commands.push({command:command,payload:request});
+          const nextState = {"job.pause":"pause_requested","job.resume":"running","job.cancel":"cancel_requested"}[command];
+          const owned = stage53Ui.rows.find(row => String(row.job_id || "") === String(request.job_id || ""));
+          if (owned) owned.state = nextState;
+          return Promise.resolve({success:true,data:{job_id:request.job_id,state:nextState}});
         }
         const result = originalInvoke(command, request);
         if (command === "sound.preview_book") {
@@ -1732,6 +1828,7 @@
     record("stage5_production_preview_restores_sound_master_state_for_restart_validation", true,
       "After Voice Only parity tests and cancellation, the real Production master control restored the saved enabled Chapter-Based BGM state before process restart.");
 
+    await runStage53JobUiAcceptance();
     publish("passed");
   } catch (error) {
     errors.push(String(error && error.stack || error));
