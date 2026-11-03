@@ -5759,6 +5759,10 @@ class PremiumV2Bridge(QObject):
         )
         if chapter is None:
             raise ValueError("The selected saved chapter is no longer available. Refresh the chapter list and try again.")
+        requested_chapter_id = str(payload.get("chapter_id") or "").strip()
+        actual_chapter_id = str(getattr(chapter, "chapter_id", "") or getattr(chapter, "id", "") or "").strip()
+        if requested_chapter_id and actual_chapter_id and requested_chapter_id != actual_chapter_id:
+            raise ValueError("The selected chapter identity changed before preview started. Refresh the saved chapter list and try again.")
         if not str(chapter.text or "").strip():
             raise ValueError("The selected chapter contains no saved narration text to preview.")
 
