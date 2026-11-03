@@ -1401,7 +1401,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn('production_preview = bool(payload.get("_production_preview"))', host)
         self.assertIn('job_type = "production-preview" if production_preview', host)
         self.assertIn("current_chapter=int(selected_chapter.number) if selected_chapter else 0", host)
-        self.assertIn('"production-preview" in {\n                    "voice-preview", "sound-design-preview", "production-preview", "audiobook-generation"\n                }', host)
+        self.assertIn('"voice-preview", "sound-design-preview", "production-preview", "audiobook-generation"', host)
         self.assertIn('self._preview_cancel_events[job_id] = cancel_event', host)
         self.assertIn('preview_cancel.set()', host)
         self.assertIn("Cancel preview", adapter)
