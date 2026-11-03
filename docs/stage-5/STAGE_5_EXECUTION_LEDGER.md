@@ -445,3 +445,37 @@ Do not move to Step 5.3 on the strength of #2136 alone. Require the next exact-h
 The #2142 regression job passed 1,101 tests, including the selector harness contract, while its Windows package job began. Reviewing the actual UI function revealed one more mismatch: the selector change handler wrote a chapter-specific status, then `syncProductionPreviewControls()` immediately replaced it with a generic idle message when there was no preview job. The selected chapter state itself was correctly updated, but the user-facing selected-chapter status was not preserved.
 
 The follow-up source correction makes `syncProductionPreviewControls()` render the selected chapter's name/number while idle, retaining a neutral prompt when no saved chapter is selected. The contract test now verifies both the selector's selected state and the pre-job status rendering. The #2142 workflow is not cancelled; the per-run concurrency key keeps it independently auditable while this corrected head is verified.
+
+
+## 33. #2142 packaged UI failure and #2143 exact-head regression pass — 3 November 2026
+
+### #2142 — packaged selector status regression reproduced
+
+Run [#2142](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41605043619) on commit `e8940efe95967e2c508c71bc03604711066a3952`:
+- Tests job passed: 1,101 tests, JavaScript syntax and isolated Qt lifecycle regression all passed.
+- Build job passed its installer syntax, frozen app build, frozen EXE verification and bundled voice asset/module verification.
+- Packaged Sound Design/Music Library acceptance passed all preceding Stage 2 / metadata / project-switch checks, then failed at the new Production Preview selection step: `Timed out waiting for Production-owned Chapter 2 selection`.
+- This was the known idle-status overwrite: the selector stored the selected chapter but `syncProductionPreviewControls()` rewrote the selected-chapter status to a generic prompt. It failed before preview synthesis, so it is not evidence of a preview worker/synthesis failure. The correction is in #2143's source commit.
+
+### #2143 — final source regression pass
+
+Run [#2143](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41606123216) on exact source commit `b8966283e7bc5686a8c8f934683a0cf5ff3b301c`:
+- Tests job passed: **1,101 tests in 56.537 seconds**.
+- Frontend JavaScript syntax validation passed.
+- Isolated native Qt lifecycle regression passed.
+- Build job was skipped because the commit was not labelled `[artifact-checkpoint]`. This is a workflow condition, not a code failure.
+
+The only source change after #2142 is the Production Preview idle-status preservation and its regression contract. The following artifact-checkpoint commit is documentation-only and should be packaged against this verified source state.
+
+### Exact package candidate to close Step 5.2
+
+The current commit explicitly includes `[artifact-checkpoint]` to force the Windows build job. Its exact-head run must pass:
+1. 1,101+ full regressions, JavaScript syntax and native Qt lifecycle;
+2. frozen Windows app build, verification and bundled model/voice assets;
+3. packaged Production chapter preview: saved Chapter Two M4A generation and measured duration, saved Voice Only configuration, real Play/Pause/Stop/Replay, and cancellation of the separate 90-second Chapter Three preview;
+4. existing packaged Sound Design/Music Library and metadata/project-switch acceptance;
+5. HTML/core installer, portable ZIP, release SHA-256 manifest, logo and Defender checks, artifact uploads.
+
+No older run is to be cancelled or reported as a failure merely because a later commit exists. Workflow concurrency is now unique per run ID; all runs remain independently auditable.
+
+Step 5.2 remains open until that exact-head packaged acceptance succeeds. User-machine real-audio listening and preview/final pronunciation/BGM matrix remain separate manual acceptance items and must not be represented as completed by CI alone.

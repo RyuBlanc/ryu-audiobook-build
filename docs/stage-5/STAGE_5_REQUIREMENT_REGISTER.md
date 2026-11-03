@@ -188,3 +188,11 @@ The current status is still CODE CHANGED — NOT VERIFIED for PROD-05/06/07 and 
 ## Production Preview pre-job selector status
 
 The exact selected chapter was stored in `productionPreviewSelectedChapter`, but the idle control synchronizer overwrote the selector's chapter-specific status with a generic prompt before any preview job existed. The synchronizer now preserves the selected chapter number in the idle status until a job becomes active. This is a UI status correction, not a change to chapter ownership or synthesis payload. The new regression verifies selected chapter state and pre-job status rendering. PROD-05/06/07 and the parity integration items remain CODE CHANGED — NOT VERIFIED until the exact-head package acceptance passes.
+
+
+## Final pre-package status: #2142 and #2143 — 3 November 2026
+
+- #2142 passed 1,101 regressions plus frozen app and voice asset checks, then exposed that the idle preview-status synchronizer erased the selected chapter message before a preview job was created. It timed out at Chapter 2 selection, before synthesis.
+- #2143 corrected the idle selected-chapter status and passed 1,101 regressions in 56.537 seconds, JavaScript syntax, and the Qt lifecycle check. Its Windows package job was skipped because its commit lacked the `[artifact-checkpoint]` tag, not because of a failed test.
+- The next documentation-only `[artifact-checkpoint]` commit packages the exact #2143 source. Require a green exact-head Windows package and the real Production preview/playback/cancellation checks before changing any Stage 5.2 requirement status to accepted.
+- PROD-08/09/15 and GEN-06 remain `CODE CHANGED — NOT VERIFIED` until package acceptance and runtime matrix evidence are complete. PROD-14 and GEN-01–05 remain open for later steps; do not move these into Step 5.2 closeout.
