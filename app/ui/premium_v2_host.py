@@ -65,6 +65,12 @@ from app.version import APP_NAME, full_version
 
 log = logging.getLogger(__name__)
 
+
+def _generation_worker_is_alive(manager: Any) -> bool:
+    thread = getattr(manager, "_thread", None)
+    return bool(thread is not None and thread.is_alive())
+
+
 FRONTEND_RELATIVE_PATH = Path("assets") / "frontend" / "ryu_audiobook_premium_v2.html"
 
 
@@ -443,6 +449,8 @@ class PremiumV2Bridge(QObject):
                 "job.pause": self._job_pause,
                 "job.resume": self._job_resume,
                 "job.cancel": self._job_cancel,
+                "job.retry": self._job_retry,
+                "job.recover": self._job_recover,
                 "job.clear_completed": self._job_clear_completed,
                 "history.list": self._history_list,
                 "player.get_active": self._player_get_active,
@@ -583,6 +591,8 @@ class PremiumV2Bridge(QObject):
             "job.pause": True,
             "job.resume": True,
             "job.cancel": True,
+            "job.retry": True,
+            "job.recover": True,
             "job.clear_completed": True,
             "history.list": True,
             "player.get_active": True,
@@ -5587,7 +5597,32 @@ class PremiumV2Bridge(QObject):
         close_cache = getattr(self, "close_preview_provider_cache", None)
         if callable(close_cache):
             close_cache()
-        project = self._active_project()
+        requested_project_folder = str(payload.get("_project_folder") or "").strip()
+        if requested_project_folder:
+            requested_path = Path(requested_project_folder).expanduser().resolve()
+            project = next(
+                (item for item in list_projects() if str(item.folder.resolve()) == str(requested_path)),
+                None,
+            )
+            if project is None:
+                raise ValueError("The project for this generation job is no longer available in the local library.")
+        else:
+            project = self._active_project()
+
+        active_generation_states = {
+            "queued", "running", "paused", "pause_requested", "cancel_requested", "retrying"
+        }
+        with self._jobs_lock:
+            active_for_project = [
+                row for row in getattr(self, "_jobs", {}).values()
+                if str(row.get("type") or "") == "audiobook-generation"
+                and str(row.get("project_folder") or "")
+                and Path(str(row.get("project_folder"))).expanduser().resolve() == project.folder.resolve()
+                and str(row.get("state") or "").casefold() in active_generation_states
+            ]
+        if active_for_project:
+            raise ValueError("This project already has an active audiobook generation job. Resume or cancel that job before starting another.")
+
         chapters = [c for c in project.chapters if not getattr(c, "skip_for_generation", False) and (c.text or "").strip()]
         skipped = len(project.chapters) - len(chapters)
         empty_skipped = sum(1 for c in project.chapters if not (c.text or "").strip())
@@ -5988,20 +6023,60 @@ class PremiumV2Bridge(QObject):
         job_id = str(payload.get("job_id") or "")
         with self._jobs_lock:
             manager = self._generators.get(job_id)
-        if manager is None:
+            row = self._jobs.get(job_id)
+            if row is None:
+                raise ValueError("Background job no longer exists.")
+            if row.get("state") in {"completed", "failed", "cancelled"}:
+                return dict(row)
+            if row.get("state") in {"paused", "pause_requested"}:
+                return dict(row)
+        if manager is None or not _generation_worker_is_alive(manager):
             raise ValueError("This job has no active pause-capable generation worker.")
         manager.pause()
-        return self._job_update(job_id, state="pause_requested", stage="Pause requested",
-                                message="The active audio chunk will finish before pausing at the next safe chapter checkpoint.")
+        with self._jobs_lock:
+            current = self._jobs.get(job_id)
+            if current is None:
+                raise ValueError("Background job no longer exists.")
+            if (
+                current.get("state") in {"completed", "failed", "cancelled", "paused"}
+                or self._generators.get(job_id) is not manager
+                or not _generation_worker_is_alive(manager)
+            ):
+                return dict(current)
+            return self._job_update(
+                job_id,
+                state="pause_requested",
+                stage="Pause requested",
+                message="The current audio chunk/batch will finish and be saved before generation pauses.",
+            )
 
     def _job_resume(self, payload: dict[str, Any]) -> dict[str, Any]:
         job_id = str(payload.get("job_id") or "")
         with self._jobs_lock:
             manager = self._generators.get(job_id)
-        if manager is None:
-            raise ValueError("No live worker can resume this job. Start generation from the project to reuse compatible checkpoints.")
+            row = self._jobs.get(job_id)
+            if row is None:
+                raise ValueError("Background job no longer exists.")
+            if row.get("state") in {"completed", "failed", "cancelled"}:
+                return dict(row)
+            if row.get("state") not in {"paused", "pause_requested"}:
+                raise ValueError("Only a paused or pause-requested generation job can be resumed.")
+        if manager is None or not _generation_worker_is_alive(manager):
+            raise ValueError("No live worker can resume this job. Retry from the project to reuse compatible checkpoints.")
         manager.resume()
-        return self._job_update(job_id, state="running", stage="Resuming generation", message="Resume requested.")
+        with self._jobs_lock:
+            current = self._jobs.get(job_id)
+            if current is None:
+                raise ValueError("Background job no longer exists.")
+            if (
+                current.get("state") in {"completed", "failed", "cancelled"}
+                or self._generators.get(job_id) is not manager
+                or not _generation_worker_is_alive(manager)
+            ):
+                return dict(current)
+            return self._job_update(
+                job_id, state="running", stage="Resuming generation", message="Resume requested."
+            )
 
     def _job_cancel(self, payload: dict[str, Any]) -> dict[str, Any]:
         job_id = str(payload.get("job_id") or "")
@@ -6012,6 +6087,8 @@ class PremiumV2Bridge(QObject):
             with self._jobs_lock:
                 preview_cancel = self._preview_cancel_events.get(job_id)
                 import_cancel = self._import_cancel_events.get(job_id)
+            if row and row.get("state") in {"completed", "failed", "cancelled"}:
+                return dict(row)
             if row and preview_cancel is not None and row.get("state") in {"queued", "running", "cancel_requested"}:
                 preview_cancel.set()
                 return self._job_update(job_id, state="cancel_requested", stage="Cancellation requested",
@@ -6022,11 +6099,121 @@ class PremiumV2Bridge(QObject):
                 import_cancel.set()
                 return self._job_update(job_id, state="cancel_requested", stage="Cancellation requested",
                                         message="Import will stop at the next safe extraction/chapter boundary; the source file will be preserved.")
-            if row and row.get("state") in {"queued", "running", "paused"}:
+            if row and row.get("type") != "audiobook-generation" and row.get("state") == "queued":
                 return self._job_update(job_id, state="cancelled", stage="Cancelled", message="Job cancelled before active processing.")
+            if row and row.get("type") == "audiobook-generation" and row.get("state") == "queued":
+                return self._job_update(job_id, state="cancelled", stage="Cancelled", message="Generation cancelled before a worker started.")
             raise ValueError("Choose an active background job to cancel.")
+
+        with self._jobs_lock:
+            current = self._jobs.get(job_id)
+            if current is None:
+                raise ValueError("Background job no longer exists.")
+            if current.get("state") in {"completed", "failed", "cancelled"}:
+                return dict(current)
+            if current.get("state") == "cancel_requested":
+                return dict(current)
+            if self._generators.get(job_id) is not manager or not _generation_worker_is_alive(manager):
+                return dict(current)
         manager.cancel()
-        return self._job_update(job_id, state="cancel_requested", stage="Cancellation requested", message="Stopping the provider safely.")
+        with self._jobs_lock:
+            current = self._jobs.get(job_id)
+            if current is None:
+                raise ValueError("Background job no longer exists.")
+            if (
+                current.get("state") in {"completed", "failed", "cancelled"}
+                or self._generators.get(job_id) is not manager
+                or not _generation_worker_is_alive(manager)
+            ):
+                return dict(current)
+            return self._job_update(
+                job_id,
+                state="cancel_requested",
+                stage="Cancellation requested",
+                message="Stopping the provider safely; the current safe checkpoint will be preserved.",
+            )
+
+    def _restart_generation_from_job(self, source_row: dict[str, Any], *, recovery: bool = False) -> dict[str, Any]:
+        source_job_id = str(source_row.get("job_id") or "").strip()
+        project_folder_value = str(source_row.get("project_folder") or "").strip()
+        if not source_job_id or not project_folder_value:
+            raise ValueError("The original generation job does not contain a saved project reference.")
+
+        requested_path = Path(project_folder_value).expanduser().resolve()
+        project = next(
+            (item for item in list_projects() if str(item.folder.resolve()) == str(requested_path)),
+            None,
+        )
+        if project is None:
+            raise ValueError("The original project is no longer available in the local library.")
+
+        active_states = {"queued", "running", "paused", "pause_requested", "cancel_requested", "retrying"}
+        with self._jobs_lock:
+            for row in self._jobs.values():
+                if (
+                    str(row.get("job_id") or "") != source_job_id
+                    and str(row.get("type") or "") == "audiobook-generation"
+                    and str(row.get("project_folder") or requested_path)
+                    and Path(str(row.get("project_folder") or requested_path)).expanduser().resolve() == requested_path
+                    and str(row.get("state") or "").casefold() in active_states
+                ):
+                    raise ValueError("This project already has another active generation job. Finish or cancel it before retrying.")
+
+        project_state = load_state(project.folder)
+        owner_job_id = str(project_state.get("generation_job_id") or "").strip()
+        if owner_job_id and owner_job_id != source_job_id:
+            raise ValueError("A newer generation job now owns this project. The older job cannot be retried over it.")
+        if recovery and not bool(project_state.get("generation_recovery_required")):
+            raise ValueError("The project is not marked as interrupted/recoverable. Use Retry only for an eligible failed/cancelled generation.")
+
+        result = self._production_generate_book({"_project_folder": str(project.folder)})
+        new_job_id = str(result.get("job_id") or "").strip()
+        if not new_job_id:
+            raise RuntimeError("The generation backend did not return a new job ID.")
+        changes = {
+            "retry_of_job_id": source_job_id,
+            "retry_count": int(source_row.get("retry_count") or 0) + 1,
+        }
+        if recovery:
+            changes["recovery_of_job_id"] = source_job_id
+        self._job_update(new_job_id, **changes)
+        response = dict(result)
+        response["retry_of_job_id"] = source_job_id
+        if recovery:
+            response["recovery_of_job_id"] = source_job_id
+        return response
+
+    def _job_retry(self, payload: dict[str, Any]) -> dict[str, Any]:
+        job_id = str(payload.get("job_id") or "").strip()
+        with self._jobs_lock:
+            row = dict(self._jobs.get(job_id) or {})
+        if not row:
+            raise ValueError("The generation job no longer exists.")
+        if str(row.get("type") or "") != "audiobook-generation":
+            raise ValueError("Only full audiobook generation jobs can be retried here.")
+        state = str(row.get("state") or "").casefold()
+        if state not in {"failed", "cancelled"}:
+            raise ValueError("Retry is available only for a failed or cancelled audiobook generation job.")
+        if state == "failed" and not row.get("recoverable"):
+            raise ValueError("This failed job is not marked recoverable. Inspect its error before starting another generation.")
+        return self._restart_generation_from_job(row, recovery=False)
+
+    def _job_recover(self, payload: dict[str, Any]) -> dict[str, Any]:
+        job_id = str(payload.get("job_id") or "").strip()
+        with self._jobs_lock:
+            row = dict(self._jobs.get(job_id) or {})
+        if not row:
+            raise ValueError("The interrupted generation job no longer exists.")
+        if str(row.get("type") or "") != "audiobook-generation":
+            raise ValueError("Only interrupted full audiobook generation jobs can be recovered here.")
+        error = row.get("error") if isinstance(row.get("error"), dict) else {}
+        if (
+            str(row.get("state") or "").casefold() != "failed"
+            or not row.get("recoverable")
+            or str(error.get("code") or "").casefold() != "interrupted"
+        ):
+            raise ValueError("This job is not an interrupted, recoverable generation. Use Retry for an eligible failed/cancelled job.")
+        return self._restart_generation_from_job(row, recovery=True)
 
     def _job_clear_completed(self, _payload: dict[str, Any]) -> dict[str, Any]:
         count = 0

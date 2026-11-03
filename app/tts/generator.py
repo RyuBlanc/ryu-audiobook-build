@@ -103,6 +103,39 @@ def _provider_signature(provider: TTSProvider, voice: str | None, chunks: list[t
     ).hexdigest()
 
 
+def is_valid_wav_chunk(path: Path) -> bool:
+    """Return True only when a cached PCM WAV contains every declared audio frame.
+
+    wave.open() alone validates the header, not the sample payload. Reading the
+    declared frames prevents a truncated file with an intact header from being
+    incorrectly reused as a completed narration checkpoint.
+    """
+    target = Path(path)
+    try:
+        if not target.is_file() or target.stat().st_size < 1024:
+            return False
+        with wave.open(str(target), "rb") as wav_file:
+            channels = int(wav_file.getnchannels())
+            sample_width = int(wav_file.getsampwidth())
+            frame_rate = int(wav_file.getframerate())
+            frame_count = int(wav_file.getnframes())
+            if (
+                channels <= 0
+                or sample_width <= 0
+                or frame_rate <= 0
+                or frame_count <= 0
+                or wav_file.getcomptype() != "NONE"
+            ):
+                return False
+            expected_payload_bytes = frame_count * channels * sample_width
+            if expected_payload_bytes <= 0:
+                return False
+            payload = wav_file.readframes(frame_count)
+            return len(payload) == expected_payload_bytes
+    except (OSError, wave.Error, EOFError, ValueError, OverflowError):
+        return False
+
+
 def prepare_chapter_plan(
     chapter: Chapter,
     provider: TTSProvider,
@@ -273,11 +306,8 @@ def prepare_chapter_plan(
     for index in sorted(persisted_indexes):
         output = chunks_dir / f"{index + 1:05d}.wav"
         try:
-            if not output.is_file() or output.stat().st_size < 1024:
-                raise ValueError("cached audio chunk is missing or incomplete")
-            with wave.open(str(output), "rb") as wav_file:
-                if wav_file.getnframes() <= 0 or wav_file.getframerate() <= 0:
-                    raise wave.Error("cached audio chunk has no readable audio frames")
+            if not is_valid_wav_chunk(output):
+                raise ValueError("cached audio chunk is missing, truncated, or invalid")
         except (OSError, wave.Error, EOFError, ValueError):
             output.unlink(missing_ok=True)
             invalid_cached_chunk = True
@@ -309,6 +339,7 @@ def generate_chapter(
     narration_speed: float = 0.90,
     pacing_profile: str = "natural",
     preserve_paragraph_boundaries: bool = False,
+    checkpoint_callback: Callable[[int, int], bool] | None = None,
 ) -> GenerationResult:
     plan = prepare_chapter_plan(
         chapter,
@@ -349,17 +380,11 @@ def generate_chapter(
             raise RuntimeError(
                 f"Audio chunk {index + 1}/{len(chunks)} was not created: {output.name}"
             )
-        try:
-            with wave.open(str(output), "rb") as wav_file:
-                if wav_file.getnframes() <= 0 or wav_file.getframerate() <= 0:
-                    raise RuntimeError(
-                        f"Audio chunk {index + 1}/{len(chunks)} is empty: {output.name}"
-                    )
-        except (wave.Error, OSError) as exc:
+        if not is_valid_wav_chunk(output):
             raise RuntimeError(
-                f"Audio chunk {index + 1}/{len(chunks)} is not a valid WAV: "
-                f"{output.name} ({exc})"
-            ) from exc
+                f"Audio chunk {index + 1}/{len(chunks)} is missing, truncated, or not a valid PCM WAV: "
+                f"{output.name}"
+            )
 
         completed.add(index)
         state["completed"] = sorted(completed)
@@ -421,6 +446,12 @@ def generate_chapter(
                         provider.synthesize(chunks[i], output, chunks_with_voices[i][1])
                 for i in batch_indices:
                     validate_and_commit(i, chunks_dir / f"{i + 1:05d}.wav", chunks[i])
+                if checkpoint_callback:
+                    # Batch synthesis may write multiple chunks at once. Commit
+                    # the entire validated batch before pausing at this safe point.
+                    save_state(chapter_dir, state)
+                    if checkpoint_callback(len(completed), len(chunks)):
+                        break
                 index = batch_indices[-1] + 1
                 continue
 
@@ -436,6 +467,12 @@ def generate_chapter(
             provider.synthesize(chunks[index], output, chunk_voice)
 
         validate_and_commit(index, output, chunks[index])
+        if checkpoint_callback:
+            # Persist this chunk before allowing a pause/cancel request to
+            # suspend generation. Resume will reuse only validated WAV payloads.
+            save_state(chapter_dir, state)
+            if checkpoint_callback(len(completed), len(chunks)):
+                break
         index += 1
 
     state["completed"] = sorted(completed)

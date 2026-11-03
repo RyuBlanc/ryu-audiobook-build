@@ -30,9 +30,6 @@ DIALOGUE_PATTERNS = (
     re.compile(r'"([^"]{2,1800})"'),
     re.compile(r'[\u300c]([^\u300d]{2,1800})[\u300d]'),
     re.compile(r'[\u300e]([^\u300f]{2,1800})[\u300f]'),
-    # Smart and straight single-quoted dialogue, excluding apostrophes inside words.
-    re.compile(r'(?<![\w])‘([^’\r\n]{2,1800})’(?![\w])'),
-    re.compile(r"(?<![\w])'([^'\r\n]{2,1800})'(?![\w])"),
 )
 SPEAKER_VERBS = (
     "said|asked|replied|answered|shouted|yelled|whispered|muttered|called|"
@@ -42,8 +39,6 @@ SPEAKER_VERBS = (
 )
 
 NAME_TOKEN = r"[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'’-]{2,30}\b"
-# Unicode-aware token for explicit speaker labels, including Japanese/Korean scripts.
-SPEAKER_NAME_TOKEN = r"([^\W\d_][\w'’.-]*(?:\s+[^\W\d_][\w'’.-]*){0,2})"
 
 NAME_STOPWORDS = {
     "The","A","An","I","Im","I'm","I’m","Ive","I've","I’ve","Id","I'd","I’d","Ill","I'll","I’ll",
@@ -60,20 +55,6 @@ NAME_STOPWORDS = {
     "School","Building","Room","Street","Day","Night","Morning","Afternoon","Evening","God","Devil","Demon",
     "Human","Humans","Girl","Boy","Man","Woman","Someone","Something","Anything","Nothing","Everyone","Everybody",
     "Him","Her","Me","Us","His","Our","Their","These","Those","Wha","Heh","Ah","Oh","Uh","Hmm",
-    # Frequent sentence-initial prose/discourse words that are not cast members.
-    # These were repeatedly misclassified as speakers in imported light novels.
-    "Having","Well","Right","Already","Magic","Speaking","Feeling","Let","Two","Three",
-    "First","Second","Third","Saying","Says","Think","Thinking","Sure","Fine","Okay",
-    "Wait","Guess","Damn","Good","Bad","Enough","Please","Sorry","Great","Actually",
-    "Suddenly","Finally","Probably","Course","OfCourse","Anyway","Anyway","Almost",
-    "Rather","Instead","Perhaps","Maybe","Clearly","Certainly","Obviously","Seriously",
-    "Especially","Exactly","Anyway","Nevertheless","Unfortunately","Fortunately",
-    "Meanwhile","Besides","Otherwise","Still","Yet","Then","Now","Today","Tomorrow",
-    "Yesterday","Later","Earlier","Beforehand","Somehow","Apparently","Eventually",
-    "Perhaps","Indeed","Naturally","Simply","Quickly","Slowly","Carefully","Suddenly",
-    "Beginning","Ending","During","Across","Around","Inside","Outside","Beyond","Together",
-    "Magic","Power","Strength","Ability","Skill","Knowledge","Experience","Training",
-    "School","Academy","Student","Teacher","President","Captain","Commander","General",
 }
 
 
@@ -87,8 +68,6 @@ def analyze_book(chapters: list[Chapter]) -> CharacterAnalysis:
     text = _clean_analysis_text(text)
     narrator_name = _detect_first_person_narrator(text)
     candidates = _discover_candidates(text)
-    # Explicit speech tags are stronger evidence than generic proper nouns.
-    candidates.update(_discover_explicit_speakers(text))
     canonical, aliases = _canonicalize_candidates(candidates)
 
     records: dict[str, Character] = {
@@ -104,22 +83,12 @@ def analyze_book(chapters: list[Chapter]) -> CharacterAnalysis:
     last_speaker: str | None = None
     assigned_dialogue = 0
 
-    # Manual Voice Cast assignments may use either the legacy "speaker"
-    # field or the newer multi-speaker "speakers" list. Include both so
-    # previously assigned characters are not lost during re-analysis.
-    manual_speakers: set[str] = set()
-    for chapter in chapters:
-        for assignment in getattr(chapter, "dialogue_assignments", []) or []:
-            if not isinstance(assignment, dict):
-                continue
-            raw_speakers = assignment.get("speakers")
-            if isinstance(raw_speakers, (list, tuple)):
-                manual_speakers.update(
-                    str(value).strip() for value in raw_speakers if str(value).strip()
-                )
-            legacy_speaker = str(assignment.get("speaker") or "").strip()
-            if legacy_speaker:
-                manual_speakers.add(legacy_speaker)
+    manual_speakers = {
+        str(item.get("speaker", "")).strip()
+        for chapter in chapters
+        for item in getattr(chapter, "dialogue_assignments", [])
+        if str(item.get("speaker", "")).strip()
+    }
     for speaker in manual_speakers:
         if _is_plausible_name(speaker):
             canonical.append(speaker)
@@ -206,7 +175,6 @@ def _detect_first_person_narrator(text: str) -> str | None:
 
 def _discover_candidates(text: str) -> set[str]:
     candidates: set[str] = set()
-
     patterns = (
         # Explicit self-identification is highly reliable and common in
         # first-person/light-novel narration.
@@ -267,38 +235,6 @@ def _discover_candidates(text: str) -> set[str]:
     return candidates
 
 
-def _discover_explicit_speakers(text: str) -> set[str]:
-    """Extract names only from explicit speech-tag/label structures."""
-    candidates: set[str] = set()
-
-    # Handle standalone labels line-by-line instead of a multiline regex.
-    # This prevents whitespace matching from swallowing neighboring labels.
-    lines = text.splitlines()
-    for index, line in enumerate(lines[:-1]):
-        label = line.strip()
-        following = lines[index + 1].lstrip(" \t")
-        if not label or not following or following[0] not in '“"「『—–-':
-            continue
-        if _is_plausible_name(label):
-            candidates.add(_clean_name(label))
-    patterns = (
-        # Name: "dialogue" / Name： 「dialogue」
-        rf"(?m)^\s*{SPEAKER_NAME_TOKEN}\s*[:：]\s*[“\"「『]",
-        # "dialogue," Name said / 「dialogue」 Name replied
-        rf"[”\"」』]\s*,?\s*{SPEAKER_NAME_TOKEN}\s+(?:{SPEAKER_VERBS})\b",
-        # Name said, "dialogue" (including a comma after the speech verb)
-        rf"(?:^|[\n\r.!?。！？]\s*|[,;:]\s*){SPEAKER_NAME_TOKEN}\s+(?:{SPEAKER_VERBS})\b\s*[,;:]?",
-        # "dialogue," said Name
-        rf"[”\"」』]\s*,?\s*(?:{SPEAKER_VERBS})\s+{SPEAKER_NAME_TOKEN}\b",
-    )
-    for pattern in patterns:
-        for match in re.finditer(pattern, text, re.I):
-            name = _clean_name(match.group(1))
-            if _is_plausible_name(name):
-                candidates.add(name)
-    return candidates
-
-
 def _canonicalize_candidates(candidates: set[str]) -> tuple[list[str], dict[str, set[str]]]:
     ordered = sorted(candidates, key=lambda x: (-len(x.split()), -len(x), x.casefold()))
     canonical: list[str] = []
@@ -336,12 +272,12 @@ def _speaker_near_quote(
 ) -> tuple[str | None, float]:
     before = text[max(0, start - 650):start]
     after = text[end:min(len(text), end + 500)]
-    name_phrase = SPEAKER_NAME_TOKEN
+    name_phrase = rf"({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})"
 
     for pattern in (
-        rf"{name_phrase}\s*(?:{SPEAKER_VERBS})\b\s*[,;:]?\s*$",
+        rf"{name_phrase}\s*(?:{SPEAKER_VERBS})\b\s*$",
         rf"(?:{SPEAKER_VERBS})\s+{name_phrase}\s*$",
-        rf"{name_phrase}\s*[:：—–-]\s*$",
+        rf"{name_phrase}\s*[:—–-]\s*$",
     ):
         matches = list(re.finditer(pattern, before, re.I | re.S))
         if matches:
@@ -409,15 +345,16 @@ def _speaker_near_quote(
         if re.search(rf"\b{escaped}\s+(?:{SPEAKER_VERBS})\b", local_after, re.I):
             return candidate, 0.92
 
-    # A standalone speaker label belongs to the immediately preceding
-    # non-empty line, not any matching label in a broad window. Searching a
-    # 260-character window also sees labels for later dialogue and can silently
-    # assign this quote to the wrong character.
-    preceding_line = text[:start].rstrip(" \t\r\n").rsplit("\n", 1)[-1].rstrip("\r").strip()
-    if _is_plausible_name(preceding_line):
-        resolved = _resolve_candidate(preceding_line, candidates)
-        if resolved:
-            return resolved, 0.96
+    # PDF extraction can separate a speaker label from the quote onto
+    # adjacent lines. Prefer an exact known candidate over contextual guessing.
+    adjacent = text[max(0, start - 260):start]
+    adjacent_after = text[end:min(len(text), end + 260)]
+    for candidate in candidates:
+        escaped = re.escape(candidate)
+        if re.search(rf"(?m)^\s*{escaped}\s*$", adjacent, re.I):
+            return candidate, 0.93
+        if re.search(rf"(?m)^\s*{escaped}\s*$", adjacent_after, re.I):
+            return candidate, 0.93
 
     # Some light-novel layouts place the character name in nearby narration
     # without a speech verb. Only use this when exactly one known candidate
@@ -529,56 +466,6 @@ def _is_plausible_name(value: str) -> bool:
         return False
     if len(value) <= 12 and value.replace("-", "").replace("’", "").isupper():
         return False
-    if not all(word and (word[0].isupper() or not word[0].isascii()) for word in words):
+    if not all(re.match(r"^[A-ZÀ-ÖØ-Þ]", word) for word in words):
         return False
-    # Japanese, Chinese and Korean character names are often only two
-    # Unicode characters long. Do not discard these otherwise valid explicit
-    # speaker labels simply because they are shorter than Latin-script names.
-    return any(
-        len(token) >= 3
-        or (not token.isascii() and len(token) >= 2)
-        for token in (word.strip(".,!?;:") for word in words)
-    )
-
-
-def merge_character_analysis_record(candidate: Character, prior: dict | None = None) -> dict:
-    """Refresh analysis evidence while preserving explicitly saved cast metadata.
-
-    Detection-derived dialogue counts, confidence, examples, and role defaults are
-    refreshed. User-maintained aliases, voice selection, descriptions, notes, scope,
-    and chapter appearance metadata survive re-analysis for an exact case-insensitive
-    name match.
-    """
-    prior = prior if isinstance(prior, dict) else {}
-    prior_aliases = prior.get("aliases") or []
-    if isinstance(prior_aliases, str):
-        prior_aliases = [prior_aliases]
-    aliases = list(dict.fromkeys(
-        str(alias).strip()
-        for alias in [*prior_aliases, *(candidate.aliases or [])]
-        if str(alias).strip()
-    ))
-    item = {
-        "name": candidate.name,
-        "role": str(prior.get("role") or candidate.role),
-        "dialogue_count": candidate.dialogue_count,
-        "examples": list(candidate.examples or []),
-        "confidence": float(candidate.confidence),
-        "aliases": aliases,
-        "voice_profile": prior.get("voice_profile"),
-        "chapter_appearances": list(prior.get("chapter_appearances") or []),
-    }
-    for key, limit in (("short_description", 1000), ("notes", 4000), ("scope", 80)):
-        value = prior.get(key)
-        if isinstance(value, str) and value.strip():
-            item[key] = value.strip()[:limit]
-    # Explicitly created cast entries stay explicitly created after re-analysis;
-    # otherwise a user-authored identity without a voice profile may be dropped
-    # by the conservative detector on a later analysis pass.
-    if prior.get("user_created"):
-        item["user_created"] = True
-    if prior.get("manual"):
-        item["manual"] = True
-    if str(prior.get("series") or "").strip():
-        item["series"] = str(prior["series"]).strip()
-    return item
+    return any(len(word.strip(".,!?;:")) >= 3 for word in words)

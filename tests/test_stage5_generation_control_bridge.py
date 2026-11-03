@@ -126,6 +126,57 @@ class Stage53GenerationControlBridgeTests(unittest.TestCase):
             self.assertEqual(summaries[0].chapters_completed, 2)
             self.assertEqual(len(provider.calls), 2)
 
+    def test_bridge_pause_and_resume_at_saved_chunk_boundary_inside_a_chapter(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            job_id = "stage54-chunk-control-job"
+            provider = LocalControlProvider()
+            provider.recommended_chunk_sentences = 1
+            paused = threading.Event()
+            completed = threading.Event()
+            pause_requested = threading.Event()
+            summaries = []
+            bridge_ref = {}
+
+            def on_progress(chapter, total, done, detail):
+                bridge_ref["bridge"]._generation_progress(job_id, chapter, total, done, detail)
+                if detail.startswith("chunk:") and not pause_requested.is_set():
+                    pause_requested.set()
+                    bridge_ref["bridge"]._job_pause({"job_id": job_id})
+                if detail.startswith("paused:"):
+                    paused.set()
+
+            def on_finished(summary):
+                summaries.append(summary)
+                completed.set()
+
+            manager = GenerationManager(
+                provider,
+                "Saved Narrator",
+                [Chapter(1, "Long Chapter", "First sentence. Second sentence. Third sentence.")],
+                root / "working_audio",
+                on_progress=on_progress,
+                on_finished=on_finished,
+            )
+            bridge = GenerationControlBridgeHarness(job_id, manager)
+            bridge_ref["bridge"] = bridge
+            manager.start(output_path=None, title="Stage 5.4 Chunk Pause", author="Test Author")
+
+            self.assertTrue(paused.wait(10), "job did not pause at a saved chunk boundary inside the chapter")
+            self.assertEqual(bridge._jobs[job_id]["state"], "paused")
+            self.assertEqual(len(provider.calls), 1, "pause should be reached before the remaining chapter chunks run")
+
+            response = bridge._job_resume({"job_id": job_id})
+            self.assertEqual(response["state"], "running")
+            self.assertTrue(completed.wait(10), "generation did not resume after the chunk checkpoint")
+            manager._thread.join(timeout=10)
+
+            self.assertFalse(manager._thread.is_alive())
+            self.assertEqual(len(summaries), 1)
+            self.assertFalse(summaries[0].cancelled)
+            self.assertEqual(summaries[0].chapters_completed, 1)
+            self.assertGreater(len(provider.calls), 1)
+
     def test_bridge_cancel_stops_real_generation_while_paused(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             job_id, provider, manager, bridge, completed, summaries = self._start_paused_manager(

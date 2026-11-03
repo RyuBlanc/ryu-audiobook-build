@@ -1,5 +1,4 @@
 import unittest
-from pathlib import Path
 
 from app.chapters.detector import Chapter
 from app.chapters.dialogue import dialogue_segments, dialogue_segment_for_selection
@@ -140,56 +139,6 @@ class DialogueAssignmentTests(unittest.TestCase):
         self.assertIsNotNone(segment)
         self.assertEqual(segment.suggested_speaker, "Kurenai")
         self.assertEqual(segment.confidence, 1.0)
-
-
-    def test_project_scoped_confirmed_memory_improves_later_fast_speaker_suggestion(self):
-        from tempfile import TemporaryDirectory
-        from app.chapters.character_learning import record_project_speaker_assignment
-        from app.core.state import save_state
-
-        with TemporaryDirectory() as folder:
-            root = Path(folder)
-            save_state(root, {"series": "Slime series"})
-            previous_text = (
-                "Souei checked the eastern route from the gate. "
-                "He looked at the river and said, “The eastern route is clear.” "
-                "The commander waited for his report."
-            )
-            previous_start = previous_text.index("“")
-            previous_end = previous_text.index("”", previous_start) + 1
-            previous_chapter = Chapter(1, "The Oath", previous_text)
-            saved = record_project_speaker_assignment(root, previous_chapter, {
-                "start": previous_start,
-                "end": previous_end,
-                "speaker": "Souei",
-                "source": "manual",
-            })
-            self.assertTrue(saved["saved"], saved)
-
-            next_text = (
-                "Souei checked the eastern route from the gate. "
-                "He looked at the river. “The eastern route is clear.” "
-                "The commander waited for his report."
-            )
-            start = next_text.index("“")
-            end = next_text.index("”", start) + 1
-            next_chapter = Chapter(2, "The Report", next_text)
-            segment = dialogue_segment_for_selection(
-                next_chapter, start, end, project_folder=root
-            )
-
-            self.assertIsNotNone(segment)
-            self.assertTrue(
-                any(
-                    name == "Souei" and "confirmed example" in evidence
-                    for name, _confidence, evidence in segment.suggestions
-                ),
-                segment.suggestions,
-            )
-            # The memory informs the picker only; the source chapter is not
-            # auto-assigned and the user's confirmation is still required.
-            self.assertEqual(next_chapter.dialogue_assignments, [])
-
 
 
 if __name__ == "__main__":

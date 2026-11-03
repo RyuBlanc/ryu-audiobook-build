@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   cleanup:
-    name: Prune superseded package artifacts after Stage 3 Step 11.9
+    name: Clean superseded packages and obsolete runs after Stage 3 Step 11.9
     if: >-
       ${{ github.event_name == 'workflow_run' &&
           github.event.workflow_run.conclusion == 'success' &&
@@ -23,7 +23,7 @@ jobs:
           contains(github.event.workflow_run.head_commit.message, '[Stage 3][Step 11.9]') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Prune superseded package artifacts; retain test evidence and workflow logs
+      - name: Delete superseded packages and prune redundant Stage 1–6 run history
         uses: actions/github-script@v7
         with:
           script: |

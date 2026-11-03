@@ -16,25 +16,17 @@ DefaultDirName={autopf}\Ryu's Audiobook
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=installer-output
-OutputBaseFilename=Ryu's Audiobook Core Setup
+OutputBaseFilename=Ryu's Audiobook Setup
 Compression=lzma
 SolidCompression=yes
-WizardStyle=modern dark hidebevels includetitlebar
-WizardResizable=yes
-WizardSizePercent=125,110
-WizardBackColor=#05060A
-WizardImageFile=..\assets\installer_brand_panel.bmp
-WizardImageBackColor=#05060A
-WizardSmallImageFile=..\assets\ryu_audiobook_logo.bmp
-WizardSmallImageBackColor=#05060A
-DefaultDialogFontName=Segoe UI
+WizardStyle=modern
 SetupIconFile=..\assets\ryu_audiobook_logo.ico
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 CloseApplications=yes
 CloseApplicationsFilter=Ryu's Audiobook.exe
 UninstallDisplayName={#MyAppName}
-UninstallDisplayIcon={app}\{#MyAppExeName}
+UninstallDisplayIcon={app}\Ryu's Audiobook.exe
 VersionInfoVersion={#MyAppVersion}
 VersionInfoProductVersion={#MyAppVersion}
 VersionInfoCompany={#MyAppPublisher}
@@ -45,21 +37,14 @@ VersionInfoProductName={#MyAppName}
 Source: "..\dist\Ryu's Audiobook\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: startmenuicon
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
-Name: "startmenuicon"; Description: "Create a Start menu entry"; GroupDescription: "Shortcuts:"; Flags: unchecked
+Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
 ; Deliberately do not remove user data outside {app}.
-
-[Messages]
-WelcomeLabel1=Welcome to [name/ver]
-WelcomeLabel2=Install Ryu's Audiobook Dragon Studio on this computer.\n\nYour books, voice profiles, models, and settings are kept in your user profile and are not removed by uninstalling the application.
-FinishedHeadingLabel=Ryu's Audiobook is ready
-FinishedLabel=Setup has finished installing Ryu's Audiobook. Launch Dragon Studio to continue your audiobook projects.

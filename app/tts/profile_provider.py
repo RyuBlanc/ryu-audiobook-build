@@ -1,6 +1,4 @@
 from pathlib import Path
-import hashlib
-import json
 
 from app.tts.voice_profile import VoiceProfile
 from app.tts.system_sapi import SystemSAPIProvider
@@ -10,10 +8,6 @@ from app.tts.providers.chatterbox import ChatterboxProvider
 from app.tts.providers.edge_tts import EdgeTTSProvider
 from app.tts.providers.elevenlabs import ElevenLabsProvider
 from app.tts.providers.qwen_character import QwenCharacterProvider
-from app.tts.qwen_model_preference import (
-    get_qwen_model_preference,
-    qwen_model_kinds_for_preference,
-)
 
 
 def provider_from_profile(profile: VoiceProfile):
@@ -27,28 +21,20 @@ def provider_from_profile(profile: VoiceProfile):
         return ElevenLabsProvider(), profile.voice_id
 
     if profile.provider == "qwen-character":
-        # Resolve the global setting at provider creation time so it applies
-        # equally to legacy/saved profiles and profiles created in the future.
-        mode = profile.qwen_mode or "custom"
-        global_model_kind, global_long_form_kind = qwen_model_kinds_for_preference(
-            mode, get_qwen_model_preference()
-        )
-        effective_model_kind = global_model_kind or profile.model_id or "auto"
         return (
             QwenCharacterProvider(
                 voice_id=profile.voice_id,
                 language=profile.language or "English",
                 instruct=profile.qwen_prompt or profile.notes,
                 backend=profile.backend,
-                model_kind=effective_model_kind,
+                model_kind=profile.model_id or "auto",
                 reference_audio=(
                     Path(profile.sample_path).expanduser()
                     if profile.sample_path else None
                 ),
                 reference_text=profile.reference_text or "",
-                qwen_mode=mode,
+                qwen_mode=profile.qwen_mode or "custom",
                 qwen_seed=profile.qwen_seed,
-                long_form_model_kind=global_long_form_kind,
                 qwen_anchor_path=(
                     Path(profile.qwen_anchor_path).expanduser()
                     if profile.qwen_anchor_path else None
@@ -90,51 +76,3 @@ def provider_from_profile(profile: VoiceProfile):
         )
 
     raise ValueError(f"Unsupported voice provider: {profile.provider}")
-
-
-
-class ProfileBoundProvider:
-    """Delegate synthesis while making the selected saved profile part of cache identity."""
-
-    def __init__(self, provider, profile: VoiceProfile):
-        self._provider = provider
-        self.profile = profile
-
-    def __getattr__(self, name):
-        return getattr(self._provider, name)
-
-    def voices(self):
-        return self._provider.voices()
-
-    def synthesize(self, text, output_path, voice=None):
-        return self._provider.synthesize(text, output_path, voice=voice)
-
-    def generation_signature(self) -> str:
-        from dataclasses import asdict
-
-        profile_data = asdict(self.profile)
-        for key, raw_path in (("sample_audio_sha256", self.profile.sample_path),
-                              ("anchor_audio_sha256", self.profile.qwen_anchor_path)):
-            digest = None
-            if raw_path:
-                path = Path(raw_path).expanduser()
-                if path.is_file():
-                    hasher = hashlib.sha256()
-                    try:
-                        with path.open("rb") as handle:
-                            for block in iter(lambda: handle.read(1024 * 1024), b""):
-                                hasher.update(block)
-                        digest = hasher.hexdigest()
-                    except OSError:
-                        digest = "unreadable"
-                else:
-                    digest = "missing"
-            profile_data[key] = digest
-        engine_signature = getattr(self._provider, "generation_signature", None)
-        engine_data = engine_signature() if callable(engine_signature) else (
-            f"{self._provider.__class__.__module__}.{self._provider.__class__.__qualname__}"
-        )
-        payload = {"profile": profile_data, "engine": engine_data}
-        return hashlib.sha256(
-            json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
-        ).hexdigest()

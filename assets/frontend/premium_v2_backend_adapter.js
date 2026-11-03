@@ -5783,8 +5783,11 @@
         (canCancelPreview && ['queued','running'].includes(state))) {
       actions.push(action('cancel','Cancel','ghost'));
     }
-    if (state === 'failed' && job.recoverable) {
-      actions.push('<small>Retry from Production Studio to revalidate saved project settings.</small>');
+    if (state === 'failed' && job.recoverable && isGeneration) {
+      const interrupted = String(job.error?.code || '').toLowerCase() === 'interrupted';
+      actions.push(action(interrupted ? 'recover' : 'retry', interrupted ? 'Recover' : 'Retry','secondary'));
+    } else if (state === 'cancelled' && isGeneration) {
+      actions.push(action('retry','Retry','secondary'));
     }
     if (['running','pause_requested'].includes(state) && !isGeneration && !canCancelImport && !canCancelPreview) {
       actions.push('<small>Cancellation and pause are not supported for this operation.</small>');
@@ -5808,7 +5811,7 @@
     if (isVisiblePage('generate')) renderProductionGeneration(allJobs);
     const jobs = allJobs.filter(j => backendJobFilter === 'all' ||
       (backendJobFilter === 'completed' ? j.state === 'completed' :
-      (backendJobFilter === 'failed' ? j.state === 'failed' :
+      (backendJobFilter === 'failed' ? ['failed','cancelled'].includes(j.state) :
       !['completed','failed','cancelled'].includes(j.state))));
     const box = $('backgroundJobsList');
     // The jobs modal is normally hidden. Avoid rebuilding its DOM on every poll;
@@ -5819,7 +5822,7 @@
       // and error contents are updated in place below; rebuilding every row
       // when a worker first emits a message flashes the entire job panel.
       const signature = jobs.map(j => [
-        j.job_id, j.state, j.type, j.title, Boolean(j.recoverable)
+        j.job_id, j.state, j.type, j.title, Boolean(j.recoverable), String(j.error?.code || '')
       ].join('\u001f')).join('\u001e');
       if (box.dataset.backendJobsSignature !== signature) {
         box.innerHTML = jobs.map(j => {
@@ -9159,9 +9162,17 @@
       if (b) {
         e.preventDefault(); e.stopImmediatePropagation();
         try {
-          const commands = {pause:'job.pause',resume:'job.resume',cancel:'job.cancel'};
-          await call(commands[b.dataset.jobAction] || 'job.cancel', {job_id:b.dataset.jobId});
+          const commands = {
+            pause:'job.pause', resume:'job.resume', cancel:'job.cancel',
+            retry:'job.retry', recover:'job.recover'
+          };
+          const actionName = String(b.dataset.jobAction || '');
+          await call(commands[actionName] || 'job.cancel', {job_id:b.dataset.jobId});
           await refreshJobs();
+          if (actionName === 'retry' || actionName === 'recover') {
+            await refreshHistory().catch(()=>{});
+            message(actionName === 'recover' ? 'Generation recovery started from compatible saved checkpoints.' : 'Generation retry started from compatible saved checkpoints.');
+          }
         } catch (err) { message(err?.message || String(err), true); }
         return;
       }

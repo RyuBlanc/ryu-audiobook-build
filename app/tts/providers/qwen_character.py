@@ -21,10 +21,6 @@ from ..qwen_character_runtime import (
     runtime_ready,
     verify_runtime,
     worker_script,
-    _detected_vram_gb,
-    ensure_best_runtime_for_gpu,
-    register_qwen_worker,
-    unregister_qwen_worker,
 )
 from ..expression import DEFAULT_VOICE_DESIGN_ANCHOR_TEXT, classify_expression
 
@@ -33,21 +29,15 @@ class QwenCharacterProvider(TTSProvider):
     """Offline Qwen3-TTS character voices with no API key or cloud service."""
 
     provider_id = "qwen-character"
-    # Long-form audiobook narration uses the original high-throughput bounds.
-    # Larger sentence-aware units reduce per-request overhead while retaining
-    # expression-based boundaries. Short previews intentionally stay smaller.
-    recommended_chunk_chars = 2400
-    recommended_chunk_sentences = 10
+    # Qwen can safely handle substantially larger sentence-aware units. The
+    # previous 360-char/2-sentence setting created thousands of tiny generation
+    # jobs on long novels and made GPU utilization/ETA unnecessarily poor.
+    recommended_chunk_chars = 800
+    recommended_chunk_sentences = 4
     # Preserve efficient long units in calm narration, but cut at real shifts
     # between neutral, thoughtful, warm and concerned styles so each unit can
     # use the matching stable-identity expression reference.
     split_on_expression_change = True
-    # Preview requests use the same bounded sentence-aware units as production
-    # narration. This reduces per-request model overhead without changing the
-    # selected model, prompt, sampling, pronunciation or voice identity.
-    recommended_preview_chunk_chars = 800
-    recommended_preview_chunk_sentences = 4
-    split_preview_on_expression_change = True
     # Conservative startup estimate used only until real chunk timings are available.
     estimated_chars_per_minute = 180.0
     handles_narration_controls = False
@@ -67,7 +57,6 @@ class QwenCharacterProvider(TTSProvider):
         qwen_anchor_path: Path | None = None,
         qwen_anchor_text: str = "",
         qwen_profile_id: str = "",
-        long_form_model_kind: str | None = None,
     ):
         self.voice_id = voice_id
         self.language = language or "English"
@@ -81,11 +70,6 @@ class QwenCharacterProvider(TTSProvider):
             or (DEFAULT_VOICE_DESIGN_ANCHOR_TEXT if self.qwen_mode == "design" else "")
         )
         self.qwen_profile_id = qwen_profile_id or ""
-        self.long_form_model_kind = (
-            long_form_model_kind
-            if long_form_model_kind in {"base-0.6b", "base-1.7b"}
-            else None
-        )
         self.status_callback = None
         requested_kind = (model_kind or "auto").lower()
         self._auto_select_model = (
@@ -117,9 +101,7 @@ class QwenCharacterProvider(TTSProvider):
         """Resolve automatic model/GPU choices outside the Qt main thread."""
         if not self._auto_select_model:
             return
-        if self.qwen_mode in {"design", "design-preview"}:
-            self.model_kind = best_voice_design_kind()
-        elif self.qwen_mode == "clone":
+        if self.qwen_mode == "clone":
             self.model_kind = best_clone_kind()
         else:
             self.model_kind = best_custom_kind()
@@ -127,32 +109,9 @@ class QwenCharacterProvider(TTSProvider):
 
     @property
     def recommended_batch_size(self) -> int:
-        """Use conservative two-chunk batches only with ample GPU memory.
+        """Generate one Qwen segment at a time for responsive checkpoints."""
+        return 1
 
-        The production worker already supports same-voice Qwen VoiceDesign
-        batches. CPU, low-memory devices and providers that cannot batch keep
-        the serial path; the generator falls back to serial on an explicit
-        accelerator OOM, preserving checkpoint and recovery behavior.
-        """
-        if self.qwen_mode != "design":
-            return 1
-        try:
-            return 2 if _detected_vram_gb() >= 12.0 else 1
-        except Exception:
-            return 1
-
-    @property
-    def recommended_preview_batch_size(self) -> int:
-        """Batch short VoiceDesign previews only on GPUs with comfortable VRAM."""
-        if self.qwen_mode != "design-preview":
-            return 1
-        try:
-            # VoiceDesign is a 1.7B model. Prefer serial inference on 4 GB
-            # GPUs / CPU; two sentences can share a call on 8 GB-class GPUs.
-            # The preview caller falls back if the device reports CUDA OOM.
-            return 2 if _detected_vram_gb() >= 7.0 else 1
-        except Exception:
-            return 1
 
     def _request_timeout(self, text_chars: int) -> float:
         # One 2.4k-character Qwen chunk can legitimately take many minutes on
@@ -180,8 +139,8 @@ class QwenCharacterProvider(TTSProvider):
                 self.qwen_mode,
                 self.model_kind,
                 (
-                    self.long_form_model_kind or best_long_form_clone_kind()
-                    if self.qwen_mode == "design"
+                    best_long_form_clone_kind()
+                    if self.qwen_mode in {"design", "design-preview"}
                     else ""
                 ),
                 self.instruct,
@@ -209,8 +168,6 @@ class QwenCharacterProvider(TTSProvider):
         if self._worker is not None and self._worker.poll() is None:
             return
         self._ensure_model_kind()
-        if str(self.backend or "automatic").casefold() in {"automatic", "auto"} and runtime_ready():
-            ensure_best_runtime_for_gpu(self._status)
         if not runtime_ready():
             try:
                 verify_runtime()
@@ -229,17 +186,12 @@ class QwenCharacterProvider(TTSProvider):
                 "Open Models and install the corresponding Qwen3-TTS phase."
             )
         clone_kind = None
-        # A VoiceDesign preview is deliberately a one-pass audition using the
-        # same VoiceDesign model and profile prompt. It must not generate the
-        # long-form anchor bank or require a separate Qwen Base model merely to
-        # audition a profile. Production narration remains on the stable
-        # VoiceDesign/Base identity-lock path.
-        if self.qwen_mode == "design":
-            clone_kind = self.long_form_model_kind or best_long_form_clone_kind()
+        if self.qwen_mode in {"design", "design-preview"}:
+            clone_kind = best_long_form_clone_kind()
             if not model_installed(clone_kind):
                 raise RuntimeError(
-                    f"VoiceDesign stable identity needs the local Qwen Base model ({clone_kind}) selected by the global preference. "
-                    "Open Models and install the selected global model size, or change the global preference in Models & Voice Engines."
+                    f"VoiceDesign stable identity needs the local Qwen Base model ({clone_kind}). "
+                    "Open Models and install the matching Qwen Base phase."
                 )
         log_path = Path.home() / "Ryu's Audiobook" / "Settings" / "qwen_character_worker.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -271,13 +223,9 @@ class QwenCharacterProvider(TTSProvider):
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
             if sys.platform == "win32" else 0,
         )
-        register_qwen_worker(self._worker.pid)
-        stdout_queue = queue.Queue()
-        self._stdout_queue = stdout_queue
-        worker = self._worker
+        self._stdout_queue = queue.Queue()
         self._stdout_thread = threading.Thread(
             target=self._drain_stdout,
-            args=(worker, stdout_queue),
             name="RyuQwenCharacterStdout",
             daemon=True,
         )
@@ -298,21 +246,14 @@ class QwenCharacterProvider(TTSProvider):
         self.close()
         raise RuntimeError(str(detail))
 
-    def _drain_stdout(self, worker, output_queue: queue.Queue[str | None]) -> None:
-        """Drain one worker into its captured queue, even while close() clears shared state."""
-        stdout = getattr(worker, "stdout", None)
-        if stdout is None:
-            output_queue.put(None)
+    def _drain_stdout(self) -> None:
+        if self._worker is None or self._worker.stdout is None or self._stdout_queue is None:
             return
         try:
-            for line in iter(stdout.readline, ""):
-                output_queue.put(line.rstrip("\r\n"))
-        except (OSError, ValueError):
-            # close() intentionally closes the pipe to stop the worker. The
-            # queue is owned by this thread and remains valid until its sentinel.
-            pass
+            for line in iter(self._worker.stdout.readline, ""):
+                self._stdout_queue.put(line.rstrip("\r\n"))
         finally:
-            output_queue.put(None)
+            self._stdout_queue.put(None)
 
     def _read_response(self, timeout: float, heartbeat: str = "") -> dict:
         q = self._stdout_queue
@@ -431,7 +372,6 @@ class QwenCharacterProvider(TTSProvider):
     def synthesize_batch(
         self,
         items: list[tuple[str, Path]],
-        voice: str | None = None,
     ) -> list[Path]:
         """Generate several same-voice chunks in one Qwen request.
 
@@ -439,8 +379,6 @@ class QwenCharacterProvider(TTSProvider):
         """
         if not items:
             return []
-        if self.qwen_mode not in {"design", "design-preview"}:
-            return [self.synthesize(text, output) for text, output in items]
         self._start_worker()
         if not self._worker or not self._worker.stdin:
             raise RuntimeError("Offline character worker is unavailable.")
@@ -523,13 +461,10 @@ class QwenCharacterProvider(TTSProvider):
         self._stdout_queue = None
         self._stdout_thread = None
         if worker is not None:
-            worker_pid = getattr(worker, "pid", None)
-            if worker_pid is not None:
-                unregister_qwen_worker(worker_pid)
             try:
                 if worker.stdin:
                     worker.stdin.close()
-            except (OSError, ValueError):
+            except OSError:
                 pass
             try:
                 if worker.poll() is None:
@@ -543,12 +478,12 @@ class QwenCharacterProvider(TTSProvider):
             try:
                 if worker.stdout:
                     worker.stdout.close()
-            except (OSError, ValueError):
+            except OSError:
                 pass
         if self._worker_log is not None:
             try:
                 self._worker_log.flush()
                 self._worker_log.close()
-            except (OSError, ValueError):
+            except OSError:
                 pass
             self._worker_log = None

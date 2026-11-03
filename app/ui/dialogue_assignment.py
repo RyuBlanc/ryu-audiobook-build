@@ -22,10 +22,6 @@ from app.chapters.assignment_utils import (
     format_character_registry_entry,
     normalize_assignment,
 )
-from app.chapters.character_learning import (
-    record_project_speaker_assignment,
-    remove_project_speaker_assignment_feedback,
-)
 
 
 class DialogueAssignmentDialog(QDialog):
@@ -53,9 +49,7 @@ class DialogueAssignmentDialog(QDialog):
         self.end = max(self.start, min(int(end), len(chapter.text)))
         self.book_chapters = list(book_chapters or [chapter])
         self.project_folder = project_folder
-        self.selected_segment = dialogue_segment_for_selection(
-            chapter, self.start, self.end, project_folder=self.project_folder
-        )
+        self.selected_segment = dialogue_segment_for_selection(chapter, self.start, self.end)
         self.registry = build_book_character_registry(self.book_chapters, project_folder)
         self.characters: list[str] = [entry["name"] for entry in self.registry.values()]
         self.assigned = False
@@ -322,21 +316,7 @@ class DialogueAssignmentDialog(QDialog):
             mode=self.mode.currentData() or "chorus",
         )
 
-        # Replace only the exact same selected dialogue span. Remove any
-        # earlier confirmed single-speaker memory before recording the user's
-        # new explicit choice (chorus assignments are not single-speaker truth).
-        previous_assignment = next(
-            (
-                item for item in getattr(self.chapter, "dialogue_assignments", [])
-                if int(item.get("start", -1)) == assignment["start"]
-                and int(item.get("end", -1)) == assignment["end"]
-            ),
-            None,
-        )
-        if previous_assignment is not None:
-            remove_project_speaker_assignment_feedback(
-                self.project_folder, self.chapter, previous_assignment
-            )
+        # Replace only the exact same selected dialogue span.
         self.chapter.dialogue_assignments = [
             item
             for item in getattr(self.chapter, "dialogue_assignments", [])
@@ -346,8 +326,5 @@ class DialogueAssignmentDialog(QDialog):
             )
         ]
         self.chapter.dialogue_assignments.append(assignment)
-        record_project_speaker_assignment(
-            self.project_folder, self.chapter, assignment
-        )
         self.assigned = True
         self.accept()

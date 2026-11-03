@@ -9,7 +9,6 @@ from app.chapters.characters import (
     _clean_dialogue,
     _speaker_near_quote,
     _discover_candidates,
-    _discover_explicit_speakers,
     _is_plausible_name,
 )
 from app.chapters.detector import Chapter
@@ -30,7 +29,6 @@ def dialogue_segment_for_selection(
     chapter: Chapter,
     start: int,
     end: int,
-    project_folder=None,
 ) -> DialogueSegment | None:
     """Return a fast, local speaker suggestion for one selected dialogue.
 
@@ -101,38 +99,11 @@ def dialogue_segment_for_selection(
     local_before_start = max(0, best_start - 1800)
     local_after_end = min(len(text), best_end + 1200)
     local_window = text[local_before_start:local_after_end]
-    discovered_names = _discover_candidates(local_window)
-    discovered_names.update(_discover_explicit_speakers(local_window))
     discovered = {
-        name for name in discovered_names
+        name for name in _discover_candidates(local_window)
         if _is_plausible_name(name)
     }
-    learned_examples = []
-    learning_scope = ""
-    learned_speakers = []
-    if project_folder is not None:
-        try:
-            from app.chapters.character_learning import (
-                learning_scope_for_project,
-                load_learning_examples,
-            )
-            learning_scope = learning_scope_for_project(project_folder)
-            if learning_scope:
-                learned_examples = load_learning_examples(learning_scope)
-                learned_speakers = list(dict.fromkeys(
-                    str(row.get("speaker") or "").strip()
-                    for row in learned_examples
-                    if isinstance(row, dict)
-                    and str(row.get("speaker") or "").strip()
-                ))
-        except (OSError, ValueError, TypeError):
-            learned_examples = []
-            learned_speakers = []
-            learning_scope = ""
-
-    candidates = list(dict.fromkeys(
-        manual_speakers + sorted(discovered) + learned_speakers
-    ))
+    candidates = list(dict.fromkeys(manual_speakers + sorted(discovered)))
 
     last_speaker = None
     previous_manual = [
@@ -160,47 +131,6 @@ def dialogue_segment_for_selection(
         aliases,
         last_speaker,
     )
-
-    # Explicitly confirmed series/book-local speaker examples can improve
-    # later suggestions. They remain suggestions only: a remembered match is
-    # never written back as an assignment until the user confirms it.
-    if learning_scope and candidates:
-        try:
-            from app.chapters.character_learning import rank_speaker_suggestions
-            known_characters = [
-                {"name": name, "series": learning_scope}
-                for name in candidates
-            ]
-            learned = rank_speaker_suggestions(
-                    chapter_text=text,
-                    start=best_start,
-                    end=best_end,
-                    known_characters=known_characters,
-                    learning_examples=learned_examples,
-                last_speaker=last_speaker or "",
-                last_speaker_series=learning_scope,
-            )
-            combined = {item[0].casefold(): item for item in suggestions}
-            for item in learned:
-                name = str(item.get("name") or "").strip()
-                if not name:
-                    continue
-                candidate = (
-                    name,
-                    max(0.0, min(1.0, float(item.get("confidence") or 0.0))),
-                    str(item.get("evidence") or "Matches a confirmed local character example."),
-                )
-                previous = combined.get(name.casefold())
-                if previous is None or candidate[1] > previous[1]:
-                    combined[name.casefold()] = candidate
-            suggestions = sorted(
-                combined.values(),
-                key=lambda item: (-item[1], item[0].casefold()),
-            )[:5]
-        except (OSError, ValueError, TypeError):
-            # Learning memory is optional and must never disable ordinary
-            # source-grounded dialogue assignment when its local store is unreadable.
-            pass
 
     if exact_manual is not None:
         exact_name = str(exact_manual.get("speaker", "")).strip()
@@ -237,11 +167,8 @@ def dialogue_segments(chapter: Chapter) -> list[DialogueSegment]:
         if str(item.get("speaker", "")).strip()
     ]
 
-    chapter_text = chapter.text or ""
-    discovered_names = _discover_candidates(chapter_text)
-    discovered_names.update(_discover_explicit_speakers(chapter_text))
     discovered = {
-        name for name in discovered_names
+        name for name in _discover_candidates(chapter.text or "")
         if _is_plausible_name(name)
     }
     candidates = list(dict.fromkeys(

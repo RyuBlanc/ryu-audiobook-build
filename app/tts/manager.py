@@ -378,7 +378,13 @@ class GenerationManager:
                     narration_speed=self.narration_speed,
                     pacing_profile=self.pacing_profile,
                     preserve_paragraph_boundaries=self._chapter_requires_paragraph_boundary(chapter),
+                    checkpoint_callback=lambda _done, _total, chapter_index=index: self._wait_if_paused(
+                        chapter_index + 1, len(self.chapters)
+                    ),
                 )
+                if self.cancel_event.is_set():
+                    cancelled = True
+                    break
                 if result.chunks_completed != result.chunks_total:
                     raise RuntimeError("Chapter generation is incomplete.")
                 completed += 1

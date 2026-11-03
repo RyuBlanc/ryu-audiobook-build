@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections import OrderedDict
 import json
-import math
 from pathlib import Path
 
 from app.core.state import load_state
@@ -147,95 +146,3 @@ def format_character_registry_entry(entry: dict) -> str:
     if source and chapters:
         return f"{entry['name']}  ·  {location}  ·  {voice_note}  ·  {source}"
     return f"{entry['name']}  ·  {location}  ·  {voice_note}"
-
-
-
-def unassign_dialogue_from_chapters(chapters, chapter_number: int, start: int, end: int, dialogue_text: str) -> dict:
-    """Remove a single assignment only after verifying its exact source span."""
-    if isinstance(chapter_number, bool) or not isinstance(chapter_number, int):
-        raise ValueError("Choose a valid chapter number before removing an assignment.")
-    if isinstance(start, bool) or not isinstance(start, int) or isinstance(end, bool) or not isinstance(end, int):
-        raise ValueError("Dialogue offsets must be integer positions.")
-    requested = str(dialogue_text or "")
-    if not requested or len(requested) > 5000 or start < 0 or end <= start:
-        raise ValueError("Select a valid dialogue passage before removing its assignment.")
-    matches = [c for c in (chapters or []) if getattr(c, "number", None) == chapter_number]
-    if len(matches) != 1:
-        raise ValueError("The selected chapter no longer exists or is ambiguous. Refresh the dialogue review.")
-    chapter = matches[0]
-    source = str(getattr(chapter, "text", "") or "")
-    if end > len(source) or source[start:end] != requested:
-        raise ValueError("The saved chapter text changed since this passage was selected. Refresh the dialogue review; no assignment was removed.")
-    assignments = list(getattr(chapter, "dialogue_assignments", []) or [])
-    indices = [i for i, item in enumerate(assignments) if isinstance(item, dict) and item.get("start") == start and item.get("end") == end]
-    if len(indices) != 1:
-        raise ValueError("No unique saved speaker assignment exists for this exact passage. Refresh the dialogue review; no assignment was removed.")
-    assignment = assignments[indices[0]]
-    if assignment.get("text") is not None and assignment.get("text") != requested:
-        raise ValueError("The saved assignment no longer matches the selected source passage. Refresh the dialogue review; no assignment was removed.")
-    del assignments[indices[0]]
-    chapter.dialogue_assignments = assignments
-    return {"chapter_number": chapter_number, "start": start, "end": end, "text": requested, "removed": True, "saved": True}
-
-
-def assign_dialogue_to_chapters(chapters, dialogue_text: str, speakers: list[str],
-                                chapter_number: int | None = None, mode: str = "single",
-                                source: str = "manual", confidence: float = 1.0) -> dict:
-    """Persist an explicit speaker choice against one uniquely matched source span."""
-    import re
-    requested = str(dialogue_text or "").strip()
-    names = list(dict.fromkeys(str(value).strip() for value in (speakers or []) if str(value).strip()))
-    if not requested:
-        raise ValueError("Select a dialogue passage before assigning a speaker.")
-    if not names:
-        raise ValueError("Select at least one saved character.")
-    if len(requested) > 5000:
-        raise ValueError("The selected dialogue passage is too long to assign safely.")
-    source_value = str(source or "manual").strip().casefold()
-    if source_value not in {"manual", "ai"}:
-        raise ValueError("Dialogue assignment source must be manual or ai.")
-    if source_value == "ai":
-        try:
-            confidence_value = float(confidence)
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise ValueError("AI confidence must be a finite value between 0 and 1.") from exc
-        if not math.isfinite(confidence_value) or not 0.0 <= confidence_value <= 1.0:
-            raise ValueError("AI confidence must be a finite value between 0 and 1.")
-    else:
-        confidence_value = 1.0
-    candidates = []
-    for chapter in chapters or []:
-        if chapter_number is not None and int(getattr(chapter, "number", 0)) != int(chapter_number):
-            continue
-        source = str(getattr(chapter, "text", "") or "")
-        pieces = re.split(r"\s+", requested)
-        pattern = r"\s+".join(re.escape(piece) for piece in pieces if piece)
-        if pattern:
-            for match in re.finditer(pattern, source):
-                candidates.append((chapter, match.start(), match.end(), source[match.start():match.end()]))
-    if not candidates:
-        raise ValueError("The selected dialogue text was not found in the saved chapter text. Refresh the chapter and select a passage from the imported book; no assignment was saved.")
-    if len(candidates) != 1:
-        raise ValueError("That dialogue passage appears more than once. Select its specific chapter or a longer unique passage; no assignment was saved.")
-    chapter, start, end, exact_text = candidates[0]
-    existing = list(getattr(chapter, "dialogue_assignments", []) or [])
-    overlapping = [item for item in existing if isinstance(item, dict)
-        and isinstance(item.get("start"), int) and isinstance(item.get("end"), int)
-        and item["start"] < end and item["end"] > start
-        and not (item["start"] == start and item["end"] == end)]
-    if overlapping:
-        raise ValueError("The selected passage overlaps another saved speaker assignment. Edit or remove the existing assignment first.")
-    base = next((dict(item) for item in existing if isinstance(item, dict)
-                 and item.get("start") == start and item.get("end") == end),
-                {"start": start, "end": end, "text": exact_text, "source": source_value})
-    base.update({"start": start, "end": end, "text": exact_text, "source": source_value})
-    normalized = normalize_assignment(base, names, mode)
-    normalized["source"] = source_value
-    normalized["confidence"] = confidence_value
-    existing = [item for item in existing if not (isinstance(item, dict)
-                and item.get("start") == start and item.get("end") == end)]
-    existing.append(normalized)
-    existing.sort(key=lambda item: (int(item.get("start", 0)), int(item.get("end", 0))))
-    chapter.dialogue_assignments = existing
-    return {"chapter_number": chapter.number, "start": start, "end": end, "text": exact_text,
-            "speakers": names, "source": source_value, "confidence": confidence_value, "saved": True}

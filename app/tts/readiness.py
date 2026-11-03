@@ -28,18 +28,6 @@ class GenerationReadiness:
         return sum(1 for item in self.items if not item.ok)
 
 
-def partition_chapters_by_body(chapters):
-    """Separate synthesizable chapters from empty records without mutating the project."""
-    valid = []
-    empty = []
-    for chapter in list(chapters or []):
-        if str(getattr(chapter, "text", "") or "").strip():
-            valid.append(chapter)
-        else:
-            empty.append(chapter)
-    return valid, empty
-
-
 def build_generation_readiness(
     chapters,
     voice_name: str | None,
@@ -48,33 +36,21 @@ def build_generation_readiness(
     custom_runtime_ready: bool = True,
     assignments: dict | None = None,
     cover_selected: bool = False,
-    qwen_runtime_ready: bool = True,
-    qwen_models_ready: bool = True,
-    qwen_model_detail: str = "Required local Qwen model files are present.",
 ) -> GenerationReadiness:
     chapters = list(chapters or [])
-    valid_chapters, empty_chapters = partition_chapters_by_body(chapters)
-    empty_numbers = [getattr(chapter, "number", "?") for chapter in empty_chapters]
+    empty = [getattr(chapter, "number", "?") for chapter in chapters if not str(getattr(chapter, "text", "") or "").strip()]
     assignments = assignments if isinstance(assignments, dict) else {}
-
-    if not chapters:
-        chapter_detail = "No chapters available."
-    elif not valid_chapters:
-        chapter_detail = "No chapter contains body text. Restore text or repair the source."
-    elif empty_chapters:
-        chapter_detail = (
-            f"{len(valid_chapters)} chapter(s) contain text; empty chapter(s) "
-            f"{', '.join(map(str, empty_numbers))} will be skipped if source repair cannot recover them."
-        )
-    else:
-        chapter_detail = f"{len(valid_chapters)} chapter(s) ready."
 
     items = [
         ReadinessItem(
             "Chapters",
-            bool(valid_chapters) and not empty_chapters,
-            chapter_detail,
-            not bool(valid_chapters),
+            bool(chapters) and not empty,
+            (
+                f"{len(chapters)} chapter(s) ready."
+                if chapters and not empty
+                else ("Empty chapters: " + ", ".join(map(str, empty)) if empty else "No chapters available.")
+            ),
+            True,
         ),
         ReadinessItem(
             "Narrator voice",
@@ -92,23 +68,6 @@ def build_generation_readiness(
             ) if voice_provider != "chatterbox" or custom_runtime_ready else
             "Install / repair the Custom Voice Engine before generation.",
             True,
-        ),
-        ReadinessItem(
-            "Qwen3-TTS runtime",
-            voice_provider != "qwen-character" or qwen_runtime_ready,
-            (
-                "Qwen3-TTS runtime is ready."
-                if qwen_runtime_ready
-                else "Install / repair the Qwen3-TTS runtime before generation."
-            ) if voice_provider == "qwen-character" else
-            "Not required for the selected narrator.",
-            voice_provider == "qwen-character",
-        ),
-        ReadinessItem(
-            "Qwen voice model",
-            voice_provider != "qwen-character" or qwen_models_ready,
-            qwen_model_detail if voice_provider == "qwen-character" else "Not required for the selected narrator.",
-            voice_provider == "qwen-character",
         ),
         ReadinessItem(
             "Output",
