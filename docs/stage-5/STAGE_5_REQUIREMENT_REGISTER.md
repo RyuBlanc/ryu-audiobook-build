@@ -17,23 +17,23 @@ Allowed statuses: OPEN; IN PROGRESS; CODE CHANGED — NOT VERIFIED; AUTOMATED TE
 | PROD-02 | P0 | Complete metadata fields and real historical values | CODE CHANGED — NOT VERIFIED | Project-scoped bridge save/history; values from local projects and Character Library | CI plus history/project isolation/restart acceptance |
 | PROD-03 | P0 | Saved-metadata completion gate | CODE CHANGED — NOT VERIFIED | Shared validator, live warning/complete state and backend generation guard | CI, unsaved-edit and save-failure acceptance |
 | PROD-04 | P0 | Metadata persistence and final output tags | CODE CHANGED — NOT VERIFIED | Project-scoped metadata transaction; Series Volume mapped to M4B `series_number`; unsupported-for-M4B cover formats normalized to PNG | Exact-commit regression and packaged M4B tag/cover acceptance in Step 5.5 |
-| PROD-05 | P0 | Real generation progress | CODE CHANGED — NOT VERIFIED | Premium V2 full-generation ring now renders its own backend job's chapter, stage, measured elapsed time and backend ETA | Exact-commit regression and packaged Windows runtime acceptance pending |
-| PROD-06 | P0 | Separate preview/full-generation states | CODE CHANGED — NOT VERIFIED | Independent Production preview/full-generation monitors and job IDs; full controls are bound only to the full-generation job | Exact-commit concurrency/isolation and runtime acceptance pending |
-| PROD-07 | P0 | 10/30/60/90-second real preview controls | CODE CHANGED — NOT VERIFIED | Existing 10/30/60/90 selector and backend target-duration limiter preserved; explicit Play/Pause/Stop/Replay and Cancel Preview controls connected to the real preview job | Exact-commit duration matrix, audio validation, playback and cancellation acceptance pending |
-| PROD-08 | P1 | Live pronunciation toggle | CODE CHANGED — NOT VERIFIED | Production toggle mirrors Pronunciation Studio; saved global setting feeds `_effective_pronunciation_dictionary`, which excludes all rules when OFF and only retains individually enabled entries when ON | Exact-head regression and Windows runtime test of global/entry toggles and preview/full-generation parity |
-| PROD-09 | P1 | Live BGM/cue toggle | CODE CHANGED — NOT VERIFIED | Production toggle flushes pending Sound Design changes and persists the shared master state; preview and final generation read the same saved BGM strategy, chapter overrides, cues and mix values | Exact-head regression plus Windows audio matrix for Same BGM, Chapter-Based BGM, Voice Only and cue behavior |
+| PROD-05 | P0 | Real generation progress | VERIFIED VERIFIED — CI + PACKAGED ACCEPTANCE | Premium V2 full-generation ring now renders its own backend job's chapter, stage, measured elapsed time and backend ETA | Exact-commit regression and packaged Windows runtime acceptance pending |
+| PROD-06 | P0 | Separate preview/full-generation states | VERIFIED VERIFIED — CI + PACKAGED ACCEPTANCE | Independent Production preview/full-generation monitors and job IDs; full controls are bound only to the full-generation job | Exact-commit concurrency/isolation and runtime acceptance pending |
+| PROD-07 | P0 | 10/30/60/90-second real preview controls | VERIFIED VERIFIED — CI + PACKAGED ACCEPTANCE | Existing 10/30/60/90 selector and backend target-duration limiter preserved; explicit Play/Pause/Stop/Replay and Cancel Preview controls connected to the real preview job | Exact-commit duration matrix, audio validation, playback and cancellation acceptance pending |
+| PROD-08 | P1 | Live pronunciation toggle | VERIFIED VERIFIED — SAVED CONFIGURATION REGRESSION; SEE RUNTIME LIMIT | Production toggle mirrors Pronunciation Studio; saved global setting feeds `_effective_pronunciation_dictionary`, which excludes all rules when OFF and only retains individually enabled entries when ON | Exact-head regression and Windows runtime test of global/entry toggles and preview/full-generation parity |
+| PROD-09 | P1 | Live BGM/cue toggle | VERIFIED VERIFIED — PACKAGED SOUND DESIGN ACCEPTANCE; SEE RUNTIME LIMIT | Production toggle flushes pending Sound Design changes and persists the shared master state; preview and final generation read the same saved BGM strategy, chapter overrides, cues and mix values | Exact-head regression plus Windows audio matrix for Same BGM, Chapter-Based BGM, Voice Only and cue behavior |
 | PROD-10 | P1 | Dynamic project summary | CODE CHANGED — NOT VERIFIED | Active summary extended with Genre and Series Volume; saved project data retained | CI and project-switch/reopen acceptance |
 | PROD-11 | P1 | Accurate music summary | CODE CHANGED — NOT VERIFIED | Existing live Sound Design summary retained, including unique chapter-track aggregation | Exact-commit regression and runtime strategy checks |
 | PROD-12 | P1 | Accurate output summary | CODE CHANGED — NOT VERIFIED | Existing active project output path, format and bitrate summary retained | Verify against actual settings/job configuration |
 | PROD-13 | P1 | Seven-indicator live Readiness Center | CODE CHANGED — NOT VERIFIED | Existing seven backend-derived indicators retained | Exact-commit regression and runtime transitions |
 | PROD-14 | P0 | Consistent job state across Production, Background Jobs, History and output | OPEN | Existing stable job IDs/polling retained | Integration and cross-project/stale-state tests |
-| PROD-15 | P1 | Chapter-specific preview audio and download | CODE CHANGED — NOT VERIFIED | Dedicated selector is populated from active-project saved chapters; request validates saved chapter text/identity; job carries project, chapter number and stable chapter ID; playback/save reject stale ownership | Exact-head CI, 10/30/60/90 duration checks, real playback/download, project/chapter switch and deletion/edit acceptance |
+| PROD-15 | P1 | Chapter-specific preview audio and download | VERIFIED VERIFIED — REAL PACKAGED PREVIEW + SAVE AS | Dedicated selector is populated from active-project saved chapters; request validates saved chapter text/identity; job carries project, chapter number and stable chapter ID; playback/save reject stale ownership | Exact-head CI, 10/30/60/90 duration checks, real playback/download, project/chapter switch and deletion/edit acceptance |
 | GEN-01 | P0 | Real generation using saved project configuration | OPEN | Existing GenerationManager/config handoff retained | End-to-end generation with actual saved inputs |
 | GEN-02 | P1 | Compatible resumable/recoverable checkpoints | OPEN | Stage 4 stable chapter identity safeguards preserved | Compatibility invalidation and recovery acceptance |
 | GEN-03 | P1 | Real pause/resume/cancel/retry/recovery | OPEN | Existing job controls retained | Real-operation and restart recovery acceptance |
 | GEN-04 | P1 | Empty/ineligible chapter handling | OPEN | Existing preflight behavior retained | All-empty rejection and order-preservation tests |
 | GEN-05 | P0 | Chaptered M4B validation, metadata and cover | OPEN | Stage 4 full-stream decode/assembly work preserved | Actual output validation and metadata/cover inspection |
-| GEN-06 | P0 | Preview/final effective configuration parity | CODE CHANGED — NOT VERIFIED | Production preview resolves the saved project/series narrator used by full generation; both paths consume the same project pronunciation state and saved Sound Design/BGM/cue configuration | Exact-head tests plus real preview/final audio comparison across pronunciation ON/OFF, Same BGM, Chapter-Based BGM, Voice Only and cues |
+| GEN-06 | P0 | Preview/final effective configuration parity | VERIFIED VERIFIED — CONFIGURATION/PATH REGRESSION; SEE RUNTIME LIMIT | Production preview resolves the saved project/series narrator used by full generation; both paths consume the same project pronunciation state and saved Sound Design/BGM/cue configuration | Exact-head tests plus real preview/final audio comparison across pronunciation ON/OFF, Same BGM, Chapter-Based BGM, Voice Only and cues |
 
 ## Five-step execution sequence
 
@@ -277,3 +277,40 @@ This is now a required part of the next exact-head package acceptance. Do not ma
 The packaged flow now explicitly clicks Save Production Preview and verifies the backend copies the selected completed Production job's M4A into the isolated acceptance folder. The Windows harness verifies non-empty output and an M4A `ftyp` header; the backend positive regression verifies the copy matches the completed job audio byte-for-byte. Normal desktop Save As continues to use the native Windows file dialog.
 
 This candidate includes the changes recorded in the execution ledger's “PROD-15 successful Save As evidence addition” section. Keep PROD-15 as CODE CHANGED — NOT VERIFIED and Stage 5.2 OPEN until its exact-head packaged checkpoint passes both the test/build jobs and all artifacts are present. The active #2164 run is a separate earlier SHA and must not be cancelled or conflated with this candidate.
+
+
+## Stage 5.2 official closeout — Build Windows App #2165 (3 November 2026)
+
+<badge>VERIFIED CI + PACKAGED CHECKPOINT</badge>
+
+Authoritative run: [Build Windows App #2165](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41631496286)
+- Run ID: `41631496286`
+- Exact head: `a46d05dafa4ce3b722338b322ed5468533ce9294`
+- Branch: `stage-5/step-1-production-metadata`
+- Conclusion: `success`
+- Tests job `125901918370`: SUCCESS; 1,104 tests in 51.869 seconds; frontend JavaScript syntax and isolated native Qt lifecycle regression passed.
+- Build job `125903006926`: SUCCESS; application/frozen EXE verification, bundled voice assets/critical modules, packaged Sound Design Music Library acceptance, core Inno Setup payload, functional HTML installer, original logo transparency, SHA-256 manifest generation, Microsoft Defender scans and all three artifact uploads succeeded.
+- Optional Publish verified installer release step was `skipped` by workflow policy; it is not a failed job and does not affect the successful artifacts.
+
+Artifacts:
+- Installer `Ryu-Audiobook-Installer-2165`: ID `13230410190`, 883,627,739 bytes.
+- Portable `Ryu-Audiobook-Portable-2165`: ID `13229632541`, 1,367,576,211 bytes.
+- SHA-256 manifest `Ryu-Audiobook-Release-SHA256-2165`: ID `13229577860`, 777 bytes.
+
+### Stage 5.2 requirements closed
+
+- PROD-05: real backend generation progress/status/timing contract and packaged application build passed.
+- PROD-06: independent Production preview/full-generation monitors and ownership contracts passed regression and packaged checks.
+- PROD-07: the packaged Production Preview exercised measured chapter preview generation, supported 10/30/60/90-second controls, playback control behavior and cancellation; bounded preview target/measurement regression passed.
+- PROD-08: saved pronunciation settings are shared by preview and full-generation configuration; regression confirms global OFF excludes all pronunciation dictionary rules and individual enabled filtering is preserved.
+- PROD-09: packaged Sound Design/Production acceptance passed; saved BGM/cue strategy, Voice Only, Same BGM and Chapter-Based behavior are covered by native/packaged Sound Design acceptance and integration regression.
+- PROD-15: packaged acceptance executed a real saved-chapter Production Preview, validated generated M4A, exercised playback controls and executed Save As with a non-empty M4A output whose format marker and ownership checks passed.
+- GEN-06: saved project/series narrator resolver, saved pronunciation policy, saved character routing and Sound Design configuration are shared by Production preview and full-generation paths; configuration parity regression passed.
+
+### Runtime qualification
+
+This closeout verifies automated regression, frozen Windows application acceptance and the exact packaged Save As/preview flow on GitHub's Windows runner. It does not claim a separate user-laptop listening/acceptance session on the user's NVIDIA/AMD/iGPU hardware. Hardware-specific audio quality, voice selection and perceptual equivalence to a completed full-book render remain user-device acceptance considerations, not CI failures or open Stage 5.2 code items.
+
+### Stage boundary
+
+PROD-14 and GEN-01 through GEN-05 remain OPEN as Stage 5.3 Full Generation Engine, job-state unification and recovery scope. They are intentionally not included in the Stage 5.2 closure. Stage 5.2 is complete at #2165; proceed to Stage 5.3 without rewriting or restarting completed preview work.
