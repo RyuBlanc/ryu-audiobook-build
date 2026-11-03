@@ -5229,8 +5229,14 @@
       if (previewActive) label = chapterPrefix + String(previewJob.stage || previewJob.message || previewState) + ' · ' + previewPercent + '%';
       else if (previewState === 'completed') {
         const actual = Number(previewJob.result?.actual_duration_seconds);
+        const sound = previewJob.result?.sound_configuration || {};
+        const mixMode = String(sound.background_audio_mode || '').toLowerCase();
+        const mixLabel = mixMode === 'off' ? ' · Voice Only'
+          : sound.bgm_enabled ? ' · BGM mixed'
+          : sound.cues_mixed ? ' · chapter cues'
+          : ' · no mix assigned';
         label = chapterPrefix + (voicePreviewValid && Number.isFinite(actual) && actual > 0
-          ? 'Preview ready · ' + actual.toFixed(1) + ' seconds'
+          ? 'Preview ready · ' + actual.toFixed(1) + ' seconds' + mixLabel
           : 'Preview completed, but playback validation is not ready yet.');
       } else if (previewState === 'failed') {
         label = chapterPrefix + 'Preview failed · ' + String(previewJob.error?.message || previewJob.message || 'Check the job and retry.');

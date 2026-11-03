@@ -1397,6 +1397,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("_chapter_bgm_override_for(", host)
         self.assertIn("resolve_music_track(", host)
         self.assertIn("sound_configuration", host)
+        self.assertIn('project_getter = getattr(self, "_active_project", None)', host)
+        self.assertIn('"cues_mixed": bool(cues_mixed)', host)
         self.assertIn("BGM mixed", adapter)
 
     def test_production_preview_reports_real_progress_timing_and_measured_duration(self):

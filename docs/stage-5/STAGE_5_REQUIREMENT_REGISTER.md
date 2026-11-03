@@ -101,3 +101,8 @@ The follow-up gives Production Preview its own Save command, checking completed 
 ## Step 5.2 selected-chapter sound-design parity correction
 
 Production chapter preview now enables the native Sound Design renderer and uses the selected chapter's stable BGM override, Same/Chapter-Based mode, Auto music resolution, Voice Only master switch and chapter boundary cues. The completed job reports the actual mixed duration/configuration. Secure Production Save As accepts its exact WAV/M4A output; Voice Studio remains unchanged. After-first-paragraph fails closed for fresh previews without a saved paragraph boundary. Regression and a fresh Windows package remain pending.
+
+
+## Step 5.2 #2111 regression correction
+
+#2111 (commit \`d32acd267b29fddb01978efc7965a21fb34bb300\`) failed before packaging: 1,089 tests, 9 errors and 2 assertion failures. The renderer's unconditional active-project lookup broke isolated/projectless preview hosts; selected chapter text/identity/position are now captured before dispatch and used without requiring a UI accessor. The renderer reports only cues actually mixed. Voice Studio's generic Save test remains WAV; the Production-only M4A export test verifies M4A and extension preservation. Exact-head regression and a replacement Windows package remain pending.

@@ -3040,6 +3040,20 @@ class PremiumV2Bridge(QObject):
                 selected_chapter.title or f"Chapter {selected_chapter.number}"
             )
             state["_preview_chapter_id"] = str(getattr(selected_chapter, "chapter_id", "") or getattr(selected_chapter, "id", "") or "")
+            state["_preview_chapter_text"] = str(selected_chapter.text or "")
+            eligible_preview_chapters = [
+                item for item in project.chapters
+                if not getattr(item, "skip_for_generation", False) and str(item.text or "").strip()
+            ]
+            selected_preview_index = next(
+                (index for index, item in enumerate(eligible_preview_chapters, start=1)
+                 if int(item.number) == int(selected_chapter.number)),
+                1,
+            )
+            state["_preview_chapter_index"] = selected_preview_index
+            state["_preview_chapter_is_first"] = selected_preview_index == 1
+            state["_preview_chapter_is_last"] = selected_preview_index == len(eligible_preview_chapters)
+            state["_preview_chapters_total"] = len(eligible_preview_chapters)
         if not text_value.strip():
             if project is None:
                 raise ValueError("Enter preview text or select a chapter with narration.")
@@ -3161,7 +3175,7 @@ class PremiumV2Bridge(QObject):
         if not selected:
             return {"cancelled": True}
         destination = Path(selected).expanduser()
-        if destination.suffix.casefold() not in {".wav", ".m4a"}:
+        if destination.suffix.casefold() != default_suffix:
             destination = destination.with_suffix(default_suffix)
         destination = destination.resolve()
         if destination == source:
@@ -3192,28 +3206,33 @@ class PremiumV2Bridge(QObject):
         validate_saved_audio_paths(state)
         sound_enabled = audio_mode != "off"
         transition_enabled = sound_enabled and is_chapter_transition_sound_enabled(state)
-        project = self._active_project()
-        selected_number = int(state.get("_preview_chapter_number") or 0)
-        eligible = [
-            chapter for chapter in project.chapters
-            if not getattr(chapter, "skip_for_generation", False) and str(chapter.text or "").strip()
-        ]
-        selected_index = next(
-            (index for index, chapter in enumerate(eligible, start=1)
-             if int(chapter.number) == selected_number),
-            0,
-        )
-        selected_chapter = eligible[selected_index - 1] if selected_index else (
-            eligible[0] if eligible else None
-        )
-        if selected_chapter is not None and not selected_number:
-            selected_number = int(selected_chapter.number)
-            selected_index = 1
+        project_getter = getattr(self, "_active_project", None)
+        project = project_getter() if callable(project_getter) else None
+        selected_number = int(state.get("_preview_chapter_number") or 1)
+        eligible = []
+        selected_index = int(state.get("_preview_chapter_index") or 1)
+        selected_chapter = None
+        if project is not None:
+            eligible = [
+                chapter for chapter in project.chapters
+                if not getattr(chapter, "skip_for_generation", False) and str(chapter.text or "").strip()
+            ]
+            selected_chapter = next(
+                (chapter for chapter in eligible if int(chapter.number) == selected_number),
+                None,
+            )
+            if selected_chapter is not None:
+                selected_index = eligible.index(selected_chapter) + 1
+        is_first_chapter = bool(state.get("_preview_chapter_is_first", selected_index == 1))
+        is_last_chapter = bool(state.get("_preview_chapter_is_last", selected_index == 1))
         chapter_title = str(
             state.get("_preview_chapter_title")
             or (selected_chapter.title if selected_chapter is not None else "Preview")
         )
-        chapter_text = str(selected_chapter.text or "") if selected_chapter is not None else ""
+        chapter_text = str(
+            state.get("_preview_chapter_text")
+            or (selected_chapter.text if selected_chapter is not None else "")
+        )
 
         preview_root = app_root() / "Previews"
         preview_root.mkdir(parents=True, exist_ok=True)
@@ -3253,8 +3272,9 @@ class PremiumV2Bridge(QObject):
             mood, variation = _selected_music_recipe(
                 chapter_title, chapter_text, str(state.get("auto_music_style") or "auto"), None
             )
+            cues_mixed = False
             if transition_enabled and selected_index:
-                cue_kind = "opening" if selected_index == 1 else "page"
+                cue_kind = "opening" if is_first_chapter else "page"
                 cue_value = state.get("opening_cue_path") if cue_kind == "opening" else state.get("page_turn_cue_path")
                 if cue_value and cue_volume > 0:
                     cue = _resolve_cue_audio(
@@ -3269,6 +3289,7 @@ class PremiumV2Bridge(QObject):
                         prefixed = preview_root / f"sound-preview-{job_id}-{cue_kind}.m4a"
                         _concat_audio_files(leveled, audio_source, prefixed, "192k")
                         audio_source = prefixed
+                        cues_mixed = True
                         cleanup_paths.extend([Path(cue), leveled, prefixed])
 
             music_path = None
@@ -3280,22 +3301,21 @@ class PremiumV2Bridge(QObject):
             if sound_enabled and audio_mode == "manual":
                 if strategy == "chapter-based":
                     override = {}
-                    if selected_chapter is not None:
-                        chapter_number = int(selected_chapter.number)
-                        metadata = {
-                            "chapter": chapter_number,
-                            "chapter_id": str(state.get("_preview_chapter_id") or ""),
-                        }
-                        import tempfile as _tempfile
-                        with _tempfile.TemporaryDirectory(prefix="ryu-preview-chapter-key-") as temp:
-                            chapter_dir = Path(temp) / f"{chapter_number:03d}_selected"
-                            chapter_dir.mkdir(parents=True, exist_ok=True)
-                            (chapter_dir / "narration.json").write_text(
-                                json.dumps(metadata), encoding="utf-8"
-                            )
-                            override = _chapter_bgm_override_for(
-                                chapter_dir, chapter_number, overrides
-                            )
+                    chapter_number = selected_number or 1
+                    metadata = {
+                        "chapter": chapter_number,
+                        "chapter_id": str(state.get("_preview_chapter_id") or ""),
+                    }
+                    import tempfile as _tempfile
+                    with _tempfile.TemporaryDirectory(prefix="ryu-preview-chapter-key-") as temp:
+                        chapter_dir = Path(temp) / f"{chapter_number:03d}_selected"
+                        chapter_dir.mkdir(parents=True, exist_ok=True)
+                        (chapter_dir / "narration.json").write_text(
+                            json.dumps(metadata), encoding="utf-8"
+                        )
+                        override = _chapter_bgm_override_for(
+                            chapter_dir, chapter_number, overrides
+                        )
                     rule = str(override.get("rule") or "none").strip().casefold()
                     if rule == "default":
                         rule = "none"
@@ -3324,7 +3344,7 @@ class PremiumV2Bridge(QObject):
             elif sound_enabled and audio_mode == "auto":
                 music_path = resolve_music_track(
                     mood, selected_track=state.get("auto_music_track_path") or None,
-                    seed_text=f"{chapter_title}|{chapter_text}|{selected_index or selected_number}",
+                    seed_text=f"{chapter_title}|{chapter_text}|{selected_number}",
                 )
 
             check_cancelled()
@@ -3340,7 +3360,7 @@ class PremiumV2Bridge(QObject):
                 )
                 cleanup_paths.append(Path(mixed))
 
-            if transition_enabled and selected_index and eligible and selected_index == len(eligible):
+            if transition_enabled and is_last_chapter:
                 closing_value = state.get("ending_cue_path")
                 if closing_value and cue_volume > 0:
                     closing = _resolve_cue_audio(
@@ -3355,6 +3375,7 @@ class PremiumV2Bridge(QObject):
                         ended = preview_root / f"sound-preview-{job_id}-ending.m4a"
                         _concat_audio_files(audio_source, leveled, ended, "192k")
                         audio_source = ended
+                        cues_mixed = True
                         cleanup_paths.extend([Path(closing), leveled, ended])
 
             state["_preview_sound_configuration"] = {
@@ -3364,6 +3385,7 @@ class PremiumV2Bridge(QObject):
                 "chapter_title": chapter_title,
                 "bgm_enabled": bool(sound_enabled and music_path is not None and volume > 0),
                 "fixed_cues_enabled": bool(transition_enabled),
+                "cues_mixed": bool(cues_mixed),
             }
             check_cancelled()
             shutil.copy2(audio_source, output)

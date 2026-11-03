@@ -233,3 +233,16 @@ The new exact-head workflow must pass before the Windows artifact checkpoint is 
 The Production chapter preview now invokes the existing native Sound Design renderer. It resolves the selected chapter's saved stable BGM override, Same/Chapter-Based strategy and Auto music selection, applies the correct opening/next-chapter and final-chapter closing cues, and stores the effective sound configuration and measured M4A duration in the completed job. Production's mix status reports whether BGM, fixed chapter cues or Voice Only was used.
 
 Production Save As now supports the exact completed job-owned WAV/M4A file and preserves its extension; Voice Studio remains on the original save action. After-first-paragraph BGM is explicitly rejected for a fresh preview when the exact paragraph boundary does not exist; no estimated offset is used. New tests exercise stable chapter assignment and Auto track resolution. Exact-head regression and Windows packaged verification pending.
+
+
+## 23. #2111 selected-chapter parity regression failure and correction
+
+Run #2111 (commit \`d32acd267b29fddb01978efc7965a21fb34bb300\`) stopped before packaging: 1,089 tests ran, 9 errors and 2 assertion failures.
+
+Root causes:
+- The new selected-chapter renderer called \`self._active_project()\` unconditionally. Existing isolated/projectless preview workers intentionally use a minimal host without that UI method. The preview request now captures selected chapter text, stable identity, index and first/last flags before dispatch; the renderer reads the active project only when that accessor exists and otherwise uses its captured chapter context (legacy projectless preview callers default to chapter 1).
+- The renderer records whether a real cue was inserted. Production status now reports Voice Only, BGM mixed, chapter cues, or no assigned mix using the completed job's actual \`sound_configuration\`.
+- A prior test edit incorrectly changed the generic Voice Studio save test to expect M4A. The Voice Studio path is restored to WAV-only; the Production-only M4A save test now verifies the dialog format, exact copy and .m4a destination.
+- Production Save As preserves the source audio suffix if a user changes the extension, preventing AAC/M4A content from being mislabeled as WAV.
+
+A fresh exact-head regression and Windows package are required before Step 5.2 closeout.

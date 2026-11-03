@@ -303,7 +303,7 @@ class VoicePreviewContractTests(unittest.TestCase):
             dialog.assert_called_once()
             self.assertEqual(result["path"], str(destination.resolve()))
             self.assertEqual(destination.read_bytes(), source.read_bytes())
-            self.assertEqual(destination.suffix, ".m4a")
+            self.assertEqual(destination.suffix, ".wav")
             self.assertFalse(result["cancelled"])
 
             external = export_dir / "untrusted.wav"
@@ -995,11 +995,12 @@ class VoicePreviewContractTests(unittest.TestCase):
             }
             with patch.object(premium_v2_host, "app_root", return_value=root), \
                  patch.object(premium_v2_host.QFileDialog, "getSaveFileName",
-                              return_value=(str(destination), "WAV audio (*.wav)")) as dialog:
+                              return_value=(str(destination), "M4A audio (*.m4a)")) as dialog:
                 result = premium_v2_host.PremiumV2Bridge._production_preview_save(bridge, payload)
             self.assertFalse(result["cancelled"])
             self.assertEqual(result["chapter_number"], 7)
             self.assertEqual(destination.read_bytes(), source.read_bytes())
+            self.assertEqual(destination.suffix, ".m4a")
             dialog.assert_called_once()
 
             for changes, expected_error in (
