@@ -3094,6 +3094,7 @@ class PremiumV2Bridge(QObject):
         self._job_update(job_id, state="running", started_at=self._now(), stage="Preparing preview", progress=2,
                           current_chapter=int(selected_chapter.number) if selected_chapter else 0,
                           current_chapter_title=str(selected_chapter.title or "") if selected_chapter else "",
+                          current_chapter_id=str(getattr(selected_chapter, "chapter_id", "") or getattr(selected_chapter, "id", "") or "") if selected_chapter else "",
                           chapters_total=len(project.chapters) if project is not None and selected_chapter else 0)
         threading.Thread(
             target=self._preview_worker,
@@ -3152,6 +3153,10 @@ class PremiumV2Bridge(QObject):
             raise ValueError("This preview belongs to a different project. Reopen its project before saving.")
         if int(job.get("current_chapter") or 0) != chapter_number:
             raise ValueError("This preview belongs to a different chapter. Generate the selected chapter again.")
+        requested_chapter_id = str(payload.get("chapter_id") or "").strip()
+        expected_chapter_id = str(job.get("current_chapter_id") or "").strip()
+        if expected_chapter_id and requested_chapter_id != expected_chapter_id:
+            raise ValueError("This preview belongs to a different saved chapter identity. Generate the selected chapter again.")
         result = job.get("result") if isinstance(job.get("result"), dict) else {}
         expected_source = str(result.get("output_path") or "").strip()
         if not expected_source:
@@ -5743,7 +5748,7 @@ class PremiumV2Bridge(QObject):
         project = self._active_project()
         raw_chapter_number = payload.get("chapter_number")
         if raw_chapter_number in (None, ""):
-            raise ValueError("Select a chapter in Chapter Studio before creating a chapter-specific production preview.")
+            raise ValueError("Select a saved chapter in Production Studio before creating a chapter-specific preview.")
         try:
             chapter_number = int(raw_chapter_number)
         except (TypeError, ValueError, OverflowError) as exc:
@@ -5753,13 +5758,39 @@ class PremiumV2Bridge(QObject):
             None,
         )
         if chapter is None:
-            raise ValueError("The selected chapter is no longer available. Refresh the chapter list and try again.")
+            raise ValueError("The selected saved chapter is no longer available. Refresh the chapter list and try again.")
         if not str(chapter.text or "").strip():
-            raise ValueError("The selected chapter contains no narration text to preview.")
-        name = str(payload.get("profile_name") or load_state(project.folder).get("voice_profile") or "")
+            raise ValueError("The selected chapter contains no saved narration text to preview.")
+
+        # Production Preview must use the same saved project/series narrator as
+        # full-book generation. Never let a transient Voice Studio card selection
+        # or an unsaved provider/voice payload silently change production identity.
+        state = load_state(project.folder)
+        series = self._project_series_name(project, state)
+        narrator = self._narrator_series_default_read(project, state, series)
+        name = str(narrator.get("effective_profile_name") or "").strip()
         if not name:
-            raise ValueError("Select and save a narrator before creating a production preview.")
-        return self._voice_preview({**payload, "profile_name": name, "chapter_number": chapter_number, "_production_preview": True})
+            raise ValueError(
+                "Select and save this project's narrator profile before creating a Production preview."
+            )
+        profile = self._find_profile(name)
+        if profile is None or not narrator.get("profile_available"):
+            raise ValueError(
+                f"The project's saved narrator profile '{name}' is unavailable. Restore or reassign it in Voice Studio."
+            )
+
+        # Strip transient catalogue/provider selectors. _voice_preview will now
+        # resolve the exact persisted profile returned by the production narrator
+        # resolver; saved character assignments remain applied by the preview worker.
+        preview_payload = dict(payload)
+        preview_payload.pop("provider", None)
+        preview_payload.pop("voice_id", None)
+        preview_payload.update({
+            "profile_name": profile.name,
+            "chapter_number": chapter_number,
+            "_production_preview": True,
+        })
+        return self._voice_preview(preview_payload)
 
     def _job_pause(self, payload: dict[str, Any]) -> dict[str, Any]:
         job_id = str(payload.get("job_id") or "")
