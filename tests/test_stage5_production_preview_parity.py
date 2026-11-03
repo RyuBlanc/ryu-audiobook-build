@@ -242,6 +242,17 @@ class ProductionPreviewParitySourceContracts(unittest.TestCase):
         self.assertIn('"-c:a", "pcm_s16le"', worker)
         self.assertIn("abs(float(playback_duration) - float(duration)) > 1.5", worker)
 
+    def test_production_preview_download_filename_uses_project_and_chapter_identity(self):
+        start = self.adapter_source.index("const downloadProductionPreview=async()=>{")
+        end = self.adapter_source.index("if ($('productionPreviewDownload'))", start)
+        download = self.adapter_source[start:end]
+        self.assertIn("activeProject?.title", download)
+        self.assertIn("activeProject?.name", download)
+        self.assertIn("const suffix='_Chapter_'", download)
+        self.assertIn("lastVoicePreviewChapterTitle", download)
+        self.assertIn("projectBaseName+suffix+'_Preview'", download)
+        self.assertIn("suggested_name:suggestedName", download)
+
     def test_preview_and_final_generation_consume_the_effective_saved_voice_configuration(self):
         self.assertIn('"_production_preview": True', self.host_source)
         self.assertIn("self._narrator_series_default_read(project, state, series)", self.host_source)
