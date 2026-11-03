@@ -3436,6 +3436,7 @@ class PremiumV2Bridge(QObject):
         request_started_at = time.monotonic()
         provider_setup_seconds = None
         synthesis_finished_at = None
+        playback_path: Path | None = None
         try:
             if cancel_event is not None and cancel_event.is_set():
                 raise PreviewCancelledError("Preview cancelled by user.")
@@ -3630,6 +3631,36 @@ class PremiumV2Bridge(QObject):
                     "The preview audio was generated, but its duration could not be measured. "
                     "The preview is not marked ready; check the audio runtime and retry."
                 )
+
+            # Qt WebEngine builds may not include Chromium's AAC decoder. Keep
+            # the validated M4A as the downloadable production asset and use a
+            # job-owned PCM WAV copy for HTMLAudioElement playback.
+            playback_path = preview_path
+            if preview_path.suffix.casefold() == ".m4a":
+                from app.audio.assembler import _run
+                playback_path = folder / f"preview_playback_{job_id}.wav"
+                _run([
+                    "-hide_banner", "-loglevel", "error",
+                    "-i", str(preview_path), "-vn",
+                    "-ac", "2", "-ar", "44100",
+                    "-c:a", "pcm_s16le", str(playback_path),
+                ])
+                if not playback_path.is_file() or playback_path.stat().st_size < 1024:
+                    raise RuntimeError(
+                        "The M4A preview was created, but its browser-compatible playback copy could not be prepared."
+                    )
+                try:
+                    with wave.open(str(playback_path), "rb") as wav:
+                        playback_duration = wav.getnframes() / max(1, wav.getframerate())
+                    if abs(float(playback_duration) - float(duration)) > 1.5:
+                        raise RuntimeError(
+                            "The browser-compatible playback copy duration does not match the saved preview audio."
+                        )
+                except (wave.Error, OSError) as exc:
+                    raise RuntimeError(
+                        "The browser-compatible preview WAV is not a valid PCM audio file."
+                    ) from exc
+
             rule_counts = getattr(result, "applied_rule_counts", {}) or {}
             replacements = sum(rule_counts.values())
             count_message = f" Pronunciation applied {replacements} replacement(s) across {len(rule_counts)} rule(s)."
@@ -3652,7 +3683,10 @@ class PremiumV2Bridge(QObject):
             self._job_update(job_id, state="completed", stage="Preview ready", progress=100,
                              message=performance_summary + count_message,
                              output_path=str(preview_path), result={
-                                 "output_path": str(preview_path), "file_url": preview_path.resolve().as_uri(),
+                                 "output_path": str(preview_path),
+                                 "file_url": playback_path.resolve().as_uri(),
+                                 "playback_output_path": str(playback_path),
+                                 "playback_format": playback_path.suffix.casefold().lstrip("."),
                                  "requested_duration_seconds": seconds, "actual_duration_seconds": duration,
                                  "provider_setup_seconds": provider_setup_seconds,
                                  "synthesis_seconds": synthesis_seconds,
@@ -3672,7 +3706,8 @@ class PremiumV2Bridge(QObject):
             preview_succeeded = True
         except Exception as exc:
             if cancel_event is not None and cancel_event.is_set() or isinstance(exc, PreviewCancelledError):
-                for candidate in {output, preview_path,
+                for candidate in {output, preview_path, playback_path,
+                                   app_root() / "Previews" / f"preview_playback_{job_id}.wav",
                                    app_root() / "Previews" / f"sound_mix_preview_{job_id}.m4a",
                                    app_root() / "Previews" / f"sound-preview-opening-{job_id}.m4a"}:
                     try:
@@ -3683,7 +3718,8 @@ class PremiumV2Bridge(QObject):
                                  message="Preview cancelled at a safe synthesis boundary; temporary audio was discarded.")
             else:
                 log.exception("Premium V2 voice preview failed")
-                for candidate in {output, preview_path,
+                for candidate in {output, preview_path, playback_path,
+                                   app_root() / "Previews" / f"preview_playback_{job_id}.wav",
                                    app_root() / "Previews" / f"sound_mix_preview_{job_id}.m4a",
                                    app_root() / "Previews" / f"sound-preview-opening-{job_id}.m4a"}:
                     try:
