@@ -5764,12 +5764,9 @@
       refreshSoundCues().catch(error => message(error?.message || String(error), true));
     }, 160);
   }
-  function backgroundGenerationJobActions(job, id, action) {
+  function backgroundGenerationJobActions(job, id, action, canControlGeneration, canCancelImport, canCancelPreview) {
     const state = String(job.state || 'unknown').toLowerCase();
-    const type = String(job.type || '').toLowerCase();
-    const isGeneration = type === 'audiobook-generation';
-    const canCancelImport = type === 'import';
-    const canCancelPreview = ['voice-preview','production-preview','sound-design-preview'].includes(type);
+    const isGeneration = Boolean(canControlGeneration);
     const actions = [];
     if (isGeneration && state === 'running') {
       actions.push(action('pause','Pause','secondary'));
@@ -5828,7 +5825,10 @@
         box.innerHTML = jobs.map(j => {
           const id = esc(j.job_id || ''), state = String(j.state || 'unknown');
           const action = (name,label,cls) => '<button class="btn small ' + cls + '" data-job-action="' + name + '" data-job-id="' + id + '">' + label + '</button>';
-          const actions = backgroundGenerationJobActions(j, id, action);
+          const canControlGeneration = j.type === 'audiobook-generation';
+          const canCancelImport = j.type === 'import';
+          const canCancelPreview = ['voice-preview','production-preview','sound-design-preview'].includes(j.type);
+          const actions = backgroundGenerationJobActions(j, id, action, canControlGeneration, canCancelImport, canCancelPreview);
           return '<article class="job-row" data-backend-job="' + id + '">' +
             '<b data-job-title>' + esc(j.title || j.type || id) + '</b>' +
             '<p data-job-stage>' + esc(j.stage || j.message || state) + '</p>' +

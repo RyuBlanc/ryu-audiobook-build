@@ -630,7 +630,7 @@ jobs:
           Write-Host "Bundled real starter audio verified: BGM=$($starterMusic.Count), with opening/page-turn/closing cue categories."
           Write-Host 'Critical application modules were already exercised by the frozen EXE self-test.'
 
-      - name: Run packaged Sound Design and Stage 5 generation UI acceptance
+      - name: Run packaged Sound Design Music Library acceptance (including Stage 5.3 generation UI)
         timeout-minutes: 20
         shell: pwsh
         run: |

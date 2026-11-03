@@ -29,7 +29,7 @@ class Stage53GenerationJobUiStateTests(unittest.TestCase):
         start = self.adapter.index("function refreshDashboardGeneration(")
         end = self.adapter.index("function audiobookPageActive()", start)
         renderer = self.adapter[start:end]
-        self.assertIn("data-dashboard-generation-control", self.adapter)
+        self.assertIn("dashboardGenerationControl", self.adapter)
         self.assertIn("controlState === 'pause_requested' ? 'Pausing…'", renderer)
         self.assertIn("controlState === 'cancel_requested' ? 'Cancelling…'", renderer)
         self.assertIn("delete control.dataset.dashboardGenerationAction", renderer)
