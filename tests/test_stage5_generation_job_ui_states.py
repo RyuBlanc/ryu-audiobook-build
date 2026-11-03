@@ -55,10 +55,13 @@ class Stage53GenerationJobUiStateTests(unittest.TestCase):
         self.assertIn("Production preview monitor diagnostic", self.packaged)
         self.assertIn("latestPreviewJob?.current_chapter_id", self.packaged)
     def test_frozen_app_acceptance_generates_real_audio_for_all_four_preview_durations(self):
-        duration_loop = self.packaged[
-            self.packaged.index('for (const target of [', self.packaged.index("Production Preview actual Save As copy")):
-            self.packaged.index("Production Preview real cancellation request", self.packaged.index("for (const target of [", self.packaged.index("Production Preview actual Save As copy")))
-        ]
+        duration_loop_start = self.packaged.index(
+            'for (const target of [', self.packaged.index("Production Preview actual Save As copy")
+        )
+        duration_loop_end = self.packaged.index(
+            "Production Preview real cancellation completion", duration_loop_start
+        )
+        duration_loop = self.packaged[duration_loop_start:duration_loop_end]
         self.assertIn('{label:"30s",seconds:30,button:durationControls[1]}', duration_loop)
         self.assertIn('{label:"60s",seconds:60,button:durationControls[2]}', duration_loop)
         self.assertIn('{label:"90s",seconds:90,button:durationControls[3]}', duration_loop)
