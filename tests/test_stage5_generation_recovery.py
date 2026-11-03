@@ -20,7 +20,7 @@ class DurableJobRecoveryHarness:
     _persist_jobs = host.PremiumV2Bridge._persist_jobs
     _persist_history = host.PremiumV2Bridge._persist_history
     _record_history_job = host.PremiumV2Bridge._record_history_job
-    _now = host.PremiumV2Bridge._now
+    _now = staticmethod(host.PremiumV2Bridge._now)
 
     def __init__(self, jobs_path: Path, history_path: Path) -> None:
         self._jobs: dict[str, dict] = {}
