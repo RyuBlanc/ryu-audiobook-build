@@ -5795,6 +5795,7 @@ class PremiumV2Bridge(QObject):
         preview_payload.update({
             "profile_name": profile.name,
             "chapter_number": chapter_number,
+            "chapter_id": actual_chapter_id,
             "route_character_cast": True,
             "apply_pronunciation_rules": True,
             "include_sound_design": True,
