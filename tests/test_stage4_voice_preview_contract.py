@@ -861,50 +861,82 @@ class VoicePreviewContractTests(unittest.TestCase):
 
 
     def test_production_preview_requires_and_forwards_the_selected_chapter(self):
-        chapter = SimpleNamespace(number=3, title="The Return", text="Chapter three narration.")
+        chapter = SimpleNamespace(
+            number=3, title="The Return", text="Chapter three narration.",
+            chapter_id="saved-chapter-3",
+        )
         project = SimpleNamespace(chapters=[chapter], folder=Path("unused"))
+        saved_profile = SimpleNamespace(name="Saved Narrator")
         forwarded = Mock(return_value={"job_id": "production-preview"})
-        bridge = SimpleNamespace(_active_project=lambda: project, _voice_preview=forwarded)
-
-        with self.assertRaisesRegex(ValueError, "Select a chapter"):
-            premium_v2_host.PremiumV2Bridge._production_preview(
-                bridge, {"profile_name": "Saved Narrator", "duration_seconds": 30}
-            )
-        with self.assertRaisesRegex(ValueError, "no longer available"):
-            premium_v2_host.PremiumV2Bridge._production_preview(
-                bridge, {"profile_name": "Saved Narrator", "chapter_number": 99}
-            )
-
-        empty_project = SimpleNamespace(
-            chapters=[SimpleNamespace(number=4, title="Empty", text="")],
-            folder=Path("unused"),
+        bridge = SimpleNamespace(
+            _active_project=lambda: project,
+            _voice_preview=forwarded,
+            _project_series_name=lambda _project, _state: "Saved Series",
+            _narrator_series_default_read=lambda _project, _state, _series: {
+                "effective_profile_name": saved_profile.name,
+                "profile_available": True,
+            },
+            _find_profile=lambda name: saved_profile if name == saved_profile.name else None,
         )
-        bridge._active_project = lambda: empty_project
-        with self.assertRaisesRegex(ValueError, "no narration text"):
-            premium_v2_host.PremiumV2Bridge._production_preview(
-                bridge, {"profile_name": "Saved Narrator", "chapter_number": 4}
+
+        with patch.object(premium_v2_host, "load_state", return_value={}):
+            with self.assertRaisesRegex(ValueError, "Select a chapter"):
+                premium_v2_host.PremiumV2Bridge._production_preview(
+                    bridge, {"profile_name": "Transient", "duration_seconds": 30}
+                )
+            with self.assertRaisesRegex(ValueError, "no longer available"):
+                premium_v2_host.PremiumV2Bridge._production_preview(
+                    bridge, {"profile_name": "Transient", "chapter_number": 99}
+                )
+
+            empty_project = SimpleNamespace(
+                chapters=[SimpleNamespace(number=4, title="Empty", text="")],
+                folder=Path("unused"),
+            )
+            bridge._active_project = lambda: empty_project
+            with self.assertRaisesRegex(ValueError, "no saved narration text"):
+                premium_v2_host.PremiumV2Bridge._production_preview(
+                    bridge, {"profile_name": "Transient", "chapter_number": 4}
+                )
+
+            bridge._active_project = lambda: project
+            result = premium_v2_host.PremiumV2Bridge._production_preview(
+                bridge,
+                {
+                    "profile_name": "Transient",
+                    "chapter_number": "3",
+                    "chapter_id": "saved-chapter-3",
+                    "duration_seconds": 30,
+                    "provider": "piper",
+                    "voice_id": "transient-card-voice",
+                    "text": "Untrusted text",
+                },
             )
 
-        bridge._active_project = lambda: project
-        result = premium_v2_host.PremiumV2Bridge._production_preview(
-            bridge,
-            {"profile_name": "Saved Narrator", "chapter_number": "3", "duration_seconds": 30},
-        )
         self.assertEqual(result["job_id"], "production-preview")
         forwarded.assert_called_once_with({
-            "profile_name": "Saved Narrator", "chapter_number": 3, "duration_seconds": 30,
+            "profile_name": "Saved Narrator",
+            "chapter_number": 3,
+            "chapter_id": "saved-chapter-3",
+            "duration_seconds": 30,
+            "route_character_cast": True,
+            "apply_pronunciation_rules": True,
+            "include_sound_design": True,
             "_production_preview": True,
         })
 
-    def test_production_preview_uses_selected_chapter_and_preserves_download_identity(self):
+    def test_production_preview_uses_production_owned_chapter_selector_and_preserves_download_identity(self):
         adapter = Path("assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
-        self.assertIn("const chapterNumber=Number(window.ryuPremiumSelectedChapter||0)", adapter)
+        self.assertIn("const chapterNumber=Number(productionPreviewSelectedChapter||$('productionPreviewChapterSelect')?.value||0)", adapter)
+        self.assertIn("function syncProductionPreviewChapterSelector()", adapter)
+        self.assertIn("productionPreviewChapterSelect", adapter)
         self.assertIn("chapters.find(item=>Number(item.number)===chapterNumber)", adapter)
         self.assertIn("chapter_number:chapterNumber", adapter)
+        self.assertIn("chapter_id:chapterId", adapter)
         self.assertIn("lastVoicePreviewChapterNumber=Number(job?.result?.chapter_number)||null", adapter)
         self.assertIn("lastVoicePreviewChapterTitle=String(job?.result?.chapter_title||'')", adapter)
         self.assertIn("const chapterSuffix=lastVoicePreviewChapterNumber", adapter)
-        self.assertIn("voice.preview.save", adapter)
+        self.assertIn("production.preview.save", adapter)
 
 
     def test_generate_preview_ignores_stale_completion_after_newer_request(self):
@@ -916,7 +948,9 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertIn("const previewToken=voicePreviewEpoch;", handler)
         self.assertIn("if(previewToken!==voicePreviewEpoch)return;", handler)
         self.assertIn("if(previewToken!==voicePreviewEpoch)return false;", handler)
-        self.assertIn("preparePreviewPlayback(job,Number(duration),{profileName:name,preserveSummary:true})", handler)
+        self.assertIn("preparePreviewPlayback(job,Number(duration),{profileName:previewProfileName,preserveSummary:true})", handler)
+        self.assertIn("activeFolder!==productionPreviewRequestProjectFolder", handler)
+        self.assertIn("jobChapter!==productionPreviewRequestChapterNumber", handler)
 
 
     def test_preview_worker_applies_project_pronunciation_rules_only_when_enabled(self):
