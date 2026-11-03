@@ -3436,7 +3436,7 @@ class PremiumV2Bridge(QObject):
         request_started_at = time.monotonic()
         provider_setup_seconds = None
         synthesis_finished_at = None
-        playback_path: Path | None = None
+        playback_path: Path = output
         try:
             if cancel_event is not None and cancel_event.is_set():
                 raise PreviewCancelledError("Preview cancelled by user.")
