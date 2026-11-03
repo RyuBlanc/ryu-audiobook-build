@@ -270,3 +270,10 @@ The following acceptance coverage is now added:
 - `fdf1316b112b0fb0da6e9558cf4cc52db04639ba`: the Windows harness verifies that the saved output exists, is non-empty, has an M4A `ftyp` header and was reported as a passed packaged check.
 
 This is now a required part of the next exact-head package acceptance. Do not mark PROD-15 VERIFIED COMPLETE until that run passes the new Save As assertions along with the existing real chapter preview, playback, bounded 10/30/60 target checks and 90-second cancellation.
+
+
+## Save As-inclusive final packaged checkpoint — 3 November 2026
+
+The packaged flow now explicitly clicks Save Production Preview and verifies the backend copies the selected completed Production job's M4A into the isolated acceptance folder. The Windows harness verifies non-empty output and an M4A `ftyp` header; the backend positive regression verifies the copy matches the completed job audio byte-for-byte. Normal desktop Save As continues to use the native Windows file dialog.
+
+This candidate includes the changes recorded in the execution ledger's “PROD-15 successful Save As evidence addition” section. Keep PROD-15 as CODE CHANGED — NOT VERIFIED and Stage 5.2 OPEN until its exact-head packaged checkpoint passes both the test/build jobs and all artifacts are present. The active #2164 run is a separate earlier SHA and must not be cancelled or conflated with this candidate.
