@@ -195,7 +195,13 @@ class Stage53LiveGenerationIntegrationTests(unittest.TestCase):
             self.assertGreater(output.stat().st_size, 1024)
 
             retried_project_state = load_state(project_folder)
-            self.assertEqual(retried_project_state["status"], "completed")
+            self.assertEqual(
+                retried_project_state["status"],
+                "completed",
+                "retry project state: " + repr(retried_project_state) + "; "
+                "retry job state: " + repr(bridge._jobs.get(retry_result["job_id"])) + "; "
+                "provider calls: " + repr(local_provider.calls),
+            )
             self.assertEqual(retried_project_state["generation_job_id"], retry_result["job_id"])
             self.assertEqual(retried_project_state["output_path"], str(output.resolve()))
 
