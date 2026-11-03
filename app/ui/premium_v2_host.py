@@ -3039,6 +3039,7 @@ class PremiumV2Bridge(QObject):
             state["_preview_chapter_title"] = str(
                 selected_chapter.title or f"Chapter {selected_chapter.number}"
             )
+            state["_preview_chapter_id"] = str(getattr(selected_chapter, "chapter_id", "") or getattr(selected_chapter, "id", "") or "")
         if not text_value.strip():
             if project is None:
                 raise ValueError("Enter preview text or select a chapter with narration.")
@@ -3144,20 +3145,24 @@ class PremiumV2Bridge(QObject):
         source = Path(source_value).expanduser().resolve()
         expected = Path(expected_source).expanduser().resolve()
         preview_root = (app_root() / "Previews").resolve()
-        if source != expected or source.parent != preview_root or source.suffix.casefold() != ".wav":
+        if source != expected or source.parent != preview_root or source.suffix.casefold() not in {".wav", ".m4a"}:
             raise ValueError("The selected audio file does not belong to this Production preview job.")
         if not source.is_file() or source.stat().st_size < 1024:
             raise FileNotFoundError("The Production preview file is no longer available. Generate it again.")
         import re as _re
         suggested = str(payload.get("suggested_name") or "Ryu Production Preview").strip()
         suggested = _re.sub(r'[<>:"/\\\\|?*\\x00-\\x1f]+', "-", suggested).strip(" .-")[:100] or "Ryu Production Preview"
-        default_path = Path.home() / "Downloads" / f"{suggested}.wav"
-        selected, _filter = QFileDialog.getSaveFileName(None, "Save Production Chapter Preview", str(default_path), "WAV audio (*.wav)")
+        default_suffix = source.suffix.casefold()
+        default_path = Path.home() / "Downloads" / f"{suggested}{default_suffix}"
+        selected, _filter = QFileDialog.getSaveFileName(
+            None, "Save Production Chapter Preview", str(default_path),
+            "Production preview audio (*.wav *.m4a);;WAV audio (*.wav);;M4A audio (*.m4a)"
+        )
         if not selected:
             return {"cancelled": True}
         destination = Path(selected).expanduser()
-        if destination.suffix.casefold() != ".wav":
-            destination = destination.with_suffix(".wav")
+        if destination.suffix.casefold() not in {".wav", ".m4a"}:
+            destination = destination.with_suffix(default_suffix)
         destination = destination.resolve()
         if destination == source:
             raise ValueError("Choose a different destination from the temporary preview file.")
@@ -3171,117 +3176,209 @@ class PremiumV2Bridge(QObject):
         return start_full_book_preview(self)
 
     def _render_sound_design_preview(self, source: Path, job_id: str, state: dict[str, Any]) -> Path:
-        """Render a short audition using the active book's effective saved sound assignments."""
-        from app.audio.assembler import _concat_audio_files, _duration_ms, _run
-        from app.audio.library import effective_background_audio_mode, is_chapter_transition_sound_enabled, validate_saved_audio_paths
+        """Render the selected chapter with saved BGM/cue rules used by final assembly."""
+        import json
+        from app.audio.assembler import (
+            _chapter_bgm_fade_out, _chapter_bgm_override_for, _concat_audio_files,
+            _duration_ms, _resolve_cue_audio, _mix_chapter_bgm, _scale_audio_gain,
+            _selected_music_recipe,
+        )
+        from app.audio.library import (
+            effective_background_audio_mode, is_chapter_transition_sound_enabled,
+            resolve_music_track, validate_saved_audio_paths,
+        )
 
-        # Use the same master switch and saved-asset validation as Production and
-        # Full-book Mix Preview. In particular, Voice Only must suppress retained
-        # BGM and cue preferences instead of merely skipping their validation.
         audio_mode = effective_background_audio_mode(state)
         validate_saved_audio_paths(state)
         sound_enabled = audio_mode != "off"
         transition_enabled = sound_enabled and is_chapter_transition_sound_enabled(state)
+        project = self._active_project()
+        selected_number = int(state.get("_preview_chapter_number") or 0)
+        eligible = [
+            chapter for chapter in project.chapters
+            if not getattr(chapter, "skip_for_generation", False) and str(chapter.text or "").strip()
+        ]
+        selected_index = next(
+            (index for index, chapter in enumerate(eligible, start=1)
+             if int(chapter.number) == selected_number),
+            0,
+        )
+        selected_chapter = eligible[selected_index - 1] if selected_index else (
+            eligible[0] if eligible else None
+        )
+        if selected_chapter is not None and not selected_number:
+            selected_number = int(selected_chapter.number)
+            selected_index = 1
+        chapter_title = str(
+            state.get("_preview_chapter_title")
+            or (selected_chapter.title if selected_chapter is not None else "Preview")
+        )
+        chapter_text = str(selected_chapter.text or "") if selected_chapter is not None else ""
 
         preview_root = app_root() / "Previews"
         preview_root.mkdir(parents=True, exist_ok=True)
         original_source = Path(source).resolve()
-        audio_source = original_source
-        opening = Path(str(state.get("opening_cue_path") or "")).expanduser()
-        if transition_enabled and opening.is_file():
-            with_opening = preview_root / f"sound-preview-opening-{job_id}.m4a"
-            _concat_audio_files(opening, audio_source, with_opening, "192k")
-            audio_source = with_opening
-
-        music_path = None
-        volume = max(
-            0.0,
-            min(
-                0.50,
-                float(
-                    state.get("background_audio_volume")
-                    if state.get("background_audio_volume") is not None else 0.18
-                ),
-            ),
-        )
-        overrides_value = state.get("chapter_bgm_overrides")
-        overrides = overrides_value if isinstance(overrides_value, dict) else {}
-        raw_strategy = str(
-            state.get("chapter_bgm_strategy")
-            or ("custom" if overrides else "same")
-        ).strip().casefold()
-        if raw_strategy in {"same", "same-bgm", "same_bgm"}:
-            chapter_based = False
-        elif raw_strategy in {"custom", "chapter-based", "chapter_based", "chapter"}:
-            chapter_based = True
-        else:
-            raise ValueError(f"Unsupported chapter BGM strategy: {raw_strategy}")
-
-        # The short audition represents the first chapter. Same BGM uses only
-        # the book-level selection; Chapter-Based BGM uses only chapter 1's
-        # explicit assignment. Missing/default chapter rules are silent and
-        # never fall back to the retained book-default preference.
-        if sound_enabled and audio_mode == "manual":
-            if chapter_based:
-                first_override = overrides.get("1")
-                if not isinstance(first_override, dict):
-                    first_override = {}
-                rule = str(first_override.get("rule") or "none").strip().casefold()
-                if rule == "default":
-                    rule = "none"
-                if rule == "custom":
-                    raw_music = str(first_override.get("path") or "").strip()
-                    if not raw_music:
-                        raise ValueError(
-                            "Chapter 1 uses custom BGM but no track is saved. Reassign it in Sound Design."
-                        )
-                    music_path = Path(raw_music).expanduser()
-                    override_volume = first_override.get("volume")
-                    if override_volume is not None:
-                        volume = max(0.0, min(0.50, float(override_volume)))
-                elif rule != "none":
-                    raise ValueError(f"Unsupported chapter-based BGM rule for chapter 1: {rule}")
-            else:
-                raw_music = str(state.get("background_audio_path") or "").strip()
-                music_path = Path(raw_music).expanduser() if raw_music else None
-
-        if music_path and not music_path.is_file():
-            raise FileNotFoundError(f"Selected background music is missing: {music_path}")
         output = preview_root / f"sound_mix_preview_{job_id}.m4a"
-        duration_ms = _duration_ms(audio_source)
-        duration_seconds = max(0.1, duration_ms / 1000.0)
-        if music_path and volume > 0:
-            fade_in = max(0.0, min(30.0, float(state.get("background_audio_fade_in", 2.0))))
-            fade_out = max(
-                0.0,
-                min(30.0, float(state.get("background_audio_fade_out", 3.0)), duration_seconds),
+        cleanup_paths: list[Path] = []
+        audio_source = original_source
+
+        def check_cancelled() -> None:
+            events = getattr(self, "_preview_cancel_events", {})
+            event = events.get(str(job_id)) if isinstance(events, dict) else None
+            if event is not None and event.is_set():
+                raise RuntimeError("Production sound-design preview cancelled.")
+
+        try:
+            source_duration_ms = max(1, _duration_ms(audio_source))
+            volume = max(0.0, min(0.50, float(
+                state.get("background_audio_volume")
+                if state.get("background_audio_volume") is not None else 0.18
+            )))
+            cue_volume = max(0.0, min(0.50, float(
+                state.get("sound_cue_volume")
+                if state.get("sound_cue_volume") is not None else 0.25
+            )))
+            overrides = state.get("chapter_bgm_overrides")
+            overrides = overrides if isinstance(overrides, dict) else {}
+            raw_strategy = str(
+                state.get("chapter_bgm_strategy") or ("custom" if overrides else "same")
+            ).strip().casefold()
+            if raw_strategy in {"same", "same-bgm", "same_bgm"}:
+                strategy = "same"
+            elif raw_strategy in {"custom", "chapter-based", "chapter_based", "chapter"}:
+                strategy = "chapter-based"
+            else:
+                raise ValueError(f"Unsupported chapter BGM strategy: {raw_strategy}")
+
+            mood, variation = _selected_music_recipe(
+                chapter_title, chapter_text, str(state.get("auto_music_style") or "auto"), None
             )
-            fade_out_start = max(0.0, duration_seconds - fade_out)
-            music_filters = [f"volume={volume:.4f}"]
-            if fade_in:
-                music_filters.append(f"afade=t=in:st=0:d={min(fade_in, duration_seconds):.3f}")
-            if fade_out:
-                music_filters.append(f"afade=t=out:st={fade_out_start:.3f}:d={fade_out:.3f}")
-            music_filters.extend(["aresample=44100", "aformat=sample_rates=44100:channel_layouts=stereo"])
-            _run([
-                "-i", str(audio_source), "-stream_loop", "-1", "-i", str(music_path),
-                "-filter_complex",
-                "[0:a]aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo,asplit=2[narr_mix][narr_sc];"
-                f"[1:a]{','.join(music_filters)}[bed];"
-                "[bed][narr_sc]sidechaincompress=threshold=0.025:ratio=7:attack=22:release=420:makeup=1[ducked];"
-                "[narr_mix][ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.95[out]",
-                "-map", "[out]", "-vn", "-t", f"{duration_seconds:.3f}",
-                "-c:a", "aac", "-b:a", "192k", "-ar", "44100", str(output),
-            ])
-        else:
-            _run(["-i", str(audio_source), "-vn", "-c:a", "aac", "-b:a", "192k", "-ar", "44100", str(output)])
-        if not output.is_file() or output.stat().st_size < 1024:
-            raise RuntimeError("The Sound Design mix preview could not be rendered.")
-        if abs(_duration_ms(output) - duration_ms) > 1800:
-            raise RuntimeError("The Sound Design mix preview changed duration unexpectedly.")
-        if audio_source != original_source:
-            audio_source.unlink(missing_ok=True)
-        return output
+            if transition_enabled and selected_index:
+                cue_kind = "opening" if selected_index == 1 else "page"
+                cue_value = state.get("opening_cue_path") if cue_kind == "opening" else state.get("page_turn_cue_path")
+                if cue_value and cue_volume > 0:
+                    cue = _resolve_cue_audio(
+                        preview_root, cue_kind, str(state.get("sound_cue_style") or "library"),
+                        variation, mood, cue_value
+                    )
+                    if cue is not None:
+                        leveled = _scale_audio_gain(
+                            cue, preview_root / f"sound-preview-{job_id}-{cue_kind}-level.m4a",
+                            cue_volume, "192k"
+                        )
+                        prefixed = preview_root / f"sound-preview-{job_id}-{cue_kind}.m4a"
+                        _concat_audio_files(leveled, audio_source, prefixed, "192k")
+                        audio_source = prefixed
+                        cleanup_paths.extend([Path(cue), leveled, prefixed])
+
+            music_path = None
+            offset_ms = 0
+            fade_out = float(
+                state.get("background_audio_fade_out")
+                if state.get("background_audio_fade_out") is not None else 3.0
+            )
+            if sound_enabled and audio_mode == "manual":
+                if strategy == "chapter-based":
+                    override = {}
+                    if selected_chapter is not None:
+                        chapter_number = int(selected_chapter.number)
+                        metadata = {
+                            "chapter": chapter_number,
+                            "chapter_id": str(state.get("_preview_chapter_id") or ""),
+                        }
+                        import tempfile as _tempfile
+                        with _tempfile.TemporaryDirectory(prefix="ryu-preview-chapter-key-") as temp:
+                            chapter_dir = Path(temp) / f"{chapter_number:03d}_selected"
+                            chapter_dir.mkdir(parents=True, exist_ok=True)
+                            (chapter_dir / "narration.json").write_text(
+                                json.dumps(metadata), encoding="utf-8"
+                            )
+                            override = _chapter_bgm_override_for(
+                                chapter_dir, chapter_number, overrides
+                            )
+                    rule = str(override.get("rule") or "none").strip().casefold()
+                    if rule == "default":
+                        rule = "none"
+                    if rule == "custom":
+                        raw_music = str(override.get("path") or "").strip()
+                        if not raw_music:
+                            raise ValueError(f"Chapter {selected_number} uses custom BGM but no track is saved.")
+                        music_path = Path(raw_music).expanduser()
+                        volume = max(0.0, min(0.50, float(override.get("volume", volume))))
+                        start_offset = str(override.get("start_offset") or "immediate").strip().casefold()
+                        if start_offset == "after_10_seconds":
+                            offset_ms = 10_000
+                        elif start_offset == "after_first_paragraph":
+                            raise ValueError(
+                                "After first paragraph BGM requires saved chapter audio boundaries. "
+                                "Generate the chapter first or choose Immediate / After 10 seconds."
+                            )
+                        fade_out = _chapter_bgm_fade_out(
+                            str(override.get("end_behavior") or "fade_before_end"), fade_out
+                        )
+                    elif rule != "none":
+                        raise ValueError(f"Unsupported chapter-based BGM rule for chapter {selected_number}: {rule}")
+                else:
+                    raw_music = str(state.get("background_audio_path") or "").strip()
+                    music_path = Path(raw_music).expanduser() if raw_music else None
+            elif sound_enabled and audio_mode == "auto":
+                music_path = resolve_music_track(
+                    mood, selected_track=state.get("auto_music_track_path") or None,
+                    seed_text=f"{chapter_title}|{chapter_text}|{selected_index or selected_number}",
+                )
+
+            check_cancelled()
+            if music_path is not None and volume > 0:
+                mixed = preview_root / f"sound-preview-{job_id}-bgm.m4a"
+                audio_source = _mix_chapter_bgm(
+                    audio_source, music_path, mixed, volume,
+                    fade_in=float(
+                        state.get("background_audio_fade_in")
+                        if state.get("background_audio_fade_in") is not None else 2.0
+                    ),
+                    fade_out=fade_out, start_offset_ms=offset_ms, bitrate="192k",
+                )
+                cleanup_paths.append(Path(mixed))
+
+            if transition_enabled and selected_index and eligible and selected_index == len(eligible):
+                closing_value = state.get("ending_cue_path")
+                if closing_value and cue_volume > 0:
+                    closing = _resolve_cue_audio(
+                        preview_root, "ending", str(state.get("sound_cue_style") or "library"),
+                        variation, mood, closing_value
+                    )
+                    if closing is not None:
+                        leveled = _scale_audio_gain(
+                            closing, preview_root / f"sound-preview-{job_id}-ending-level.m4a",
+                            cue_volume, "192k"
+                        )
+                        ended = preview_root / f"sound-preview-{job_id}-ending.m4a"
+                        _concat_audio_files(audio_source, leveled, ended, "192k")
+                        audio_source = ended
+                        cleanup_paths.extend([Path(closing), leveled, ended])
+
+            state["_preview_sound_configuration"] = {
+                "background_audio_mode": audio_mode,
+                "chapter_bgm_strategy": strategy,
+                "chapter_number": selected_number or None,
+                "chapter_title": chapter_title,
+                "bgm_enabled": bool(sound_enabled and music_path is not None and volume > 0),
+                "fixed_cues_enabled": bool(transition_enabled),
+            }
+            check_cancelled()
+            shutil.copy2(audio_source, output)
+            if not output.is_file() or output.stat().st_size < 1024:
+                raise RuntimeError("The Production chapter mix preview could not be rendered.")
+            if _duration_ms(output) < source_duration_ms - 1500:
+                raise RuntimeError("The Production chapter mix preview is missing narration audio.")
+            return output
+        finally:
+            for candidate in cleanup_paths:
+                try:
+                    Path(candidate).unlink(missing_ok=True)
+                except OSError:
+                    pass
+
 
     def _preview_worker(
         self, job_id: str, profile, text_value: str, seconds: int,
@@ -3531,6 +3628,7 @@ class PremiumV2Bridge(QObject):
                                  "chapter_title": str(state.get("_preview_chapter_title") or ""),
                                  "pronunciation_replacements": replacements,
                                  "pronunciation_rule_counts": dict(rule_counts),
+                                 "sound_configuration": dict(state.get("_preview_sound_configuration") or {}),
                              })
             preview_succeeded = True
         except Exception as exc:

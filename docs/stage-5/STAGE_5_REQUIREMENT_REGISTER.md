@@ -96,3 +96,8 @@ The follow-up gives Production Preview its own Save command, checking completed 
 ## Step 5.2 exact-head correction after #2108
 
 #2108 ran 1,086 tests but failed four contracts. The new Production preview save security tests passed. The capability map now includes the Production save command; the Production chapter preview now flushes saved Sound Design state and refreshes saved pronunciation before starting; the Stage 2 UI contract expects the dedicated Production save button; and the Qwen cache test uses the exact preview method signature. Exact-head regression and packaged Windows verification are pending.
+
+
+## Step 5.2 selected-chapter sound-design parity correction
+
+Production chapter preview now enables the native Sound Design renderer and uses the selected chapter's stable BGM override, Same/Chapter-Based mode, Auto music resolution, Voice Only master switch and chapter boundary cues. The completed job reports the actual mixed duration/configuration. Secure Production Save As accepts its exact WAV/M4A output; Voice Studio remains unchanged. After-first-paragraph fails closed for fresh previews without a saved paragraph boundary. Regression and a fresh Windows package remain pending.

@@ -226,3 +226,10 @@ Run #2108 on commit `bbebe9a9ee8c13ba0cedf26a9dcbc0b97cf52e35` completed with 1,
 - Stage 4's Qwen cache test used `def _production_preview` as a slice boundary, which also matched the new `def _production_preview_save`; it now uses the exact `def _production_preview(self, payload:` signature.
 
 The new exact-head workflow must pass before the Windows artifact checkpoint is accepted.
+
+
+## 22. Selected-chapter Sound Design / final-assembly parity
+
+The Production chapter preview now invokes the existing native Sound Design renderer. It resolves the selected chapter's saved stable BGM override, Same/Chapter-Based strategy and Auto music selection, applies the correct opening/next-chapter and final-chapter closing cues, and stores the effective sound configuration and measured M4A duration in the completed job. Production's mix status reports whether BGM, fixed chapter cues or Voice Only was used.
+
+Production Save As now supports the exact completed job-owned WAV/M4A file and preserves its extension; Voice Studio remains on the original save action. After-first-paragraph BGM is explicitly rejected for a fresh preview when the exact paragraph boundary does not exist; no estimated offset is used. New tests exercise stable chapter assignment and Auto track resolution. Exact-head regression and Windows packaged verification pending.

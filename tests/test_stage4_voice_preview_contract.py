@@ -303,6 +303,7 @@ class VoicePreviewContractTests(unittest.TestCase):
             dialog.assert_called_once()
             self.assertEqual(result["path"], str(destination.resolve()))
             self.assertEqual(destination.read_bytes(), source.read_bytes())
+            self.assertEqual(destination.suffix, ".m4a")
             self.assertFalse(result["cancelled"])
 
             external = export_dir / "untrusted.wav"
@@ -976,9 +977,9 @@ class VoicePreviewContractTests(unittest.TestCase):
             root = Path(temp)
             preview_root = root / "Previews"
             preview_root.mkdir()
-            source = preview_root / "preview_prod-1.wav"
+            source = preview_root / "sound_mix_preview_prod-1.m4a"
             source.write_bytes(b"P" * 2048)
-            destination = root / "production-preview.wav"
+            destination = root / "production-preview.m4a"
             bridge = SimpleNamespace(
                 _jobs_lock=threading.RLock(),
                 _jobs={"prod-1": {

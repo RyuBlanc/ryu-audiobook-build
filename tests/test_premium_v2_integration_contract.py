@@ -1389,6 +1389,16 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("call('job.cancel',{job_id:productionPreviewJobId})", adapter)
         self.assertNotIn("activeJobType!=='audiobook-generation'", adapter)
 
+    def test_production_preview_uses_saved_sound_design_and_reports_selected_mix_configuration(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn("include_sound_design:true,_production_preview:true", adapter)
+        self.assertIn("_render_sound_design_preview(voice_preview_path, job_id, state)", host)
+        self.assertIn("_chapter_bgm_override_for(", host)
+        self.assertIn("resolve_music_track(", host)
+        self.assertIn("sound_configuration", host)
+        self.assertIn("BGM mixed", adapter)
+
     def test_production_preview_reports_real_progress_timing_and_measured_duration(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")

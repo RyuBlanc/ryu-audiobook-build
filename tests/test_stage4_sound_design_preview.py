@@ -144,5 +144,83 @@ class SoundDesignPreviewConfigurationTests(unittest.TestCase):
         self.assertEqual(concatenations, [])
 
 
+
+    def test_selected_chapter_preview_uses_selected_stable_chapter_bgm_override(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            app_root = root / "app"
+            (app_root / "Previews").mkdir(parents=True)
+            source = root / "preview.wav"
+            source.write_bytes(b"narration" * 256)
+            track = self._asset(root, "chapter-two.wav")
+            project = SimpleNamespace(chapters=[
+                SimpleNamespace(number=1, title="One", text="Opening", skip_for_generation=False),
+                SimpleNamespace(number=2, title="Two", text="Middle", skip_for_generation=False),
+            ])
+            state = {
+                "_preview_chapter_number": 2, "_preview_chapter_title": "Two",
+                "_preview_chapter_id": "stable-chapter-two",
+                "background_audio_mode": "manual", "background_audio_enabled": True,
+                "chapter_bgm_strategy": "chapter-based",
+                "chapter_bgm_overrides": {
+                    "stable-chapter-two": {"rule": "custom", "path": str(track), "volume": 0.25}
+                },
+                "background_audio_path": str(self._asset(root, "book-default.wav")),
+                "chapter_transition_sound": False,
+            }
+            calls = []
+            def fake_mix(src, path, output, volume, **kwargs):
+                calls.append((str(path), volume))
+                Path(output).write_bytes(b"mixed chapter" * 256)
+                return Path(output)
+            bridge = SimpleNamespace(_active_project=lambda: project)
+            with patch.object(premium_v2_host, "app_root", return_value=app_root), \
+                 patch("app.audio.library.validate_saved_audio_paths"), \
+                 patch("app.audio.assembler._duration_ms", return_value=10000), \
+                 patch("app.audio.assembler._mix_chapter_bgm", side_effect=fake_mix):
+                output = premium_v2_host.PremiumV2Bridge._render_sound_design_preview(bridge, source, "selected-two", state)
+            self.assertTrue(output.is_file())
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0][0], str(track))
+            self.assertEqual(calls[0][1], 0.25)
+            self.assertEqual(state["_preview_sound_configuration"]["chapter_number"], 2)
+            self.assertEqual(state["_preview_sound_configuration"]["chapter_bgm_strategy"], "chapter-based")
+
+    def test_automatic_chapter_preview_selects_real_library_music_from_chapter_recipe(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            app_root = root / "app"
+            (app_root / "Previews").mkdir(parents=True)
+            source = root / "preview.wav"
+            source.write_bytes(b"narration" * 256)
+            track = self._asset(root, "auto-library-track.wav")
+            project = SimpleNamespace(chapters=[
+                SimpleNamespace(number=4, title="Mystery", text="A mystery in the forest.", skip_for_generation=False)
+            ])
+            state = {
+                "_preview_chapter_number": 4, "_preview_chapter_title": "Mystery",
+                "background_audio_mode": "auto", "background_audio_enabled": True,
+                "chapter_bgm_strategy": "same", "auto_music_style": "mystery",
+                "auto_music_track_path": "", "chapter_transition_sound": False,
+            }
+            selected = []
+            def resolve(mood, selected_track=None, seed_text=""):
+                selected.append((mood, selected_track, seed_text))
+                return track
+            def fake_mix(src, path, output, volume, **kwargs):
+                Path(output).write_bytes(b"auto mixed" * 256)
+                return Path(output)
+            bridge = SimpleNamespace(_active_project=lambda: project)
+            with patch.object(premium_v2_host, "app_root", return_value=app_root), \
+                 patch("app.audio.library.validate_saved_audio_paths"), \
+                 patch("app.audio.library.resolve_music_track", side_effect=resolve), \
+                 patch("app.audio.assembler._duration_ms", return_value=10000), \
+                 patch("app.audio.assembler._mix_chapter_bgm", side_effect=fake_mix):
+                output = premium_v2_host.PremiumV2Bridge._render_sound_design_preview(bridge, source, "selected-auto", state)
+            self.assertTrue(output.is_file())
+            self.assertEqual(len(selected), 1)
+            self.assertIn("Mystery", selected[0][2])
+
+
 if __name__ == "__main__":
     unittest.main()
