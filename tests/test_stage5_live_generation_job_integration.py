@@ -163,7 +163,7 @@ class Stage53LiveGenerationIntegrationTests(unittest.TestCase):
             saved_project_state = load_state(project_folder)
             self.assertEqual(saved_project_state["status"], "completed")
             self.assertEqual(saved_project_state["generation_job_id"], result["job_id"])
-            self.assertEqual(saved_project_state["output_path"], str(output))
+            self.assertEqual(saved_project_state["output_path"], str(output.resolve()))
             self.assertEqual(saved_project_state["completed_chapters"], [1])
 
             queue_rows = bridge._job_list({"include_hidden": False})
@@ -173,8 +173,8 @@ class Stage53LiveGenerationIntegrationTests(unittest.TestCase):
             self.assertEqual(queue_job["state"], "completed")
             self.assertEqual(history_job["state"], "completed")
             self.assertEqual(queue_job["job_id"], history_job["job_id"])
-            self.assertEqual(queue_job["output_path"], str(output))
-            self.assertEqual(history_job["output_path"], str(output))
+            self.assertEqual(queue_job["output_path"], str(output.resolve()))
+            self.assertEqual(history_job["output_path"], str(output.resolve()))
 
             persisted_jobs = json_rows = __import__("json").loads(
                 (settings_root / "premium_v2_jobs.json").read_text(encoding="utf-8")

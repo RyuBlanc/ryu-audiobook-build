@@ -155,7 +155,7 @@ class Stage53ProductionPreflightTests(unittest.TestCase):
             self.assertEqual(state["excluded_chapters_skipped"], 1)
             self.assertEqual(state["chapters_skipped_for_generation"], 2)
             manager.start.assert_called_once()
-            self.assertEqual(manager.start.call_args.args[0], output)
+            self.assertEqual(manager.start.call_args.args[0].resolve(), output.resolve())
             self.assertIsNone(state["output_path"])
             bridge._job_update.assert_called_once()
 
