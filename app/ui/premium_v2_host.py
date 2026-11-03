@@ -3290,7 +3290,7 @@ class PremiumV2Bridge(QObject):
                         _concat_audio_files(leveled, audio_source, prefixed, "192k")
                         audio_source = prefixed
                         cues_mixed = True
-                        cleanup_paths.extend([Path(cue), leveled, prefixed])
+                        cleanup_paths.extend([leveled, prefixed])
 
             music_path = None
             offset_ms = 0
@@ -3376,7 +3376,7 @@ class PremiumV2Bridge(QObject):
                         _concat_audio_files(audio_source, leveled, ended, "192k")
                         audio_source = ended
                         cues_mixed = True
-                        cleanup_paths.extend([Path(closing), leveled, ended])
+                        cleanup_paths.extend([leveled, ended])
 
             state["_preview_sound_configuration"] = {
                 "background_audio_mode": audio_mode,

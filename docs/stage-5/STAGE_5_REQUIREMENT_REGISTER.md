@@ -116,3 +116,8 @@ Production chapter preview now enables the native Sound Design renderer and uses
 ## Step 5.2 #2113 correction
 
 #2113 (commit \`6f8b5e476b3bc2cbce7c5c0e2461d3cf20132b81\`) passed JS syntax and native Qt lifecycle but reported five errors, all a single missing local import for the FFmpeg \`_run\` helper in the WAV-to-M4A preview branch. The import is added. Full regression and packaged Windows checkpoint pending.
+
+
+## Step 5.2 imported cue preservation correction
+
+A data-safety audit found preview cleanup could delete the original imported opening/ending cue because the selected-path resolver returns the source path. Cleanup now removes only generated temporary outputs; a regression proves both original cue assets remain present and byte-identical after preview. Exact-head regression and Windows packaging pending.

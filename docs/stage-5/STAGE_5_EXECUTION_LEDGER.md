@@ -256,3 +256,8 @@ Run #2112 on commit \`2334bd9e1e82317f49c33ab3e37fea01befe9692\` completed JavaS
 ## 25. #2113 WAV encode import correction
 
 Run #2113 on commit \`6f8b5e476b3bc2cbce7c5c0e2461d3cf20132b81\` completed 1,090 tests with five errors, all from the same \`NameError\`: the new WAV-to-AAC/M4A branch referenced assembler \`_run\` without importing it in the renderer's local import list. The missing import is added; no other failures were reported. Exact-head regression and package verification pending.
+
+
+## 26. Imported cue source preservation correction
+
+A final data-safety audit found that \`resolve_cue_track(selected_path=...)\` returns the original user-selected cue file. The Production chapter preview's \`finally\` cleanup had included that returned source in its temporary-file deletion list for opening/page and closing cues. This could delete imported library assets after a preview. The renderer now cleans only the derived temporary leveled/concatenated files and leaves the original cue source untouched. A new regression checks both opening and ending user-owned cue files survive with their original bytes after a Production sound-design preview. This correction is required in the next exact-head regression and package checkpoint.

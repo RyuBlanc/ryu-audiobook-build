@@ -260,5 +260,27 @@ class SoundDesignPreviewConfigurationTests(unittest.TestCase):
             self.assertEqual(commands[0][-1],str(expected))
 
 
+
+    def test_production_sound_design_preview_never_deletes_original_imported_cue_assets(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)
+            opening=self._asset(root,"library/cues/opening.wav")
+            ending=self._asset(root,"library/cues/ending.wav")
+            opening_before=opening.read_bytes()
+            ending_before=ending.read_bytes()
+            self._render(root,{
+                "background_audio_mode":"manual",
+                "background_audio_enabled":True,
+                "chapter_transition_sound":True,
+                "opening_cue_path":str(opening),
+                "ending_cue_path":str(ending),
+                "sound_cue_volume":0.25,
+            })
+            self.assertTrue(opening.is_file(),"Preview cleanup must not delete the imported opening cue.")
+            self.assertTrue(ending.is_file(),"Preview cleanup must not delete the imported ending cue.")
+            self.assertEqual(opening.read_bytes(),opening_before)
+            self.assertEqual(ending.read_bytes(),ending_before)
+
+
 if __name__ == "__main__":
     unittest.main()
