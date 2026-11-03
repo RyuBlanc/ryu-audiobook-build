@@ -109,7 +109,7 @@ class Stage53TerminalJobConsistencyTests(unittest.TestCase):
                         row for row in bridge._history_list({})
                         if row["job_id"] == job_id
                     )
-                    expected_output = str(output.resolve()) if attach_output else None
+                    expected_output = str(output) if attach_output else None
 
                     self.assertEqual(project_state["status"], expected_status)
                     self.assertEqual(project_state["generation_job_id"], job_id)
