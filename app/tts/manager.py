@@ -192,7 +192,7 @@ class GenerationManager:
                     chapter,
                     total,
                     0,
-                    "paused:Generation paused at a chapter checkpoint. Resume to continue.",
+                    "paused:Generation paused at a saved chunk/batch checkpoint. Resume to continue.",
                 )
                 notified = True
             time.sleep(0.15)
