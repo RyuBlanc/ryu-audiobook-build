@@ -314,3 +314,34 @@ Two further exact-scope safeguards were added after the first preview/parity can
 This closes the backend loophole where a malformed or future UI request could accidentally preview caller-supplied text or skip a saved production setting. It also preserves the strict chapter-only synthesis requirement. Full suite and packaged Windows verification for this exact candidate remain pending.
 
 Implementation/test candidate before this ledger checkpoint: `a31387d42a3fd4a3ab5be502b7d2ed947c9ddad5`. The following ledger commit is the matching `[artifact-checkpoint]` push and should be treated as the exact workflow candidate once its SHA is confirmed. A green result, test count and artifacts must be recorded only after the Actions run is inspected.
+
+
+## 29. Step 5.2 request-time chapter identity guard and single final verification candidate — 3 November 2026
+
+Additional correction after reviewing the project/chapter-switch race:
+
+- Commit `2bdb88840662e9b18143dfb5cc0eb5819a9aa85a`: the Production backend validates an optional request `chapter_id` against the stable ID on the currently saved chapter before starting synthesis. A stale selector now fails before creating an audio job.
+- Commit `50d519193609bb5c3f9d025f744114ff87b7eff7`: Production Preview sends the selector's stable chapter ID in its request.
+- Commit `4cf063dccb5a586242dabc7b69d0b640c82891a1`: regressions verify that the UI passes the ID and the backend rejects a stale ID before the preview synthesis handler can be invoked.
+
+### Final candidate preparation
+
+All code corrections and regression changes for the identified Step 5.2 scope are now complete in source. This checkpoint consolidates the branch into one final matching candidate so its result, once visible, supersedes any older pending/superseded run.
+
+The Build Windows App workflow uses a per-branch concurrency group with `cancel-in-progress: false`; multiple rapid pushes may therefore leave one run active while older pending runs are superseded by the newest pending commit. Do not interpret a cancelled/superseded pending run as a code failure. The authoritative result is the run that checks out this final candidate SHA.
+
+The GitHub connector in this session does not expose the repository's push-triggered workflow-run listing or run dispatch. Its commit-run operation only returns pull-request-triggered runs. Therefore, after this checkpoint is pushed, exact run number/ID, job status, cancelled/failed job list, test count and package artifact metadata still must be read from the Actions run. The combined commit-status endpoint currently returns no status rows; that is not proof of success or failure.
+
+### Step 5.2 final verification matrix
+
+Required exact-candidate checks:
+1. Premium V2 JavaScript syntax validation.
+2. Isolated native Qt preview-lifecycle regression.
+3. Full regression suite including Stage 2 Sound Design/Music Library, Stage 4 preview assembly, and the new Stage 5 preview parity/identity tests.
+4. Windows packaged application build and existing package/installer integrity checks.
+5. Confirm both `Ryu-Audiobook-Portable` and `Ryu-Audiobook-Installer` artifacts and their SHA-256 manifest are generated for the exact successful run.
+6. Record the exact passing run ID, run number, head SHA, per-job status, test count, artifact IDs and hashes.
+
+Installed-Windows runtime acceptance is still an external/hands-on gate: play the actual chapter preview at 10/30/60/90 seconds; test global pronunciation ON/OFF and individually disabled entries; test Same BGM, Chapter-Based BGM, Voice Only and opening/transition/closing cues; confirm playback, stop/replay, cancel and Save As; change projects/chapters during preview and confirm stale audio is blocked; compare the Production preview's saved narrator/configuration to a full-generation test. Do not claim these listening tests were executed by CI.
+
+**Current closure rule:** keep PROD-08, PROD-09, PROD-15 and GEN-06 at `CODE CHANGED — NOT VERIFIED` until the exact-candidate CI/package evidence and runtime acceptance are recorded. Do not open Stage 5.3 before those gates pass.
