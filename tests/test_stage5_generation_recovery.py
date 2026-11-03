@@ -150,6 +150,7 @@ class GenerationFinishOwnershipHarness:
     """Call the real completion callback without constructing the Qt application."""
 
     _generation_finished = host.PremiumV2Bridge._generation_finished
+    _now = staticmethod(host.PremiumV2Bridge._now)
 
     def __init__(self, job_id: str) -> None:
         self._jobs_lock = threading.RLock()
