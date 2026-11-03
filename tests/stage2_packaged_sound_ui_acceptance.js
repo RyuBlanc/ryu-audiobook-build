@@ -1426,12 +1426,19 @@
       "The Production Preview acceptance chapter has no saved narration text.");
     const chosenPreviewChapterId = String(chosenPreviewChapter.chapter_id || chosenPreviewChapter.id || "");
     const productionChapterPicker = document.querySelector("#productionPreviewChapterSelect");
-    productionChapterPicker.value = "2";
-    productionChapterPicker.dispatchEvent(new Event("change", {bubbles:true}));
-    await waitFor("Production-owned Chapter Two selection", function () {
-      return productionChapterPicker.value === "2" &&
-        document.querySelector("#productionPreviewChapter")?.textContent.includes("Chapter 2");
-    }, 10000);
+    async function selectProductionPreviewChapter(number, expectedTitle) {
+      productionChapterPicker.value = String(number);
+      productionChapterPicker.dispatchEvent(new Event("change", {bubbles:true}));
+      await waitFor("Production-owned Chapter " + number + " selection", function () {
+        const optionText = productionChapterPicker.selectedOptions?.[0]?.textContent || "";
+        const statusText = document.querySelector("#productionPreviewStatus")?.textContent || "";
+        return productionChapterPicker.value === String(number) &&
+          optionText.includes("Chapter " + number) &&
+          (!expectedTitle || optionText.includes(expectedTitle)) &&
+          statusText.includes("Chapter " + number + " selected.");
+      }, 10000);
+    }
+    await selectProductionPreviewChapter(2, String(chosenPreviewChapter.title || ""));
     const durationButtons = Array.from(document.querySelectorAll("#generate .segmented button"));
     const supportedPreviewDurations = ["10s", "30s", "60s", "90s"];
     const durationControls = supportedPreviewDurations.map(label =>
@@ -1539,12 +1546,10 @@
     // The chapter worker is deliberately started through the actual Production
     // button so the dedicated job ID, Cancel Preview control and terminal state
     // all use the real backend worker rather than a direct mocked call.
-    productionChapterPicker.value = "3";
-    productionChapterPicker.dispatchEvent(new Event("change", {bubbles:true}));
-    await waitFor("Production Preview cancellation chapter selected", function () {
-      return productionChapterPicker.value === "3" &&
-        document.querySelector("#productionPreviewChapter")?.textContent.includes("Chapter 3");
-    }, 10000);
+    const cancellationChapter = savedPreviewChapters.find(chapter => Number(chapter.number) === 3);
+    must(cancellationChapter && String(cancellationChapter.text || "").trim(),
+      "The Production Preview cancellation chapter has no saved narration text.");
+    await selectProductionPreviewChapter(3, String(cancellationChapter.title || ""));
     durationControls[3].click();
     await waitFor("Production Preview 90-second cancellation target", function () {
       return durationControls[3].classList.contains("active");

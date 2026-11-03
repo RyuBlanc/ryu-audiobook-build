@@ -392,3 +392,49 @@ Runs #2101, #2102, #2104, #2105, #2117, #2119, #2120, #2121, #2123, #2124, #2127
 The next `[artifact-checkpoint]` must run on the final consolidated SHA after commits `37102e4`, `ba49f5b` and `d67c79f`. The expected run must have both `tests` and `build` jobs successful; test count, run ID, portable/installer/manifest artifact IDs and exact SHA values must be recorded from that run. A test pass with a skipped build is not sufficient to close Step 5.2.
 
 Installed Windows runtime acceptance (real chapter audio listening, duration matrix, pronunciation/BGM/cue matrix, playback/cancellation/save and project-switch isolation) remains distinct from CI and must be completed before declaring those user-facing flows runtime-verified.
+
+
+## 31. #2136 complete package baseline; #2141 packaged-selector harness correction — 3 November 2026
+
+### Completed exact-head package checkpoint
+
+Run [#2136](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41591534180) completed successfully on exact commit `bb5d3b2b8a803e79189ba972556dd05725ec480a`:
+
+- Tests job passed: **1,100 tests** in 52.450 seconds; JavaScript syntax and isolated native Qt lifecycle checks passed.
+- Windows build job passed: frozen app build, frozen application verification, bundled voice assets/critical modules, packaged Sound Design/Music Library UI acceptance, core installer, functional HTML installer, logo/hash verification and Microsoft Defender scan.
+- Artifacts uploaded:
+  - Portable: `Ryu-Audiobook-Portable-2136`, ID `13210739270`, 1,367,568,913 bytes.
+  - Installer: `Ryu-Audiobook-Installer-2136`, ID `13210739232`, 883,680,924 bytes.
+  - Manifest: `Ryu-Audiobook-Release-SHA256-2136`, ID `13210484613`, 780 bytes.
+- Build-output SHA-256:
+  - HTML installer `Ryu's Audiobook Setup.exe`: `232dca8055c0b3b7fdc5772de92d9cf9e0840c6bd3cfbe0f656499870922aa5`.
+  - Core installer `Ryu's Audiobook Core Setup.exe`: `cddf4fc74c41bc3b58fd4b6cb733c8b1719b9735d5adeb24ab34f4c373d8842c`.
+  - Portable main application EXE: `19095063cdf235175b9c42ede349b5fa7492fed9e64c7031743a266b1195ffa8`.
+- Artifact ZIP digests: installer `1ce778b208c33ad828553a7cd89fba10ae56a5a1cb135e8650076513ca014793`; manifest `e9b8521aac428bddf9c7d66de62d170fcf8c2da9ccc2875a2a496ef37eebb0eb`; portable `e174e242d314d24523e06094ef7297f1b02c279d3f9369cab2b73d43f8d62b31`.
+- Public release publication was skipped by workflow policy; the verified build artifacts are uploaded and available.
+
+This is a successful exact-head package baseline, but it predates the additional Production chapter-preview UI smoke added in the #2141 candidate. It does not by itself close the Stage 5.2 Production Preview runtime acceptance.
+
+### #2141 failure root cause
+
+Run #2141 on commit `5d31633e013b73b68c04a973329c9ee6ac453b17` passed its full regression job and the Windows frozen build, but failed the packaged UI acceptance before it started Production Preview synthesis:
+
+- The acceptance manually selected Chapter Two and then waited for `#productionPreviewChapter` to say “Chapter 2”.
+- That element is intentionally the preview-job monitor's chapter label and remains at its idle selection text until a job exists. The real selector change handler instead updates `#productionPreviewStatus` with “Chapter 2 selected. Generate a new preview for this chapter.” and updates the selected option.
+- The cancellation test contained the same incorrect wait for Chapter Three in the job-monitor element.
+- This is an acceptance harness selector/monitor assumption error, not evidence that the Production backend rejected the selected chapter or failed synthesis. The run never reached the chapter preview start.
+
+### Corrective changes in the next single checkpoint
+
+- The packaged acceptance now waits for the real Production selector value, selected option title and the pre-job selection status text for both Chapter Two and Chapter Three.
+- A regression contract asserts the selected-chapter status is exposed by the selector handler before a preview job exists.
+- Workflow concurrency is now keyed by both branch ref and `github.run_id`, so a later push cannot replace an earlier pending run in the branch queue. `cancel-in-progress` remains false. This trades queued-run supersession for independent run execution and preserves an auditable result for each pushed candidate.
+- These changes are committed together as one checkpoint; its own `tests` and `build` jobs are the deciding verification.
+
+### Cancelled-run reconciliation
+
+Runs #2137–#2140 and earlier #2134/#2135 etc. were cancelled/superseded while the same branch's one-pending-run concurrency group was receiving newer commits. Although `cancel-in-progress: false` prevented killing the currently running job, GitHub's per-group pending slot replaced earlier pending runs when newer pushes arrived. These cancelled runs did not all represent code failures; the latest exact candidate is what must be judged. The new per-run concurrency key removes that pending-slot replacement behaviour.
+
+### Step 5.2 current decision
+
+Do not move to Step 5.3 on the strength of #2136 alone. Require the next exact-head checkpoint to pass all 1,100+ regression tests, the real frozen Production Preview generation/playback/control/cancellation acceptance, and the full installer/portable/manifest package. Then record the matching run ID, SHA, test count, artifact IDs and hashes. The installed-Windows preview/final audio listening and full duration/pronunciation/Sound Design matrix remains a separate acceptance item if not exercised on the target user's installed hardware.

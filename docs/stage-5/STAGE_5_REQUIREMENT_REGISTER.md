@@ -175,3 +175,11 @@ Step 5.2's original execution-ledger scope is PROD-05/06/07 (real progress, inde
 After auditing #2130, the request-time stable chapter ID is now forwarded into the preview job and the superseded Stage 4 preview tests have been migrated to the Production-owned selector contract. The new Stage 5 regression now asserts the stable ID is passed to the worker. Source/test commits included in this checkpoint: `37102e4ba7557aa55448539e3971e27eff7870e1`, `ba49f5b687459b654910b607c51f17cf68087209`, `d67c79ffda73b1d1a01eba82f950f87af7285610`, plus the execution-ledger run history update.
 
 The current status is still CODE CHANGED — NOT VERIFIED for PROD-05/06/07 and the later PROD-08/09/15 + GEN-06 integration items until the new exact-head `tests` and `build` jobs both pass. The packaged #2115 baseline is evidence for the previous source SHA only and cannot substitute for this candidate's final verification.
+
+
+## Step 5.2 run #2136/#2141 verification reconciliation — 3 November 2026
+
+- #2136 (`bb5d3b2b8a803e79189ba972556dd05725ec480a`) is a successful 1,100-test + full Windows package checkpoint. Portable, installer and release hash-manifest artifacts were uploaded. The exact IDs and SHA-256 values are recorded in execution-ledger section 31.
+- #2141 (`5d31633e013b73b68c04a973329c9ee6ac453b17`) passed tests and frozen build checks but its packaged UI test failed because it waited for the job-monitor chapter label before a preview job existed. The selector's own status element is the authoritative pre-job selection display; the test now checks it for both Chapter Two and the Chapter Three cancellation case.
+- The workflow concurrency key is changed to include `github.run_id`; this prevents new pushes replacing an older pending run. The next single exact-head checkpoint is required before marking PROD-05/06/07 and the later Production parity integrations as accepted.
+- PROD-08/09/15 and GEN-06 remain `CODE CHANGED — NOT VERIFIED` pending the packaged preview smoke and the required audio scenario matrix. PROD-14 and GEN-01–05 remain open for their separately planned Stage 5 integration steps; do not silently mark them complete as part of Step 5.2.
