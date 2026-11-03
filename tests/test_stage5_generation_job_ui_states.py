@@ -54,6 +54,18 @@ class Stage53GenerationJobUiStateTests(unittest.TestCase):
         self.assertLess(monitor_wait, audio_completion)
         self.assertIn("Production preview monitor diagnostic", self.packaged)
         self.assertIn("latestPreviewJob?.current_chapter_id", self.packaged)
+    def test_frozen_app_acceptance_generates_real_audio_for_all_four_preview_durations(self):
+        duration_loop = self.packaged[
+            self.packaged.index('for (const target of [', self.packaged.index("Production Preview actual Save As copy")):
+            self.packaged.index("Production Preview real cancellation request", self.packaged.index("for (const target of [", self.packaged.index("Production Preview actual Save As copy")))
+        ]
+        self.assertIn('{label:"30s",seconds:30,button:durationControls[1]}', duration_loop)
+        self.assertIn('{label:"60s",seconds:60,button:durationControls[2]}', duration_loop)
+        self.assertIn('{label:"90s",seconds:90,button:durationControls[3]}', duration_loop)
+        self.assertIn('Number(productionPreviewResult.requested_duration_seconds || 0) === 10', self.packaged)
+        self.assertIn('initialPreviewSeconds >= 5 && initialPreviewSeconds <= 15', self.packaged)
+        self.assertIn('actualSeconds >= target.seconds - 5', duration_loop)
+
     def test_frozen_app_acceptance_runs_real_saved_profile_full_generation(self):
         packaged_runner = (ROOT / "tests" / "packaged_sound_ui_acceptance.py").read_text(encoding="utf-8")
         self.assertIn("full_generation_project_folder", packaged_runner)
