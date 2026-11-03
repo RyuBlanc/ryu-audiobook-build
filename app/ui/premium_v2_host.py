@@ -3388,7 +3388,19 @@ class PremiumV2Bridge(QObject):
                 "cues_mixed": bool(cues_mixed),
             }
             check_cancelled()
-            shutil.copy2(audio_source, output)
+            if audio_source.suffix.casefold() == ".m4a":
+                # Cue concatenation/BGM mixing already produced an AAC M4A.
+                # Keep the exact output rather than transcoding it again.
+                shutil.copy2(audio_source, output)
+            else:
+                # Voice Only, Same BGM with no selected track, and Chapter-Based
+                # chapters with no override can remain as a synthesized WAV.
+                # Encode it as AAC before using the .m4a preview destination;
+                # never just rename/copy WAV bytes under an M4A extension.
+                _run([
+                    "-i", str(audio_source), "-vn", "-c:a", "aac",
+                    "-b:a", "192k", "-ar", "44100", str(output),
+                ])
             if not output.is_file() or output.stat().st_size < 1024:
                 raise RuntimeError("The Production chapter mix preview could not be rendered.")
             if _duration_ms(output) < source_duration_ms - 1500:

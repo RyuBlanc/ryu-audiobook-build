@@ -106,3 +106,8 @@ Production chapter preview now enables the native Sound Design renderer and uses
 ## Step 5.2 #2111 regression correction
 
 #2111 (commit \`d32acd267b29fddb01978efc7965a21fb34bb300\`) failed before packaging: 1,089 tests, 9 errors and 2 assertion failures. The renderer's unconditional active-project lookup broke isolated/projectless preview hosts; selected chapter text/identity/position are now captured before dispatch and used without requiring a UI accessor. The renderer reports only cues actually mixed. Voice Studio's generic Save test remains WAV; the Production-only M4A export test verifies M4A and extension preservation. Exact-head regression and a replacement Windows package remain pending.
+
+
+## Step 5.2 #2112 correction
+
+#2112 (commit \`2334bd9e1e82317f49c33ab3e37fea01befe9692\`) passed JS syntax and native Qt lifecycle but failed four tests because a narration WAV could be copied into an M4A-named destination when no sound assets were active. The renderer now AAC-encodes WAV-only previews and copies only audio already rendered as M4A. A direct regression test covers projectless Voice Only output. Full regression and a matching Windows artifact checkpoint remain pending.

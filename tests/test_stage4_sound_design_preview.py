@@ -222,5 +222,43 @@ class SoundDesignPreviewConfigurationTests(unittest.TestCase):
             self.assertIn("Mystery", selected[0][2])
 
 
+
+    def test_voice_only_wav_preview_is_encoded_to_m4a_not_copied_with_wrong_extension(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)
+            app_root=root/"app"
+            (app_root/"Previews").mkdir(parents=True)
+            source=root/"narration.wav"
+            source.write_bytes(b"narration fixture"*256)
+            output_written=[]
+            commands=[]
+            def fake_run(args):
+                command=[str(item) for item in args]
+                commands.append(command)
+                Path(command[-1]).write_bytes(b"encoded AAC M4A fixture"*256)
+                output_written.append(Path(command[-1]))
+            bridge=SimpleNamespace()
+            state={
+                "background_audio_mode":"off",
+                "background_audio_enabled":False,
+                "chapter_transition_sound":False,
+                "_preview_chapter_number":1,
+                "_preview_chapter_title":"Chapter 1",
+            }
+            with patch.object(premium_v2_host,"app_root",return_value=app_root), \
+                 patch("app.audio.library.validate_saved_audio_paths"), \
+                 patch("app.audio.assembler._duration_ms",return_value=10000), \
+                 patch("app.audio.assembler._run",side_effect=fake_run):
+                result=premium_v2_host.PremiumV2Bridge._render_sound_design_preview(
+                    bridge,source,"voice-only-wav",state
+                )
+            expected=app_root/"Previews"/"sound_mix_preview_voice-only-wav.m4a"
+            self.assertEqual(result,expected)
+            self.assertEqual(output_written,[expected])
+            self.assertEqual(len(commands),1)
+            self.assertEqual(commands[0][commands[0].index("-c:a")+1],"aac")
+            self.assertEqual(commands[0][-1],str(expected))
+
+
 if __name__ == "__main__":
     unittest.main()
