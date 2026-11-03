@@ -628,3 +628,43 @@ Run [#2164](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/4162913
 - The optional Publish verified installer release step was skipped by workflow policy. It is not a failed build/upload job; all three requested artifacts were uploaded successfully.
 
 This is the first full packaged success after the #2162 failure. It does not include the later PROD-15 Save As click-and-copy acceptance addition; that is being verified on the separate #2165 exact-head package run. Therefore, #2164 is recorded as a successful prerequisite package checkpoint, not yet the final Stage 5.2 closure SHA.
+
+
+## 31. Stage 5.2 official closeout and Stage 5.3 handoff — 3 November 2026
+
+Authoritative packaged checkpoint: [Build Windows App #2165](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41631496286).
+
+- Run ID: `41631496286`
+- Head SHA: `a46d05dafa4ce3b722338b322ed5468533ce9294`
+- Branch: `stage-5/step-1-production-metadata`
+- Overall conclusion: SUCCESS.
+- Tests job `125901918370`: SUCCESS; 1,104 tests in 51.869 seconds. Frontend JavaScript syntax and isolated native Qt lifecycle regression both passed.
+- Build job `125903006926`: SUCCESS. Installer JavaScript validation, frozen Windows application build and verification, bundled voice/critical-module checks, packaged Sound Design/Music Library and Production Preview acceptance, core installer payload, functional HTML installer, original logo/transparency verification, SHA-256 generation, Microsoft Defender scan, and installer/manifest/portable artifact uploads all passed.
+- Optional `Publish verified installer release` was skipped by workflow policy. The build and all three release artifacts completed successfully; this is not a failed required job.
+
+### Uploaded release artifacts
+- Installer `Ryu-Audiobook-Installer-2165`: artifact ID `13230410190`, 883,627,739 bytes.
+- Portable `Ryu-Audiobook-Portable-2165`: artifact ID `13229632541`, 1,367,576,211 bytes.
+- SHA-256 `Ryu-Audiobook-Release-SHA256-2165`: artifact ID `13229577860`, 777 bytes.
+
+### Step 5.2 closure scope
+- PROD-05: real progress/status/timing integration retained and regression/package pipeline successful.
+- PROD-06: preview/full-generation jobs have independent IDs, status monitors and control ownership; exact-head regression and packaged acceptance passed.
+- PROD-07: chapter preview target-duration support and output measurement checks passed; packaged UI covered 10/30/60/90 duration controls, playback controls and real preview cancellation.
+- PROD-08: Production pronunciation controls use saved project state; global OFF/individual entry filtering and preview/final configuration parity regression passed.
+- PROD-09: shared Sound Design settings/strategies and cue hand-off passed native integration and packaged Sound Design acceptance, including Voice Only and restoration of saved Chapter-Based configuration.
+- PROD-15: packaged acceptance created a real saved-chapter preview M4A, validated output, exercised Play/Pause/Stop/Replay, executed Save As into the isolated acceptance folder and verified a non-empty valid M4A output. Backend tests prove job/project/chapter/source ownership and byte-identical copy.
+- GEN-06: saved narrator, chapter/cast routing, pronunciation settings and Sound Design configuration paths are shared between preview and full-generation entry points; integration regression passed.
+
+Stage 5.2 is CLOSED at #2165. The closeout does not claim a separate user-owned laptop listening session on NVIDIA/AMD/iGPU hardware. Hardware-specific perceptual quality and real full-book-vs-preview listening remain user-device acceptance considerations, not reasons to hold the automated/package stage open.
+
+### Stage 5.3 handoff
+PROD-14 and GEN-01 through GEN-05 remain open and carry forward as Step 5.3 scope:
+- PROD-14 — unify/verify status across Production, Background Jobs, History and output.
+- GEN-01 — full generation from saved project configuration.
+- GEN-02 — compatible resumable/recoverable checkpoints and invalidation.
+- GEN-03 — real pause/resume/cancel/retry/recovery, including process restart.
+- GEN-04 — empty/ineligible chapter handling and ordering.
+- GEN-05 — chaptered M4B assembly, full-stream validation, metadata and cover.
+
+Stage 5.3 begins from the successful #2165 package baseline and the exact `a46d05dafa4ce3b722338b322ed5468533ce9294` source checkpoint. Do not reopen or redo Stage 5.2 preview work unless a new Stage 5.3 integration regression specifically requires a fix.
