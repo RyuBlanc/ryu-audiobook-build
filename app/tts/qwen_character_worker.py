@@ -25,6 +25,7 @@ from app.tts.expression import (
     reference_style,
     voice_design_anchor_instruction,
 )
+from app.tts.qwen_accelerator import best_accelerator
 
 EXPRESSION_BANK_VERSION = "v8-emotion-range-anchor"
 
@@ -59,12 +60,34 @@ def _load_model(kind: str, backend: str, root: Path):
     if not model_path.exists():
         raise RuntimeError(f"Qwen model is not installed: {MODEL_IDS[kind]}")
 
-    if backend == "cpu":
+    selected = best_accelerator()
+    requested = (backend or "automatic").casefold()
+    if requested == "cpu":
         device = "cpu"
+    elif requested in {"automatic", "auto"}:
+        device = (
+            selected.device
+            if selected.supported and selected.backend in {"cuda", "rocm", "xpu"}
+            else "cpu"
+        )
+    elif requested == "cuda" and torch.cuda.is_available() and not getattr(torch.version, "hip", None):
+        device = "cuda:0"
+    elif requested == "rocm" and torch.cuda.is_available() and getattr(torch.version, "hip", None):
+        device = "cuda:0"
+    elif requested == "xpu" and getattr(torch, "xpu", None) is not None and torch.xpu.is_available():
+        device = "xpu:0"
     else:
-        device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        raise RuntimeError(
+            f"Requested Qwen backend '{requested}' is unavailable or not certified. "
+            f"Detected: {selected.backend} ({selected.name}). {selected.reason}"
+        )
 
-    dtype = torch.bfloat16 if device.startswith("cuda") else torch.float32
+    if device.startswith("cuda"):
+        dtype = _inference_dtype(torch, device)
+    elif device.startswith("xpu"):
+        dtype = _xpu_inference_dtype(torch, device)
+    else:
+        dtype = torch.float32
     if device.startswith("cuda"):
         try:
             torch.set_float32_matmul_precision("high")
@@ -85,13 +108,36 @@ def _load_model(kind: str, backend: str, root: Path):
             torch.cuda.empty_cache()
         except Exception:
             pass
+    elif device.startswith("xpu"):
+        try:
+            torch.xpu.empty_cache()
+        except Exception:
+            pass
     return model, device
+
+
+def _inference_dtype(torch, device: str):
+    """Choose a safe CUDA/ROCm inference dtype for the active device."""
+    if not str(device).startswith("cuda"):
+        return torch.float32
+    try:
+        return torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+    except Exception:
+        return torch.float16
+
+
+def _xpu_inference_dtype(torch, device: str):
+    """Use BF16 on supported Intel XPU devices, otherwise FP16."""
+    try:
+        return torch.bfloat16 if torch.xpu.is_bf16_supported() else torch.float16
+    except Exception:
+        return torch.float16
 
 
 def _is_cuda_oom(exc: BaseException) -> bool:
     message = str(exc).casefold()
-    return "out of memory" in message and (
-        "cuda" in message or "cublas" in message or "outofmemory" in message
+    return ("out of memory" in message or "outofmemory" in message) and any(
+        token in message for token in ("cuda", "cublas", "hip", "rocm", "xpu")
     )
 
 
@@ -455,6 +501,7 @@ def server(args) -> int:
     active_kind = args.kind
     locked_clone_prompts = None
     locked_anchors = None
+    design_identity_cache: dict[str, tuple[dict, dict, str]] = {}
 
     def load_model(kind: str, *, allow_cpu_fallback: bool = True) -> None:
         nonlocal model, device, active_kind
@@ -476,79 +523,96 @@ def server(args) -> int:
             for style in ANCHOR_STYLES
         }
 
+    def clear_model_cache(target_device: str) -> None:
+        try:
+            import torch
+            if target_device.startswith("cuda"):
+                torch.cuda.empty_cache()
+            elif target_device.startswith("xpu"):
+                torch.xpu.empty_cache()
+        except Exception:
+            pass
+
     def lock_design_identity(request: dict) -> None:
         nonlocal model, device, locked_clone_prompts, locked_anchors, active_kind
-        if locked_clone_prompts is not None:
+        profile_key = str(request.get("profile_id") or "").strip()
+        if not profile_key:
+            profile_key = hashlib.sha256(
+                json.dumps({
+                    "speaker": request.get("speaker"),
+                    "language": request.get("language"),
+                    "instruct": request.get("instruct"),
+                    "anchor_text": request.get("anchor_text"),
+                    "seed": request.get("seed"),
+                }, sort_keys=True, ensure_ascii=False).encode("utf-8")
+            ).hexdigest()[:32]
+
+        cached_identity = design_identity_cache.get(profile_key)
+        if cached_identity is not None:
+            locked_clone_prompts, locked_anchors, cached_kind = cached_identity
+            if model is None or active_kind != cached_kind:
+                if model is not None:
+                    del model
+                    model = None
+                    gc.collect()
+                    clear_model_cache(device)
+                model, device = _load_model(cached_kind, args.backend, root)
+                active_kind = cached_kind
             return
+
         paths = anchor_bank_paths(request)
         ready = all(
             path.exists() and path.stat().st_size >= 1024
             for path in paths.values()
         )
+        clone_kind = str(args.clone_kind)
 
-        if ready:
+        if not ready:
+            # Create a new character anchor only when this profile has none.
+            # Release an already loaded Base model before loading VoiceDesign.
+            if model is not None:
+                del model
+                model = None
+                gc.collect()
+                clear_model_cache(device)
+            load_model(args.kind)
             print(
                 json.dumps({
-                    "progress": "Loading the saved canonical character identity…"
+                    "progress": "Preparing this character's saved acoustic identity…"
                 }),
                 flush=True,
             )
-            clone_kind = args.clone_kind
+            paths = _create_expression_anchors(model, request, root)
+            del model
+            model = None
+            gc.collect()
+            clear_model_cache(device)
+
+        # Keep each saved canonical character identity cached per profile while
+        # reusing one Base model instance across character profiles and creating
+        # only profile-specific clone prompts. This preserves each character's
+        # acoustic anchor without loading a separate 0.6B/1.7B model per cast member.
+        if model is None or active_kind != clone_kind:
+            if model is not None:
+                del model
+                model = None
+                gc.collect()
+                clear_model_cache(device)
             try:
-                clone_model, clone_device = _load_model(clone_kind, args.backend, root)
+                model, device = _load_model(clone_kind, args.backend, root)
             except Exception as exc:
                 if _is_cuda_oom(exc) and args.backend != "cpu":
-                    clone_kind = "base-0.6b"
-                    args.clone_kind = clone_kind
-                    clone_model, clone_device = _load_model(clone_kind, args.backend, root)
+                    # Respect the globally selected Base size. A GPU OOM may
+                    # move this same model to CPU, but must never silently swap
+                    # a user's selected 1.7B model for 0.6B.
+                    print(json.dumps({
+                        "progress": f"{clone_kind} did not fit GPU memory • retrying the same model on CPU…"
+                    }), flush=True)
+                    model, device = _load_model(clone_kind, "cpu", root)
                 else:
                     raise
-            model = clone_model
-            device = clone_device
-            active_kind = clone_kind
-            explicit_anchor = bool(str(request.get("anchor_path") or "").strip())
-            locked_clone_prompts = {}
-            for style, path in paths.items():
-                transcript = _expression_anchor_text(request, style)
-                use_xvector_only = explicit_anchor and style == "neutral" and not str(
-                    request.get("anchor_text") or ""
-                ).strip()
-                locked_clone_prompts[style] = model.create_voice_clone_prompt(
-                    ref_audio=str(path),
-                    ref_text=None if use_xvector_only else transcript,
-                    x_vector_only_mode=use_xvector_only,
-                )
-            locked_anchors = paths
-            return
-
-        load_model(args.kind)
-        print(
-            json.dumps({
-                "progress": "Preparing the saved character identity • first use for this profile…"
-            }),
-            flush=True,
-        )
-        paths = _create_expression_anchors(model, request, root)
-        del model
-        gc.collect()
-        try:
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except Exception:
-            pass
-
-        clone_kind = str(args.clone_kind)
-        try:
-            model, device = _load_model(clone_kind, args.backend, root)
-        except Exception as exc:
-            if _is_cuda_oom(exc) and args.backend != "cpu":
-                clone_kind = "base-0.6b"
-                args.clone_kind = clone_kind
-                model, device = _load_model(clone_kind, args.backend, root)
-            else:
-                raise
         active_kind = clone_kind
+
         explicit_anchor = bool(str(request.get("anchor_path") or "").strip())
         locked_clone_prompts = {}
         for style, path in paths.items():
@@ -562,6 +626,7 @@ def server(args) -> int:
                 x_vector_only_mode=use_xvector_only,
             )
         locked_anchors = paths
+        design_identity_cache[profile_key] = (locked_clone_prompts, paths, clone_kind)
 
     print(
         json.dumps(
@@ -593,8 +658,12 @@ def server(args) -> int:
             batch_texts = request.get("texts")
             batch_outputs = request.get("outputs")
 
-            if active_task in {"design", "design-preview"}:
+            if active_task == "design":
                 lock_design_identity(request)
+            elif active_task == "design-preview" and model is None:
+                # One-pass audition: load only VoiceDesign, without preparing
+                # multiple anchor recordings or swapping to a Base model.
+                load_model(args.kind)
 
             if isinstance(batch_texts, list):
                 if not isinstance(batch_outputs, list) or len(batch_texts) != len(batch_outputs):
@@ -603,41 +672,81 @@ def server(args) -> int:
                 if any(not value for value in texts):
                     raise RuntimeError("Qwen batch contains empty narration text.")
 
-                print(json.dumps({"progress": f"Generating {len(texts)} Qwen segments with natural expression…"}), flush=True)
                 requested_styles = request.get("styles") or [None] * len(texts)
                 styles = [
                     str(style) if style else classify_expression(text)
                     for text, style in zip(texts, requested_styles)
                 ]
                 import soundfile as sf
-                for style in dict.fromkeys(styles):
-                    indexes = [i for i, item_style in enumerate(styles) if item_style == style]
-                    selected_texts = [texts[i] for i in indexes]
-                    temperature = expression_temperature(style)
-                    batch_request = {
-                        **request,
-                        "text": max(selected_texts, key=len) if selected_texts else "",
-                        "temperature": temperature,
-                        "subtalker_temperature": temperature,
-                    }
-                    prompt_style = reference_style(style)
-                    prompt = locked_clone_prompts.get(prompt_style) or locked_clone_prompts.get("neutral")
-                    if prompt is None:
-                        raise RuntimeError(f"No Qwen expression prompt is available for style '{style}'.")
-                    wavs, sr = model.generate_voice_clone(
-                        text=selected_texts,
-                        language=[str(request.get("language") or "English")] * len(selected_texts),
-                        voice_clone_prompt=prompt,
-                        **_generation_kwargs(batch_request),
+                if active_task == "design-preview":
+                    # Preview batches remain on the VoiceDesign model; do not
+                    # swap to the production Base voice-clone identity workflow.
+                    print(
+                        json.dumps({"progress": f"Generating {len(texts)} VoiceDesign preview segments…"}),
+                        flush=True,
                     )
-                    if len(wavs) != len(indexes):
-                        raise RuntimeError(
-                            f"Qwen returned {len(wavs)} outputs for {len(indexes)} {style} batch items."
+                    for style in dict.fromkeys(styles):
+                        indexes = [i for i, item_style in enumerate(styles) if item_style == style]
+                        selected_texts = [texts[i] for i in indexes]
+                        longest_text = max(selected_texts, key=len) if selected_texts else ""
+                        batch_request = {
+                            **request,
+                            "text": longest_text,
+                            "max_new_tokens": min(_recommended_max_new_tokens(longest_text), 1024),
+                        }
+                        design_instructions = [
+                            _voice_design_instruct({**request, "text": texts[index]}, style)
+                            for index in indexes
+                        ]
+                        _set_seed(request.get("seed"))
+                        wavs, sr = model.generate_voice_design(
+                            text=selected_texts,
+                            language=[str(request.get("language") or "English")] * len(selected_texts),
+                            instruct=design_instructions,
+                            **_generation_kwargs(batch_request),
                         )
-                    for index, wav in zip(indexes, wavs):
-                        destination = Path(str(batch_outputs[index]))
-                        destination.parent.mkdir(parents=True, exist_ok=True)
-                        sf.write(str(destination), wav, sr)
+                        if len(wavs) != len(indexes):
+                            raise RuntimeError(
+                                f"Qwen VoiceDesign returned {len(wavs)} outputs for "
+                                f"{len(indexes)} {style} preview items."
+                            )
+                        for index, wav in zip(indexes, wavs):
+                            destination = Path(str(batch_outputs[index]))
+                            destination.parent.mkdir(parents=True, exist_ok=True)
+                            sf.write(str(destination), wav, sr)
+                else:
+                    print(
+                        json.dumps({"progress": f"Generating {len(texts)} Qwen segments with locked character expression…"}),
+                        flush=True,
+                    )
+                    for style in dict.fromkeys(styles):
+                        indexes = [i for i, item_style in enumerate(styles) if item_style == style]
+                        selected_texts = [texts[i] for i in indexes]
+                        temperature = expression_temperature(style)
+                        batch_request = {
+                            **request,
+                            "text": max(selected_texts, key=len) if selected_texts else "",
+                            "temperature": temperature,
+                            "subtalker_temperature": temperature,
+                        }
+                        prompt_style = reference_style(style)
+                        prompt = locked_clone_prompts.get(prompt_style) or locked_clone_prompts.get("neutral")
+                        if prompt is None:
+                            raise RuntimeError(f"No Qwen expression prompt is available for style '{style}'.")
+                        wavs, sr = model.generate_voice_clone(
+                            text=selected_texts,
+                            language=[str(request.get("language") or "English")] * len(selected_texts),
+                            voice_clone_prompt=prompt,
+                            **_generation_kwargs(batch_request),
+                        )
+                        if len(wavs) != len(indexes):
+                            raise RuntimeError(
+                                f"Qwen returned {len(wavs)} outputs for {len(indexes)} {style} batch items."
+                            )
+                        for index, wav in zip(indexes, wavs):
+                            destination = Path(str(batch_outputs[index]))
+                            destination.parent.mkdir(parents=True, exist_ok=True)
+                            sf.write(str(destination), wav, sr)
 
                 print(
                     json.dumps(
@@ -665,20 +774,12 @@ def server(args) -> int:
                     flush=True,
                 )
                 _generate_custom(model, request, output)
-            elif active_task in {"design", "design-preview"}:
-                print(
-                    json.dumps(
-                        {
-                            "progress": (
-                                "Generating natural VoiceDesign narration…"
-                                if active_task == "design"
-                                else "Generating natural VoiceDesign preview…"
-                            )
-                        }
-                    ),
-                    flush=True,
-                )
+            elif active_task == "design":
+                print(json.dumps({"progress": "Generating natural VoiceDesign narration…"}), flush=True)
                 _generate_design_locked(model, locked_clone_prompts, request, output)
+            elif active_task == "design-preview":
+                print(json.dumps({"progress": "Generating one-pass VoiceDesign preview…"}), flush=True)
+                _generate_design_preview(model, request, output)
             elif active_task == "clone":
                 print(
                     json.dumps({"progress": "Generating Qwen Base clone speech…"}),
@@ -704,7 +805,15 @@ def server(args) -> int:
             )
         except Exception as exc:
             # A CUDA OOM should not destroy a long audiobook.
-            if _is_cuda_oom(exc) and device.startswith("cuda") and isinstance(batch_texts, list):
+            if _is_cuda_oom(exc) and device.startswith(("cuda", "xpu")) and isinstance(batch_texts, list):
+                try:
+                    import torch
+                    if device.startswith("cuda"):
+                        torch.cuda.empty_cache()
+                    else:
+                        torch.xpu.empty_cache()
+                except Exception:
+                    pass
                 print(json.dumps({
                     "ok": False,
                     "batch_oom": True,
@@ -722,14 +831,16 @@ def server(args) -> int:
                 except Exception:
                     pass
                 try:
-                    if active_task in {"design", "design-preview"}:
-                        # The stable clone model is always the active model once
-                        # identity is locked. Re-load it on CPU and reuse prompts.
-                        model, device = _load_model(
-                            str(args.clone_kind),
-                            "cpu",
-                            root,
-                        )
+                    if active_task == "design-preview":
+                        # A preview may fall back to CPU, but keep it on the same
+                        # VoiceDesign model/prompt path; never swap into the
+                        # production Base-anchor identity workflow during audition.
+                        model, device = _load_model(str(args.kind), "cpu", root)
+                        active_kind = str(args.kind)
+                        _generate_design_preview(model, request, Path(str(request.get("output"))))
+                    elif active_task == "design":
+                        # Production narration retains the stable VoiceDesign/Base identity lock.
+                        model, device = _load_model(str(args.clone_kind), "cpu", root)
                         active_kind = str(args.clone_kind)
                         if locked_clone_prompts is None:
                             raise RuntimeError("The stable VoiceDesign identity could not be restored after GPU memory fallback.")

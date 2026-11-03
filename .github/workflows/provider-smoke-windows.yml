@@ -2,14 +2,23 @@ name: Provider Runtime Smoke
 
 on:
   push:
-    branches: [main]
+    branches: [main, stage-3/restart-from-stage2-closeout-1794]
+    # Avoid repeating multi-provider/model downloads for artifact-only or CI housekeeping commits.
+    # App, assets, tests, build, or dependency changes still run these real-provider checks.
+    paths:
+      - 'app/**'
+      - 'assets/**'
+      - 'tests/**'
+      - 'requirements*.txt'
+      - 'build.py'
+      - 'run_app.py'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ryu-audiobook-provider-smoke
+  group: ryu-audiobook-provider-smoke-stage5
   cancel-in-progress: true
 
 jobs:
@@ -28,8 +37,11 @@ jobs:
       - name: Install application dependencies
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           python -m pip install --upgrade pip
+          if ($LASTEXITCODE -ne 0) { throw "pip upgrade failed." }
           python -m pip install -r requirements.txt
+          if ($LASTEXITCODE -ne 0) { throw "Kokoro and application requirements failed to install." }
 
       - name: Download Kokoro assets
         shell: pwsh
@@ -88,13 +100,212 @@ jobs:
           python -m pip install --no-cache-dir --no-deps $perthSource.Directory.FullName
           python -c "import perth; print(perth.__file__); assert getattr(perth,'PerthImplicitWatermarker',None) is not None or getattr(perth,'DummyWatermarker',None) is not None"
           python -m pip install --no-cache-dir --no-deps (Get-ChildItem $extract -Directory | Select-Object -First 1).FullName
+          if ($LASTEXITCODE -ne 0) { throw "Pinned Chatterbox source installation failed." }
 
       - name: Import actual Chatterbox Nano API
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           $env:PYTHONPATH = "${{ github.workspace }}"
-          python -c "import inspect; from chatterbox.tts_turbo import ChatterboxTurboTTS; sig=inspect.signature(ChatterboxTurboTTS.from_pretrained); print(sig); assert 'nano' in sig.parameters"
+          python -m pip install --no-cache-dir librosa==0.11.0
+          if ($LASTEXITCODE -ne 0) { throw "Chatterbox librosa dependency failed to install." }
+          python -c "import librosa; import inspect; from chatterbox.tts_turbo import ChatterboxTurboTTS; sig=inspect.signature(ChatterboxTurboTTS.from_pretrained); print(sig); assert 'nano' in sig.parameters"
+          if ($LASTEXITCODE -ne 0) { throw "Pinned Chatterbox Nano API import smoke test failed." }
           Write-Host "Pinned Chatterbox Nano API import smoke test PASSED."
+
+
+  qwen-real-voicedesign:
+    if: ${{ !contains(github.event.head_commit.message, '[skip-qwen-real]') }}
+    name: Qwen 1.7B VoiceDesign real preview (CPU acceptance)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install application and Qwen runtime dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -r requirements.txt
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.9.1 torchaudio==2.9.1
+          python -m pip install qwen-tts==0.1.1
+          python -c "import torch, torchaudio, qwen_tts; print('torch=' + torch.__version__); print('torchaudio=' + torchaudio.__version__); print('cuda=' + str(torch.cuda.is_available())); assert not torch.cuda.is_available()"
+
+      - name: Download the actual Qwen VoiceDesign model
+        shell: pwsh
+        env:
+          HF_HOME: ${{ runner.temp }}\ryu-qwen-hf
+          RYU_QWEN_MODEL_ROOT: ${{ runner.temp }}\ryu-qwen-models
+        run: |
+          python -c "import os; from huggingface_hub import snapshot_download; root=os.environ['RYU_QWEN_MODEL_ROOT']; snapshot_download(repo_id='Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign', local_dir=os.path.join(root,'design-1.7b'), allow_patterns=['*.json','*.safetensors','*.txt','*.model','*.npz','*.bin','tokenizer*','vocab*'])"
+
+      - name: Run actual Qwen VoiceDesign 30-second preview and expression tests
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          HF_HOME: ${{ runner.temp }}\ryu-qwen-hf
+          RYU_QWEN_MODEL_ROOT: ${{ runner.temp }}\ryu-qwen-models
+          RYU_QWEN_ACCEPTANCE_OUTPUT: ${{ github.workspace }}\qwen-real-provider-artifacts
+          PYTHONWARNINGS: ignore
+        run: python -B tests/smoke_qwen_real_preview.py
+
+      - name: Upload actual Qwen VoiceDesign audio evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ryu-Stage3-Real-Qwen-VoiceDesign-${{ github.run_number }}
+          path: qwen-real-provider-artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+
+
+  qwen-customvoice-real:
+    needs: qwen-real-voicedesign
+    name: Qwen 0.6B and 1.7B CustomVoice real audio
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install application and CPU Qwen runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -r requirements.txt
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.9.1 torchaudio==2.9.1
+          python -m pip install qwen-tts==0.1.1
+          python -c "import torch, qwen_tts; assert not torch.cuda.is_available(); print('Qwen CPU runtime ready:', torch.__version__)"
+
+      - name: Download both official Qwen CustomVoice models
+        shell: pwsh
+        env:
+          HF_HOME: ${{ runner.temp }}\ryu-qwen-hf
+          RYU_QWEN_MODEL_ROOT: ${{ runner.temp }}\ryu-qwen-models
+        run: |
+          python -c "import os; from huggingface_hub import snapshot_download; root=os.environ['RYU_QWEN_MODEL_ROOT']; ids={'custom-0.6b':'Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice','custom-1.7b':'Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice'}; [snapshot_download(repo_id=repo,local_dir=os.path.join(root,kind),allow_patterns=['*.json','*.safetensors','*.txt','*.model','*.npz','*.bin','tokenizer*','vocab*']) for kind,repo in ids.items()]"
+
+      - name: Run real 0.6B and 1.7B CustomVoice synthesis
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          HF_HOME: ${{ runner.temp }}\ryu-qwen-hf
+          RYU_QWEN_MODEL_ROOT: ${{ runner.temp }}\ryu-qwen-models
+          RYU_QWEN_CUSTOM_OUTPUT: ${{ github.workspace }}\qwen-customvoice-artifacts
+          PYTHONWARNINGS: ignore
+        run: python -B tests/smoke_qwen_real_customvoice.py
+
+      - name: Upload actual CustomVoice audio evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ryu-Stage3-Real-Qwen-CustomVoice-${{ github.run_number }}
+          path: qwen-customvoice-artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+
+  qwen-clone-design-production:
+    needs: qwen-customvoice-real
+    name: Qwen Base Clone + saved VoiceDesign + character-to-M4B
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install application and CPU Qwen runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -r requirements.txt
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.9.1 torchaudio==2.9.1
+          python -m pip install qwen-tts==0.1.1
+          python -c "import torch, qwen_tts; assert not torch.cuda.is_available(); print('Qwen CPU runtime ready:', torch.__version__)"
+
+      - name: Download actual Qwen VoiceDesign and Base models
+        shell: pwsh
+        env:
+          HF_HOME: ${{ runner.temp }}\ryu-qwen-hf
+          RYU_QWEN_MODEL_ROOT: ${{ runner.temp }}\ryu-qwen-models
+        run: |
+          python -c "import os; from huggingface_hub import snapshot_download; root=os.environ['RYU_QWEN_MODEL_ROOT']; ids={'design-1.7b':'Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign','base-0.6b':'Qwen/Qwen3-TTS-12Hz-0.6B-Base'}; [snapshot_download(repo_id=repo,local_dir=os.path.join(root,kind),allow_patterns=['*.json','*.safetensors','*.txt','*.model','*.npz','*.bin','tokenizer*','vocab*']) for kind,repo in ids.items()]"
+
+      - name: Download Piper speech fixture for authorized reference import and narration
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "bundled_models\piper" | Out-Null
+          python -m piper.download_voices --data-dir "bundled_models\piper" en_US-lessac-medium
+          if (-not (Test-Path "bundled_models\piper\en_US-lessac-medium.onnx")) { throw "Piper reference fixture model was not downloaded." }
+
+      - name: Run real Base clone, saved VoiceDesign and Qwen Production M4B
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          HF_HOME: ${{ runner.temp }}\ryu-qwen-hf
+          RYU_QWEN_MODEL_ROOT: ${{ runner.temp }}\ryu-qwen-models
+          RYU_QWEN_DESIGN_OUTPUT: ${{ github.workspace }}\qwen-design-production-artifacts
+          PYTHONWARNINGS: ignore
+        run: python -B tests/smoke_qwen_real_clone_design_production.py
+
+      - name: Upload Qwen Base Clone, VoiceDesign and M4B evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ryu-Stage3-Real-Qwen-Clone-Design-M4B-${{ github.run_number }}
+          path: qwen-design-production-artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+
+
+
+  qwen-backend-discovery:
+    name: Qwen accelerator discovery and runtime installer unit tests
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install CPU test dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.9.1 torchaudio==2.9.1
+
+      - name: Run Qwen accelerator discovery and installer tests
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          PYTHONWARNINGS: ignore
+        run: |
+          python -B -m unittest tests.test_qwen_runtime_safety.QwenAcceleratorDiscoveryTests -v
+          python -B -m unittest tests.test_qwen_runtime_safety.QwenAcceleratorRuntimeInstallTests -v
+          python -B -m py_compile app/tts/qwen_accelerator.py app/tts/qwen_character_runtime.py app/tts/qwen_character_worker.py tests/smoke_qwen_amd_intel_preview.py
+          python -B -c "from app.tts.qwen_accelerator import accelerator_report; print(accelerator_report())"
 
   qwen-protocol:
     name: Qwen expression protocol smoke

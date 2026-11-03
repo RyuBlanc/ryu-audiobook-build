@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import urllib.request
@@ -11,31 +12,69 @@ try:
 except ImportError:
     certifi = None
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, Signal, Qt
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QListWidget,
-    QPushButton, QMessageBox, QInputDialog
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox, QScrollArea,
+    QFrame, QLabel, QListWidget, QListWidgetItem, QPushButton, QMessageBox,
+    QInputDialog, QComboBox
 )
 
 from app.core.paths import models_root, ensure_roots
-from app.tts.chatterbox_runtime import install_runtime, runtime_status
+from app.tts.chatterbox_runtime import install_runtime, runtime_status, RUNTIME_DIR as CHATTERBOX_RUNTIME_DIR
 from app.tts.model_registry import BUILTIN_CATALOG, installed_models, mark_installed
 from app.tts.providers.piper import PiperProvider
-from app.tts.providers.kokoro import KokoroProvider
+from app.tts.providers.kokoro import (
+    KokoroProvider,
+    KOKORO_MODEL_MIN_BYTES,
+    KOKORO_VOICES_MIN_BYTES,
+    kokoro_model_file_ready,
+    kokoro_voices_file_ready,
+)
 from app.tts.qwen_character_runtime import (
     install_runtime as install_qwen_runtime,
     install_model as install_qwen_model,
     model_installed as qwen_model_installed,
+    runtime_ready as qwen_runtime_ready,
     best_custom_kind,
     best_clone_kind,
     best_voice_design_kind,
     repair_runtime as repair_qwen_runtime,
+    MODEL_DIRS as QWEN_MODEL_DIRS,
+    RUNTIME_ROOT as QWEN_RUNTIME_ROOT,
+    PYTHON_ROOT as QWEN_PYTHON_ROOT,
+    VENV_ROOT as QWEN_VENV_ROOT,
+    MARKER as QWEN_MARKER,
+    INSTALLER_PATH as QWEN_INSTALLER_PATH,
+    INSTALLER_LOG as QWEN_INSTALLER_LOG,
 )
-from app.ai.model_runtime import brain_root, install_runtime as install_audiobook_ai, recommended_model, installed as audiobook_ai_installed, self_test as test_audiobook_ai
+from app.ai.model_runtime import brain_root, install_runtime as install_audiobook_ai, self_test as test_audiobook_ai
+from app.tts.qwen_model_preference import (
+    get_qwen_model_preference,
+    set_qwen_model_preference,
+    qwen_model_preference_label,
+)
 
 
 KOKORO_MODEL_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.0.onnx"
 KOKORO_VOICES_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/voices-v1.0.bin"
+
+def _file_ready(path: Path, minimum_bytes: int = 1024) -> bool:
+    """Cheap filesystem integrity check; never opens or loads model assets."""
+    try:
+        return path.is_file() and path.stat().st_size >= minimum_bytes
+    except OSError:
+        return False
+
+
+def _directory_has_entries(path: Path) -> bool:
+    """Return a filesystem-only presence signal; treat inaccessible paths as incomplete."""
+    try:
+        return path.is_dir() and any(path.iterdir())
+    except OSError:
+        return path.exists()
+
+
+from app.ui.stable_refresh import stable_view_refresh
 
 
 class PiperDownloadWorker(QThread):
@@ -73,7 +112,13 @@ class KokoroDownloadWorker(QThread):
     failed = Signal(str)
     progress = Signal(str)
 
-    def _download(self, url: str, target: Path, label: str) -> None:
+    def _download(
+        self,
+        url: str,
+        target: Path,
+        label: str,
+        minimum_bytes: int = 1024,
+    ) -> None:
         temp = target.with_suffix(target.suffix + ".part")
         try:
             self.progress.emit(f"Downloading {label}…")
@@ -104,8 +149,17 @@ class KokoroDownloadWorker(QThread):
                     received += len(block)
                     if total:
                         self.progress.emit(f"Downloading {label}… {received * 100 // total}%")
-            if not temp.exists() or temp.stat().st_size < 1024:
-                raise RuntimeError(f"Downloaded {label} is incomplete.")
+            size = temp.stat().st_size if temp.is_file() else 0
+            if total > 0 and received != total:
+                raise RuntimeError(
+                    f"Downloaded {label} is incomplete: received {received:,} "
+                    f"of {total:,} expected bytes."
+                )
+            if size < minimum_bytes:
+                raise RuntimeError(
+                    f"Downloaded {label} is incomplete: {size:,} bytes; "
+                    f"at least {minimum_bytes:,} bytes are required."
+                )
             temp.replace(target)
         finally:
             if temp.exists():
@@ -115,8 +169,25 @@ class KokoroDownloadWorker(QThread):
         try:
             target = models_root() / "kokoro"
             target.mkdir(parents=True, exist_ok=True)
-            self._download(KOKORO_MODEL_URL, target / "kokoro-v1.0.onnx", "Kokoro model (~326 MB)")
-            self._download(KOKORO_VOICES_URL, target / "voices-v1.0.bin", "Kokoro voice pack (~28 MB)")
+            self._download(
+                KOKORO_MODEL_URL,
+                target / "kokoro-v1.0.onnx",
+                "Kokoro model (~326 MB)",
+                minimum_bytes=KOKORO_MODEL_MIN_BYTES,
+            )
+            self._download(
+                KOKORO_VOICES_URL,
+                target / "voices-v1.0.bin",
+                "Kokoro voice pack (~28 MB)",
+                minimum_bytes=KOKORO_VOICES_MIN_BYTES,
+            )
+            if not (
+                kokoro_model_file_ready(target / "kokoro-v1.0.onnx")
+                and kokoro_voices_file_ready(target / "voices-v1.0.bin")
+            ):
+                raise RuntimeError(
+                    "Kokoro download finished but the model and voice pack did not pass integrity checks."
+                )
             mark_installed("kokoro", True)
             self.finished_ok.emit()
         except Exception as exc:
@@ -139,18 +210,22 @@ class QwenCharacterInstallWorker(QThread):
             self.progress.emit("Installing isolated Qwen3-TTS runtime…")
             install_qwen_runtime(self.progress.emit)
 
+            preference = get_qwen_model_preference()
+            if preference in {"0.6b", "1.7b"}:
+                selected_custom = f"custom-{preference}"
+                selected_base = f"base-{preference}"
+            else:
+                selected_custom = best_custom_kind()
+                selected_base = best_clone_kind()
+
             choices = {
-                "CustomVoice": [best_custom_kind()],
-                "VoiceDesign": [best_voice_design_kind(), best_clone_kind()],
-                "Voice Clone": [best_clone_kind()],
+                "CustomVoice": [selected_custom],
+                "VoiceDesign": [best_voice_design_kind(), selected_base],
+                "Voice Clone": [selected_base],
             }
             if self.selection == "Full Qwen Voice Studio":
                 targets = []
-                for kind in [
-                    best_custom_kind(),
-                    best_voice_design_kind(),
-                    best_clone_kind(),
-                ]:
+                for kind in [selected_custom, best_voice_design_kind(), selected_base]:
                     if kind not in targets:
                         targets.append(kind)
             else:
@@ -168,11 +243,15 @@ class QwenCharacterInstallWorker(QThread):
 
 class QwenCacheResetWorker(QThread):
     finished_ok = Signal(int)
+    failed = Signal(str)
     progress = Signal(str)
 
     def run(self) -> None:
-        count = reset_qwen_voice_cache(self.progress.emit)
-        self.finished_ok.emit(count)
+        try:
+            count = reset_qwen_voice_cache(self.progress.emit)
+            self.finished_ok.emit(count)
+        except Exception as exc:
+            self.failed.emit(str(exc))
 
 
 class QwenRepairWorker(QThread):
@@ -196,11 +275,13 @@ class AudiobookAIInstallWorker(QThread):
 
     def run(self) -> None:
         try:
-            model_id, filename, size = recommended_model()
-            install_audiobook_ai(self.progress.emit)
-            self.progress.emit("Testing local Audiobook AI inference…")
+            # Hardware probing and model selection are delegated to the runtime
+            # worker path. Never run nvidia-smi synchronously from the Qt slot.
+            self.progress.emit("Checking hardware and selecting a compatible local model…")
+            model_path = install_audiobook_ai(self.progress.emit)
+            self.progress.emit(f"Testing local Audiobook AI model: {model_path.name}…")
             test_result = test_audiobook_ai()
-            self.finished_ok.emit(f"{model_id}|{filename}|{size}|{test_result}")
+            self.finished_ok.emit(f"local|{model_path.name}|{model_path.stat().st_size}|{test_result}")
         except Exception as exc:
             self.failed.emit(str(exc))
 
@@ -219,6 +300,92 @@ class ChatterboxInstallWorker(QThread):
             self.failed.emit(str(exc))
 
 
+class UninstallComponentWorker(QThread):
+    """Remove one explicitly selected, app-managed local component."""
+
+    finished_ok = Signal(str)
+    failed = Signal(str)
+
+    def __init__(self, component_id: str):
+        super().__init__()
+        self.component_id = str(component_id)
+
+    @staticmethod
+    def _remove_path(target: Path, allowed_root: Path) -> None:
+        root = Path(allowed_root).resolve()
+        candidate = Path(target).resolve()
+        # Do not delete the root itself, follow paths outside it, or touch
+        # any user's Library/Voices/Audiobooks folders.
+        if candidate == root or root not in candidate.parents:
+            raise RuntimeError(
+                f"Refusing to remove a path outside the selected component root: {target}"
+            )
+        if candidate.is_dir():
+            shutil.rmtree(candidate)
+        elif candidate.exists():
+            candidate.unlink()
+
+    def run(self) -> None:
+        try:
+            component_id = self.component_id
+            root = models_root()
+
+            if component_id.startswith("piper:"):
+                relative_name = component_id.split(":", 1)[1]
+                piper_root = root / "piper"
+                candidate = (piper_root / relative_name).resolve()
+                if piper_root.resolve() not in candidate.parents or candidate.suffix.lower() != ".onnx":
+                    raise RuntimeError("Invalid Piper voice selection.")
+                if not candidate.is_file():
+                    raise RuntimeError("That user-installed Piper voice is no longer present.")
+                self._remove_path(candidate, piper_root)
+                sidecar = candidate.with_suffix(candidate.suffix + ".json")
+                if sidecar.exists():
+                    self._remove_path(sidecar, piper_root)
+                mark_installed(
+                    "piper",
+                    piper_root.exists() and any(piper_root.rglob("*.onnx")),
+                )
+
+            elif component_id == "kokoro":
+                self._remove_path(root / "kokoro", root)
+                mark_installed("kokoro", False)
+
+            elif component_id == "chatterbox-runtime":
+                self._remove_path(CHATTERBOX_RUNTIME_DIR, root)
+                mark_installed("chatterbox", False)
+                mark_installed("chatterbox-multilingual", False)
+
+            elif component_id.startswith("qwen-model:"):
+                kind = component_id.split(":", 1)[1]
+                if kind not in QWEN_MODEL_DIRS:
+                    raise RuntimeError("Unknown Qwen model selection.")
+                self._remove_path(QWEN_MODEL_DIRS[kind], QWEN_RUNTIME_ROOT)
+
+            elif component_id == "qwen-runtime":
+                # Preserve downloaded model folders, Hugging Face cache and
+                # generated voice anchors; remove only the isolated Python runtime.
+                for target in (
+                    QWEN_VENV_ROOT,
+                    QWEN_PYTHON_ROOT,
+                    QWEN_MARKER,
+                    QWEN_INSTALLER_PATH,
+                    QWEN_INSTALLER_LOG,
+                ):
+                    if target.exists():
+                        self._remove_path(target, QWEN_RUNTIME_ROOT)
+
+            elif component_id == "audiobook-ai":
+                self._remove_path(root / "audiobook-ai", root)
+
+            else:
+                raise RuntimeError("The selected item is not a removable installed component.")
+
+            self.finished_ok.emit(component_id)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
 class ModelsPage(QWidget):
     def __init__(self):
         super().__init__()
@@ -230,17 +397,46 @@ class ModelsPage(QWidget):
         self.qwen_repair_worker: QwenRepairWorker | None = None
         self.qwen_cache_worker: QwenCacheResetWorker | None = None
         self.audiobook_ai_worker: AudiobookAIInstallWorker | None = None
+        self.uninstall_worker: UninstallComponentWorker | None = None
+        self._active_operation: str | None = None
+        self._operation_buttons: tuple[QPushButton, ...] = ()
 
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("<h2>Local TTS Models</h2>"))
-        layout.addWidget(QLabel(
-            "Models stay on this PC. Kokoro provides a larger natural-voice catalogue for offline audiobook generation; Piper remains the lightweight fallback."
-        ))
+        layout.setContentsMargins(18, 16, 18, 14)
+        layout.setSpacing(10)
+        layout.addWidget(QLabel("<h2>Models & Voice Engines</h2>"))
+        intro = QLabel(
+            "Manage local narration voices and optional AI engines in one place. "
+            "Removing a component keeps your books, generated audiobooks, voice profiles, "
+            "and project settings. Models may need to be reinstalled before their profiles can be used again."
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
 
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(2, 2, 8, 2)
+        content_layout.setSpacing(12)
+
+        installed_group = QGroupBox("Installed components")
+        installed_layout = QVBoxLayout(installed_group)
         self.list = QListWidget()
-        layout.addWidget(self.list)
+        self.list.setMaximumHeight(205)
+        self.list.setToolTip("Select one installed, app-managed component to uninstall.")
+        self.list.currentItemChanged.connect(self._update_uninstall_button)
+        installed_layout.addWidget(self.list)
+        installed_actions = QHBoxLayout()
+        self.uninstall_button = QPushButton("Uninstall selected component")
+        self.uninstall_button.setEnabled(False)
+        self.uninstall_button.clicked.connect(self.uninstall_selected_component)
+        installed_actions.addWidget(self.uninstall_button)
+        installed_actions.addStretch(1)
+        installed_layout.addLayout(installed_actions)
+        content_layout.addWidget(installed_group)
 
-        row = QHBoxLayout()
         self.install_kokoro = QPushButton("Download Natural Voices")
         self.install_piper = QPushButton("Download Piper Voice")
         self.install_chatterbox = QPushButton("Install / Repair Custom Voice Engine")
@@ -249,17 +445,54 @@ class ModelsPage(QWidget):
         self.reset_qwen_cache = QPushButton("Reset Qwen Voice Cache")
         self.install_audiobook_ai = QPushButton("Install Audiobook AI")
         self.refresh_button = QPushButton("Refresh")
-        row.addWidget(self.install_kokoro)
-        row.addWidget(self.install_piper)
-        row.addWidget(self.install_chatterbox)
-        row.addWidget(self.install_qwen_character)
-        row.addWidget(self.repair_qwen)
-        row.addWidget(self.reset_qwen_cache)
-        row.addWidget(self.install_audiobook_ai)
-        row.addWidget(self.refresh_button)
-        layout.addLayout(row)
 
+        voice_group = QGroupBox("Offline narration voices")
+        voice_grid = QGridLayout(voice_group)
+        voice_grid.addWidget(self.install_kokoro, 0, 0)
+        voice_grid.addWidget(self.install_piper, 0, 1)
+        content_layout.addWidget(voice_group)
+
+        character_group = QGroupBox("Character voices & voice cloning")
+        character_grid = QGridLayout(character_group)
+        character_grid.addWidget(self.install_qwen_character, 0, 0)
+        character_grid.addWidget(self.install_chatterbox, 0, 1)
+        character_grid.addWidget(self.repair_qwen, 1, 0)
+        character_grid.addWidget(self.reset_qwen_cache, 1, 1)
+        content_layout.addWidget(character_group)
+
+        # One global model-size preference governs every saved and future Qwen
+        # voice profile. Existing profile model_id values remain intact, but
+        # provider creation applies this global override at synthesis time.
+        qwen_preference_group = QGroupBox("Global Qwen model preference")
+        qwen_preference_layout = QVBoxLayout(qwen_preference_group)
+        preference_row = QHBoxLayout()
+        preference_row.addWidget(QLabel("Model size"))
+        self.qwen_model_preference = QComboBox()
+        self.qwen_model_preference.addItem("Automatic (hardware-aware)", "auto")
+        self.qwen_model_preference.addItem("0.6B — lighter / lower memory", "0.6b")
+        self.qwen_model_preference.addItem("1.7B — larger model", "1.7b")
+        selected_preference = get_qwen_model_preference()
+        selected_index = self.qwen_model_preference.findData(selected_preference)
+        self.qwen_model_preference.setCurrentIndex(max(0, selected_index))
+        preference_row.addWidget(self.qwen_model_preference, 1)
+        qwen_preference_layout.addLayout(preference_row)
+        self.qwen_model_preference_status = QLabel()
+        self.qwen_model_preference_status.setWordWrap(True)
+        self.qwen_model_preference_status.setObjectName("muted")
+        qwen_preference_layout.addWidget(self.qwen_model_preference_status)
+        content_layout.addWidget(qwen_preference_group)
+
+        ai_group = QGroupBox("Book analysis")
+        ai_grid = QGridLayout(ai_group)
+        ai_grid.addWidget(self.install_audiobook_ai, 0, 0)
+        ai_grid.addWidget(self.refresh_button, 0, 1)
+        content_layout.addWidget(ai_group)
+        content_layout.addStretch(1)
+
+        scroll.setWidget(content)
+        layout.addWidget(scroll, 1)
         self.status = QLabel("Ready")
+        self.status.setWordWrap(True)
         layout.addWidget(self.status)
 
         self.install_kokoro.clicked.connect(self.download_kokoro)
@@ -270,46 +503,316 @@ class ModelsPage(QWidget):
         self.reset_qwen_cache.clicked.connect(self.reset_qwen_voice_cache)
         self.install_audiobook_ai.clicked.connect(self.install_audiobook_ai_runtime)
         self.refresh_button.clicked.connect(self.refresh)
-        self.refresh()
+        self.qwen_model_preference.currentIndexChanged.connect(
+            self._save_qwen_model_preference
+        )
+        self._update_qwen_model_preference_status()
+        self._operation_buttons = (
+            self.install_kokoro,
+            self.install_piper,
+            self.install_chatterbox,
+            self.install_qwen_character,
+            self.repair_qwen,
+            self.reset_qwen_cache,
+            self.install_audiobook_ai,
+            self.refresh_button,
+        )
+        self._update_operation_controls()
+        self.status.setText("Model inventory loads when this screen opens.")
 
-    def refresh(self) -> None:
-        self.list.clear()
-        installed = {m.model_id for m in installed_models()}
-        for spec in BUILTIN_CATALOG:
-            state = "Installed" if spec.model_id in installed else "Not installed"
-            clone = " • Voice cloning" if spec.voice_cloning else ""
-            self.list.addItem(f"{spec.display_name} — {state}{clone}")
 
-        kokoro_voices = KokoroProvider().voices()
-        if "kokoro" in installed:
-            self.list.addItem(f"Kokoro voices available: {len(kokoro_voices)}")
-
-        self.list.addItem(f"Custom voice runtime: {runtime_status()}")
-        qwen_status = []
-        if qwen_model_installed("custom-1.7b"):
-            qwen_status.append("CustomVoice 1.7B")
-        elif qwen_model_installed("custom-0.6b"):
-            qwen_status.append("CustomVoice 0.6B")
-        if qwen_model_installed("design-1.7b"):
-            qwen_status.append("VoiceDesign 1.7B")
-        if qwen_model_installed("base-1.7b"):
-            qwen_status.append("Clone Base 1.7B")
-        elif qwen_model_installed("base-0.6b"):
-            qwen_status.append("Clone Base 0.6B")
-        self.list.addItem(
-            "Qwen3-TTS Voice Studio: " + (", ".join(qwen_status) if qwen_status else "Not installed")
+    def _save_qwen_model_preference(self, _index: int = -1) -> None:
+        selected = self.qwen_model_preference.currentData()
+        try:
+            set_qwen_model_preference(selected)
+        except Exception as exc:
+            QMessageBox.critical(self, "Qwen model preference", str(exc))
+            return
+        self._update_qwen_model_preference_status()
+        self.status.setText(
+            "Global Qwen model preference saved. It applies to all saved and new "
+            "Qwen profiles on their next preview or generation; an active task is unchanged."
         )
 
-        model_id, filename, size = recommended_model()
-        ai_state = "Installed" if audiobook_ai_installed() else "Not installed"
-        size_gb = size / (1024 ** 3)
-        self.list.addItem(f"Audiobook AI: {ai_state} • {model_id} • ~{size_gb:.1f} GB model")
-        voices = PiperProvider.model_paths()
-        if voices:
-            self.list.addItem("")
-            self.list.addItem("Installed Piper voices:")
-            for voice in voices:
-                self.list.addItem(f"  • {voice.stem}")
+    def _update_qwen_model_preference_status(self) -> None:
+        selected = get_qwen_model_preference()
+        if selected == "auto":
+            self.qwen_model_preference_status.setText(
+                "Automatic selection preserves the existing hardware-aware model choice. "
+                "The setting is shared by saved profiles and profiles created later."
+            )
+            return
+
+        required = [f"custom-{selected}", f"base-{selected}", "design-1.7b"]
+        labels = {
+            "custom-0.6b": "CustomVoice 0.6B",
+            "custom-1.7b": "CustomVoice 1.7B",
+            "base-0.6b": "Base 0.6B",
+            "base-1.7b": "Base 1.7B",
+            "design-1.7b": "VoiceDesign 1.7B",
+        }
+        missing = [labels[kind] for kind in required if not qwen_model_installed(kind)]
+        message = (
+            f"Global override: {qwen_model_preference_label(selected)}. "
+            "Applies to every saved and new Qwen profile, including narrator and character assignments. "
+            "VoiceDesign creation and audition still use the required 1.7B VoiceDesign model; "
+            "this choice controls CustomVoice/Clone and VoiceDesign's long-form Base model."
+        )
+        if missing:
+            message += " Missing selected model files: " + ", ".join(missing) +                 ". Use Install / Repair Qwen Voice Studio to install the chosen size."
+        else:
+            message += " All models required by this selection are installed."
+        self.qwen_model_preference_status.setText(message)
+
+    @stable_view_refresh
+    def refresh(self) -> None:
+        selected = self.list.currentItem()
+        selected_label = selected.text() if selected else None
+        selected_id = selected.data(Qt.ItemDataRole.UserRole) if selected else None
+        scroll = self.list.verticalScrollBar()
+        previous_scroll = scroll.value()
+        desired_rows: list[tuple[str, str | None, str]] = []
+
+        def add_component(label: str, component_id: str | None = None) -> None:
+            tooltip = (
+                "This item is bundled, not installed separately, or not currently removable."
+                if component_id is None else ""
+            )
+            desired_rows.append((label, component_id, tooltip))
+
+        piper_root = models_root() / "piper"
+        user_voices = [
+            voice for voice in PiperProvider.model_paths()
+            if piper_root.resolve() in voice.resolve().parents
+        ]
+        if user_voices:
+            for voice in user_voices:
+                relative = voice.resolve().relative_to(piper_root.resolve()).as_posix()
+                add_component(f"Piper voice • {voice.stem} — Installed", f"piper:{relative}")
+        elif PiperProvider.model_paths():
+            add_component("Piper voice — bundled with the application (managed by installer)")
+        else:
+            add_component("Piper — no local voice installed")
+
+        # Only files in the user Models folder are removable here. A bundled
+        # Kokoro pack ships inside the application and must not offer an uninstall
+        # button that appears to succeed but cannot remove the bundled assets.
+        local_kokoro_root = models_root() / "kokoro"
+        try:
+            local_kokoro_present = (
+                local_kokoro_root.is_dir()
+                and any(path.is_file() for path in local_kokoro_root.iterdir())
+            )
+        except OSError:
+            local_kokoro_present = True
+        local_kokoro_models = [
+            path for path in local_kokoro_root.glob("*.onnx")
+        ] if local_kokoro_root.is_dir() else []
+        local_kokoro_voicepacks = [
+            local_kokoro_root / "voices-v1.0.bin",
+            local_kokoro_root / "voices.bin",
+        ]
+        local_kokoro_ready = (
+            any(kokoro_model_file_ready(path) for path in local_kokoro_models)
+            and any(kokoro_voices_file_ready(path) for path in local_kokoro_voicepacks)
+        )
+        if local_kokoro_ready:
+            add_component(
+                f"Kokoro 82M — User-installed • {len(KokoroProvider().voices())} voices available",
+                "kokoro",
+            )
+        elif local_kokoro_present:
+            add_component("Kokoro 82M — Incomplete • retry download or remove partial files", "kokoro")
+        elif KokoroProvider.assets_available():
+            add_component("Kokoro 82M — Bundled with application (not individually removable)")
+        else:
+            add_component("Kokoro 82M — Not installed")
+
+        chat_status = runtime_status()
+        if CHATTERBOX_RUNTIME_DIR.exists():
+            add_component(f"Chatterbox voice engine — {chat_status}", "chatterbox-runtime")
+        else:
+            add_component(f"Chatterbox voice engine — {chat_status}")
+
+        qwen_labels = {
+            "custom-0.6b": "CustomVoice 0.6B",
+            "custom-1.7b": "CustomVoice 1.7B",
+            "design-1.7b": "VoiceDesign 1.7B",
+            "base-0.6b": "Voice Clone Base 0.6B",
+            "base-1.7b": "Voice Clone Base 1.7B",
+        }
+        any_qwen_model_entry = False
+        for kind, model_root in QWEN_MODEL_DIRS.items():
+            component_id = f"qwen-model:{kind}"
+            if qwen_model_installed(kind):
+                any_qwen_model_entry = True
+                add_component(
+                    f"Qwen3-TTS • {qwen_labels.get(kind, kind)} — Installed",
+                    component_id,
+                )
+            elif _directory_has_entries(model_root):
+                any_qwen_model_entry = True
+                add_component(
+                    f"Qwen3-TTS • {qwen_labels.get(kind, kind)} — Incomplete • reinstall or remove partial files",
+                    component_id,
+                )
+        if not any_qwen_model_entry:
+            add_component("Qwen3-TTS Voice Studio — no model installed")
+
+        qwen_runtime_present = any(
+            path.exists()
+            for path in (
+                QWEN_RUNTIME_ROOT, QWEN_VENV_ROOT, QWEN_PYTHON_ROOT,
+                QWEN_MARKER, QWEN_INSTALLER_PATH, QWEN_INSTALLER_LOG,
+            )
+        )
+        if qwen_runtime_ready():
+            add_component("Qwen3-TTS Python runtime — Ready", "qwen-runtime")
+        elif qwen_runtime_present:
+            add_component("Qwen3-TTS Python runtime — Incomplete • repair required", "qwen-runtime")
+        else:
+            add_component("Qwen3-TTS Python runtime — Not installed")
+
+        # Use cheap filesystem checks here. The full readiness helper invokes
+        # recommended_model(), which can launch nvidia-smi; that must not run
+        # from the Qt refresh path because a missing/slow driver can freeze UI.
+        ai_root = models_root() / "audiobook-ai"
+        try:
+            ai_root_present = ai_root.is_dir() and any(ai_root.iterdir())
+        except OSError:
+            ai_root_present = True
+        ai_server = ai_root / "llama-server.exe"
+        ai_models = (
+            ai_root / "Qwen3-1.7B-Q5_K_M.gguf",
+            ai_root / "Qwen3-4B-Q4_K_M.gguf",
+        )
+        ai_ready = _file_ready(ai_server) and any(_file_ready(path) for path in ai_models)
+        if ai_ready:
+            add_component("Audiobook AI — Runtime + model files present", "audiobook-ai")
+        elif ai_root_present:
+            add_component("Audiobook AI — Incomplete • install/repair required", "audiobook-ai")
+        else:
+            add_component("Audiobook AI — Not installed")
+
+        was_blocked = self.list.blockSignals(True)
+        updates_were_enabled = self.list.updatesEnabled()
+        if updates_were_enabled:
+            self.list.setUpdatesEnabled(False)
+        try:
+            # Reuse existing rows in their current order. The previous clear/add
+            # cycle discarded selection and item data every time inventory refreshed.
+            for index, (label, component_id, tooltip) in enumerate(desired_rows):
+                if index < self.list.count():
+                    item = self.list.item(index)
+                    if item.text() != label:
+                        item.setText(label)
+                    if item.data(Qt.ItemDataRole.UserRole) != component_id:
+                        item.setData(Qt.ItemDataRole.UserRole, component_id)
+                    if item.toolTip() != tooltip:
+                        item.setToolTip(tooltip)
+                else:
+                    item = QListWidgetItem(label)
+                    item.setData(Qt.ItemDataRole.UserRole, component_id)
+                    item.setToolTip(tooltip)
+                    self.list.addItem(item)
+
+            while self.list.count() > len(desired_rows):
+                self.list.takeItem(self.list.count() - 1)
+
+            target_row = -1
+            for index, (label, component_id, _tooltip) in enumerate(desired_rows):
+                if selected_id is not None and component_id == selected_id:
+                    target_row = index
+                    break
+                if selected_id is None and selected_label == label and component_id is None:
+                    target_row = index
+                    break
+            self.list.setCurrentRow(target_row)
+        finally:
+            self.list.blockSignals(was_blocked)
+            if updates_were_enabled:
+                self.list.setUpdatesEnabled(True)
+            scroll.setValue(
+                min(max(previous_scroll, scroll.minimum()), scroll.maximum())
+            )
+            if updates_were_enabled:
+                self.list.viewport().update()
+
+        self._update_uninstall_button()
+        self._update_qwen_model_preference_status()
+        self.status.setText("Model inventory refreshed from this PC.")
+
+    def _update_operation_controls(self) -> None:
+        """Allow only one model/runtime mutation at a time in the desktop UI."""
+        busy = self._active_operation is not None
+        for button in self._operation_buttons:
+            button.setEnabled(not busy)
+        if hasattr(self, "list"):
+            self.list.setEnabled(not busy)
+        self._update_uninstall_button()
+
+    def _begin_operation(self, label: str) -> bool:
+        """Acquire the single-flight model operation slot before starting a worker."""
+        if self._active_operation is not None:
+            self.status.setText(
+                f"Cannot start {label}: {self._active_operation} is still running. "
+                "Wait for it to finish, then retry."
+            )
+            return False
+        self._active_operation = label
+        self._update_operation_controls()
+        return True
+
+    def _end_operation(self, *_args) -> None:
+        """Release the model operation slot after a worker fully exits."""
+        if self._active_operation is None:
+            return
+        self._active_operation = None
+        self._update_operation_controls()
+
+    def _update_uninstall_button(self, *_args) -> None:
+        item = self.list.currentItem() if hasattr(self, "list") else None
+        component_id = item.data(Qt.ItemDataRole.UserRole) if item else None
+        running = bool(self.uninstall_worker and self.uninstall_worker.isRunning())
+        busy = getattr(self, "_active_operation", None) is not None
+        if hasattr(self, "uninstall_button"):
+            self.uninstall_button.setEnabled(bool(component_id) and not running and not busy)
+
+    def uninstall_selected_component(self) -> None:
+        item = self.list.currentItem()
+        component_id = item.data(Qt.ItemDataRole.UserRole) if item else None
+        if not component_id:
+            self.status.setText("Select an installed, removable component first.")
+            return
+        answer = QMessageBox.question(
+            self,
+            "Uninstall selected component",
+            f"Remove {item.text()}?\n\n"
+            "Only the selected app-managed component will be removed. The Library, source books, "
+            "generated audiobooks, projects, voice profiles, and settings will be kept. "
+            "If another profile uses this model, reinstall it before generating with that profile.",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        if not self._begin_operation(f"Uninstall {item.text()}"):
+            return
+        self.status.setText(f"Uninstalling {item.text()}…")
+        self.uninstall_worker = UninstallComponentWorker(str(component_id))
+        self.uninstall_worker.finished.connect(self._end_operation)
+        self.uninstall_worker.finished_ok.connect(self._uninstall_component_ok)
+        self.uninstall_worker.failed.connect(self._uninstall_component_failed)
+        self.uninstall_worker.finished.connect(self._update_uninstall_button)
+        self.uninstall_worker.start()
+
+    def _uninstall_component_ok(self, component_id: str) -> None:
+        self.refresh()
+        self.status.setText(f"Removed component: {component_id}")
+        self._update_uninstall_button()
+
+    def _uninstall_component_failed(self, message: str) -> None:
+        self.status.setText("Uninstall failed. Unrelated files were not intentionally removed.")
+        QMessageBox.warning(self, "Uninstall failed", message)
+        self._update_uninstall_button()
 
     def download_kokoro(self) -> None:
         if KokoroProvider.assets_available():
@@ -323,21 +826,21 @@ class ModelsPage(QWidget):
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
-        self.install_kokoro.setEnabled(False)
+        if not self._begin_operation("download Kokoro natural voices"):
+            return
         self.status.setText("Preparing Kokoro natural voices…")
         self.kokoro_worker = KokoroDownloadWorker()
+        self.kokoro_worker.finished.connect(self._end_operation)
         self.kokoro_worker.finished_ok.connect(self._kokoro_ok)
         self.kokoro_worker.failed.connect(self._kokoro_failed)
         self.kokoro_worker.progress.connect(self.status.setText)
         self.kokoro_worker.start()
 
     def _kokoro_ok(self) -> None:
-        self.install_kokoro.setEnabled(True)
         self.status.setText("Kokoro natural offline voices installed.")
         self.refresh()
 
     def _kokoro_failed(self, message: str) -> None:
-        self.install_kokoro.setEnabled(True)
         self.status.setText("Kokoro download failed")
         detail = str(message)
         if "CERTIFICATE_VERIFY_FAILED" in detail or "CERTIFICATE_VERIFY_FAILED".casefold() in detail.casefold():
@@ -359,20 +862,20 @@ class ModelsPage(QWidget):
         if not ok or not voice.strip():
             return
 
-        self.install_piper.setEnabled(False)
+        if not self._begin_operation(f"download Piper voice {voice.strip()}"):
+            return
         self.status.setText(f"Downloading {voice.strip()}...")
         self.worker = PiperDownloadWorker(voice.strip())
+        self.worker.finished.connect(self._end_operation)
         self.worker.finished_ok.connect(self._download_ok)
         self.worker.failed.connect(self._download_failed)
         self.worker.start()
 
     def _download_ok(self, voice: str) -> None:
-        self.install_piper.setEnabled(True)
         self.status.setText(f"Installed Piper voice: {voice}")
         self.refresh()
 
     def _download_failed(self, message: str) -> None:
-        self.install_piper.setEnabled(True)
         self.status.setText("Download failed")
         QMessageBox.warning(self, "Piper Download Failed", message)
 
@@ -393,16 +896,17 @@ class ModelsPage(QWidget):
         )
         if not ok:
             return
-        self.install_qwen_character.setEnabled(False)
+        if not self._begin_operation(f"install Qwen {selection}"):
+            return
         self.status.setText(f"Preparing Qwen {selection}…")
         self.qwen_character_worker = QwenCharacterInstallWorker(selection)
+        self.qwen_character_worker.finished.connect(self._end_operation)
         self.qwen_character_worker.finished_ok.connect(self._qwen_character_ok)
         self.qwen_character_worker.failed.connect(self._qwen_character_failed)
         self.qwen_character_worker.progress.connect(self.status.setText)
         self.qwen_character_worker.start()
 
     def _qwen_character_ok(self, detail: str) -> None:
-        self.install_qwen_character.setEnabled(True)
         parts = detail.split("|", 1)
         selection = parts[0]
         models = parts[1] if len(parts) > 1 else ""
@@ -413,7 +917,6 @@ class ModelsPage(QWidget):
         self.refresh()
 
     def _qwen_character_failed(self, message: str) -> None:
-        self.install_qwen_character.setEnabled(True)
         self.status.setText("Offline character voice installation failed.")
         QMessageBox.warning(self, "Offline Character Voice Installation Failed", message)
 
@@ -426,17 +929,23 @@ class ModelsPage(QWidget):
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
-        self.reset_qwen_cache.setEnabled(False)
+        if not self._begin_operation("reset Qwen voice cache"):
+            return
         self.status.setText("Resetting generated Qwen voice cache…")
         self.qwen_cache_worker = QwenCacheResetWorker()
+        self.qwen_cache_worker.finished.connect(self._end_operation)
         self.qwen_cache_worker.progress.connect(self.status.setText)
         self.qwen_cache_worker.finished_ok.connect(self._qwen_cache_reset_ok)
+        self.qwen_cache_worker.failed.connect(self._qwen_cache_reset_failed)
         self.qwen_cache_worker.start()
 
     def _qwen_cache_reset_ok(self, count: int) -> None:
-        self.reset_qwen_cache.setEnabled(True)
         self.status.setText(f"Qwen voice cache reset • removed {count} generated reference file(s).")
         self.refresh()
+
+    def _qwen_cache_reset_failed(self, message: str) -> None:
+        self.status.setText("Qwen voice cache reset failed; saved profiles and downloaded models were kept.")
+        QMessageBox.warning(self, "Qwen Voice Cache Reset Failed", message)
 
     def repair_qwen_runtime(self) -> None:
         answer = QMessageBox.question(
@@ -448,56 +957,51 @@ class ModelsPage(QWidget):
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
-        self.repair_qwen.setEnabled(False)
-        self.install_qwen_character.setEnabled(False)
+        if not self._begin_operation("repair Qwen3-TTS runtime"):
+            return
         self.status.setText("Repairing Qwen3-TTS runtime…")
         self.qwen_repair_worker = QwenRepairWorker()
+        self.qwen_repair_worker.finished.connect(self._end_operation)
         self.qwen_repair_worker.finished_ok.connect(self._qwen_repair_ok)
         self.qwen_repair_worker.failed.connect(self._qwen_repair_failed)
         self.qwen_repair_worker.progress.connect(self.status.setText)
         self.qwen_repair_worker.start()
 
     def _qwen_repair_ok(self, detail: str) -> None:
-        self.repair_qwen.setEnabled(True)
-        self.install_qwen_character.setEnabled(True)
         self.status.setText(f"Qwen3-TTS runtime repaired and verified • {detail}")
         self.refresh()
 
     def _qwen_repair_failed(self, message: str) -> None:
-        self.repair_qwen.setEnabled(True)
-        self.install_qwen_character.setEnabled(True)
         self.status.setText("Qwen3-TTS runtime repair failed.")
         QMessageBox.warning(self, "Qwen3-TTS Runtime Repair Failed", message)
 
     def install_audiobook_ai_runtime(self) -> None:
-        model_id, filename, size = recommended_model()
-        size_gb = size / (1024 ** 3)
         answer = QMessageBox.question(
             self,
             "Install Audiobook AI",
-            f"Ryu's Audiobook will install a local analysis engine using {model_id}. "
-            f"The model download is about {size_gb:.1f} GB. "
-            "After installation, book analysis works offline and the AI does not modify your source text. Continue?",
+            "Ryu's Audiobook will check hardware compatibility in the background and select a suitable local analysis model. "
+            "The model download is about 1.2 GiB for the compact option or 2.3 GiB for the larger option. "
+            "After installation, the local engine will self-test; book analysis works offline and does not modify your source text. Continue?",
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
-        self.install_audiobook_ai.setEnabled(False)
+        if not self._begin_operation("install Audiobook AI"):
+            return
         self.status.setText("Installing local Audiobook AI…")
         self.audiobook_ai_worker = AudiobookAIInstallWorker()
+        self.audiobook_ai_worker.finished.connect(self._end_operation)
         self.audiobook_ai_worker.finished_ok.connect(self._audiobook_ai_ok)
         self.audiobook_ai_worker.failed.connect(self._audiobook_ai_failed)
         self.audiobook_ai_worker.progress.connect(self.status.setText)
         self.audiobook_ai_worker.start()
 
     def _audiobook_ai_ok(self, detail: str) -> None:
-        self.install_audiobook_ai.setEnabled(True)
         parts = detail.split("|", 3)
         result = parts[3] if len(parts) > 3 else "ready"
         self.status.setText(f"Audiobook AI installed and self-tested successfully • {result}")
         self.refresh()
 
     def _audiobook_ai_failed(self, message: str) -> None:
-        self.install_audiobook_ai.setEnabled(True)
         self.status.setText("Audiobook AI installation failed.")
         QMessageBox.warning(self, "Audiobook AI Installation Failed", message)
 
@@ -511,20 +1015,20 @@ class ModelsPage(QWidget):
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
-        self.install_chatterbox.setEnabled(False)
+        if not self._begin_operation("install Chatterbox custom voice engine"):
+            return
         self.status.setText("Installing Chatterbox custom voice engine…")
         self.chatterbox_worker = ChatterboxInstallWorker()
+        self.chatterbox_worker.finished.connect(self._end_operation)
         self.chatterbox_worker.finished_ok.connect(self._chatterbox_ok)
         self.chatterbox_worker.failed.connect(self._chatterbox_failed)
         self.chatterbox_worker.progress.connect(self.status.setText)
         self.chatterbox_worker.start()
 
     def _chatterbox_ok(self, name: str) -> None:
-        self.install_chatterbox.setEnabled(True)
         self.status.setText("Custom voice engine installed. Its model will download when first used.")
         self.refresh()
 
     def _chatterbox_failed(self, message: str) -> None:
-        self.install_chatterbox.setEnabled(True)
         QMessageBox.warning(self, "Custom Voice Engine Installation Failed", message)
         self.status.setText("Custom voice engine installation failed.")

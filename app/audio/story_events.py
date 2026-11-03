@@ -65,93 +65,113 @@ _RULES = (
         r"\b(?:running|sprinting)\s+footsteps?\b",
         r"\bfootsteps?\s+(?:pounded|thudded|raced|sprinted|approached|receded)\b",
         r"\b(?:feet|footsteps?)\s+(?:were\s+)?(?:pounding|racing|thundering)\s+(?:down|along|across|through)\b",
+        r"(?:廊下|通路|階段|路地|道路|森|庭|部屋|橋|トンネル)を(?:走り抜け|駆け抜け|駆け込|走った|駆けた)",
     )),
     ("walking_footsteps", 0.86, (
         r"\bfootsteps?\s+(?:echoed|crunched|approached|receded|clicked|clattered)\b",
         r"\b(?:walked|strolled|paced|strode)\s+(?:slowly\s+|quietly\s+|carefully\s+)?(?:across|down|up|through|toward|towards|along|past)\s+(?:the\s+|a\s+|an\s+|his\s+|her\s+|their\s+)?(?:hall(?:way)?|corridor|stairs?|street|road|path|field|forest|room|yard|garden|bridge|alley|passage|platform|courtyard|doorway|beach|ground|floor|tunnel)\b",
         r"\b(?:steps|shoes)\s+(?:clicked|crunched|thudded)\s+(?:on|against|over)\s+(?:the\s+|a\s+)?(?:stone|gravel|wood|floor|ground|tiles?|path)\b",
+        r"(?:廊下|通路|階段|路地|道路|森|庭|部屋|橋|公園)を(?:歩いた|歩き続けた|歩いていた|歩き始めた)",
     )),
     ("door_slam", 0.97, (
         r"\b(?:slammed|banged|shut)\s+(?:the\s+|his\s+|her\s+|their\s+)?door\b",
         r"\bthe\s+door\s+(?:slammed|banged|crashed|shut)\b",
         r"\bdoor\s+(?:slammed|banged)\s+shut\b",
+        r"(?:ドア|扉|戸)(?:を|が)(?:勢いよく|乱暴に|強く)?(?:閉め|閉じ|叩きつけ)",
     )),
     ("door_open", 0.91, (
         r"\b(?:opened|pushed open|pulled open|swung open|eased open)\s+(?:the\s+|a\s+|his\s+|her\s+|their\s+)?door\b",
         r"\bthe\s+door\s+(?:creaked|swung|slid|flew)\s+open\b",
         r"\bdoor\s+creaked\s+open\b",
+        r"(?:ドア|扉|戸)(?:を|が)(?:ゆっくり|静かに)?(?:開け|開い)",
     )),
     ("knock", 0.88, (
         r"\b(?:knocked|rapped|pounded)\s+(?:on|at)\s+(?:the\s+|a\s+|his\s+|her\s+|their\s+)?door\b",
         r"\b(?:a|three|two|two loud|three sharp)\s+knocks?\s+(?:sounded|echoed|came)\b",
+        r"(?:ドア|扉|戸)(?:を|に)(?:三回|二回|何度も)?(?:ノック|叩い)",
     )),
     ("glass_break", 0.94, (
         r"\b(?:glass|window|crystal|mirror)\s+(?:shattered|smashed|burst|broke into pieces)\b",
         r"\bshards of glass\b",
+        r"(?:窓ガラス|ガラス|鏡)(?:が)?(?:割れ|砕け|粉々)",
     )),
     ("sword_clash", 0.93, (
         r"\b(?:swords?|blades?|steel)\s+(?:clashed|collided|rang|struck|crossed)\b",
         r"\b(?:metal|steel)\s+(?:clanged|rang out|clashed)\b",
         r"\bblade struck (?:the\s+)?blade\b",
+        r"(?:剣|刀|刃)(?:が|と)?(?:ぶつか|交わ|打ち合|激突)",
     )),
     ("explosion", 0.92, (
         r"\b(?:an?\s+)?explosion\s+(?:ripped|erupted|echoed|rocked|boomed)\b",
         r"\b(?:the\s+)?(?:bomb|device)\s+(?:exploded|detonated)\b",
         r"\bblast\s+(?:erupted|roared|hit|shook)\b",
+        r"(?:爆発|爆ぜ)(?:し|た|る|音)",
     )),
     ("horse_hooves", 0.90, (
         r"\b(?:horse|horses)\s+(?:galloped|galloping|charged|raced)\b",
         r"\bhooves\s+(?:clattered|thundered|pounded|approached|receded)\b",
         r"\bgalloping hooves\b",
+        r"(?:馬|蹄)(?:が)?(?:駆け|走り|迫り|響き)",
     )),
     ("heartbeat", 0.88, (
         r"\b(?:his|her|their)\s+heart\s+(?:pounded|hammered|raced)\s+in\s+(?:his|her|their)\s+chest\b",
         r"\bheartbeat\s+(?:thundered|pounded|raced|quickened)\b",
         r"\bpulse\s+(?:pounded|hammered|raced)\s+in\s+(?:his|her|their)\s+(?:ears|neck|wrist)\b",
+        r"(?:心臓|鼓動)(?:が)?(?:激しく|速く)?(?:鳴り|高鳴|打ち)",
     )),
     ("gasp", 0.83, (
         r"\b(?:gasped|gasping|let out a gasp|drew in a sharp breath|sharp intake of breath)\b",
+        r"(?:息を呑|息をの|息を飲|あっと息)",
     )),
     ("water_splash", 0.88, (
         r"\b(?:splashed|plunged|dove|dived)\s+into\s+(?:the\s+|a\s+)?(?:water|pool|river|lake)\b",
         r"\bwater\s+(?:splashed|sprayed)\s+(?:over|against|around)\b",
+        r"(?:水しぶき|水が跳ね|水に飛び込|水を跳ね上げ)",
     )),
     ("thunder", 0.86, (
         r"\bthunder\s+(?:rolled|rumbled|cracked|roared|boomed|exploded)\b",
         r"\b(?:a|the)\s+thunderclap\b",
         r"\bthunderstorm\s+(?:approached|rolled|raged)\b",
+        r"(?:雷が鳴|雷鳴|雷が落ち|雷が轟)",
     )),
     ("rain", 0.86, (
         r"\b(?:rain|rainfall)\s+(?:poured|drummed|hammered|lashed|pat{1,2}ered|streamed|tapped|rattled)\b",
         r"\bit\s+was\s+raining\b",
         r"\bthe\s+rain\s+(?:fell|grew heavier|began|intensified|continued)\b",
         r"\brain\s+lashed\s+against\b",
+        r"(?:雨が(?:激しく|静かに|強く)?降|雨音が響|雨が窓を叩)",
     )),
     ("wind", 0.82, (
         r"\b(?:wind|gusts? of wind)\s+(?:howled|whistled|gusted|roared|rattled|picked up|swept)\b",
         r"\bwind\s+howled\s+through\b",
+        r"(?:風が(?:強く)?吹|風が唸|風が吹き抜け)",
     )),
     ("waves", 0.82, (
         r"\bwaves?\s+(?:crashed|lapped|rolled|washed|pounded|broke)\s+(?:against|over|on|onto|the shore|the rocks|the beach)?\b",
         r"\b(?:surf|sea)\s+(?:crashed|roared|pounded|rolled)\b",
         r"\b(?:stream|river|waterfall)\s+(?:babbl(?:ed|ing)|rushed|cascaded|roared)\b",
+        r"(?:波が(?:岸に|岩に)?(?:打ち寄せ|押し寄せ|砕け)|波音が響)",
     )),
     ("birds", 0.82, (
         r"\b(?:birds?|songbirds?)\s+(?:chirped|sang|called|fluttered|twittered)\b",
         r"\b(?:birdsong|chirping birds|birds? chirping)\b",
+        r"(?:鳥|小鳥)(?:たち)?が(?:鳴|さえず|囀)",
     )),
     ("fire", 0.82, (
         r"\b(?:fire|flames?|campfire|logs?)\s+(?:crackled|roared|popped|snapped|flickered)\b",
         r"\bfire\s+(?:was|is)\s+crackling\b",
+        r"(?:炎|火|焚き火)(?:が)?(?:燃え|揺れ|立ち上が|爆ぜ)",
     )),
     ("crowd", 0.80, (
         r"\b(?:crowd|spectators|audience)\s+(?:roared|cheered|murmured|erupted|chanted|booed|applauded)\b",
         r"\bcheering crowd\b",
+        r"(?:群衆|観衆|観客)(?:が)?(?:叫|歓声|沸き立)|歓声が上が|拍手が沸き起こ",
     )),
     ("magic", 0.85, (
         r"\b(?:magic|magical energy|mana|runes?)\s+(?:surged|crackled|swirled|flared|sparked|glowed|pulsed)\b",
         r"\b(?:cast|casting) (?:a |the )?(?:spell|incantation)\b",
         r"\bspell\s+(?:burst|flared|sparked|shimmered|exploded|activated)\b",
+        r"(?:魔法を放|魔力が(?:溢れ|渦巻|迸)|呪文を唱)",
     )),
 )
 

@@ -2,14 +2,14 @@ name: Provider Functional Smoke
 
 on:
   push:
-    branches: [main]
+    branches: [main, stage-3/restart-from-stage2-closeout-1794]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ryu-audiobook-provider-functional
+  group: ryu-audiobook-provider-functional-stage5
   cancel-in-progress: true
 
 jobs:
@@ -36,7 +36,12 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path "bundled_models\piper" | Out-Null
           python -m piper.download_voices --data-dir "bundled_models\piper" en_US-lessac-medium
-          if (-not (Get-ChildItem "bundled_models\piper\*.onnx")) { throw "Piper voice was not downloaded." }
+          python -m piper.download_voices --data-dir "bundled_models\piper" en_US-amy-medium
+          python -m piper.download_voices --data-dir "bundled_models\piper" en_US-ryan-high
+          foreach ($voice in @("en_US-lessac-medium", "en_US-amy-medium", "en_US-ryan-high")) {
+            if (-not (Test-Path "bundled_models\piper\$voice.onnx")) { throw "Required Piper model was not downloaded: $voice" }
+            if (-not (Test-Path "bundled_models\piper\$voice.onnx.json")) { throw "Required Piper model config was not downloaded: $voice" }
+          }
 
       - name: Run Piper and Edge synthesis
         shell: pwsh
@@ -44,6 +49,84 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
           PYTHONWARNINGS: ignore
         run: python -B tests/smoke_piper_edge.py
+
+      - name: Run offscreen native Character Studio UI and selected-profile preview acceptance
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          QT_QPA_PLATFORM: offscreen
+          RYU_STAGE3_ACCEPTANCE_OUTPUT: ${{ github.workspace }}\stage3-real-provider-artifacts
+          PYTHONWARNINGS: ignore
+        run: python -B tests/smoke_stage3_character_ui.py
+
+      - name: Run real Stage 3 Voice Studio preview and multi-chapter audiobook acceptance
+        if: always()
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          PYTHONWARNINGS: ignore
+          RYU_STAGE3_ACCEPTANCE_OUTPUT: ${{ github.workspace }}\stage3-real-provider-artifacts
+        run: python -B tests/smoke_stage3_real_multichapter.py
+
+      - name: Upload real Stage 3 preview and audiobook evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ryu-Stage3-Real-Audio-Acceptance-${{ github.run_number }}
+          path: stage3-real-provider-artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+
+  premium-v2-ui:
+    name: Default Premium V2 WebEngine Voice and Character Studio acceptance
+    runs-on: windows-latest
+    timeout-minutes: 50
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install application dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Download real Piper profile models
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path "bundled_models\\piper" | Out-Null
+          foreach ($voice in @("en_US-amy-medium", "en_US-ryan-high", "en_US-lessac-medium")) {
+            python -m piper.download_voices --data-dir "bundled_models\\piper" $voice
+            if (-not (Test-Path "bundled_models\\piper\\$voice.onnx")) { throw "Piper voice model missing: $voice" }
+            if (-not (Test-Path "bundled_models\\piper\\$voice.onnx.json")) { throw "Piper voice configuration missing: $voice" }
+          }
+
+      - name: Run the actual default Premium V2 WebEngine workflow
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          QT_QPA_PLATFORM: offscreen
+          QTWEBENGINE_DISABLE_SANDBOX: "1"
+          QTWEBENGINE_CHROMIUM_FLAGS: --disable-gpu --no-sandbox --autoplay-policy=no-user-gesture-required --mute-audio --disable-features=AudioServiceOutOfProcess
+          RYU_STAGE3_PREMIUM_V2_OUTPUT: ${{ github.workspace }}\stage3-premium-v2-artifacts
+          PYTHONWARNINGS: ignore
+        run: python -B tests/smoke_stage3_premium_v2_ui.py
+
+      - name: Upload Premium V2 browser interaction and audio evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ryu-Stage3-Premium-V2-UI-Acceptance-${{ github.run_number }}
+          path: stage3-premium-v2-artifacts/
+          if-no-files-found: warn
+          retention-days: 30
 
   chatterbox:
     name: Chatterbox Nano real synthesis

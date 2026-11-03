@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QThread, Signal
-from PySide6.QtWidgets import QLabel, QComboBox, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QThread, Signal, Qt
+from PySide6.QtWidgets import QLabel, QComboBox, QPushButton, QVBoxLayout, QWidget, QScrollArea
 
 from app.hardware.backend import detect_hardware
 from app.tts.benchmark import benchmark_provider
@@ -18,7 +18,8 @@ class _BenchmarkThread(QThread):
 
     def run(self):
         result = benchmark_provider(
-            PiperProvider(self.voice, backend=self.backend),
+            PiperProvider(backend=self.backend),
+            voice=self.voice,
             backend=self.backend,
         )
         if result.success:
@@ -36,8 +37,11 @@ class _BenchmarkThread(QThread):
 class HardwarePage(QWidget):
     def __init__(self):
         super().__init__()
-        layout = QVBoxLayout(self)
-        self.profile = detect_hardware()
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(4, 6, 4, 12)
+        layout.setSpacing(14)
+        self.profile = None
 
         layout.addWidget(QLabel("<h2>Hardware & TTS Performance</h2>"))
         self.info = QLabel()
@@ -45,9 +49,6 @@ class HardwarePage(QWidget):
 
         self.backend_combo = QComboBox()
         self.backend_combo.addItem("Automatic", "automatic")
-        for backend in self.profile.backends:
-            if backend.available:
-                self.backend_combo.addItem(backend.name, backend.name)
         layout.addWidget(self.backend_combo)
 
         self.benchmark_button = QPushButton("Verify Local Backend (background)")
@@ -57,22 +58,66 @@ class HardwarePage(QWidget):
 
         self.result = QLabel("No benchmark run yet.")
         layout.addWidget(self.result)
+        self.info.setText("Hardware details are detected when this screen opens.")
 
-        self.refresh()
+        scroll = QScrollArea(self)
+        scroll.setObjectName("hardwareScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setWidget(content)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
 
     def refresh(self):
+        # Hardware probing may invoke external tools. Do it only after the user
+        # opens this screen and the native shell has had a chance to paint.
+        if self.profile is None:
+            selected_backend = self.backend_combo.currentData() or "automatic"
+            try:
+                profile = detect_hardware()
+            except Exception as exc:
+                self.info.setText(
+                    "Hardware detection is unavailable right now. "
+                    "Check Logs/application.log for details."
+                )
+                self.result.setText(f"Hardware detection failed: {type(exc).__name__}: {exc}")
+                return
+
+            self.profile = profile
+            blocked = self.backend_combo.blockSignals(True)
+            try:
+                self.backend_combo.clear()
+                self.backend_combo.addItem("Automatic", "automatic")
+                for backend in profile.backends:
+                    if backend.available:
+                        self.backend_combo.addItem(backend.name, backend.name)
+                restore_index = self.backend_combo.findData(selected_backend)
+                if restore_index >= 0:
+                    self.backend_combo.setCurrentIndex(restore_index)
+            finally:
+                self.backend_combo.blockSignals(blocked)
+
+        profile = self.profile
+        if profile is None:
+            return
         lines = [
-            f"CPU: {self.profile.cpu}",
-            f"Architecture: {self.profile.architecture}",
-            f"Recommended backend: {self.profile.recommended}",
+            f"CPU: {profile.cpu}",
+            f"Architecture: {profile.architecture}",
+            f"Recommended backend: {profile.recommended}",
             "",
         ]
-        for b in self.profile.backends:
-            state = "Available" if b.available else "Unavailable"
-            lines.append(f"{b.name}: {state}" + (f" — {b.device}" if b.device else ""))
+        for backend in profile.backends:
+            state = "Available" if backend.available else "Unavailable"
+            lines.append(
+                f"{backend.name}: {state}" + (f" — {backend.device}" if backend.device else "")
+            )
         recommendations = ["Provider recommendations from detected hardware:"]
         recommendations.extend(
-            f"{name}: {backend}" for name, backend in self.profile.provider_recommendations.items()
+            f"{name}: {backend}"
+            for name, backend in profile.provider_recommendations.items()
         )
         self.info.setText("\n".join(lines + [""] + recommendations))
 
@@ -82,7 +127,11 @@ class HardwarePage(QWidget):
             self.result.setText("Install a Piper voice first from the Models page.")
             return
         backend = self.backend_combo.currentData() or "automatic"
-        provider_backend = "cuda" if backend == "NVIDIA CUDA" else "cpu"
+        provider_backend = (
+            "cuda" if backend == "NVIDIA CUDA"
+            else "automatic" if backend == "automatic"
+            else "cpu"
+        )
         self.benchmark_button.setEnabled(False)
         self.result.setText("Verifying selected backend in the background…")
         self.benchmark_thread = _BenchmarkThread(provider_backend, voices[0].stem)

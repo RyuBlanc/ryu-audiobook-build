@@ -1,0 +1,75 @@
+name: Qwen AMD and Intel 30-second Preview Acceptance
+
+on:
+  # Run real accelerator acceptance automatically when the Qwen performance
+  # path changes. This targets the dedicated self-hosted AMD/Intel runner;
+  # hosted CPU smoke is diagnostic only and cannot prove GPU performance.
+  push:
+    branches:
+      - stage-3/restart-from-stage2-closeout-1794
+    paths:
+      - app/tts/preview.py
+      - app/tts/providers/qwen_character.py
+      - app/tts/qwen_character_worker.py
+      - tests/smoke_qwen_amd_intel_preview.py
+      - .github/workflows/qwen-amd-intel-preview-acceptance.yml
+  workflow_dispatch:
+    inputs:
+      backend:
+        description: "Expected Qwen GPU backend"
+        required: true
+        type: choice
+        options:
+          - rocm
+          - xpu
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ryu-audiobook-qwen-non-nvidia-acceptance
+  cancel-in-progress: false
+
+jobs:
+  qwen-non-nvidia-preview:
+    name: Real Qwen 1.7B VoiceDesign under 60 seconds on AMD ROCm / Intel XPU
+    runs-on: [self-hosted, Windows, X64, AMD-INTEL]
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check preinstalled GPU PyTorch runtime
+        shell: pwsh
+        env:
+          RYU_QWEN_EXPECT_BACKEND: ${{ inputs.backend || '' }}
+        run: |
+          python -c "import os, torch; expected=os.environ.get('RYU_QWEN_EXPECT_BACKEND','').casefold(); hip=bool(getattr(torch.version,'hip',None)); x=getattr(torch,'xpu',None); xpu=bool(x is not None and x.is_available()); active='rocm' if hip else ('xpu' if xpu else ''); print('torch=' + torch.__version__); print('hip=' + str(getattr(torch.version,'hip',None))); print('xpu=' + str(xpu)); print('active_backend=' + (active or 'none')); assert active and (not expected or active == expected), 'Expected a working AMD ROCm or Intel XPU PyTorch runtime on this self-hosted runner.'"
+
+      - name: Download official Qwen VoiceDesign model
+        shell: pwsh
+        env:
+          HF_HOME: ${{ runner.temp }}\ryu-qwen-hf
+          RYU_QWEN_MODEL_ROOT: ${{ runner.temp }}\ryu-qwen-models
+        run: |
+          python -c "import os; from huggingface_hub import snapshot_download; snapshot_download(repo_id='Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign', local_dir=os.path.join(os.environ['RYU_QWEN_MODEL_ROOT'],'design-1.7b'), allow_patterns=['*.json','*.safetensors','*.txt','*.model','*.npz','*.bin','tokenizer*','vocab*'])"
+
+      - name: Run real 30-second Qwen preview on selected backend
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          HF_HOME: ${{ runner.temp }}\ryu-qwen-hf
+          RYU_QWEN_MODEL_ROOT: ${{ runner.temp }}\ryu-qwen-models
+          RYU_QWEN_GPU_OUTPUT: ${{ github.workspace }}\qwen-non-nvidia-acceptance
+          RYU_QWEN_EXPECT_BACKEND: ${{ inputs.backend || '' }}
+          PYTHONWARNINGS: ignore
+        run: python -B tests/smoke_qwen_amd_intel_preview.py
+
+      - name: Upload audio and benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ryu-Stage3-Qwen-${{ inputs.backend || 'auto-detected' }}-Preview-${{ github.run_number }}
+          path: qwen-non-nvidia-acceptance/
+          if-no-files-found: warn
+          retention-days: 30

@@ -27,6 +27,10 @@ from app.chapters.assignment_utils import (
     format_character_registry_entry,
     normalize_assignment,
 )
+from app.chapters.character_learning import (
+    record_project_speaker_assignment,
+    remove_project_speaker_assignment_feedback,
+)
 from app.chapters.dialogue import dialogue_segment_for_selection
 from app.chapters.characters import _all_dialogue_spans
 
@@ -253,7 +257,9 @@ class DialogueAssignmentManagerDialog(QDialog):
         start, end, raw = selected
         self.preview.setText(f"<b>Dialogue</b><br>{str(raw).strip()}")
         self._clear_character_checks()
-        self.current_segment = dialogue_segment_for_selection(chapter, start, end)
+        self.current_segment = dialogue_segment_for_selection(
+            chapter, start, end, project_folder=self.project_folder
+        )
 
         if self.current_segment and self.current_segment.suggestions:
             top = self.current_segment.suggestions[0]
@@ -376,6 +382,14 @@ class DialogueAssignmentManagerDialog(QDialog):
             return
 
         start, end, raw = selected
+        previous_assignment = next(
+            (
+                item for item in getattr(chapter, "dialogue_assignments", [])
+                if int(item.get("start", -1)) == start
+                and int(item.get("end", -1)) == end
+            ),
+            None,
+        )
         assignment = normalize_assignment(
             {
                 "start": start,
@@ -386,6 +400,10 @@ class DialogueAssignmentManagerDialog(QDialog):
             speakers,
             self.mode.currentData() or "chorus",
         )
+        if previous_assignment is not None:
+            remove_project_speaker_assignment_feedback(
+                self.project_folder, chapter, previous_assignment
+            )
         chapter.dialogue_assignments = [
             item for item in getattr(chapter, "dialogue_assignments", [])
             if not (
@@ -394,6 +412,9 @@ class DialogueAssignmentManagerDialog(QDialog):
             )
         ]
         chapter.dialogue_assignments.append(assignment)
+        record_project_speaker_assignment(
+            self.project_folder, chapter, assignment
+        )
 
         self.registry.setdefault(
             speakers[0].casefold(),
@@ -412,6 +433,18 @@ class DialogueAssignmentManagerDialog(QDialog):
         if not chapter or not selected:
             return
         start, end, _raw = selected
+        previous_assignment = next(
+            (
+                item for item in getattr(chapter, "dialogue_assignments", [])
+                if int(item.get("start", -1)) == start
+                and int(item.get("end", -1)) == end
+            ),
+            None,
+        )
+        if previous_assignment is not None:
+            remove_project_speaker_assignment_feedback(
+                self.project_folder, chapter, previous_assignment
+            )
         chapter.dialogue_assignments = [
             item for item in getattr(chapter, "dialogue_assignments", [])
             if not (

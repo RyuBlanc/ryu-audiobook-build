@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QItemSelectionModel, QTimer, QThread, Signal, Qt, QPoint
-from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
+from pathlib import Path
+
+from PySide6.QtCore import QEvent, QItemSelectionModel, QTimer, QThread, Signal, Qt, QPoint, QSize
+from PySide6.QtGui import QColor, QIcon, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -17,6 +19,8 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QInputDialog,
     QSizePolicy,
+    QToolTip,
+    QScrollArea,
 )
 from app.chapters.detector import Chapter
 from app.chapters.editor import ChapterEditor
@@ -27,6 +31,7 @@ from app.documents.parser import (
     reflow_source_text,
 )
 from app.ui.character_review import CharacterReviewDialog
+from app.ui.stable_refresh import stable_view_refresh
 from app.ui.dialogue_assignment import DialogueAssignmentDialog
 from app.ui.dialogue_manager import DialogueAssignmentManagerDialog
 from app.chapters.dialogue import dialogue_segment_for_selection
@@ -48,10 +53,16 @@ class AudiobookAIWorker(QThread):
     def run(self):
         brain = None
         try:
+            from app.ai.learning_context import load_project_learning_context
+            learning_context = load_project_learning_context(self.project_folder)
             brain = AudiobookBrain(self.project_folder)
             def update(fraction, message):
                 self.progress.emit(float(fraction), message)
-            self.finished_ok.emit(brain.analyze_book(self.chapters, progress=update))
+            self.finished_ok.emit(brain.analyze_book(
+                self.chapters,
+                progress=update,
+                learning_context=learning_context,
+            ))
         except Exception as exc:
             self.failed.emit(str(exc))
         finally:
@@ -93,18 +104,42 @@ class ChapterEditorPage(QWidget):
         self.title.setMaximumHeight(55)
         self.text = QTextEdit()
         self._loading_fields = False
-        self._assignment_plus = QPushButton("＋", self.text.viewport())
+        self._fields_dirty = False
+        self._loaded_chapter: Chapter | None = None
+        self._assignment_plus = QPushButton("", self.text.viewport())
         self._assignment_plus.setObjectName("assignmentPlus")
+        dragon_assets = Path(__file__).resolve().parents[2] / "assets"
+        # Use the supplied master PNG so this control preserves the actual
+        # four-winged dragon silhouette. The build creates this asset from the master PNG; the circle is a UI
+        # treatment around that artwork, not a separately redrawn approximation.
+        dragon_plus_path = dragon_assets / "dragon_cross.png"
+        if dragon_plus_path.is_file():
+            self._assignment_plus.setIcon(QIcon(str(dragon_plus_path)))
+            self._assignment_plus.setIconSize(QSize(22, 22))
+        else:
+            self._assignment_plus.setText("⊕")
+        self._assignment_plus.setStyleSheet(
+            "QPushButton#assignmentPlus {"
+            " background: #170a11; border: 1px solid #9f2b4b;"
+            " border-radius: 14px; padding: 1px;"
+            "}"
+            "QPushButton#assignmentPlus:hover {"
+            " background: #321020; border: 1px solid #ed526e;"
+            "}"
+        )
         self.text.setViewportMargins(82, 0, 0, 0)
-        self._assignment_plus.setFixedSize(24, 24)
+        self._assignment_plus.setFixedSize(28, 28)
         self._assignment_plus.setToolTip("Assign this sentence to a character")
         self._assignment_plus.hide()
         self._assignment_plus.clicked.connect(self._open_inline_assignment_dialog)
-        self._assignment_badges: list[QLabel] = []
+        self._assignment_hover_items: list[tuple[int, int, tuple[str, ...]]] = []
+        self._assignment_tooltip_key: tuple[int, int, tuple[str, ...]] | None = None
         self._assignment_palette = (
             "#8EC5FF", "#F0C674", "#E8A7C7", "#8FD8A8",
             "#B8A2EE", "#F1B881", "#72C9C1", "#D7A5D6",
         )
+        self.text.viewport().setMouseTracking(True)
+        self.text.viewport().installEventFilter(self)
         self.text.selectionChanged.connect(self._update_assignment_plus)
         self.text.verticalScrollBar().valueChanged.connect(self._refresh_assignment_visuals)
         self.text.horizontalScrollBar().valueChanged.connect(self._refresh_assignment_visuals)
@@ -112,7 +147,23 @@ class ChapterEditorPage(QWidget):
         self._autosave_timer.setSingleShot(True)
         self._autosave_timer.setInterval(900)
         self._autosave_timer.timeout.connect(self._autosave)
-        root = QVBoxLayout(self)
+        # Keep the complete editor reachable on short displays and when the
+        # user's interface scale is increased. The chapter list and text editor
+        # retain their own internal scrolling; this scrolls the page controls.
+        page_layout = QVBoxLayout(self)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(0)
+        scroll = QScrollArea(self)
+        scroll.setObjectName("chapterEditorScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        content = QWidget()
+        root = QVBoxLayout(content)
+        root.setContentsMargins(4, 6, 8, 14)
+        root.setSpacing(12)
+        scroll.setWidget(content)
+        page_layout.addWidget(scroll)
         root.addWidget(QLabel("Chapter Editor"))
 
         primary = QHBoxLayout()
@@ -138,6 +189,7 @@ class ChapterEditorPage(QWidget):
             ("Split", self.split),
             ("Mark Selection as Chapter", self.mark_selection_as_chapter),
             ("Analyze Book with AI", self.analyze_with_ai),
+            ("View AI Analysis Report", self.view_ai_analysis_report),
             ("Clean Book Text", self.clean_book_text),
             ("View Characters & Dialogue", self.view_characters),
             ("Merge Next", self.merge),
@@ -194,32 +246,96 @@ class ChapterEditorPage(QWidget):
         self.text.textChanged.connect(self._schedule_autosave)
         self.refresh()
 
+    @stable_view_refresh
     def refresh(self, selected: int | None = None) -> None:
-        self.list.blockSignals(True)
-        self.list.clear()
-        for chapter in self.editor.chapters:
-            assigned = len(getattr(chapter, "dialogue_assignments", []))
-            suffix = f" · {assigned} assigned" if assigned else ""
-            self.list.addItem(QListWidgetItem(f"{chapter.number}. {chapter.title}{suffix}"))
-        self.list.blockSignals(False)
-        if self.editor.chapters:
-            self.list.setCurrentRow(max(0, min(selected if selected is not None else 0, len(self.editor.chapters) - 1)))
+        """Refresh chapter rows without clearing the live list or losing the view state."""
+        chapters = list(self.editor.chapters)
+        previous_row = self.list.currentRow()
+        target_row = selected if selected is not None else previous_row
+        if target_row < 0 and chapters:
+            target_row = 0
+
+        was_blocked = self.list.blockSignals(True)
+        updates_were_enabled = self.list.updatesEnabled()
+        if updates_were_enabled:
+            self.list.setUpdatesEnabled(False)
+        try:
+            # Reuse existing rows whenever possible. Clearing and repopulating this
+            # list on each refresh caused visible flashes and discarded row metadata.
+            for index, chapter in enumerate(chapters):
+                assigned = len(getattr(chapter, "dialogue_assignments", []))
+                suffix = f" · {assigned} assigned" if assigned else ""
+                label = f"{chapter.number}. {chapter.title}{suffix}"
+                if index < self.list.count():
+                    item = self.list.item(index)
+                    if item.text() != label:
+                        item.setText(label)
+                else:
+                    self.list.addItem(QListWidgetItem(label))
+
+            while self.list.count() > len(chapters):
+                self.list.takeItem(self.list.count() - 1)
+        finally:
+            # Never leave chapter navigation signal-blocked or visually frozen
+            # if a malformed chapter record prevents a full refresh.
+            self.list.blockSignals(was_blocked)
+            if updates_were_enabled:
+                self.list.setUpdatesEnabled(True)
+                self.list.viewport().update()
+
+        if chapters:
+            target_row = max(0, min(target_row, len(chapters) - 1))
+            if self.list.currentRow() != target_row:
+                self.list.setCurrentRow(target_row)
+            elif self._fields_dirty:
+                # Keep the live editor buffer visible while its debounce timer is
+                # pending; refreshing metadata must never discard user input.
+                self._update_current_chapter_list_label()
+            else:
+                self.load_selected(target_row)
+        else:
+            self.list.setCurrentRow(-1)
+            if self._fields_dirty:
+                self.save_status.setText(
+                    "Unsaved chapter edits remain in the editor. Save successfully before continuing."
+                )
+            else:
+                self.load_selected(-1)
 
     def load_selected(self, index: int) -> None:
+        if self._fields_dirty and not self._persist_loaded_fields():
+            old_chapter = self._loaded_chapter
+            previous_row = next(
+                (row for row, chapter in enumerate(self.editor.chapters) if chapter is old_chapter),
+                -1,
+            )
+            if previous_row >= 0:
+                blocked = self.list.blockSignals(True)
+                try:
+                    self.list.setCurrentRow(previous_row)
+                finally:
+                    self.list.blockSignals(blocked)
+            return
+
+        self._autosave_timer.stop()
         self._loading_fields = True
         try:
             if 0 <= index < len(self.editor.chapters):
                 chapter = self.editor.chapters[index]
                 self.title.setPlainText(chapter.title)
                 self.text.setPlainText(chapter.text)
-                self._clear_assignment_badges()
+                self._clear_assignment_hover_state()
                 self._refresh_assignment_visuals()
                 self.save_status.setText("Auto-save enabled")
+                self._loaded_chapter = chapter
             else:
                 self.title.clear()
                 self.text.clear()
+                self._loaded_chapter = None
         finally:
             self._loading_fields = False
+            self._fields_dirty = False
+
 
     def _update_current_chapter_list_label(self) -> None:
         if self._loading_fields:
@@ -283,10 +399,10 @@ class ChapterEditorPage(QWidget):
         speaker = str(item.get("speaker", "")).strip()
         return [speaker] if speaker else []
 
-    def _clear_assignment_badges(self) -> None:
-        for badge in self._assignment_badges:
-            badge.deleteLater()
-        self._assignment_badges.clear()
+    def _clear_assignment_hover_state(self) -> None:
+        self._assignment_hover_items.clear()
+        self._assignment_tooltip_key = None
+        QToolTip.hideText()
 
     def _assignment_color(self, speaker: str) -> QColor:
         key = str(speaker or "speaker").casefold().strip()
@@ -296,12 +412,13 @@ class ChapterEditorPage(QWidget):
     def _refresh_assignment_visuals(self) -> None:
         if not hasattr(self, "text"):
             return
-        self._clear_assignment_badges()
+        self._clear_assignment_hover_state()
         selections: list[QTextEdit.ExtraSelection] = []
         chapter_index = self.list.currentRow()
         if not (0 <= chapter_index < len(self.editor.chapters)):
             self.text.setExtraSelections(selections)
             return
+
         chapter = self.editor.chapters[chapter_index]
         for assignment in getattr(chapter, "dialogue_assignments", []):
             try:
@@ -320,61 +437,65 @@ class ChapterEditorPage(QWidget):
             cursor.setPosition(start)
             cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
 
+            # Colour the assigned range in-place. Permanent floating buttons covered
+            # glyphs and made otherwise valid words look truncated.
             color = self._assignment_color(speakers[0])
             soft = QColor(color)
             soft.setAlpha(52)
             fmt = QTextCharFormat()
             fmt.setBackground(soft)
-
             selection = QTextEdit.ExtraSelection()
             selection.cursor = cursor
             selection.format = fmt
             selections.append(selection)
+            self._assignment_hover_items.append((start, end, tuple(speakers)))
 
-            probe = self.text.textCursor()
-            probe.setPosition(end)
-            rect = self.text.cursorRect(probe)
-
-            display_name = speakers[0]
-            if len(speakers) > 1:
-                display_name += f" +{len(speakers) - 1}"
-            from PySide6.QtGui import QFontMetrics
-            metrics = QFontMetrics(self.text.viewport().font())
-            badge_width = min(
-                150,
-                max(42, metrics.horizontalAdvance(display_name) + 12),
-            )
-            badge = QPushButton(display_name, self.text.viewport())
-            badge.setFixedSize(badge_width, 16)
-            badge.setToolTip("Click to change speaker • Assigned: " + ", ".join(speakers))
-            badge.setCursor(Qt.CursorShape.PointingHandCursor)
-            badge.setStyleSheet(
-                "QPushButton {"
-                f"background:rgba({color.red()},{color.green()},{color.blue()},92);"
-                "color:#f6f7fb; border:1px solid rgba(255,255,255,0.13);"
-                "border-radius:6px; padding:0 3px; font-size:7px; font-weight:500;"
-                "}"
-                "QPushButton:hover { background:rgba(255,255,255,0.20); }"
-            )
-            badge.clicked.connect(
-                lambda _checked=False, a_start=start, a_end=end: self._edit_assignment_badge(
-                    a_start, a_end
-                )
-            )
-            viewport_rect = self.text.cursorRect(probe)
-            x = min(
-                max(2, viewport_rect.right() - badge.width()),
-                max(2, self.text.viewport().width() - badge.width() - 4),
-            )
-            y = viewport_rect.top() - badge.height() - 1
-            if y < 1 or viewport_rect.bottom() < 1 or viewport_rect.top() > self.text.viewport().height():
-                badge.hide()
-            else:
-                badge.move(x, max(1, y))
-                badge.show()
-            self._assignment_badges.append(badge)
         self.text.setExtraSelections(selections)
         self._update_assignment_plus()
+
+    def eventFilter(self, watched, event):
+        # Qt can deliver final child/viewport events while the parent editor is
+        # being destroyed. Do not dereference its deleted QTextEdit wrapper.
+        try:
+            text_widget = getattr(self, "text", None)
+            viewport = text_widget.viewport() if text_widget is not None else None
+        except RuntimeError:
+            return False
+
+        if watched is viewport:
+            try:
+                if event.type() == QEvent.Type.MouseMove:
+                    point = event.position().toPoint()
+                    position = text_widget.cursorForPosition(point).position()
+                    hover_item = next(
+                        (item for item in self._assignment_hover_items if item[0] <= position < item[1]),
+                        None,
+                    )
+                    if hover_item is None:
+                        if self._assignment_tooltip_key is not None:
+                            QToolTip.hideText()
+                            self._assignment_tooltip_key = None
+                    else:
+                        start, end, speakers = hover_item
+                        key = (start, end, speakers)
+                        if key != self._assignment_tooltip_key:
+                            QToolTip.showText(
+                                text_widget.viewport().mapToGlobal(point + QPoint(14, 18)),
+                                "Assigned speaker: " + ", ".join(speakers),
+                                text_widget,
+                            )
+                            self._assignment_tooltip_key = key
+                elif event.type() == QEvent.Type.Leave:
+                    QToolTip.hideText()
+                    self._assignment_tooltip_key = None
+            except RuntimeError:
+                # The target may have been deleted between event dispatch and
+                # Python callback teardown. Returning False lets Qt finish it.
+                return False
+        try:
+            return super().eventFilter(watched, event)
+        except RuntimeError:
+            return False
 
     def _update_assignment_plus(self) -> None:
         if self._loading_fields or not self.text.isEnabled():
@@ -398,28 +519,6 @@ class ChapterEditorPage(QWidget):
         y = min(max(3, rect.top()), max(3, self.text.viewport().height() - button.height() - 4))
         button.move(x, y)
 
-    def _edit_assignment_badge(self, start: int, end: int) -> None:
-        chapter_index = self.list.currentRow()
-        if chapter_index < 0:
-            return
-        cursor = self.text.textCursor()
-        cursor.setPosition(start)
-        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
-        self.text.setTextCursor(cursor)
-        chapter = self.editor.chapters[chapter_index]
-        dialog = DialogueAssignmentDialog(
-            chapter=chapter,
-            start=start,
-            end=end,
-            book_chapters=self.editor.chapters,
-            project_folder=self.project_folder,
-            parent=self,
-        )
-        if dialog.exec() == dialog.DialogCode.Accepted and dialog.assigned:
-            self._save_silently()
-            self._refresh_assignment_visuals()
-            self.save_status.setText("✓ Speaker assignment updated")
-    
     def _open_inline_assignment_dialog(self) -> None:
         chapter_index = self.list.currentRow()
         if chapter_index < 0:
@@ -447,64 +546,98 @@ class ChapterEditorPage(QWidget):
     def _schedule_autosave(self) -> None:
         if self._loading_fields:
             return
+        self._fields_dirty = True
         self.save_status.setText("Unsaved changes…")
         self._autosave_timer.start()
 
-    def _autosave(self) -> None:
-        if self._loading_fields:
-            return
-        try:
-            self.commit_current()
-            callback = self.on_autosave or self.on_save
-            if callback:
+    def _persist_loaded_fields(self) -> bool:
+        """Commit and persist pending editor text before replacing the active chapter."""
+        if not self._fields_dirty:
+            return True
+        self._autosave_timer.stop()
+        loaded = self._loaded_chapter
+        if loaded is None or not any(chapter is loaded for chapter in self.editor.chapters):
+            self.save_status.setText(
+                "Cannot safely switch chapters: the unsaved chapter is no longer available. Save or recover the edit first."
+            )
+            return False
+
+        self.commit_current()
+        callback = self.on_autosave or self.on_save
+        if callback:
+            try:
                 result = callback(self.editor.chapters)
-                if result is False:
-                    self.save_status.setText("Auto-save failed — use Save Now.")
-                    return
-            self.save_status.setText("✓ Auto-saved")
-        except Exception as exc:
-            self.save_status.setText(f"Auto-save failed: {exc}")
+            except Exception as exc:
+                self.save_status.setText(f"Auto-save failed — keep the edit open and retry: {exc}")
+                return False
+            if result is False:
+                self.save_status.setText("Auto-save failed — keep the edit open and retry Save Now.")
+                return False
+
+        self._fields_dirty = False
+        self.save_status.setText("✓ Auto-saved")
+        return True
+
+    def _autosave(self) -> None:
+        if self._loading_fields or not self._fields_dirty:
+            return
+        self._persist_loaded_fields()
 
     def _save_silently(self) -> bool:
         try:
+            self._autosave_timer.stop()
             self.commit_current()
-            if self.on_save:
-                result = self.on_save(self.editor.chapters)
+            callback = self.on_save or self.on_autosave
+            if callback:
+                result = callback(self.editor.chapters)
                 if result is False:
-                    self.save_status.setText("Save failed.")
+                    self._fields_dirty = True
+                    self.save_status.setText("Save failed — your editor buffer remains available for retry.")
                     return False
+            self._fields_dirty = False
             self.save_status.setText("✓ Saved")
             return True
         except Exception as exc:
-            self.save_status.setText(f"Save failed: {exc}")
+            self._fields_dirty = True
+            self.save_status.setText(f"Save failed — your editor buffer remains available for retry: {exc}")
             return False
 
     def commit_current(self) -> bool:
-        index = self.list.currentRow()
-        if index < 0:
-            return False
-        chapter = self.editor.chapters[index]
+        self._autosave_timer.stop()
+        chapter = self._loaded_chapter
+        if chapter is None or not any(item is chapter for item in self.editor.chapters):
+            index = self.list.currentRow()
+            if index < 0 or index >= len(self.editor.chapters):
+                return False
+            chapter = self.editor.chapters[index]
+
+        # Rebind the active chapter object before comparing editor fields. Chapter
+        # records are immutable and edit_text/rename replace list entries, so an
+        # autosave must not leave the page pointing at the pre-save object.
+        self._loaded_chapter = chapter
         new_title = self.title.toPlainText()
         new_text = self.text.toPlainText()
-        # Most editor actions do not change the chapter text. Avoid rebuilding
-        # every dialogue-assignment offset on every click, especially on large
-        # chapters with dozens of assigned dialogue spans.
+        # Most editor actions do not change chapter text. Avoid rebuilding every
+        # dialogue-assignment offset when a refresh or toolbar click is a no-op.
         if new_title == chapter.title and new_text == chapter.text:
             return False
+        index = next(i for i, item in enumerate(self.editor.chapters) if item is chapter)
         if new_title != chapter.title:
             self.editor.rename(index, new_title)
         if new_text != chapter.text:
             self.editor.edit_text(index, new_text)
+        self._loaded_chapter = self.editor.chapters[index]
         return True
 
     def rename(self) -> None:
         index = self.list.currentRow()
-        if index < 0:
+        if index < 0 or not self._save_silently():
             return
         value, ok = QInputDialog.getText(self, "Rename Chapter", "Title:", text=self.editor.chapters[index].title)
         if ok:
             self.editor.rename(index, value)
             self.refresh(index)
+            self._save_silently()
 
     def mark_selection_as_chapter(self) -> None:
         index = self.list.currentRow()
@@ -517,7 +650,8 @@ class ChapterEditorPage(QWidget):
         selected = cursor.selectedText().replace("\u2029", " ").strip()
         if not selected:
             return
-        self.commit_current()
+        if not self._save_silently():
+            return
         try:
             self.editor.split_at_selection(index, cursor.selectionStart(), cursor.selectionEnd(), selected)
             self.refresh(index if index == 0 and len(self.editor.chapters) == 1 else index + 1)
@@ -526,7 +660,8 @@ class ChapterEditorPage(QWidget):
 
 
     def clean_book_text(self) -> None:
-        self.commit_current()
+        if not self._save_silently():
+            return
         chapters = self.editor.chapters
         if not chapters:
             return
@@ -583,13 +718,14 @@ class ChapterEditorPage(QWidget):
             return
         if self.ai_worker and self.ai_worker.isRunning():
             return
-        self.commit_current()
         answer = QMessageBox.question(
             self,
             "Analyze Book with Audiobook AI",
             "Ryu will analyze characters, dialogue speakers, scene mood, pacing, pronunciation, ambience, music and SFX locally. Your chapter text is not changed. Continue?",
         )
         if answer != QMessageBox.StandardButton.Yes:
+            return
+        if not self._save_silently():
             return
         import time
         self.ai_started_at = time.monotonic()
@@ -697,9 +833,14 @@ class ChapterEditorPage(QWidget):
         self.ai_status_label.setText("Audiobook AI: analysis complete")
         import time
         elapsed = int(max(0.0, time.monotonic() - (self.ai_started_at or time.monotonic())))
+        theme_count = len(result.get("book_themes") or [])
+        emotional_count = len(result.get("emotional_arc") or [])
+        character_arc_count = len(result.get("character_arcs") or {})
         self.ai_eta_label.setText(
             f"Elapsed: {elapsed // 60}:{elapsed % 60:02d} • "
-            f"High-confidence dialogue assignments: {assignments_added}"
+            f"{theme_count} theme(s) • {emotional_count} emotional beat(s) • "
+            f"{character_arc_count} character arc(s) • "
+            f"{assignments_added} high-confidence dialogue assignment(s)"
         )
         self._set_editor_busy(False)
         self.refresh(self.list.currentRow())
@@ -708,12 +849,47 @@ class ChapterEditorPage(QWidget):
             f"✓ Audiobook AI analysis saved • {assignments_added} high-confidence dialogue assignments"
         )
 
+    def view_ai_analysis_report(self) -> None:
+        """Open the live, data-driven view of this project's saved offline AI report."""
+        if not self.project_folder:
+            QMessageBox.information(
+                self, "Audiobook AI Report",
+                "Open this book through the Library before viewing its saved analysis.",
+            )
+            return
+
+        report_path = Path(self.project_folder) / "analysis" / "audiobook_brain.json"
+        if not report_path.is_file():
+            QMessageBox.information(
+                self, "Audiobook AI Report",
+                "No saved report is available yet. Run Analyze Book with AI first.",
+            )
+            return
+
+        from app.ui.ai_analysis_report import AIAnalysisReportWindow
+
+        current = getattr(self, "_ai_report_window", None)
+        if current is not None:
+            try:
+                current.reload()
+                current.show()
+                current.raise_()
+                current.activateWindow()
+                return
+            except RuntimeError:
+                # The user may have closed the previous top-level report window.
+                self._ai_report_window = None
+
+        self._ai_report_window = AIAnalysisReportWindow(report_path, parent=self)
+        self._ai_report_window.show()
+
     def _ai_worker_finished(self) -> None:
         self.ai_worker = None
         self.ai_started_at = None
 
     def open_dialogue_manager(self) -> None:
-        self.commit_current()
+        if not self._save_silently():
+            return
         dialog = DialogueAssignmentManagerDialog(
             self.editor.chapters,
             project_folder=self.project_folder,
@@ -725,7 +901,8 @@ class ChapterEditorPage(QWidget):
         self.load_selected(self.list.currentRow())
 
     def assign_selected_dialogue(self) -> None:
-        self.commit_current()
+        if not self._save_silently():
+            return
         index = self.list.currentRow()
         if index < 0:
             return
@@ -760,7 +937,8 @@ class ChapterEditorPage(QWidget):
             self.text.setTextCursor(cursor)
 
     def view_characters(self) -> None:
-        self.commit_current()
+        if not self._save_silently():
+            return
         index = self.list.currentRow()
         if index < 0:
             return
@@ -768,7 +946,8 @@ class ChapterEditorPage(QWidget):
         dialog.exec()
 
     def split(self) -> None:
-        self.commit_current()
+        if not self._save_silently():
+            return
         index = self.list.currentRow()
         if index < 0:
             return
@@ -786,7 +965,8 @@ class ChapterEditorPage(QWidget):
             self._save_silently()
 
     def merge(self) -> None:
-        self.commit_current()
+        if not self._save_silently():
+            return
         index = self.list.currentRow()
         if index < 0:
             return
@@ -798,7 +978,8 @@ class ChapterEditorPage(QWidget):
             QMessageBox.information(self, "Merge Chapter", "There is no next chapter.")
 
     def move(self, direction: int) -> None:
-        self.commit_current()
+        if not self._save_silently():
+            return
         index = self.list.currentRow()
         if index < 0:
             return
@@ -811,6 +992,8 @@ class ChapterEditorPage(QWidget):
         if index < 0:
             return
         if QMessageBox.question(self, "Delete Chapter", "Delete this chapter?") == QMessageBox.StandardButton.Yes:
+            if not self._save_silently():
+                return
             self.editor.delete(index)
             self.refresh(min(index, len(self.editor.chapters) - 1) if self.editor.chapters else None)
             self._save_silently()
@@ -831,6 +1014,8 @@ class ChapterEditorPage(QWidget):
             QMessageBox.StandardButton.No,
         )
         if answer != QMessageBox.StandardButton.Yes:
+            return
+        if not self._save_silently():
             return
         for index in rows:
             if 0 <= index < len(self.editor.chapters):
@@ -876,4 +1061,6 @@ class ChapterEditorPage(QWidget):
             QMessageBox.StandardButton.No,
         )
         if answer == QMessageBox.StandardButton.Yes:
+            if not self._save_silently():
+                return
             self.on_redetect()

@@ -13,6 +13,7 @@ def _default_state() -> dict[str, Any]:
         "cover_path": None,
         "backend": "automatic",
         "status": "new",
+        "background_audio_volume": 0.18,
         "completed_chapters": [],
         "failed_chapters": [],
     }

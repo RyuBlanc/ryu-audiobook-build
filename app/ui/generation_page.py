@@ -1,30 +1,40 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
+import logging
 import json
 import re
 import time
 import tempfile
+from datetime import datetime, timezone
 
 from PySide6.QtCore import QObject, Signal, QUrl, QTimer, QThread, QSettings
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
+    QFileDialog, QInputDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QVBoxLayout, QWidget, QComboBox, QScrollArea,
     QTableWidget, QTableWidgetItem, QHeaderView, QSizePolicy, QCheckBox,
     QDoubleSpinBox, QSpinBox,
 )
 
 from app.chapters.detector import Chapter, detect_chapters
+from app.core.paths import audiobooks_root
 from app.chapters.characters import analyze_book
 from app.ai.brain import _numeric_score
-from app.tts.pronunciation_suggester import suggest_pronunciation, suggest_names_from_text, COMMON_ENGLISH_WORDS, is_common_english_phrase, nativeish_pronunciation
+from app.tts.pronunciation_suggester import (
+    suggest_pronunciation, suggest_names_from_text, COMMON_ENGLISH_WORDS,
+    is_common_english_phrase, is_likely_character_name_candidate, nativeish_pronunciation,
+)
 from app.documents.parser import extract_text
+from app.documents.cover_art import persist_project_cover
 from app.core.state import load_state, save_state
+from app.core.character_identity import parse_character_identity_key
 from app.core.project import list_projects
 from app.ui.metadata_widgets import HistoryComboBox, GenrePicker
 from app.ui.motion import SmoothProgressBar
+from app.ui.stable_refresh import sync_combo_items_in_place
 from app.ui.audio_visualizer import AudioVisualizer
 from app.tts.manager import GenerationManager, GenerationSummary
 from app.tts.profile_provider import provider_from_profile
@@ -32,10 +42,18 @@ from app.tts.voice_profile import load_profiles, load_saved_profile, load_saved_
 from app.tts.providers.piper import PiperProvider
 from app.tts.system_sapi import SystemSAPIProvider
 from app.tts.preview import build_voice_preview
-from app.tts.readiness import build_generation_readiness
+from app.tts.readiness import build_generation_readiness, partition_chapters_by_body
 from app.tts.chatterbox_runtime import runtime_ready
-from app.audio.assembler import DEFAULT_AUDIO_BITRATE_KBPS
+from app.tts.qwen_character_runtime import runtime_ready as qwen_runtime_ready
+from app.audio.assembler import DEFAULT_AUDIO_BITRATE_KBPS, _duration_ms
 from app.tts.resume import inspect_generation_state
+from app.audio.library import (
+    AUDIO_SOURCE_LINKS, CUE_KIND_LABELS, MUSIC_CATEGORIES, ensure_audio_library,
+    import_audio_files, list_cue_tracks, list_music_tracks, resolve_cue_track, resolve_music_track,
+)
+
+
+log = logging.getLogger(__name__)
 
 
 class VoicePreviewWorker(QThread):
@@ -46,7 +64,8 @@ class VoicePreviewWorker(QThread):
     percent = Signal(int)
 
     def __init__(self, profile, backend, project_folder, profiles, pronunciation_dictionary,
-                 text, output, narration_speed, pacing_profile, dialogue_assignments=None):
+                 text, output, narration_speed, pacing_profile, dialogue_assignments=None,
+                 target_seconds: float | None = 30.0, mix_settings: dict | None = None):
         super().__init__()
         self.profile = profile
         self.backend = backend
@@ -58,6 +77,8 @@ class VoicePreviewWorker(QThread):
         self.narration_speed = narration_speed
         self.pacing_profile = pacing_profile
         self.dialogue_assignments = list(dialogue_assignments or [])
+        self.target_seconds = max(0.0, float(target_seconds or 0.0))
+        self.mix_settings = dict(mix_settings or {})
         self._provider = None
         self._progress_floor = 0
         self._preview_started = 0.0
@@ -110,7 +131,8 @@ class VoicePreviewWorker(QThread):
             if self.project_folder:
                 state = load_state(self.project_folder)
                 assignments = state.get('voice_cast', {}) if isinstance(state, dict) else {}
-                if assignments:
+                identity_assignments = state.get("voice_cast_identity_assignments", {}) if isinstance(state, dict) else {}
+                if assignments or identity_assignments:
                     from app.tts.cast_provider import CastAwareProvider
                     self._provider = CastAwareProvider(
                         provider, voice,
@@ -118,6 +140,7 @@ class VoicePreviewWorker(QThread):
                         assignments,
                         narrating_character=state.get('voice_cast_narrating_character'),
                         backend_override=self.backend,
+                        identity_assignments=identity_assignments,
                     )
                     wrapper_status = getattr(self._provider, "set_status_callback", None)
                     if callable(wrapper_status):
@@ -166,7 +189,38 @@ class VoicePreviewWorker(QThread):
                 pacing_profile=self.pacing_profile,
                 dialogue_assignments=self.dialogue_assignments,
                 progress_callback=preview_progress,
+                target_seconds=self.target_seconds,
             )
+            if self.mix_settings.get("enabled"):
+                self._emit_percent(91)
+                self.progress.emit("[91%] Mixing selected BGM, narration ducking and story effects…")
+                from app.audio.preview_mixer import mix_voice_preview
+                mixed_output = self.output.with_name(f"{self.output.stem}_full_mix.wav")
+                mix_voice_preview(
+                    result.output_path,
+                    mixed_output,
+                    result.source_text,
+                    background_enabled=bool(self.mix_settings.get("background_enabled", False)),
+                    background_mode=str(self.mix_settings.get("background_mode") or "auto"),
+                    music_style=str(self.mix_settings.get("music_style") or "auto"),
+                    music_variation_id=self.mix_settings.get("music_variation_id"),
+                    background_audio_path=self.mix_settings.get("background_audio_path"),
+                    ambience_audio_path=self.mix_settings.get("ambience_audio_path"),
+                    music_volume=float(self.mix_settings.get("music_volume", 0.12)),
+                    ambience_volume=float(self.mix_settings.get("ambience_volume", 0.06)),
+                    story_effects_enabled=bool(self.mix_settings.get("story_effects_enabled", True)),
+                    story_effect_volume=float(self.mix_settings.get("story_effect_volume", 0.12)),
+                    chapter_transition_sound=bool(self.mix_settings.get("chapter_transition_sound", True)),
+                    is_first_chapter=bool(self.mix_settings.get("is_first_chapter", True)),
+                    is_last_chapter=bool(self.mix_settings.get("is_last_chapter", False)),
+                    sound_cue_style=str(self.mix_settings.get("sound_cue_style") or "classic-book"),
+                    opening_cue_path=self.mix_settings.get("opening_cue_path"),
+                    page_turn_cue_path=self.mix_settings.get("page_turn_cue_path"),
+                    ending_cue_path=self.mix_settings.get("ending_cue_path"),
+                )
+                from dataclasses import replace
+                result = replace(result, output_path=mixed_output)
+                self._emit_percent(98)
             self._emit_percent(100)
             self.progress.emit('[100%] Preview ready.')
             self.finished_ok.emit(result)
@@ -250,6 +304,11 @@ class GenerationPage(QWidget):
         self._eta_last_time: float | None = None
         self._eta_warmup_samples = 0
         self._eta_rates: list[float] = []
+        self._estimated_listening_seconds = 0.0
+        self._estimated_generation_seconds = 0.0
+        self._active_calibration_key: str | None = None
+        self._active_calibration_is_resume = False
+        self._calibration_factor = 2.45
         self.motion_settings = QSettings("RyuBlanc", "Ryu's Audiobook")
         self._reduce_motion_enabled = bool(
             self.motion_settings.value("ui/reduce_motion", False, type=bool)
@@ -287,11 +346,12 @@ class GenerationPage(QWidget):
         outer.setContentsMargins(12, 10, 12, 10)
         outer.setSpacing(8)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.content_scroll = QScrollArea()
+        self.content_scroll.setWidgetResizable(True)
+        self.content_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         content = QWidget()
         root = QVBoxLayout(content)
+        self.content_root_layout = root
         root.setContentsMargins(6, 4, 6, 12)
         root.setSpacing(12)
 
@@ -332,6 +392,10 @@ class GenerationPage(QWidget):
         overview_layout.addWidget(self.chapter_count)
         overview_layout.addWidget(self.word_count)
         overview_layout.addWidget(self.duration_estimate)
+        self.generation_estimate = QLabel()
+        self.generation_estimate.setWordWrap(True)
+        self.generation_estimate.setObjectName("muted")
+        overview_layout.addWidget(self.generation_estimate)
         overview_layout.addStretch(1)
         root.addWidget(overview)
         self._update_overview()
@@ -344,6 +408,8 @@ class GenerationPage(QWidget):
         root.addWidget(cast_box)
 
         pronunciation_box = QGroupBox("Pronunciation Dictionary")
+        self.pronunciation_box = pronunciation_box
+        pronunciation_box.setObjectName("pronunciationDictionarySection")
         pronunciation_layout = QVBoxLayout(pronunciation_box)
         pronunciation_hint = QLabel(
             "Add words or names the voice should pronounce differently. "
@@ -351,6 +417,21 @@ class GenerationPage(QWidget):
         )
         pronunciation_hint.setWordWrap(True)
         pronunciation_layout.addWidget(pronunciation_hint)
+
+        pronunciation_filter_row = QHBoxLayout()
+        self.pronunciation_scope = QComboBox()
+        self.pronunciation_scope.setObjectName("pronunciationScope")
+        self.pronunciation_scope.addItem("Current book", "book")
+        self.pronunciation_scope.addItem("Global library", "global")
+        pronunciation_filter_row.addWidget(self.pronunciation_scope)
+        self.pronunciation_search = QLineEdit()
+        self.pronunciation_search.setObjectName("pronunciationSearch")
+        self.pronunciation_search.setPlaceholderText("Search dictionary…")
+        self.pronunciation_search.setClearButtonEnabled(True)
+        pronunciation_filter_row.addWidget(self.pronunciation_search, 1)
+        pronunciation_layout.addLayout(pronunciation_filter_row)
+        self.pronunciation_search.textChanged.connect(self._apply_pronunciation_search)
+        self.pronunciation_scope.currentIndexChanged.connect(self._switch_pronunciation_scope)
 
         self.pronunciation_table = QTableWidget(0, 3)
         self.pronunciation_table.setHorizontalHeaderLabels(["Written", "Pronounce as", "Enabled"])
@@ -411,6 +492,8 @@ class GenerationPage(QWidget):
         root.addWidget(pronunciation_box)
 
         settings = QGroupBox("Audio settings")
+        self.audio_settings_box = settings
+        settings.setObjectName("audioSettingsSection")
         settings_form = QFormLayout(settings)
         self._background_audio_form = settings_form
 
@@ -451,8 +534,14 @@ class GenerationPage(QWidget):
             if kbps == DEFAULT_AUDIO_BITRATE_KBPS:
                 label += " • Premium recommended"
             self.audio_bitrate.addItem(label, kbps)
+        try:
+            global_bitrate = int(QSettings("RyuBlanc", "Ryu's Audiobook").value(
+                "audio/default_bitrate", DEFAULT_AUDIO_BITRATE_KBPS
+            ) or DEFAULT_AUDIO_BITRATE_KBPS)
+        except (TypeError, ValueError):
+            global_bitrate = DEFAULT_AUDIO_BITRATE_KBPS
         self.audio_bitrate.setCurrentIndex(
-            max(0, self.audio_bitrate.findData(DEFAULT_AUDIO_BITRATE_KBPS))
+            max(0, self.audio_bitrate.findData(global_bitrate))
         )
         settings_form.addRow("Audio quality", self.audio_bitrate)
 
@@ -460,6 +549,14 @@ class GenerationPage(QWidget):
         # The default remains narration-only. Track settings are stored in the
         # project state and mixed only during final M4B packaging.
         audio_state = load_state(self.project_folder) if self.project_folder else {}
+        try:
+            project_bitrate = int(audio_state.get("audio_bitrate")) if audio_state.get("audio_bitrate") is not None else None
+        except (TypeError, ValueError):
+            project_bitrate = None
+        if project_bitrate is not None:
+            saved_bitrate_index = self.audio_bitrate.findData(project_bitrate)
+            if saved_bitrate_index >= 0:
+                self.audio_bitrate.setCurrentIndex(saved_bitrate_index)
         self.background_audio_enabled = QCheckBox("Enable background music / ambience")
         self.background_audio_enabled.setChecked(
             bool(audio_state.get("background_audio_enabled", False))
@@ -489,12 +586,14 @@ class GenerationPage(QWidget):
         self.auto_music_style = QComboBox()
         for label, value in (
             ("Auto-detect from each chapter", "auto"),
-            ("Fantasy / Adventure", "fantasy"),
-            ("Mystery / Suspense", "mystery"),
-            ("Romance / Warm", "romance"),
-            ("Dark / Horror", "dark"),
-            ("Action / Adventure", "action"),
-            ("Calm / Reflective", "calm"),
+            ("Epic Anime Fantasy", "fantasy"),
+            ("Cinematic Mystery / Suspense", "mystery"),
+            ("Emotional Cinematic Drama", "romance"),
+            ("Dark Supernatural Tension", "dark"),
+            ("Heroic Anime Battle", "action"),
+            ("Adventure Journey / Exploration", "calm"),
+            ("High-Energy Anime Rock", "anime-rock"),
+            ("Futuristic Sword-Fantasy / Sci-Fi", "sci-fi"),
         ):
             self.auto_music_style.addItem(label, value)
         saved_style_index = self.auto_music_style.findData(
@@ -503,13 +602,178 @@ class GenerationPage(QWidget):
         self.auto_music_style.setCurrentIndex(max(0, saved_style_index))
         settings_form.addRow("Automatic music style", self.auto_music_style)
 
+        # Original rhythmic cinematic arrangements replace the old harmony-pad
+        # catalogue. Tracks are synthesized only when previewed or exported.
+        ensure_audio_library()
+        self.bgm_variation = QComboBox()
+        self.bgm_variation.setObjectName("realBgmCatalogue")
+        self.bgm_variation.setMinimumContentsLength(28)
+        self.bgm_variation.setToolTip(
+            "Real audio files only. Auto mode selects a track from your local library "
+            "based on each chapter's mood. Add multiple tracks per category for variety."
+        )
+        self.bgm_variation.addItem("Auto • match each chapter to a real track", "auto")
+        for track in list_music_tracks():
+            self.bgm_variation.addItem(
+                f"{track.category_label} • {track.path.name}",
+                str(track.path),
+            )
+        saved_track_path = str(audio_state.get("auto_music_track_path") or "")
+        saved_track_index = self.bgm_variation.findData(saved_track_path)
+        self.bgm_variation.setCurrentIndex(saved_track_index if saved_track_index >= 0 else 0)
+
+        music_filter_row = QHBoxLayout()
+        self.music_catalogue_search = QLineEdit()
+        self.music_catalogue_search.setObjectName("musicCatalogueSearch")
+        self.music_catalogue_search.setPlaceholderText("Search tracks, mood or scene…")
+        self.music_catalogue_search.setClearButtonEnabled(True)
+        music_filter_row.addWidget(self.music_catalogue_search, 2)
+        self.music_category_filter = QComboBox()
+        self.music_category_filter.setObjectName("musicCategoryFilter")
+        self.music_category_filter.addItem("All categories", "all")
+        for category_key, category_label in MUSIC_CATEGORIES:
+            self.music_category_filter.addItem(category_label, category_key)
+        music_filter_row.addWidget(self.music_category_filter, 1)
+        music_filter_container = QWidget()
+        music_filter_container.setLayout(music_filter_row)
+        settings_form.addRow("Browse music", music_filter_container)
+        self.music_catalogue_search.textChanged.connect(lambda *_: self._refresh_bgm_catalogue())
+        self.music_category_filter.currentIndexChanged.connect(lambda *_: self._refresh_bgm_catalogue())
+
+        music_catalogue_row = QHBoxLayout()
+        music_catalogue_row.addWidget(self.bgm_variation, 1)
+        self.music_catalogue_preview = QPushButton("▶ Preview selected BGM")
+        self.music_catalogue_preview.clicked.connect(self.preview_catalogue_music)
+        music_catalogue_row.addWidget(self.music_catalogue_preview)
+        self.music_import_button = QPushButton("Import tracks…")
+        self.music_import_button.clicked.connect(self.import_music_tracks)
+        music_catalogue_row.addWidget(self.music_import_button)
+        self.music_sources_button = QPushButton("Find tracks online…")
+        self.music_sources_button.clicked.connect(lambda: self.open_audio_sources("music"))
+        music_catalogue_row.addWidget(self.music_sources_button)
+        self.music_catalogue_container = QWidget()
+        self.music_catalogue_container.setLayout(music_catalogue_row)
+        settings_form.addRow("Real BGM catalogue", self.music_catalogue_container)
+        self._catalogue_preview_path: Path | None = None
+        self.music_catalogue_hint = QLabel(
+            "Import licensed tracks into story categories. Auto chooses a real, mood-matched file; "
+            "if no track is installed, narration stays clean rather than using synthetic music."
+        )
+        self.music_catalogue_hint.setObjectName("muted")
+        settings_form.addRow("", self.music_catalogue_hint)
+
         self.chapter_transition_sound = QCheckBox(
-            "Add a short transition sound at every chapter (generated locally)"
+            "Add real book-opening, chapter-turn and book-closing sounds"
         )
         self.chapter_transition_sound.setChecked(
             bool(audio_state.get("chapter_transition_sound", True))
         )
+        self.chapter_transition_sound.setToolTip(
+            "Use imported real audio clips. Leave a cue field blank to rotate through "
+            "the relevant local library folder."
+        )
         settings_form.addRow("", self.chapter_transition_sound)
+
+        # Compatibility field for older saved project state. Generated cue
+        # presets are removed from the user interface and export path.
+        self.sound_cue_style = QComboBox()
+        self.sound_cue_style.addItem("Local audio library (real sounds only)", "library")
+        self.sound_cue_style.hide()
+
+        cue_preview_row = QHBoxLayout()
+        self.preview_opening_cue = QPushButton("▶ Preview opening")
+        self.preview_opening_cue.clicked.connect(lambda: self.preview_cue("opening"))
+        cue_preview_row.addWidget(self.preview_opening_cue)
+        self.preview_page_cue = QPushButton("▶ Preview next chapter")
+        self.preview_page_cue.clicked.connect(lambda: self.preview_cue("page"))
+        cue_preview_row.addWidget(self.preview_page_cue)
+        self.preview_ending_cue = QPushButton("▶ Preview book closing")
+        self.preview_ending_cue.clicked.connect(lambda: self.preview_cue("ending"))
+        cue_preview_row.addWidget(self.preview_ending_cue)
+        settings_form.addRow("Audition book cues", cue_preview_row)
+
+        custom_cues_layout = QVBoxLayout()
+        custom_cues_layout.setContentsMargins(0, 0, 0, 0)
+        custom_cues_layout.setSpacing(8)
+        self.opening_cue_path = QLineEdit(str(audio_state.get("opening_cue_path") or ""))
+        self.opening_cue_path.setPlaceholderText("No opening sound selected • Auto library is active")
+        self.page_turn_cue_path = QLineEdit(str(audio_state.get("page_turn_cue_path") or ""))
+        self.page_turn_cue_path.setPlaceholderText("Optional chapter-turn clip • blank = auto-rotate library")
+        self.ending_cue_path = QLineEdit(str(audio_state.get("ending_cue_path") or ""))
+        self.ending_cue_path.setPlaceholderText("Optional closing clip • blank = auto-rotate library")
+        self._cue_path_fields = {
+            "opening": self.opening_cue_path,
+            "page": self.page_turn_cue_path,
+            "ending": self.ending_cue_path,
+        }
+
+        opening_card = QGroupBox("Book opening")
+        self.opening_cue_box = opening_card
+        opening_card_layout = QVBoxLayout(opening_card)
+        opening_card_layout.setContentsMargins(10, 10, 10, 10)
+        opening_card_layout.setSpacing(6)
+        opening_card_layout.addWidget(QLabel("Choose a real opening sound, preview it, or use Auto to rotate the opening library."))
+        opening_controls = QHBoxLayout()
+        opening_controls.addWidget(self.opening_cue_path, 1)
+        self.opening_cue_preview_button = QPushButton("▶ Preview")
+        self.opening_cue_preview_button.clicked.connect(lambda: self.preview_cue("opening"))
+        opening_controls.addWidget(self.opening_cue_preview_button)
+        opening_browse = QPushButton("Import from PC…")
+        opening_browse.clicked.connect(lambda: self.import_cue_audio("opening"))
+        opening_controls.addWidget(opening_browse)
+        opening_library = QPushButton("Library…")
+        opening_library.clicked.connect(lambda: self.choose_from_cue_library("opening"))
+        opening_controls.addWidget(opening_library)
+        opening_auto = QPushButton("Auto")
+        opening_auto.setToolTip("Clear the selected file and choose from the opening library automatically.")
+        opening_auto.clicked.connect(lambda: self.clear_cue_audio_path("opening"))
+        opening_controls.addWidget(opening_auto)
+        opening_card_layout.addLayout(opening_controls)
+        custom_cues_layout.addWidget(opening_card)
+
+        other_cues_card = QGroupBox("Chapter transition and book closing")
+        self.transition_cue_box = other_cues_card
+        other_cues_layout = QVBoxLayout(other_cues_card)
+        other_cues_layout.setContentsMargins(10, 10, 10, 10)
+        other_cues_layout.setSpacing(5)
+        for kind, field in (("page", self.page_turn_cue_path), ("ending", self.ending_cue_path)):
+            row = QHBoxLayout()
+            row.addWidget(field, 1)
+            browse = QPushButton("Browse…")
+            browse.setToolTip("Use one specific local sound file")
+            browse.clicked.connect(lambda _checked=False, cue_kind=kind: self.choose_cue_audio(cue_kind))
+            row.addWidget(browse)
+            library_button = QPushButton("Library…")
+            library_button.setToolTip("Choose one of the imported real sounds")
+            library_button.clicked.connect(lambda _checked=False, cue_kind=kind: self.choose_from_cue_library(cue_kind))
+            row.addWidget(library_button)
+            import_button = QPushButton("Import…")
+            import_button.clicked.connect(lambda _checked=False, cue_kind=kind: self.import_cue_audio(cue_kind))
+            row.addWidget(import_button)
+            clear_button = QPushButton("Auto")
+            clear_button.setToolTip("Clear the override and rotate through this cue library")
+            clear_button.clicked.connect(lambda _checked=False, cue_kind=kind: self.clear_cue_audio_path(cue_kind))
+            row.addWidget(clear_button)
+            other_cues_layout.addLayout(row)
+        custom_cues_layout.addWidget(other_cues_card)
+        self.custom_cues_container = QWidget()
+        self.custom_cues_container.setLayout(custom_cues_layout)
+        settings_form.addRow("Real audiobook cue files", self.custom_cues_container)
+
+        cue_source_row = QHBoxLayout()
+        self.cue_sources_button = QPushButton("Find book sounds online…")
+        self.cue_sources_button.clicked.connect(lambda: self.open_audio_sources("cue"))
+        cue_source_row.addWidget(self.cue_sources_button)
+        self.cue_library_hint = QLabel(
+            "Add multiple clips to each library for rotation. Opening, page-turn and closing "
+            "sounds stay separate; no generated placeholder cues are used."
+        )
+        self.cue_library_hint.setObjectName("muted")
+        cue_source_row.addWidget(self.cue_library_hint, 1)
+        cue_source_container = QWidget()
+        cue_source_container.setLayout(cue_source_row)
+        settings_form.addRow("", cue_source_container)
+        self._toggle_custom_cue_fields()
 
         self.story_effects_enabled = QCheckBox(
             "Add story-aware sound effects (footsteps, doors, weather, impacts, magic, etc.)"
@@ -616,18 +880,33 @@ class GenerationPage(QWidget):
             "Manual: use your own music or ambience. Effects stay beneath narration."
         )
         self.background_audio_hint.setToolTip(
-            "Automatic mode selects from 1,008 deterministic local BGM recipes "
-            "(6 moods × 8 timbres × 7 tempos × 3 harmony patterns), generating only "
-            "the variations the book needs rather than downloading 1,000 files or "
-            "shuffling random tracks. Mood detection uses chapter text; sound effects "
-            "are placed from explicit text cues and approximate audio timing. Manual "
-            "mode uses music/ambience files you have permission to use. Story effects "
-            "can be enabled independently. Review the final mix before publishing."
+            "Automatic mode selects from 1,344 original local cinematic arrangements "
+            "(8 story styles × 8 rhythmic textures × 7 tempos × 3 rhythmic arrangements). "
+            "These use bass movement, ostinatos, percussion, strings and melodic leads "
+            "instead of the retired quiet harmony-pad recipe. Tracks render only as needed. "
+            "The linked cue set adds an opening, chapter page turns and a different closing; "
+            "choose a preset or supply your own three recordings. Use only music/ambience "
+            "you have permission to use and review the final mix before publishing."
         )
         self.background_audio_hint.setWordWrap(True)
         self.background_audio_hint.setObjectName("muted")
         settings_form.addRow("", self.background_audio_hint)
         self.background_audio_enabled.toggled.connect(self._toggle_background_audio_controls)
+        self.background_audio_enabled.toggled.connect(self._update_overview)
+        self.background_audio_mode.currentIndexChanged.connect(self._update_overview)
+        self.auto_music_style.currentIndexChanged.connect(self._update_overview)
+        self.bgm_variation.currentIndexChanged.connect(self._update_overview)
+        self.chapter_transition_sound.toggled.connect(self._update_overview)
+        self.sound_cue_style.currentIndexChanged.connect(self._update_overview)
+        for cue_path_field in self._cue_path_fields.values():
+            cue_path_field.textChanged.connect(self._update_overview)
+        self.story_effects_enabled.toggled.connect(self._update_overview)
+        self.story_effect_volume.valueChanged.connect(self._update_overview)
+        self.background_audio_volume.valueChanged.connect(self._update_overview)
+        self.ambience_audio_volume.valueChanged.connect(self._update_overview)
+        self.narration_speed.currentIndexChanged.connect(self._update_overview)
+        self.pacing_profile.currentIndexChanged.connect(self._update_overview)
+        self.voice_profile.currentIndexChanged.connect(self._update_overview)
         self._toggle_background_audio_controls(self.background_audio_enabled.isChecked())
 
         self.pacing_hint = QLabel(
@@ -675,6 +954,23 @@ class GenerationPage(QWidget):
         preview_source_row.addWidget(self.preview_chapter, 1)
         preview_layout.addLayout(preview_source_row)
 
+        preview_options_row = QHBoxLayout()
+        preview_options_row.addWidget(QLabel("Preview length"))
+        self.preview_duration = QComboBox()
+        for seconds in (15, 30, 60):
+            self.preview_duration.addItem(f"{seconds} seconds", seconds)
+        self.preview_duration.setCurrentIndex(1)
+        preview_options_row.addWidget(self.preview_duration)
+        self.preview_mix_enabled = QCheckBox("Include selected BGM, story effects and chapter/end cues")
+        self.preview_mix_enabled.setChecked(bool(audio_state.get("preview_include_sound_design", True)))
+        self.preview_mix_enabled.setToolTip(
+            "When enabled, the generated sample auditions narration with the selected "
+            "background music/ambience, ducking, story effects and any page-turn or final-book cue. "
+            "Turn it off for a dry voice-only comparison."
+        )
+        preview_options_row.addWidget(self.preview_mix_enabled, 1)
+        preview_layout.addLayout(preview_options_row)
+
         preview_actions = QHBoxLayout()
         self.preview_button = QPushButton("▶  Generate Voice Preview")
         self.preview_button.clicked.connect(self.preview)
@@ -690,7 +986,7 @@ class GenerationPage(QWidget):
         preview_layout.addLayout(preview_actions)
 
         preview_time_row = QHBoxLayout()
-        self.preview_status = QLabel("Generate a preview to listen to the selected voice.")
+        self.preview_status = QLabel("Generate a 15/30/60-second preview; optionally include the current soundtrack and effects.")
         self.preview_time = QLabel("0:00 / 0:00")
         preview_time_row.addWidget(self.preview_status, 1)
         preview_time_row.addWidget(self.preview_time)
@@ -713,6 +1009,7 @@ class GenerationPage(QWidget):
         root.addWidget(preview_box)
 
         progress_box = QGroupBox("Generation")
+        progress_box.setObjectName("generationProgressSection")
         progress_layout = QVBoxLayout(progress_box)
         self.progress = SmoothProgressBar()
         progress_layout.addWidget(self.progress)
@@ -796,15 +1093,20 @@ class GenerationPage(QWidget):
         self.resume_button = QPushButton("Resume / Retry")
         self.resume_button.setVisible(False)
         self.resume_button.clicked.connect(self.start)
+        self.pause_button = QPushButton("Pause")
+        self.pause_button.setObjectName("generationPauseButton")
+        self.pause_button.setEnabled(False)
+        self.pause_button.clicked.connect(self.toggle_generation_pause)
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.setEnabled(False)
         actions.addWidget(self.start_button)
         actions.addWidget(self.resume_button)
+        actions.addWidget(self.pause_button)
         actions.addWidget(self.cancel_button)
         root.addLayout(actions)
 
-        scroll.setWidget(content)
-        outer.addWidget(scroll, 1)
+        self.content_scroll.setWidget(content)
+        outer.addWidget(self.content_scroll, 1)
 
         self.status = QLabel("Ready")
         self.status.setWordWrap(True)
@@ -830,6 +1132,22 @@ class GenerationPage(QWidget):
         self._refresh_resume_state()
         self._refresh_readiness()
 
+    def focus_section(self, section: str) -> bool:
+        """Scroll the existing production UI to a real feature section."""
+        targets = {
+            "pronunciation": "pronunciationDictionarySection",
+            "sound": "audioSettingsSection",
+            "generate": "generationProgressSection",
+        }
+        object_name = targets.get(str(section or "").strip().lower())
+        if not object_name:
+            return False
+        target = self.findChild(QGroupBox, object_name)
+        if target is None or not hasattr(self, "content_scroll"):
+            return False
+        self.content_scroll.ensureWidgetVisible(target, 0, 18)
+        return True
+
     def _add_pronunciation_row(self, written="", spoken="", enabled=True, source="manual"):
         from PySide6.QtCore import Qt
         row = self.pronunciation_table.rowCount()
@@ -844,6 +1162,63 @@ class GenerationPage(QWidget):
         item.setData(Qt.ItemDataRole.UserRole, source)
         item.setCheckState(Qt.CheckState.Checked if enabled else Qt.CheckState.Unchecked)
         self.pronunciation_table.setItem(row, 2, item)
+        if hasattr(self, "pronunciation_search"):
+            self._apply_pronunciation_search()
+
+    def _apply_pronunciation_search(self) -> None:
+        query = str(self.pronunciation_search.text() or "").strip().casefold()
+        for row in range(self.pronunciation_table.rowCount()):
+            values = []
+            for column in (0, 1):
+                cell = self.pronunciation_table.item(row, column)
+                values.append(cell.text().casefold() if cell else "")
+            self.pronunciation_table.setRowHidden(
+                row, bool(query) and not any(query in value for value in values)
+            )
+
+    def _switch_pronunciation_scope(self, *_args) -> None:
+        # Save the visible scope before loading the newly selected one.
+        if not hasattr(self, "pronunciation_table"):
+            return
+        previous = str(getattr(self, "_loaded_pronunciation_scope", "book"))
+        if previous == str(self.pronunciation_scope.currentData() or "book"):
+            return
+        self._save_pronunciations(scope=previous)
+        self._load_pronunciations()
+
+    def _global_pronunciation_entries(self) -> list[dict]:
+        raw = QSettings("RyuBlanc", "Ryu's Audiobook").value(
+            "pronunciation/global_dictionary", "[]"
+        )
+        try:
+            entries = json.loads(str(raw)) if isinstance(raw, str) else raw
+        except (TypeError, ValueError, json.JSONDecodeError):
+            entries = []
+        return [
+            dict(item) for item in entries
+            if isinstance(item, dict)
+            and str(item.get("written") or "").strip()
+            and str(item.get("spoken") or "").strip()
+        ] if isinstance(entries, list) else []
+
+    def _combined_pronunciation_entries(self) -> list[dict]:
+        """Merge global entries with per-book overrides; book entries win by spelling."""
+        global_entries = self._global_pronunciation_entries()
+        book_entries = []
+        if self.project_folder:
+            state = load_state(self.project_folder)
+            value = state.get("pronunciation_dictionary", [])
+            if isinstance(value, list):
+                book_entries = [
+                    dict(item) for item in value
+                    if isinstance(item, dict)
+                    and str(item.get("written") or "").strip()
+                    and str(item.get("spoken") or "").strip()
+                ]
+        merged: dict[str, dict] = {}
+        for item in global_entries + book_entries:
+            merged[str(item["written"]).casefold()] = item
+        return list(merged.values())
 
     def _load_audiobook_analysis(self):
         """Load the completed AI book analysis, or partial chapter analyses."""
@@ -899,15 +1274,22 @@ class GenerationPage(QWidget):
                 for row in range(self.pronunciation_table.rowCount())
                 if self.pronunciation_table.item(row, 0)
             }
+            # Do not scrape every capitalized sentence-initial word from prose.
+            # Use names returned by the same source-grounded character analyzer
+            # as Character Studio, and only suggest readings for those entities.
+            detected = analyze_book(self.chapters)
+            candidate_names = []
+            for character in detected.characters:
+                name = str(getattr(character, "name", "") or "").strip()
+                if name:
+                    candidate_names.append(name)
+            all_names = set(candidate_names)
+            source_text = "\n".join(ch.text or "" for ch in self.chapters)
             added = 0
-            for name in suggest_names_from_text("\n".join(ch.text or "" for ch in self.chapters)):
-                clean = name.strip()
-                if (
-                    not clean
-                    or clean.casefold() in existing
-                    or clean.casefold() in COMMON_ENGLISH_WORDS
-                    or all(part.casefold() in COMMON_ENGLISH_WORDS for part in clean.split())
-                ):
+            for clean in dict.fromkeys(candidate_names):
+                if clean.casefold() in existing or clean.casefold() not in source_text.casefold():
+                    continue
+                if not is_likely_character_name_candidate(clean, known_names=all_names):
                     continue
                 spoken = suggest_pronunciation(clean)
                 if not spoken or spoken.casefold() == clean.casefold():
@@ -956,10 +1338,12 @@ class GenerationPage(QWidget):
                 return False
             if spoken.casefold() == folded:
                 return False
-            # Never import ordinary English vocabulary merely because the AI
-            # assigned it a non-English language. Preserve English words only
-            # when they are also a confirmed character name.
-            if is_common_english_phrase(written) and folded not in character_names:
+            # Do not trust the model's language label alone: "Having" or "The Oath"
+            # must not become a Japanese reading just because the model tagged it
+            # as Japanese. Character names from the book bible are explicitly allowed.
+            if not is_likely_character_name_candidate(
+                written, known_names=character_names, script=script
+            ):
                 return False
 
             # For English/unknown-language suggestions, require stronger evidence:
@@ -1076,7 +1460,25 @@ class GenerationPage(QWidget):
 
     def _load_pronunciations(self):
         self.pronunciation_table.setRowCount(0)
+        scope = str(self.pronunciation_scope.currentData() or "book")
+        self._loaded_pronunciation_scope = scope
         if not self.project_folder:
+            return
+        if scope == "global":
+            entries = self._global_pronunciation_entries()
+            for item in entries:
+                self._add_pronunciation_row(
+                    str(item.get("written") or ""),
+                    str(item.get("spoken") or ""),
+                    item.get("enabled", True) is not False,
+                    source=str(item.get("source") or "manual"),
+                )
+            self.pronunciation_status.setText(
+                f"{len(entries)} global pronunciation entr{'y' if len(entries) == 1 else 'ies'} loaded. "
+                "Saved entries are available across books on this PC."
+                if entries else "Global library is empty. Add a pronunciation and save it to reuse it across books."
+            )
+            self._apply_pronunciation_search()
             return
         state = load_state(self.project_folder)
         entries = state.get("pronunciation_dictionary", [])
@@ -1169,16 +1571,32 @@ class GenerationPage(QWidget):
                 f"{count} pronunciation override{'s' if count != 1 else ''} saved for this book."
                 if count else "No pronunciation overrides saved for this book."
             )
+        self._apply_pronunciation_search()
 
-    def _save_pronunciations(self):
+    def _save_pronunciations(self, scope: str | None = None):
+        target_scope = str(scope or self.pronunciation_scope.currentData() or "book")
+        entries = self._pronunciation_entries()
+        if target_scope == "global":
+            settings = QSettings("RyuBlanc", "Ryu's Audiobook")
+            settings.setValue(
+                "pronunciation/global_dictionary",
+                json.dumps(entries, ensure_ascii=False),
+            )
+            settings.sync()
+            self.pronunciation_status.setText(
+                f"Saved {len(entries)} global pronunciation entr{'y' if len(entries) == 1 else 'ies'}."
+            )
+            return
         if not self.project_folder:
             return
         state = load_state(self.project_folder)
-        entries = self._pronunciation_entries()
         state["pronunciation_dictionary"] = entries
         state["pronunciation_dictionary_version"] = 2
         save_state(self.project_folder, state)
-        self.pronunciation_status.setText(f"{len(entries)} pronunciation override{'s' if len(entries) != 1 else ''} saved for this book." if entries else "No pronunciation overrides saved for this book.")
+        self.pronunciation_status.setText(
+            f"{len(entries)} pronunciation override{'s' if len(entries) != 1 else ''} saved for this book."
+            if entries else "No pronunciation overrides saved for this book."
+        )
     def _test_selected_pronunciation(self) -> None:
         row = self.pronunciation_table.currentRow()
         if row < 0:
@@ -1271,32 +1689,49 @@ class GenerationPage(QWidget):
         if not self.project_folder:
             return
         state = load_state(self.project_folder)
-        cast = state.get("voice_cast", {})
-        if not cast:
+        legacy_cast = state.get("voice_cast", {})
+        legacy_cast = legacy_cast if isinstance(legacy_cast, dict) else {}
+        identity_cast = state.get("voice_cast_identity_assignments", {})
+        lines = []
+        if isinstance(identity_cast, dict) and identity_cast:
+            for identity, voice in identity_cast.items():
+                parsed = parse_character_identity_key(identity)
+                if not parsed or not str(voice or "").strip():
+                    continue
+                series, name = parsed
+                lines.append(f"{name} [{series}] → {voice}")
+            # Narrator remains a legacy, project-wide fallback assignment.
+            narrator = legacy_cast.get("Narrator") or legacy_cast.get("narrator")
+            if narrator:
+                lines.append(f"Narrator → {narrator}")
+        else:
+            lines = [f"{name} → {voice}" for name, voice in legacy_cast.items() if voice]
+        if not lines:
             self.cast_summary.setText("No character-specific voice assignments saved. Narrator voice will be used.")
             return
-        lines = [f"{name} → {voice}" for name, voice in cast.items()]
         self.cast_summary.setText(
             "Saved voice cast assignments:\n" + "\n".join(lines) +
             "\n\nThese assignments are stored with this book and are ready for the cast-aware narration engine."
         )
 
     def _load_profiles(self, keep_name: str | None = None) -> None:
-        self.voice_profile.clear()
-        for profile in self.profiles:
-            self.voice_profile.addItem(profile.name, profile)
-        if not self.profiles:
-            self.voice_profile.addItem("No saved voice profiles", None)
-            return
-        if keep_name:
-            index = self.voice_profile.findText(keep_name)
-            if index >= 0:
-                self.voice_profile.setCurrentIndex(index)
+        current = keep_name if keep_name is not None else self.voice_profile.currentText()
+        if self.profiles:
+            rows = [(profile.name, profile) for profile in self.profiles]
+            selected = next((profile for profile in self.profiles if profile.name == current), None)
+        else:
+            rows = [("No saved voice profiles", None)]
+            selected = None
+        sync_combo_items_in_place(self.voice_profile, rows, selected)
 
     def _refresh_voice_profiles(self) -> None:
         current = self.voice_profile.currentText()
         self.profiles = load_profiles()
         self._load_profiles(current)
+        # Signals are intentionally blocked during the in-place update, so refresh
+        # dependent readiness and duration estimates once from the final selection.
+        self._update_overview()
+        self._refresh_readiness()
         self.status.setText("Voice profiles refreshed.")
 
     def _metadata_history(self, key: str, defaults: list[str] | None = None) -> list[str]:
@@ -1326,27 +1761,14 @@ class GenerationPage(QWidget):
         return result[:40]
 
     def refresh_chapter_sources(self) -> None:
-        """Refresh chapter-dependent UI from the current ProjectWorkflow list."""
-        selected_number = self.preview_chapter.currentData() if hasattr(self, "preview_chapter") else None
-        self.preview_chapter.blockSignals(True)
-        self.preview_chapter.clear()
-        for chapter in self.chapters:
-            self.preview_chapter.addItem(
-                f"Chapter {chapter.number}: {chapter.title}",
-                chapter.number,
-            )
-        self.preview_chapter.blockSignals(False)
-        if self.chapters:
-            target_index = 0
-            if selected_number is not None:
-                for index, chapter in enumerate(self.chapters):
-                    if chapter.number == selected_number:
-                        target_index = index
-                        break
-            self.preview_chapter.setCurrentIndex(min(target_index, len(self.chapters) - 1))
-            self.preview_chapter.setEnabled(True)
-        else:
-            self.preview_chapter.setEnabled(False)
+        """Refresh chapter-dependent UI without clearing the visible selector."""
+        selected_number = self.preview_chapter.currentData()
+        rows = [
+            (f"Chapter {chapter.number}: {chapter.title}", chapter.number)
+            for chapter in self.chapters
+        ]
+        sync_combo_items_in_place(self.preview_chapter, rows, selected_number)
+        self.preview_chapter.setEnabled(bool(self.chapters))
         self._update_overview()
         self._refresh_readiness()
         self._refresh_resume_state()
@@ -1355,19 +1777,92 @@ class GenerationPage(QWidget):
     def _update_overview(self) -> None:
         words = sum(len(ch.text.split()) for ch in self.chapters)
         speed = float(self.narration_speed.currentData() or 0.90) if hasattr(self, "narration_speed") else 0.90
-        effective_wpm = max(60.0, 150.0 * speed)
-        minutes = max(1, round(words / effective_wpm))
+        effective_wpm = max(60.0, 170.0 * speed)
+        listening_seconds = words * 60.0 / effective_wpm
+        if hasattr(self, "motion_settings") and hasattr(self, "voice_profile"):
+            try:
+                key = self._generation_calibration_key()
+                observed_seconds_per_word = float(
+                    self.motion_settings.value(f"{key}/seconds_per_word", 0.0) or 0.0
+                )
+                if observed_seconds_per_word > 0:
+                    listening_seconds = words * observed_seconds_per_word
+            except (TypeError, ValueError, AttributeError):
+                pass
+        # Include the actual transition/end cues in the duration estimate when
+        # this book is configured to add them.
+        if (
+            hasattr(self, "chapter_transition_sound")
+            and self.chapter_transition_sound.isChecked()
+            and len(self.chapters) > 0
+        ):
+            from app.audio.sound_design import ENDING_SECONDS, OPENING_SECONDS, PAGE_TURN_SECONDS
+            listening_seconds += OPENING_SECONDS + max(0, len(self.chapters) - 1) * PAGE_TURN_SECONDS + ENDING_SECONDS
+            if str(self.sound_cue_style.currentData() or "classic-book") == "custom":
+                for path_field, times_used, default_seconds in (
+                    (self.opening_cue_path, 1, OPENING_SECONDS),
+                    (self.page_turn_cue_path, max(0, len(self.chapters) - 1), PAGE_TURN_SECONDS),
+                    (self.ending_cue_path, 1, ENDING_SECONDS),
+                ):
+                    try:
+                        custom_path = Path(path_field.text().strip()).expanduser()
+                        if custom_path.is_file():
+                            listening_seconds += times_used * (
+                                _duration_ms(custom_path) / 1000.0 - default_seconds
+                            )
+                    except Exception:
+                        pass
+        self._estimated_listening_seconds = max(0.0, listening_seconds)
+        listening_minutes = max(1, round(self._estimated_listening_seconds / 60.0))
         self.chapter_count.setText(f"Chapters: {len(self.chapters)}")
         self.word_count.setText(f"Words: {words:,}")
         self.duration_estimate.setText(
-            f"Estimated length: {minutes // 60}h {minutes % 60:02d}m at {speed:.2f}× narration speed"
+            f"Estimated listening length: {listening_minutes // 60}h {listening_minutes % 60:02d}m "
+            f"at {speed:.2f}× narration speed"
         )
+        self.duration_estimate.setToolTip(
+            "Estimated duration of the finished narration at the selected playback speed. "
+            "This is not the time required to generate it. This estimate learns actual seconds-per-word "
+            "from completed books using the same voice and settings and includes enabled chapter/end cues."
+        )
+        factor = self._calibration_factor
+        samples = 0
+        try:
+            key = self._generation_calibration_key()
+            stored_factor = self.motion_settings.value(f"{key}/realtime_factor", None)
+            if stored_factor is not None and float(stored_factor) > 0:
+                factor = max(0.4, min(20.0, float(stored_factor)))
+                samples = int(self.motion_settings.value(f"{key}/samples", 0) or 0)
+        except (TypeError, ValueError, AttributeError):
+            pass
+        self._estimated_generation_seconds = self._estimated_listening_seconds * factor
+        processing_minutes = max(1, round(self._estimated_generation_seconds / 60.0))
+        confidence = (
+            f"learned from {samples} completed export(s)"
+            if samples > 0
+            else "initial estimate from your observed 18:55 processing / 7:43 audio run"
+        )
+        if hasattr(self, "generation_estimate"):
+            self.generation_estimate.setText(
+                f"Estimated generation time: about {processing_minutes // 60}h {processing_minutes % 60:02d}m "
+                f"({factor:.2f}× listening duration; {confidence})"
+            )
+            self.generation_estimate.setToolTip(
+                "Includes voice synthesis, sound design and M4B packaging. The estimate starts from "
+                "your last observed ~2.45× real-time run, then learns a separate timing ratio and "
+                "listening duration for this voice/backend/speed/pacing/soundtrack configuration on this PC."
+            )
 
     def _default_output(self) -> Path | None:
         if not self.project_folder:
             return None
-        folder = self.project_folder / "Audiobook"
-        folder.mkdir(parents=True, exist_ok=True)
+        # New exports use the configured audio-assets location, grouped by this
+        # unique project folder so similarly titled books cannot overwrite each other.
+        project_label = "".join(
+            c if c not in '<>:"/\\|?*' else "_"
+            for c in self.project_folder.name
+        ).strip() or "Project"
+        folder = audiobooks_root() / project_label
         title = self.title.text().strip() or self.project_folder.name
         safe = "".join(c if c not in '<>:"/\\|?*' else "_" for c in title).strip() or "Audiobook"
         return folder / f"{safe}.m4b"
@@ -1375,10 +1870,13 @@ class GenerationPage(QWidget):
     def _set_default_output(self) -> None:
         default = self._default_output()
         state = load_state(self.project_folder) if self.project_folder else {}
-        saved = Path(state["output_path"]) if state.get("output_path") else None
-        # Old versions used Downloads. New projects always default to the
-        # project's Audiobook folder unless the saved path is already there.
-        if saved and self.project_folder and saved.parent == self.project_folder / "Audiobook":
+        saved = Path(state["output_path"]).expanduser() if state.get("output_path") else None
+        if saved and not saved.is_absolute() and self.project_folder:
+            saved = self.project_folder / saved
+        # Always honour a book's explicitly saved output path, including a path
+        # the user selected on another drive. Only a book without a saved path
+        # receives the configured default audio-assets destination.
+        if saved:
             self.output.setText(str(saved))
         elif default:
             self.output.setText(str(default))
@@ -1414,6 +1912,14 @@ class GenerationPage(QWidget):
         cover = state.get("cover_path")
         if cover and Path(cover).exists():
             self.cover = Path(cover)
+            try:
+                portable_cover = persist_project_cover(self.cover, self.project_folder)
+                if portable_cover != self.cover.resolve():
+                    self.cover = portable_cover
+                    state["cover_path"] = str(portable_cover)
+                    save_state(self.project_folder, state)
+            except (OSError, ValueError, RuntimeError) as exc:
+                log.warning("Could not migrate an existing cover into the project folder: %s", exc)
             self.cover_label.setText(self.cover.name)
 
     def _current_profiles(self) -> list[VoiceProfile]:
@@ -1433,20 +1939,53 @@ class GenerationPage(QWidget):
             return saved
         return value
 
+    def _generation_calibration_key(self) -> str:
+        profile = self._selected_profile()
+        recipe = {
+            "profile": getattr(profile, "name", "unselected"),
+            "provider": getattr(profile, "provider", "unknown"),
+            "voice": getattr(profile, "voice_id", "default"),
+            "backend": self.backend.currentData() if hasattr(self, "backend") else "automatic",
+            "speed": float(self.narration_speed.currentData() or 1.0) if hasattr(self, "narration_speed") else 1.0,
+            "pacing": self.pacing_profile.currentData() if hasattr(self, "pacing_profile") else "natural",
+            "bgm_enabled": self.background_audio_enabled.isChecked() if hasattr(self, "background_audio_enabled") else False,
+            "bgm_mode": self.background_audio_mode.currentData() if hasattr(self, "background_audio_mode") else "off",
+            "bgm_style": self.auto_music_style.currentData() if hasattr(self, "auto_music_style") else "auto",
+            "bgm_track": self.bgm_variation.currentData() if hasattr(self, "bgm_variation") else "auto",
+            "bgm_file": self.background_audio_path.text().strip() if hasattr(self, "background_audio_path") else "",
+            "ambience_file": self.ambience_audio_path.text().strip() if hasattr(self, "ambience_audio_path") else "",
+            "bgm_volume": float(self.background_audio_volume.value()) if hasattr(self, "background_audio_volume") else 18.0,
+            "ambience_volume": float(self.ambience_audio_volume.value()) if hasattr(self, "ambience_audio_volume") else 10.0,
+            "story_effects": self.story_effects_enabled.isChecked() if hasattr(self, "story_effects_enabled") else False,
+            "story_effect_volume": float(self.story_effect_volume.value()) if hasattr(self, "story_effect_volume") else 22.0,
+            "chapter_cues": self.chapter_transition_sound.isChecked() if hasattr(self, "chapter_transition_sound") else False,
+            "cue_style": self.sound_cue_style.currentData() if hasattr(self, "sound_cue_style") else "classic-book",
+            "opening_cue_path": self.opening_cue_path.text().strip() if hasattr(self, "opening_cue_path") else "",
+            "page_turn_cue_path": self.page_turn_cue_path.text().strip() if hasattr(self, "page_turn_cue_path") else "",
+            "ending_cue_path": self.ending_cue_path.text().strip() if hasattr(self, "ending_cue_path") else "",
+        }
+        signature = json.dumps(recipe, sort_keys=True, ensure_ascii=True)
+        digest = hashlib.sha256(signature.encode("utf-8")).hexdigest()[:24]
+        return f"generation/calibration/{digest}"
+
     def _toggle_background_audio_controls(self, enabled: bool) -> None:
         enabled = bool(enabled)
         auto_mode = enabled and self.background_audio_mode.currentData() == "auto"
         manual_mode = enabled and self.background_audio_mode.currentData() == "manual"
         self.background_audio_mode.setEnabled(enabled)
         self.auto_music_style.setEnabled(auto_mode)
-        self.chapter_transition_sound.setEnabled(enabled)
+        self.bgm_variation.setEnabled(auto_mode)
+        self.music_catalogue_preview.setEnabled(auto_mode)
+        # Book cue controls stay enabled even when background music is turned off.
         # Hide manual track rows entirely in Automatic mode instead of leaving
         # four disabled rows on screen. The rows return when Manual is selected.
+        self.music_catalogue_hint.setVisible(auto_mode)
         for widget, visible in (
             (self.music_file_container, manual_mode),
             (self.background_audio_volume, auto_mode or manual_mode),
             (self.ambience_file_container, manual_mode),
             (self.ambience_audio_volume, manual_mode),
+            (self.music_catalogue_container, auto_mode),
         ):
             self._background_audio_form.setRowVisible(widget, visible)
         for widget in (
@@ -1463,6 +2002,170 @@ class GenerationPage(QWidget):
         for widget in (self.background_audio_fade_in, self.background_audio_fade_out):
             widget.setEnabled(enabled)
 
+    def _refresh_bgm_catalogue(self, preferred_path: str | None = None) -> None:
+        current = str(preferred_path or self.bgm_variation.currentData() or "auto")
+        query = str(self.music_catalogue_search.text() if hasattr(self, "music_catalogue_search") else "").strip().casefold()
+        category = str(self.music_category_filter.currentData() or "all") if hasattr(self, "music_category_filter") else "all"
+        tracks = list_music_tracks()
+        visible_tracks = [
+            track for track in tracks
+            if (category == "all" or track.category == category)
+            and (
+                not query
+                or query in track.path.name.casefold()
+                or query in track.category_label.casefold()
+                or query in track.category.casefold()
+                or query in str(track.license_note or "").casefold()
+            )
+        ]
+        self.bgm_variation.blockSignals(True)
+        self.bgm_variation.clear()
+        self.bgm_variation.addItem("Auto • match each chapter to a real track", "auto")
+        for track in visible_tracks:
+            self.bgm_variation.addItem(
+                f"{track.category_label} • {track.path.name}",
+                str(track.path),
+            )
+        index = self.bgm_variation.findData(current)
+        self.bgm_variation.setCurrentIndex(index if index >= 0 else 0)
+        self.bgm_variation.blockSignals(False)
+        if hasattr(self, "music_catalogue_hint"):
+            self.music_catalogue_hint.setText(
+                f"Showing {len(visible_tracks)} of {len(tracks)} local music tracks. "
+                "Search by title or mood; choose a category to narrow the catalogue. "
+                "Import licensed tracks to expand your offline library."
+            )
+
+    def import_music_tracks(self) -> None:
+        files, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Import licensed BGM / audiobook music",
+            "",
+            "Audio Files (*.wav *.mp3 *.m4a *.aac *.flac *.ogg *.opus *.wma);;All Files (*.*)",
+        )
+        if not files:
+            return
+        labels = [label for _key, label in MUSIC_CATEGORIES]
+        preferred = labels.index("Universal / low-distraction narration bed")
+        selected_label, ok = QInputDialog.getItem(
+            self,
+            "Categorize imported music",
+            "Choose the main story mood for these files:",
+            labels,
+            preferred,
+            False,
+        )
+        if not ok:
+            return
+        category = next(key for key, label in MUSIC_CATEGORIES if label == selected_label)
+        license_note, _ = QInputDialog.getText(
+            self,
+            "Source and license note",
+            "Optional source URL / license note (saved locally beside the track):",
+        )
+        added = import_audio_files(
+            files,
+            target_kind="music",
+            category=category,
+            license_note=license_note,
+        )
+        self._refresh_bgm_catalogue("auto")
+        self.status.setText(
+            f"Imported {len(added)} real BGM track(s) into {selected_label}. "
+            "Auto mode can now match these tracks to chapter moods."
+        )
+
+    def open_audio_sources(self, group: str = "both") -> None:
+        valid = [
+            source for source in AUDIO_SOURCE_LINKS
+            if group == "both" or source["group"] in {group, "both"}
+        ]
+        if not valid:
+            return
+        labels = [source["label"] for source in valid]
+        selected, ok = QInputDialog.getItem(
+            self,
+            "Find licensed audiobook audio",
+            "Choose a source to open in your browser:",
+            labels,
+            0,
+            False,
+        )
+        if not ok:
+            return
+        source = next(item for item in valid if item["label"] == selected)
+        QDesktopServices.openUrl(QUrl(source["url"]))
+        self.status.setText(
+            "Source opened. Review the track's current license, download the files you choose, "
+            "then import them into the matching local category."
+        )
+
+    def import_cue_audio(self, kind: str) -> None:
+        if kind not in self._cue_path_fields:
+            self.status.setText(f"Unknown cue type: {kind}")
+            return
+        files, _ = QFileDialog.getOpenFileNames(
+            self,
+            f"Import licensed {CUE_KIND_LABELS.get(kind, kind)} clips",
+            "",
+            "Audio Files (*.wav *.mp3 *.m4a *.aac *.flac *.ogg *.opus *.wma);;All Files (*.*)",
+        )
+        if not files:
+            return
+        license_note, _ = QInputDialog.getText(
+            self,
+            "Source and license note",
+            "Optional source URL / license note (saved locally beside these clips):",
+        )
+        added = import_audio_files(
+            files,
+            target_kind=kind,
+            license_note=license_note,
+        )
+        if kind == "opening" and added:
+            # Importing from the opening card selects the first imported clip
+            # so the filename is visible and the preview uses that exact file.
+            self._cue_path_fields[kind].setText(str(added[0]))
+            self.status.setText(
+                f"Imported {len(added)} opening sound(s). Selected: {added[0].name}. "
+                "Use Auto to rotate through the opening library."
+            )
+        else:
+            self._cue_path_fields[kind].clear()
+            self.status.setText(
+                f"Imported {len(added)} real {kind} cue(s). "
+                "Leave this field blank to rotate through the library or choose a specific file."
+            )
+
+    def choose_from_cue_library(self, kind: str) -> None:
+        tracks = list_cue_tracks(kind)
+        if not tracks:
+            self.status.setText(
+                f"No {kind} cues are installed. Import licensed clips or use Find book sounds online…"
+            )
+            return
+        labels = [f"{path.name} — {path.parent.name}" for path in tracks]
+        selected, ok = QInputDialog.getItem(
+            self,
+            f"Choose {CUE_KIND_LABELS.get(kind, kind)}",
+            "Select one real local audio file:",
+            labels,
+            0,
+            False,
+        )
+        if ok:
+            chosen = tracks[labels.index(selected)]
+            self._cue_path_fields[kind].setText(str(chosen))
+            self.status.setText(f"Selected real cue: {chosen.name}")
+
+    def clear_cue_audio_path(self, kind: str) -> None:
+        field = self._cue_path_fields.get(kind)
+        if field is not None:
+            field.clear()
+            self.status.setText(
+                f"{kind.title()} cue will auto-rotate through its imported library."
+            )
+
     def choose_background_audio(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
@@ -1473,6 +2176,106 @@ class GenerationPage(QWidget):
         if path:
             self.background_audio_path.setText(str(Path(path)))
             self.status.setText("Background track selected. Enable Background music to include it in the final M4B.")
+
+    def _toggle_custom_cue_fields(self, *_args) -> None:
+        # The library is always available. A blank path means auto-rotate
+        # through real local files for that cue role.
+        self.custom_cues_container.setVisible(True)
+
+    def choose_cue_audio(self, kind: str) -> None:
+        field = self._cue_path_fields.get(kind)
+        if field is None:
+            self.status.setText(f"Unknown sound cue: {kind}")
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            f"Select a specific {kind} sound",
+            field.text().strip(),
+            "Audio Files (*.wav *.mp3 *.m4a *.aac *.flac *.ogg *.opus *.wma);;All Files (*.*)",
+        )
+        if path:
+            field.setText(str(Path(path).expanduser()))
+            self.status.setText(f"Selected real {kind} sound: {Path(path).name}")
+
+    def preview_cue(self, kind: str) -> None:
+        if kind not in self._cue_path_fields:
+            self.status.setText(f"Unknown sound cue: {kind}")
+            return
+        # The opening preview button is a true play/pause toggle for the
+        # currently selected cue, using the shared in-app audio player.
+        if kind == "opening":
+            current = self.music_player.source().toLocalFile()
+            if current and self.music_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+                self.music_player.pause()
+                self.opening_cue_preview_button.setText("▶ Preview")
+                self.status.setText("Opening sound preview paused.")
+                return
+            if current and self.music_player.playbackState() == QMediaPlayer.PlaybackState.PausedState:
+                self.music_player.play()
+                self.opening_cue_preview_button.setText("Ⅱ Pause")
+                self.status.setText("Resumed opening sound preview.")
+                return
+        selected = self._cue_path_fields[kind].text().strip() or None
+        index = self.preview_chapter.currentIndex()
+        chapter = self.chapters[index] if 0 <= index < len(self.chapters) else None
+        title = chapter.title if chapter else self.title.text().strip()
+        text = chapter.text if chapter else ""
+        cue = resolve_cue_track(
+            kind,
+            selected_path=selected,
+            seed_text=f"{kind}|{title}|{text}|{index}",
+        )
+        if cue is None or not cue.is_file():
+            self.status.setText(
+                f"No real {kind} sound is installed. Import licensed clips with Import… "
+                "or use Find book sounds online…"
+            )
+            return
+        self.music_player.stop()
+        self.music_player.setSource(QUrl.fromLocalFile(str(cue.resolve())))
+        self.music_player.play()
+        if kind == "opening":
+            self.opening_cue_preview_button.setText("Ⅱ Pause")
+        label = CUE_KIND_LABELS.get(kind, kind)
+        self.status.setText(f"Previewing real {label.lower()}: {cue.name}")
+
+    def preview_catalogue_music(self) -> None:
+        if self.music_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            current = self.music_player.source().toLocalFile()
+            if self._catalogue_preview_path and current == str(self._catalogue_preview_path):
+                self.music_player.pause()
+                return
+        index = self.preview_chapter.currentIndex()
+        chapter = self.chapters[index] if 0 <= index < len(self.chapters) else None
+        title = chapter.title if chapter else self.title.text().strip()
+        text = chapter.text if chapter else ""
+        from app.audio.sound_design import detect_chapter_mood
+        mood = detect_chapter_mood(
+            title,
+            text,
+            str(self.auto_music_style.currentData() or "auto"),
+        )
+        selected_value = str(self.bgm_variation.currentData() or "auto")
+        selected_track = None if selected_value == "auto" else selected_value
+        track = resolve_music_track(
+            mood,
+            selected_track=selected_track,
+            seed_text=f"{title}|{text}|{index}",
+        )
+        if track is None or not track.is_file():
+            self.status.setText(
+                f"No real BGM track is installed for {mood}. Use Import tracks… or Find tracks online… "
+                "to add audio you are licensed to use."
+            )
+            return
+        self._catalogue_preview_path = track.resolve()
+        self.music_player.stop()
+        self.music_player.setSource(QUrl.fromLocalFile(str(track.resolve())))
+        self.music_player.play()
+        self.status.setText(
+            f"Previewing real BGM • {mood.title()} • {track.name}. "
+            "Use Voice Preview to hear this track beneath narration."
+        )
 
     def preview_background_audio(self) -> None:
         self._preview_audio_layer(self.background_audio_path, "background music")
@@ -1504,10 +2307,14 @@ class GenerationPage(QWidget):
         self.status.setText(f"Previewing {label}: {Path(value).name}")
 
     def _background_music_state_changed(self, state) -> None:
-        if state == QMediaPlayer.PlaybackState.PlayingState:
-            self.background_audio_preview.setText("Ⅱ Pause Track")
-        else:
-            self.background_audio_preview.setText("▶ Preview Track")
+        playing = state == QMediaPlayer.PlaybackState.PlayingState
+        if hasattr(self, "background_audio_preview"):
+            self.background_audio_preview.setText("Ⅱ Pause Track" if playing else "▶ Preview Track")
+        if hasattr(self, "music_catalogue_preview"):
+            current = self.music_player.source().toLocalFile()
+            catalogue = str(self._catalogue_preview_path) if self._catalogue_preview_path else ""
+            if catalogue and current == catalogue:
+                self.music_catalogue_preview.setText("Ⅱ Pause BGM" if playing else "▶ Preview selected BGM")
 
     def choose_output(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
@@ -1519,9 +2326,22 @@ class GenerationPage(QWidget):
             self._refresh_readiness()
 
     def choose_cover(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Select Cover", "", "Images (*.jpg *.jpeg *.png)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select Cover", "", "Images (*.jpg *.jpeg *.png *.webp *.gif *.bmp *.tif *.tiff)"
+        )
         if path:
-            self.cover = Path(path)
+            selected = Path(path)
+            try:
+                self.cover = persist_project_cover(selected, self.project_folder) if self.project_folder else selected
+            except (OSError, ValueError) as exc:
+                # Keep the chosen image usable for this session, but make the
+                # portability problem visible instead of silently reverting to
+                # the generic Dashboard artwork.
+                self.cover = selected
+                self.cover_label.setText(f"{selected.name} (external file; could not copy)")
+                self._refresh_readiness()
+                log.warning("Could not persist cover image into the project folder: %s", exc, exc_info=True)
+                return
             self.cover_label.setText(self.cover.name)
             self._refresh_readiness()
 
@@ -1530,7 +2350,8 @@ class GenerationPage(QWidget):
             return narrator_provider, narrator_voice
         state = load_state(self.project_folder)
         assignments = state.get("voice_cast", {})
-        if not assignments:
+        identity_assignments = state.get("voice_cast_identity_assignments", {})
+        if not assignments and not identity_assignments:
             return narrator_provider, narrator_voice
         from app.tts.cast_provider import CastAwareProvider
         profiles = {profile.name: profile for profile in self._current_profiles()}
@@ -1542,6 +2363,7 @@ class GenerationPage(QWidget):
             assignments,
             narrating_character=narrating_character,
             backend_override=self.backend.currentData() or "automatic",
+            identity_assignments=identity_assignments,
         ), narrator_voice
 
     def _provider(self):
@@ -1575,18 +2397,42 @@ class GenerationPage(QWidget):
 
         chapter = self.chapters[index]
         self._save_pronunciations()
-        pronunciation_dictionary = self._pronunciation_entries()
+        pronunciation_dictionary = self._combined_pronunciation_entries()
         text = chapter.text
         output = Path(tempfile.gettempdir()) / 'ryu_audiobook_voice_preview.wav'
         backend = self.backend.currentData() or profile.backend
         if backend == 'automatic':
             backend = profile.backend
 
+        preview_seconds = int(self.preview_duration.currentData() or 30)
+        selected_bgm_path_value = str(self.bgm_variation.currentData() or "auto")
+        mix_settings = {
+            "enabled": self.preview_mix_enabled.isChecked(),
+            "background_enabled": True,
+            "background_mode": str(self.background_audio_mode.currentData() or "auto"),
+            "music_style": str(self.auto_music_style.currentData() or "auto"),
+            "music_variation_id": None if selected_bgm_path_value == "auto" else selected_bgm_path_value,
+            "background_audio_path": self.background_audio_path.text().strip(),
+            "ambience_audio_path": self.ambience_audio_path.text().strip(),
+            "music_volume": float(self.background_audio_volume.value()) / 100.0,
+            "ambience_volume": float(self.ambience_audio_volume.value()) / 100.0,
+            "story_effects_enabled": self.story_effects_enabled.isChecked(),
+            "story_effect_volume": float(self.story_effect_volume.value()) / 100.0,
+            "chapter_transition_sound": self.chapter_transition_sound.isChecked(),
+            "is_first_chapter": index == 0,
+            "is_last_chapter": index == len(self.chapters) - 1,
+            "sound_cue_style": "library",
+            "opening_cue_path": self.opening_cue_path.text().strip(),
+            "page_turn_cue_path": self.page_turn_cue_path.text().strip(),
+            "ending_cue_path": self.ending_cue_path.text().strip(),
+        }
         self.preview_worker = VoicePreviewWorker(
             profile, backend, self.project_folder, self._current_profiles(), pronunciation_dictionary,
             text, output, float(self.narration_speed.currentData() or 0.90),
             self.pacing_profile.currentData() or 'natural',
             dialogue_assignments=getattr(chapter, "dialogue_assignments", []),
+            target_seconds=preview_seconds,
+            mix_settings=mix_settings,
         )
         self.preview_worker.progress.connect(self._preview_worker_progress)
         self.preview_worker.percent.connect(self.preview_loading.setValue)
@@ -1618,11 +2464,14 @@ class GenerationPage(QWidget):
         self.preview_play_button.setText('▶  Play Preview')
         voice_summary = ', '.join(result.voices_used) if result.voices_used else 'Narrator'
         self.preview_loading.setValue(100)
+        mix_label = " • Full soundtrack mix" if self.preview_mix_enabled.isChecked() else " • Dry voice"
         self.preview_status.setText(
-            f'100% • Preview ready • {result.segments} narration segment(s) • Voices: {voice_summary}'
+            f'100% • Preview ready{mix_label} • {result.segments} narration segment(s) • Voices: {voice_summary}'
         )
         self.status.setText(
-            'Preview generated from the current pronunciation, voice cast, speed and pacing settings.'
+            "Preview generated with the current voice, pronunciation, pacing and selected sound design."
+            if self.preview_mix_enabled.isChecked()
+            else "Dry voice preview generated with the current voice and narration settings."
         )
 
     def _preview_worker_failed(self, message: str) -> None:
@@ -1710,6 +2559,7 @@ class GenerationPage(QWidget):
         )
 
     def _repair_empty_chapters_from_source(self) -> bool:
+        """Repair empty chapter bodies without replacing manual edits or assignments."""
         if not self.project_folder:
             return False
         try:
@@ -1721,24 +2571,63 @@ class GenerationPage(QWidget):
             source = self.project_folder / "source" / source_name
             if not source.exists():
                 return False
+
             detected = detect_chapters(extract_text(source).text)
-            if not detected or any(not c.text.strip() for c in detected):
+            if not detected:
                 return False
+
+            def normalize_title(value: str) -> str:
+                return re.sub(r"[\W_]+", "", str(value or "").casefold())
+
+            # Repair only empty chapters. Existing non-empty bodies are user
+            # edits and must never be replaced by source text automatically.
+            detected_by_title = {
+                normalize_title(chapter.title): chapter
+                for chapter in detected
+                if normalize_title(chapter.title) and str(chapter.text or "").strip()
+            }
+            detected_by_number = {
+                int(chapter.number): chapter
+                for chapter in detected
+                if str(chapter.text or "").strip()
+            }
+            changed = False
+            for chapter in self.chapters:
+                if str(chapter.text or "").strip():
+                    continue
+                candidate = detected_by_title.get(normalize_title(chapter.title))
+                # Source extraction sometimes normalizes or renumbers headings
+                # differently from the saved project. If the title does not
+                # match, use the corresponding chapter number as a conservative
+                # fallback, but only for an empty target chapter.
+                if candidate is None:
+                    candidate = detected_by_number.get(int(chapter.number))
+                if candidate is None and chapter.number == 1 and len(self.chapters) == 1 and len(detected) == 1:
+                    candidate = detected[0]
+                if candidate is None or not str(candidate.text or "").strip():
+                    continue
+                chapter.text = candidate.text
+                changed = True
+
+            if not changed:
+                return False
+
+            # Preserve all fields (including dialogue assignments) and use
+            # atomic Project persistence rather than rebuilding chapter JSON.
             chapters_file = self.project_folder / "chapters.json"
-            chapters_file.write_text(
-                json.dumps(
-                    [
-                        {"number": c.number, "title": c.title, "text": c.text}
-                        for c in detected
-                    ],
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-                encoding="utf-8",
-            )
-            self.chapters = detected
+            payload = json.loads(chapters_file.read_text(encoding="utf-8"))
+            by_number = {int(ch.number): ch for ch in self.chapters}
+            for item in payload:
+                current = by_number.get(int(item.get("number", 0)))
+                if current is not None:
+                    item["title"] = current.title
+                    item["text"] = current.text
+                    item["dialogue_assignments"] = getattr(current, "dialogue_assignments", [])
+            temp_file = chapters_file.with_suffix(".json.repair.tmp")
+            temp_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            temp_file.replace(chapters_file)
             self._update_overview()
-            self.status.setText("Chapter list was automatically repaired from the original source.")
+            self.status.setText("Empty chapter text was restored from the original source; existing edits were preserved.")
             return True
         except Exception:
             return False
@@ -1757,7 +2646,7 @@ class GenerationPage(QWidget):
         resumable = (
             info.resume_available
             or bool(state.get("failed_chapters"))
-            or status in {"failed", "cancelled", "generating"}
+            or status in {"failed", "cancelled", "generating", "paused"}
         )
 
         # A fully completed book should not advertise a resume action unless
@@ -1795,6 +2684,24 @@ class GenerationPage(QWidget):
         provider_name = profile.provider if profile else None
         state = load_state(self.project_folder) if self.project_folder else {}
         assignments = state.get("voice_cast", {}) if isinstance(state, dict) else {}
+        assignments = dict(assignments) if isinstance(assignments, dict) else {}
+        identity_assignments = state.get("voice_cast_identity_assignments", {}) if isinstance(state, dict) else {}
+        if isinstance(identity_assignments, dict) and identity_assignments:
+            # Readiness counts the series-scoped assignments instead of losing
+            # duplicate names through the legacy name-keyed dictionary.
+            assignments = {key: value for key, value in identity_assignments.items() if str(value or "").strip()}
+            narrator = (state.get("voice_cast", {}) or {}).get("Narrator") if isinstance(state.get("voice_cast", {}), dict) else None
+            if narrator:
+                assignments["narrator"] = narrator
+        qwen_models_ready = True
+        qwen_model_detail = "Required local Qwen model files are present."
+        if profile and profile.provider == "qwen-character":
+            try:
+                from app.tts.qwen_character_runtime import profile_model_readiness
+                qwen_models_ready, qwen_model_detail = profile_model_readiness(profile)
+            except Exception as exc:
+                qwen_models_ready = False
+                qwen_model_detail = f"Could not verify the selected Qwen model: {exc}"
         readiness = build_generation_readiness(
             self.chapters,
             profile.name if profile else None,
@@ -1803,6 +2710,9 @@ class GenerationPage(QWidget):
             custom_runtime_ready=runtime_ready(),
             assignments=assignments,
             cover_selected=bool(self.cover),
+            qwen_runtime_ready=qwen_runtime_ready(),
+            qwen_models_ready=qwen_models_ready,
+            qwen_model_detail=qwen_model_detail,
         )
 
         self._refresh_resume_state()
@@ -1834,44 +2744,35 @@ class GenerationPage(QWidget):
             self.status.setText("No chapters available.")
             return
 
+        # Try to repair stale/empty chapter records from the original source
+        # before readiness gating. The readiness panel must not prevent the
+        # repair path from running.
+        empty_before_repair = [c for c in self.chapters if not str(c.text or "").strip()]
+        if empty_before_repair:
+            self._repair_empty_chapters_from_source()
+
         self._refresh_readiness()
         if not self.start_button.isEnabled():
             self.status.setText("Generation is blocked by the readiness checks above.")
             return
 
-        empty = [c for c in self.chapters if not c.text or not c.text.strip()]
-        if empty:
-            self._repair_empty_chapters_from_source()
-            empty = [c for c in self.chapters if not c.text or not c.text.strip()]
-        if empty:
-            # Empty records are never synthesizable. If the source cannot be
-            # re-read, safely remove only the empty records instead of blocking
-            # an otherwise valid audiobook because of stale project state.
-            self.chapters = [c for c in self.chapters if c.text and c.text.strip()]
-            for number, chapter in enumerate(self.chapters, start=1):
-                chapter.number = number
-            if self.project_folder:
-                try:
-                    chapters_file = self.project_folder / "chapters.json"
-                    chapters_file.write_text(
-                        json.dumps(
-                            [{"number": c.number, "title": c.title, "text": c.text} for c in self.chapters],
-                            ensure_ascii=False,
-                            indent=2,
-                        ),
-                        encoding="utf-8",
-                    )
-                except OSError:
-                    pass
-            self._update_overview()
-            empty = [c for c in self.chapters if not c.text or not c.text.strip()]
-        if empty:
-            numbers = ", ".join(str(c.number) for c in empty)
+        generation_chapters, skipped_empty_chapters = partition_chapters_by_body(self.chapters)
+        if not generation_chapters:
             self.status.setText(
-                f"Generation stopped: chapter(s) {numbers} contain no body text. "
-                "Please review the Chapters page."
+                "Generation stopped: no chapters contain body text. "
+                "Repair the source or restore chapter text before generating."
             )
             return
+
+        # Keep the original project chapter list untouched when a stale empty
+        # chapter cannot be repaired. Only non-empty chapters are passed to the
+        # generator; the readiness panel records which chapter numbers were skipped.
+        if skipped_empty_chapters:
+            skipped_numbers = ", ".join(str(c.number) for c in skipped_empty_chapters)
+            self.status.setText(
+                f"Empty chapter(s) {skipped_numbers} will be skipped. "
+                "Your original chapter list is preserved."
+            )
 
         output = Path(self.output.text().strip()) if self.output.text().strip() else self._default_output()
         if not output:
@@ -1883,6 +2784,10 @@ class GenerationPage(QWidget):
         background_audio_mode = "off"
         auto_music_style = str(self.auto_music_style.currentData() or "auto")
         chapter_transition_sound = bool(self.chapter_transition_sound.isChecked())
+        sound_cue_style = "library"
+        opening_cue_path = self.opening_cue_path.text().strip() or None
+        page_turn_cue_path = self.page_turn_cue_path.text().strip() or None
+        ending_cue_path = self.ending_cue_path.text().strip() or None
         if self.background_audio_enabled.isChecked():
             background_audio_mode = str(self.background_audio_mode.currentData() or "auto")
             if background_audio_mode == "manual":
@@ -1937,6 +2842,7 @@ class GenerationPage(QWidget):
             state.update({
                 "voice_profile": profile.name if profile else None,
                 "output_path": str(output),
+                "modified_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "cover_path": str(self.cover) if self.cover else None,
                 "narrator": self.narrator.text().strip(),
                 "publisher": self.publisher.text().strip(),
@@ -1950,7 +2856,13 @@ class GenerationPage(QWidget):
                 "background_audio_enabled": self.background_audio_enabled.isChecked(),
                 "background_audio_mode": str(self.background_audio_mode.currentData() or "auto"),
                 "auto_music_style": str(self.auto_music_style.currentData() or "auto"),
+                "auto_music_track_path": str(self.bgm_variation.currentData() or "auto") if str(self.bgm_variation.currentData() or "auto") != "auto" else "",
+                "preview_include_sound_design": self.preview_mix_enabled.isChecked(),
                 "chapter_transition_sound": self.chapter_transition_sound.isChecked(),
+                "sound_cue_style": "library",
+                "opening_cue_path": self.opening_cue_path.text().strip(),
+                "page_turn_cue_path": self.page_turn_cue_path.text().strip(),
+                "ending_cue_path": self.ending_cue_path.text().strip(),
                 "story_effects_enabled": self.story_effects_enabled.isChecked(),
                 "story_effect_volume": float(self.story_effect_volume.value()) / 100.0,
                 "background_audio_path": self.background_audio_path.text().strip(),
@@ -1963,7 +2875,7 @@ class GenerationPage(QWidget):
             })
             save_state(self.project_folder, state)
 
-        self.progress.setRange(0, len(self.chapters))
+        self.progress.setRange(0, len(generation_chapters))
         self.progress.setValue(0)
         self.last_progress_value = 0
         self.initial_progress_value = 0
@@ -1974,9 +2886,14 @@ class GenerationPage(QWidget):
         self._eta_last_time = time.monotonic()
         self.generation_phase = "synthesis"
         self.started_at = time.monotonic()
+        self._active_calibration_key = self._generation_calibration_key()
+        self._active_calibration_is_resume = bool(is_resume)
+        self._update_overview()
         self.timer.start(1000)
         self._set_generation_locked(True)
         self.cancel_button.setEnabled(True)
+        self.pause_button.setEnabled(True)
+        self.pause_button.setText("Pause")
         self.play_button.setEnabled(False)
         self.open_button.setEnabled(False)
         self.result_label.setText("Generating chapters and packaging the final M4B…")
@@ -1995,11 +2912,12 @@ class GenerationPage(QWidget):
             "year": self.year.text().strip(),
             "genre": self.genre.value(),
         }
+        selected_bgm_path_value = str(self.bgm_variation.currentData() or "auto")
         self.manager = GenerationManager(
-            provider, voice, self.chapters, self.audio_root,
+            provider, voice, generation_chapters, self.audio_root,
             on_progress=lambda *args: self.signals.progress.emit(*args),
             on_finished=lambda summary: self.signals.finished.emit(summary),
-            pronunciation_dictionary=self._pronunciation_entries(),
+            pronunciation_dictionary=self._combined_pronunciation_entries(),
             narration_speed=float(self.narration_speed.currentData() or 0.90),
             pacing_profile=self.pacing_profile.currentData() or "natural",
             metadata=metadata,
@@ -2012,9 +2930,14 @@ class GenerationPage(QWidget):
             background_audio_fade_out=float(self.background_audio_fade_out.value()),
             background_audio_mode=background_audio_mode,
             auto_music_style=auto_music_style,
+            auto_music_variation=None if selected_bgm_path_value == "auto" else selected_bgm_path_value,
             chapter_transition_sound=chapter_transition_sound,
             story_effects_enabled=self.story_effects_enabled.isChecked(),
             story_effect_volume=float(self.story_effect_volume.value()) / 100.0,
+            sound_cue_style=sound_cue_style,
+            opening_cue_path=Path(opening_cue_path) if opening_cue_path else None,
+            page_turn_cue_path=Path(page_turn_cue_path) if page_turn_cue_path else None,
+            ending_cue_path=Path(ending_cue_path) if ending_cue_path else None,
         )
         self.manager.start(
             output,
@@ -2024,12 +2947,40 @@ class GenerationPage(QWidget):
             metadata=metadata,
         )
 
+    def toggle_generation_pause(self) -> None:
+        if not self.manager:
+            return
+        if self.manager.pause_event.is_set():
+            self.manager.resume()
+            self.pause_button.setText("Pause")
+            self.status.setText("Resume requested. Generation will continue from the chapter checkpoint.")
+            if self.project_folder:
+                state = load_state(self.project_folder)
+                state["status"] = "generating"
+                save_state(self.project_folder, state)
+        else:
+            self.manager.pause()
+            self.pause_button.setText("Resume")
+            self.status.setText("Pause requested. The current chapter will finish before generation pauses.")
+
     def cancel(self) -> None:
         if self.manager:
             self.manager.cancel()
+            self.pause_button.setEnabled(False)
             self.status.setText("Stopping generation and releasing the voice engine…")
 
     def update_progress(self, chapter: int, total: int, done: int, message: str) -> None:
+        if message.startswith("paused:"):
+            note = message.split(":", 1)[1].strip()
+            self.status.setText(note)
+            self.stage.setText("Generation paused at a chapter checkpoint")
+            self.remaining.setText("Remaining: paused at checkpoint")
+            self.pause_button.setText("Resume")
+            if self.project_folder:
+                state = load_state(self.project_folder)
+                state["status"] = "paused"
+                save_state(self.project_folder, state)
+            return
         if message.startswith("provider:"):
             self.status.setText(message.split(":", 1)[1].strip())
             self.stage.setText(
@@ -2051,14 +3002,21 @@ class GenerationPage(QWidget):
             self.last_progress_value = completed_work
             self.initial_progress_value = completed_work
             baseline_rate = None
+            # Start with the persisted end-to-end estimate for this voice/settings
+            # signature. Live chunk measurements refine it as this book progresses.
             try:
-                provider = self.manager.provider if self.manager else None
-                estimated_cpm = float(getattr(provider, "estimated_chars_per_minute", 0) or 0)
-                if estimated_cpm > 0:
-                    baseline_rate = estimated_cpm / 60.0
+                if self._estimated_generation_seconds > 0:
+                    self._eta_ema_sec_per_unit = (
+                        self._estimated_generation_seconds / max(1, work_total)
+                    )
+                else:
+                    provider = self.manager.provider if self.manager else None
+                    estimated_cpm = float(getattr(provider, "estimated_chars_per_minute", 0) or 0)
+                    if estimated_cpm > 0:
+                        baseline_rate = estimated_cpm / 60.0
+                    self._eta_ema_sec_per_unit = (1.0 / baseline_rate) if baseline_rate else None
             except Exception:
-                baseline_rate = None
-            self._eta_ema_sec_per_unit = (1.0 / baseline_rate) if baseline_rate else None
+                self._eta_ema_sec_per_unit = None
             self._eta_warmup_samples = 0
             self._eta_rates = []
             self._eta_last_work = completed_work
@@ -2225,6 +3183,8 @@ class GenerationPage(QWidget):
         self.generation_phase = "idle"
         self._set_generation_locked(False)
         self.cancel_button.setEnabled(False)
+        self.pause_button.setEnabled(False)
+        self.pause_button.setText("Pause")
         if self.project_folder:
             state = load_state(self.project_folder)
             state["status"] = "completed" if summary.output_path else ("failed" if (summary.chapters_failed or summary.packaging_failed) else "cancelled")
@@ -2233,12 +3193,46 @@ class GenerationPage(QWidget):
             save_state(self.project_folder, state)
 
         if summary.output_path:
+            calibration_summary = ""
+            try:
+                if (
+                    not self._active_calibration_is_resume
+                    and self.started_at is not None
+                    and summary.output_path.is_file()
+                ):
+                    elapsed_seconds = max(1.0, time.monotonic() - self.started_at)
+                    listening_seconds = max(1.0, _duration_ms(summary.output_path) / 1000.0)
+                    words = max(1, sum(len(chapter.text.split()) for chapter in self.chapters))
+                    actual_factor = max(0.4, min(20.0, elapsed_seconds / listening_seconds))
+                    seconds_per_word = max(0.05, min(5.0, listening_seconds / words))
+                    key = self._active_calibration_key or self._generation_calibration_key()
+                    old_factor = self.motion_settings.value(f"{key}/realtime_factor", None)
+                    old_word_rate = self.motion_settings.value(f"{key}/seconds_per_word", None)
+                    old_samples = int(self.motion_settings.value(f"{key}/samples", 0) or 0)
+                    if old_factor is not None and old_samples > 0:
+                        actual_factor = 0.35 * actual_factor + 0.65 * float(old_factor)
+                    if old_word_rate is not None and old_samples > 0:
+                        seconds_per_word = 0.35 * seconds_per_word + 0.65 * float(old_word_rate)
+                    self.motion_settings.setValue(f"{key}/realtime_factor", actual_factor)
+                    self.motion_settings.setValue(f"{key}/seconds_per_word", seconds_per_word)
+                    self.motion_settings.setValue(f"{key}/samples", old_samples + 1)
+                    self.motion_settings.sync()
+                    self._update_overview()
+                    calibration_summary = (
+                        f" Timing calibration updated: {elapsed_seconds / 60.0:.1f} min processing / "
+                        f"{listening_seconds / 60.0:.1f} min listening."
+                    )
+            except Exception as exc:
+                calibration_summary = f" Timing calibration could not be saved ({exc})."
             self.progress.setValue(self.progress.maximum())
             self.stage.setText("Audiobook ready")
             self.result_label.setText(f"✓ Finished M4B\n{summary.output_path}")
             self.play_button.setEnabled(True)
             self.open_button.setEnabled(True)
-            self.status.setText("Audiobook created successfully. Intermediate generation audio has been cleaned.")
+            self.status.setText(
+                "Audiobook created successfully. Intermediate generation audio has been cleaned."
+                + calibration_summary
+            )
         elif summary.packaging_failed:
             self.stage.setText("M4B packaging failed")
             error = f"\n\nPackaging error: {summary.packaging_error}" if summary.packaging_error else ""

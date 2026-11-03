@@ -226,56 +226,62 @@ def load_saved_profile(name: str) -> VoiceProfile | None:
 
 
 def load_profiles() -> list[VoiceProfile]:
-    path = profiles_file()
-    saved: list[VoiceProfile] = []
-    if path.exists():
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            saved = [VoiceProfile(**item) for item in data]
-            migrated = False
-            for profile in saved:
-                if profile.provider == "qwen-character" and not profile.qwen_profile_id:
-                    profile.qwen_profile_id = uuid.uuid4().hex
-                    migrated = True
-            if migrated:
-                try:
-                    save_profiles(saved)
-                except OSError:
-                    pass
-        except (OSError, ValueError, TypeError, json.JSONDecodeError):
-            saved = []
-
+    """Combine installed voices and saved profiles, recovering from legacy name collisions."""
+    saved = load_saved_profiles()
     builtins = list(builtin_voice_profiles())
     combined = list(builtins)
+    seen_names: set[str] = {profile.name.strip().casefold() for profile in combined}
+    changed_names = False
 
-    builtin_keys = {
-        (p.provider, p.voice_id.casefold(), "")
-        for p in builtins
-    }
-    seen_names: set[str] = {p.name.casefold() for p in combined}
+    # Built-in catalogue entries must not disappear just because an old custom
+    # profile happens to use their display name. Give the saved custom item a
+    # stable disambiguated name and persist it once so Load/Preview/Assign all
+    # resolve the same identity after restart.
     ordered_saved = sorted(
         saved,
-        key=lambda p: (0 if p.provider in {"piper", "kokoro"} else 1, p.name.casefold()),
+        key=lambda profile: (0 if profile.provider in {"piper", "kokoro"} else 1, profile.name.casefold()),
     )
     for profile in ordered_saved:
-        sample_key = str(profile.sample_path or "").casefold()
-        identity = (profile.provider, profile.voice_id.casefold(), sample_key)
+        original_name = profile.name.strip()
+        folded = original_name.casefold()
+        same_installed_voice = any(
+            profile.provider == builtin.provider
+            and profile.voice_id.casefold() == builtin.voice_id.casefold()
+            and not profile.sample_path
+            for builtin in builtins
+        )
+        if same_installed_voice:
+            matching_builtin = next(
+                (builtin for builtin in builtins
+                 if profile.provider == builtin.provider
+                 and profile.voice_id.casefold() == builtin.voice_id.casefold()
+                 and profile.name.strip().casefold() == builtin.name.strip().casefold()),
+                None,
+            )
+            if matching_builtin is not None:
+                continue
 
-        if identity in builtin_keys and not sample_key:
-            continue
+        if folded in seen_names:
+            suffix = " • Custom"
+            candidate = original_name + suffix
+            ordinal = 2
+            while candidate.casefold() in seen_names:
+                candidate = f"{original_name}{suffix} {ordinal}"
+                ordinal += 1
+            profile.name = candidate
+            changed_names = True
+            folded = candidate.casefold()
 
-        if profile.name.casefold() in seen_names:
-            if profile.provider not in {"piper", "kokoro"}:
-                suffix = " • Custom"
-                base = profile.name
-                candidate = base + suffix
-                n = 2
-                while candidate.casefold() in seen_names:
-                    candidate = f"{base}{suffix} {n}"
-                    n += 1
-                profile.name = candidate
         combined.append(profile)
-        seen_names.add(profile.name.casefold())
+        seen_names.add(folded)
+
+    if changed_names:
+        try:
+            save_profiles(saved)
+        except OSError:
+            # Keep the disambiguated in-memory catalogue usable this session.
+            # The original catalogue file remains untouched if persistence fails.
+            pass
     return combined
 
 
@@ -284,20 +290,38 @@ def save_profiles(profiles: list[VoiceProfile]) -> None:
     for profile in profiles:
         if profile.provider == "qwen-character" and not profile.qwen_profile_id:
             profile.qwen_profile_id = uuid.uuid4().hex
-    builtins = {
-        (p.provider, p.voice_id.casefold())
+    builtin_names_by_identity = {
+        (p.provider, p.voice_id.casefold()): p.name.casefold()
         for p in builtin_voice_profiles()
     }
     persistent = [
         p for p in profiles
-        if (p.provider, p.voice_id.casefold()) not in builtins
-        or p.sample_path
-        or p.provider not in {"piper", "kokoro"}
+        if p.sample_path
+        or (p.provider, p.voice_id.casefold()) not in builtin_names_by_identity
+        or p.name.strip().casefold()
+        != builtin_names_by_identity[(p.provider, p.voice_id.casefold())]
     ]
-    profiles_file().write_text(
-        json.dumps([asdict(profile) for profile in persistent], ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    # Replace the profile catalogue atomically. A crash or forced shutdown
+    # during a direct write must not leave voices.json truncated and make
+    # custom voices disappear on the next application launch.
+    destination = profiles_file()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(
+        [asdict(profile) for profile in persistent],
+        ensure_ascii=False,
+        indent=2,
     )
+    temporary = destination.with_suffix(destination.suffix + ".tmp")
+    try:
+        temporary.write_text(payload, encoding="utf-8")
+        # Verify the temporary file before it can replace the last good copy.
+        written = json.loads(temporary.read_text(encoding="utf-8"))
+        expected = json.loads(payload)
+        if written != expected:
+            raise IOError("Voice profile catalogue verification failed.")
+        temporary.replace(destination)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def import_reference_audio(source: Path, profile_name: str, minimum_seconds: float = 6.0) -> Path:

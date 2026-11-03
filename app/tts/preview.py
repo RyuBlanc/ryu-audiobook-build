@@ -8,10 +8,20 @@ import wave
 
 import imageio_ffmpeg
 
-from app.tts.narration import prepare_for_narration
+from app.tts.narration import apply_pronunciation_dictionary_with_counts, prepare_for_narration
 from app.tts.pacing import append_silence, pause_after_ms, split_for_pacing
 from app.tts.base import TTSProvider
 from app.tts.multivoice import synthesize_voice_set
+
+
+class _PreviewUnits(list):
+    def __init__(self):
+        super().__init__()
+        self.rule_counts: list[dict[str, int]] = []
+
+
+class PreviewCancelledError(RuntimeError):
+    """Raised when a user cancels a preview at a safe synthesis boundary."""
 
 
 @dataclass(frozen=True)
@@ -19,6 +29,9 @@ class PreviewResult:
     output_path: Path
     segments: int
     voices_used: tuple[str, ...]
+    # Exact text represented by synthesized segments; used to align preview SFX.
+    source_text: str = ""
+    applied_rule_counts: dict[str, int] | None = None
 
 
 def _run_ffmpeg(args: list[str]) -> None:
@@ -87,10 +100,7 @@ def _preview_units(
     max_chars: int,
     dialogue_assignments=None,
 ) -> list[tuple[str, str | list[str] | None]]:
-    narration = prepare_for_narration(
-        text,
-        pronunciation_dictionary=pronunciation_dictionary,
-    ).narration_text
+    narration = prepare_for_narration(text).narration_text
 
     if hasattr(provider, "split_for_cast"):
         try:
@@ -106,18 +116,30 @@ def _preview_units(
     else:
         raw = [(narration, voice)]
 
-    units: list[tuple[str, str | list[str] | None]] = []
+    units = _PreviewUnits()
     used_chars = 0
-    preview_unit_chars = 360
-    preview_unit_sentences = 1
-    # Short previews stay sentence-sized so a 20-second request does not
-    # accidentally trigger a multi-minute synthesis unit.
+    # Keep the conservative one-sentence policy for ordinary providers. Qwen
+    # advertises its own preview policy so model inference is not fragmented
+    # into one heavyweight request per sentence. Qwen still splits on changes
+    # to its four stable expression-reference families, preserving emotional
+    # turns, dialogue boundaries and paragraph structure.
+    preview_unit_chars = max(
+        80, int(getattr(provider, "recommended_preview_chunk_chars", 360) or 360)
+    )
+    preview_unit_sentences = max(
+        1, int(getattr(provider, "recommended_preview_chunk_sentences", 1) or 1)
+    )
+    split_preview_on_expression_change = bool(
+        getattr(provider, "split_preview_on_expression_change", False)
+    )
     for segment, segment_voice in raw:
         for unit in split_for_pacing(
             segment,
             max_chars=preview_unit_chars,
             max_sentences=preview_unit_sentences,
+            split_on_expression_change=split_preview_on_expression_change,
         ):
+            unit, rule_counts = apply_pronunciation_dictionary_with_counts(unit, pronunciation_dictionary)
             if used_chars >= max_chars:
                 return units
             remaining = max_chars - used_chars
@@ -125,10 +147,51 @@ def _preview_units(
                 # Never cut through a sentence merely to fill the preview.
                 return units
             units.append((unit, segment_voice))
+            units.rule_counts.append(rule_counts)
             used_chars += len(unit)
             if used_chars >= max_chars:
                 return units
     return units
+
+
+def _trim_wav_to_duration(path: Path, target_seconds: float) -> None:
+    """Cap a generated preview WAV at the requested duration without padding short source audio."""
+    target = float(target_seconds or 0.0)
+    if target <= 0:
+        return
+    source_path = Path(path)
+    temporary_path = source_path.with_name(f"{source_path.stem}.duration-limited{source_path.suffix}")
+    try:
+        with wave.open(str(source_path), "rb") as source:
+            channels = source.getnchannels()
+            sample_width = source.getsampwidth()
+            frame_rate = source.getframerate()
+            frame_count = source.getnframes()
+            target_frames = max(1, int(target * frame_rate))
+            if frame_count <= target_frames:
+                return
+            audio_frames = source.readframes(target_frames)
+            expected_bytes = target_frames * channels * sample_width
+            if len(audio_frames) != expected_bytes:
+                raise RuntimeError("The generated preview WAV ended before the requested duration.")
+        with wave.open(str(temporary_path), "wb") as limited:
+            limited.setnchannels(channels)
+            limited.setsampwidth(sample_width)
+            limited.setframerate(frame_rate)
+            limited.writeframes(audio_frames)
+        if not temporary_path.is_file() or temporary_path.stat().st_size < 1024:
+            raise RuntimeError("The duration-limited preview WAV could not be validated.")
+        with wave.open(str(temporary_path), "rb") as limited:
+            actual_seconds = limited.getnframes() / float(max(1, limited.getframerate()))
+        if actual_seconds > target + (1.0 / max(1, frame_rate)):
+            raise RuntimeError("The duration-limited preview WAV exceeds the requested duration.")
+        temporary_path.replace(source_path)
+    except (wave.Error, OSError) as exc:
+        raise RuntimeError(
+            "The requested preview duration could not be enforced on the generated audio."
+        ) from exc
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def build_voice_preview(
@@ -143,22 +206,24 @@ def build_voice_preview(
     dialogue_assignments=None,
     progress_callback=None,
     target_seconds: float | None = None,
+    cancel_check=None,
 ) -> PreviewResult:
     if target_seconds is not None and float(target_seconds) > 0:
-        # Targeted previews should not synthesize an entire chapter and then
-        # discover that the result is 3–4 minutes long. Use a conservative
-        # character budget, keep sentence boundaries intact, and stop as soon
-        # as the requested duration is reached.
-        # The previous 12 chars/sec source budget caused a 30-second
-        # preview to contain only a few seconds of audio. Give the preview
-        # enough sentence-complete source text to reach the requested target.
-        target_chars = int(float(target_seconds) * 40.0)
-        effective_max_chars = max(
-            360,
-            min(int(max_chars), max(target_chars, 360)),
+        # A character estimate is only a safety budget, not the preview's
+        # stopping condition: fast local voices can render 1,400–1,800 characters
+        # in about ten seconds. Capping source text to that default budget makes
+        # a requested 30/60-second preview silently end too early.
+        # Give the worker enough sentence-complete source for fast voices; the
+        # measured WAV duration below remains the actual stopping condition.
+        # Never read beyond the text the caller supplied.
+        target_chars = int(float(target_seconds) * 240.0)
+        effective_max_chars = min(
+            len(text),
+            max(int(max_chars), target_chars, 360),
         )
     else:
         effective_max_chars = int(max_chars)
+    applied_rule_counts: dict[str, int] = {}
     units = _preview_units(
         text,
         provider,
@@ -167,6 +232,7 @@ def build_voice_preview(
         max_chars=effective_max_chars,
         dialogue_assignments=dialogue_assignments,
     )
+    unit_rule_counts = getattr(units, "rule_counts", [])
     if not units:
         raise ValueError("The selected chapter does not contain enough readable text for a preview.")
 
@@ -179,6 +245,11 @@ def build_voice_preview(
             except Exception:
                 pass
 
+    def check_cancelled() -> None:
+        if callable(cancel_check) and cancel_check():
+            raise PreviewCancelledError("Preview cancelled by user.")
+
+    check_cancelled()
     report("preparing", 0, total_units)
     target = max(0.0, float(target_seconds or 0.0))
     accumulated_seconds = 0.0
@@ -194,22 +265,88 @@ def build_voice_preview(
         normalized: list[Path] = []
 
         generated_segments = 0
+        generated_text: list[str] = []
+        qwen_mode = str(getattr(provider, "qwen_mode", "") or "").casefold()
+        batch_synthesizer = getattr(provider, "synthesize_batch", None)
+        try:
+            preview_batch_size = int(getattr(provider, "recommended_preview_batch_size", 1) or 1)
+        except (TypeError, ValueError):
+            preview_batch_size = 1
+        # Batch only short, same-voice Qwen VoiceDesign previews on a device
+        # whose provider explicitly advertises capacity. Other providers,
+        # long-form generation and multi-speaker passages retain serial behavior.
+        can_batch_qwen_preview = (
+            target > 0
+            and qwen_mode == "design-preview"
+            and callable(batch_synthesizer)
+            and preview_batch_size >= 2
+            and len(units) > 1
+            and all(
+                not isinstance(unit_voice, list)
+                and (not unit_voice or not voice or str(unit_voice) == str(voice))
+                for _unit, unit_voice in units
+            )
+        )
+        batch_raw_paths: dict[int, Path] = {}
         for index, (unit, unit_voice) in enumerate(units):
+            check_cancelled()
             report("synthesizing", index, total_units)
             raw_path = root / f"{index:03d}.wav"
             normalized_path = root / f"{index:03d}-normalized.wav"
-            if isinstance(unit_voice, list):
+            if can_batch_qwen_preview and index not in batch_raw_paths:
+                batch_end = min(index + preview_batch_size, total_units)
+                batch_items = [
+                    (units[batch_index][0], root / f"{batch_index:03d}.wav")
+                    for batch_index in range(index, batch_end)
+                ]
+                # Do not start a one-item batch at the tail.
+                if len(batch_items) > 1:
+                    check_cancelled()
+                    try:
+                        batch_synthesizer(batch_items)
+                        batch_raw_paths.update({
+                            batch_index: path
+                            for batch_index, (_text, path) in zip(
+                                range(index, batch_end), batch_items
+                            )
+                        })
+                    except RuntimeError as exc:
+                        # A batch may exceed CUDA memory even when each sentence
+                        # fits by itself. Retry serially only for explicit OOM;
+                        # unrelated synthesis errors must remain visible.
+                        if "qwen batch exceeded available gpu memory" not in str(exc).casefold():
+                            raise
+                        for batch_index, (batch_text, batch_path) in zip(
+                            range(index, batch_end), batch_items
+                        ):
+                            check_cancelled()
+                            provider.synthesize(batch_text, batch_path, units[batch_index][1])
+                            batch_raw_paths[batch_index] = batch_path
+                    check_cancelled()
+                if index in batch_raw_paths:
+                    raw_path = batch_raw_paths[index]
+                else:
+                    provider.synthesize(unit, raw_path, unit_voice)
+            elif index in batch_raw_paths:
+                raw_path = batch_raw_paths[index]
+            elif isinstance(unit_voice, list):
                 synthesize_voice_set(provider, unit, unit_voice, raw_path)
             else:
                 provider.synthesize(unit, raw_path, unit_voice)
+            check_cancelled()
             if not provider_handles_controls:
                 _apply_speed(raw_path, narration_speed)
                 next_text = units[index + 1][0] if index + 1 < len(units) else None
                 pause_ms = pause_after_ms(unit, pacing_profile, next_text=next_text)
                 if pause_ms:
                     append_silence(raw_path, pause_ms)
+            check_cancelled()
             _normalize(raw_path, normalized_path)
+            check_cancelled()
             normalized.append(normalized_path)
+            generated_text.append(unit)
+            for written, count in (unit_rule_counts[index] if index < len(unit_rule_counts) else {}).items():
+                applied_rule_counts[written] = applied_rule_counts.get(written, 0) + count
             generated_segments += 1
             if unit_voice:
                 voices_used.append(str(unit_voice))
@@ -224,8 +361,16 @@ def build_voice_preview(
             if target > 0 and accumulated_seconds >= target:
                 break
 
+        check_cancelled()
         report("finalizing", 0, 1)
         _concat(normalized, output_path)
+        check_cancelled()
+        # Synthesis proceeds on sentence/chunk boundaries, so its final segment
+        # can overshoot the selected duration substantially. Keep useful short
+        # chapters untouched, but cap longer output to the actual requested
+        # preview length before it reaches Sound Design, playback or Save As.
+        _trim_wav_to_duration(output_path, target)
+        check_cancelled()
         report("finalizing", 1, 1)
 
     if not output_path.exists() or output_path.stat().st_size < 1024:
@@ -235,4 +380,6 @@ def build_voice_preview(
         output_path=output_path,
         segments=generated_segments,
         voices_used=tuple(dict.fromkeys(voices_used)),
+        source_text="\n".join(generated_text),
+        applied_rule_counts=applied_rule_counts,
     )
