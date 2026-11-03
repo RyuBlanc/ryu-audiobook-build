@@ -370,7 +370,11 @@ class PreviewAssemblyTests(unittest.TestCase):
                 Path(output_path).write_bytes(b"opening plus narration" * 100)
 
             def fake_run(command):
-                Path(str(command[-1])).write_bytes(b"rendered sound mix" * 200)
+                target = Path(str(command[-1]))
+                if target.suffix.casefold() == ".wav":
+                    _write_wav(target, 10.7)
+                else:
+                    target.write_bytes(b"rendered sound mix" * 200)
 
             updates_host._render_sound_design_preview = (
                 lambda source, job_id, state:
@@ -408,6 +412,10 @@ class PreviewAssemblyTests(unittest.TestCase):
             self.assertEqual(completed["result"]["output_path"],
                              str(preview_root / "sound_mix_preview_mix-cleanup.m4a"))
             self.assertTrue((preview_root / "sound_mix_preview_mix-cleanup.m4a").is_file())
+            self.assertEqual(completed["result"]["file_url"],
+                             (preview_root / "preview_playback_mix-cleanup.wav").resolve().as_uri())
+            self.assertEqual(completed["result"]["playback_format"], "wav")
+            self.assertTrue((preview_root / "preview_playback_mix-cleanup.wav").is_file())
             self.assertFalse((preview_root / "preview_mix-cleanup.wav").exists())
             self.assertFalse((preview_root / "sound-preview-opening-mix-cleanup.m4a").exists())
 
