@@ -421,6 +421,57 @@ def _run(args: argparse.Namespace) -> int:
         "genre": metadata_history["genre"],
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    # Stage 5.3 full-generation acceptance uses a small, isolated project and
+    # the real bundled Offline Neural profile. This exercises the frozen app's
+    # saved-profile resolver, GenerationManager, chunk synthesis, durable job,
+    # History and final output hand-off without adding long-book TTS to the run.
+    full_generation_project_folder = app_root / "Library" / f"Stage 5.3 Full Generation {token}"
+    full_generation_project_folder.mkdir(parents=True, exist_ok=False)
+    generation_cover = full_generation_project_folder / "assets" / "cover.png"
+    write_png_fixture(generation_cover)
+    full_generation_output_path = temp_root / "stage5.3-real-full-generation.m4b"
+    full_generation_title = f"Stage 5.3 Full Generation {token}"
+    (full_generation_project_folder / "project.json").write_text(json.dumps({
+        "title": full_generation_title, "source_file": None,
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    (full_generation_project_folder / "chapters.json").write_text(json.dumps([{
+        "number": 1,
+        "title": "Real Production Generation Chapter",
+        "text": (
+            "This packaged acceptance chapter verifies real full audiobook generation. "
+            "The saved Offline Neural narrator must synthesize this chapter and publish "
+            "one completed output owned by this project and its generation job."
+        ),
+        "dialogue_assignments": [],
+        "review_status": "complete",
+        "skip_for_generation": False,
+    }], ensure_ascii=False, indent=2), encoding="utf-8")
+    (full_generation_project_folder / "state.json").write_text(json.dumps({
+        "status": "new",
+        "author": f"Stage 5.3 Author {token}",
+        "publisher": f"Stage 5.3 Press {token}",
+        "series": f"Stage 5.3 Series {token}",
+        "series_volume": "1",
+        "language": "en-US",
+        "year": "2026",
+        "genre": "Acceptance",
+        "cover_path": str(generation_cover.resolve()),
+        "voice_profile": narrator_profile_name,
+        "narrator": narrator_profile_name,
+        "narrator_profile_source": "project_override",
+        "backend": "automatic",
+        "audio_bitrate": 128,
+        "output_path": str(full_generation_output_path.resolve()),
+        "background_audio_mode": "off",
+        "background_audio_enabled": False,
+        "background_audio_path": "",
+        "background_audio_preferred_path": "",
+        "chapter_bgm_strategy": "same",
+        "chapter_bgm_overrides": {},
+        "sound_cues": {"opening": None, "chapter": None, "closing": None},
+        "characters": [],
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+
     previous_active = get_active_project_setting()
     set_active_project_setting(str(project_folder.resolve()))
 
@@ -458,6 +509,8 @@ def _run(args: argparse.Namespace) -> int:
         "expected_category": "fantasy", "expected_volume": 0.42,
         "project_folder": str(project_folder.resolve()),
         "secondary_project_folder": str(secondary_project_folder.resolve()),
+        "full_generation_project_folder": str(full_generation_project_folder.resolve()),
+        "full_generation_output_path": str(full_generation_output_path.resolve()),
         "original_project_title": project_title,
         "metadata": metadata_expected,
         "narrator_profile_name": narrator_profile_name,
@@ -525,6 +578,25 @@ def _run(args: argparse.Namespace) -> int:
                 )
         if "stage5_production_preview_real_save_as" not in (first_result.get("checks") or {}):
             raise AssertionError("The packaged UI did not report completion of the Production Preview Save As action.")
+        if "stage53_packaged_real_full_generation" not in (first_result.get("checks") or {}):
+            raise AssertionError("The packaged UI did not complete real Stage 5.3 full-generation acceptance.")
+        full_generation_output = Path(str(json.loads(config.read_text(encoding="utf-8")).get("full_generation_output_path") or ""))
+        if not full_generation_output.is_file() or full_generation_output.stat().st_size < 1024:
+            raise AssertionError(
+                "The packaged real full-generation flow did not create a non-empty M4B output: "
+                + str(full_generation_output)
+            )
+        with full_generation_output.open("rb") as generated_book:
+            generated_book.seek(4)
+            if generated_book.read(4) != b"ftyp":
+                raise AssertionError(
+                    "The packaged full-generation output does not have an ISO Base Media/M4B header: "
+                    + str(full_generation_output)
+                )
+        print(
+            "PACKAGED STAGE 5.3 REAL FULL GENERATION VERIFIED: "
+            + json.dumps({"path":str(full_generation_output),"bytes":full_generation_output.stat().st_size}, ensure_ascii=False)
+        )
         print(
             "PACKAGED PRODUCTION PREVIEW SAVE AS VERIFIED: "
             + json.dumps({"path":str(production_preview_save_path),"bytes":production_preview_save_path.stat().st_size}, ensure_ascii=False)
@@ -595,6 +667,7 @@ def _run(args: argparse.Namespace) -> int:
             path.with_name(path.name + ".license.json").unlink(missing_ok=True)
         shutil.rmtree(project_folder, ignore_errors=True)
         shutil.rmtree(secondary_project_folder, ignore_errors=True)
+        shutil.rmtree(full_generation_project_folder, ignore_errors=True)
         shutil.rmtree(temp_root, ignore_errors=True)
 
 

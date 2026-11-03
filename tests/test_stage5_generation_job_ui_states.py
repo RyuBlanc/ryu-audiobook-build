@@ -42,6 +42,15 @@ class Stage53GenerationJobUiStateTests(unittest.TestCase):
         self.assertIn('command === "job.list"', self.packaged)
         self.assertIn('["job.pause","job.resume","job.cancel"]', self.packaged)
 
+    def test_frozen_app_acceptance_runs_real_saved_profile_full_generation(self):
+        packaged_runner = (ROOT / "tests" / "packaged_sound_ui_acceptance.py").read_text(encoding="utf-8")
+        self.assertIn("full_generation_project_folder", packaged_runner)
+        self.assertIn("full_generation_output_path", packaged_runner)
+        self.assertIn("stage53_packaged_real_full_generation", self.packaged)
+        self.assertIn('document.querySelector("#startGenerate").click()', self.packaged)
+        self.assertIn('invoke("history.list", {})', self.packaged)
+        self.assertIn('completedGenerationProject.generation_job_id', self.packaged)
+
 
 if __name__ == "__main__":
     unittest.main()

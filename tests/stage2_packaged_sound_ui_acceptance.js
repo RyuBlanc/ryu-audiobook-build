@@ -1828,6 +1828,95 @@
     record("stage5_production_preview_restores_sound_master_state_for_restart_validation", true,
       "After Voice Only parity tests and cancellation, the real Production master control restored the saved enabled Chapter-Based BGM state before process restart.");
 
+    // Stage 5.3 GEN-01 packaged runtime acceptance: move to an isolated
+    // one-chapter project and run the real frozen-app full-generation command
+    // using the saved bundled Piper voice. No generation bridge responses are
+    // faked here; only the later UI-state rendering test uses synthetic job rows.
+    await openProjectFromDashboard(config.full_generation_project_folder, "Stage 5.3 full-generation");
+    await waitFor("Stage 5.3 full-generation project activation", async function () {
+      const active = await invoke("project.get_active", {});
+      return String(active.folder || "") === String(config.full_generation_project_folder || "");
+    }, 20000);
+    const savedGenerationNarrator = await invoke("voice.select", {
+      profile_name:narratorProfileName, backend:"automatic"
+    });
+    must(savedGenerationNarrator && savedGenerationNarrator.saved === true &&
+      String(savedGenerationNarrator.name || "") === narratorProfileName,
+      "The Stage 5.3 generation project could not persist its selected Offline Neural narrator.");
+    const generationProject = await invoke("project.get_active", {});
+    must(String(generationProject.voice_profile || generationProject.narrator || "") === narratorProfileName,
+      "The full-generation project did not retain the saved narrator profile.");
+    must(String(generationProject.publisher || "").trim() &&
+      String(generationProject.author || "").trim() &&
+      String(generationProject.cover_path || "").trim(),
+      "The isolated full-generation project is missing required saved metadata or cover details.");
+    window.go("generate");
+    await waitFor("Stage 5.3 Production full-generation controls", function () {
+      return document.querySelector("#generate")?.classList.contains("active") === true &&
+        Boolean(document.querySelector("#startGenerate"));
+    }, 20000);
+    await waitFor("Stage 5.3 full-generation metadata gate", function () {
+      const button = document.querySelector("#startGenerate");
+      return Boolean(button && !button.disabled);
+    }, 20000);
+    const jobsBeforeFullGeneration = await invoke("job.list", {include_hidden:true});
+    const priorGenerationIds = new Set((Array.isArray(jobsBeforeFullGeneration) ? jobsBeforeFullGeneration : [])
+      .filter(job => job.type === "audiobook-generation")
+      .map(job => String(job.job_id || "")));
+    document.querySelector("#startGenerate").click();
+    let fullGenerationJobId = "";
+    await waitFor("real packaged full-generation job start", async function () {
+      const jobs = await invoke("job.list", {include_hidden:true});
+      const job = Array.isArray(jobs) ? jobs.find(item =>
+        item.type === "audiobook-generation" &&
+        String(item.project_folder || "") === String(config.full_generation_project_folder || "") &&
+        !priorGenerationIds.has(String(item.job_id || "")) &&
+        Boolean(item.job_id)) : null;
+      if (!job) return false;
+      fullGenerationJobId = String(job.job_id);
+      return true;
+    }, 30000);
+    let fullGenerationJob = null;
+    await waitFor("real packaged full-generation completion", async function () {
+      const jobs = await invoke("job.list", {include_hidden:true});
+      fullGenerationJob = Array.isArray(jobs)
+        ? jobs.find(item => String(item.job_id || "") === fullGenerationJobId) : null;
+      if (!fullGenerationJob) return false;
+      const state = String(fullGenerationJob.state || "").toLowerCase();
+      if (state === "failed" || state === "cancelled") {
+        throw new Error("Packaged full generation ended " + state + ": " +
+          String(fullGenerationJob.error?.message || fullGenerationJob.message || ""));
+      }
+      return state === "completed";
+    }, 360000);
+    const generationHistory = await invoke("history.list", {});
+    const historyGenerationJob = Array.isArray(generationHistory)
+      ? generationHistory.find(item => String(item.job_id || "") === fullGenerationJobId) : null;
+    const completedGenerationProject = await invoke("project.get_active", {});
+    const normalizeOutputPath = value => String(value || "").replace(/\\/g, "/").toLowerCase();
+    const expectedGenerationOutput = normalizeOutputPath(config.full_generation_output_path);
+    must(fullGenerationJob.state === "completed" &&
+      normalizeOutputPath(fullGenerationJob.output_path) === expectedGenerationOutput,
+      "The full-generation job did not complete with the requested output path: " +
+        JSON.stringify({job:fullGenerationJob, expected:config.full_generation_output_path}));
+    must(historyGenerationJob && historyGenerationJob.state === "completed" &&
+      String(historyGenerationJob.job_id || "") === fullGenerationJobId &&
+      normalizeOutputPath(historyGenerationJob.output_path) === expectedGenerationOutput,
+      "The completed full-generation job and durable History do not share the same job/output identity.");
+    must(String(completedGenerationProject.folder || "") === String(config.full_generation_project_folder || "") &&
+      String(completedGenerationProject.generation_job_id || "") === fullGenerationJobId &&
+      normalizeOutputPath(completedGenerationProject.output_path) === expectedGenerationOutput,
+      "The completed full-generation output was not attached to its owning project and job.");
+    record("stage53_packaged_real_full_generation", true,
+      "The frozen Windows app synthesized a real chapter with the saved bundled Offline Neural narrator, completed a full GenerationManager job, persisted its identical History job ID, and associated the M4B output only with its owning project.");
+    await openProjectFromDashboard(config.project_folder, "Primary");
+    await waitFor("Primary preview project restored after full-generation acceptance", async function () {
+      const active = await invoke("project.get_active", {});
+      const soundState = await invoke("sound.chapter_bgm.get", {});
+      return String(active.folder || "") === String(config.project_folder || "") &&
+        Array.isArray(soundState.chapters) && soundState.chapters.length === 3;
+    }, 20000);
+
     await runStage53JobUiAcceptance();
     publish("passed");
   } catch (error) {
