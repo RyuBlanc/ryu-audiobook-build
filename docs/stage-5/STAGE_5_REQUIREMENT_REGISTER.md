@@ -168,3 +168,10 @@ These changes remain `CODE CHANGED — NOT VERIFIED` until the final exact-commi
 The three Stage 4 failures and one Stage 5 error in #2130 are addressed by these edits. The next artifact checkpoint must confirm this on the exact SHA; no result is presumed.
 
 Step 5.2's original execution-ledger scope is PROD-05/06/07 (real progress, independent preview/full job state, duration controls and playback/cancellation/timing). PROD-08/09/15 and GEN-06 were later planned integration items and have been implemented in the same branch, but their full manual audio matrix is still separate from the Stage 5.2 CI exit test. PROD-14 and GEN-01–05 remain tracked for later Stage 5 integration/recovery scope and are not silently marked complete here.
+
+
+## Final Step 5.2 exact-head verification candidate — 3 November 2026
+
+After auditing #2130, the request-time stable chapter ID is now forwarded into the preview job and the superseded Stage 4 preview tests have been migrated to the Production-owned selector contract. The new Stage 5 regression now asserts the stable ID is passed to the worker. Source/test commits included in this checkpoint: `37102e4ba7557aa55448539e3971e27eff7870e1`, `ba49f5b687459b654910b607c51f17cf68087209`, `d67c79ffda73b1d1a01eba82f950f87af7285610`, plus the execution-ledger run history update.
+
+The current status is still CODE CHANGED — NOT VERIFIED for PROD-05/06/07 and the later PROD-08/09/15 + GEN-06 integration items until the new exact-head `tests` and `build` jobs both pass. The packaged #2115 baseline is evidence for the previous source SHA only and cannot substitute for this candidate's final verification.
