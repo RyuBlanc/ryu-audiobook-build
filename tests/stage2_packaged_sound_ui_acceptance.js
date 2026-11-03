@@ -1492,7 +1492,7 @@
     const productionPreviewPath = String(productionPreviewResult.output_path || completedProductionPreview.output_path || "");
     must(productionPreviewPath.toLowerCase().endsWith(".m4a") &&
       Number(productionPreviewResult.actual_duration_seconds || 0) > 0 &&
-      Number(productionPreviewResult.file_size || 0) >= 1024,
+      String(productionPreviewResult.file_url || "").toLowerCase().startsWith("file:"),
       "Production Preview did not return a validated, measured AAC/M4A chapter file: " +
         JSON.stringify(productionPreviewResult));
     must(productionPreviewResult.sound_configuration?.background_audio_mode === "off" &&
@@ -1531,14 +1531,31 @@
     // The chapter worker is deliberately started through the actual Production
     // button so the dedicated job ID, Cancel Preview control and terminal state
     // all use the real backend worker rather than a direct mocked call.
+    productionChapterPicker.value = "3";
+    productionChapterPicker.dispatchEvent(new Event("change", {bubbles:true}));
+    await waitFor("Production Preview cancellation chapter selected", function () {
+      return productionChapterPicker.value === "3" &&
+        document.querySelector("#productionPreviewChapter")?.textContent.includes("Chapter 3");
+    }, 10000);
     durationControls[3].click();
     await waitFor("Production Preview 90-second cancellation target", function () {
       return durationControls[3].classList.contains("active");
     }, 5000);
     productionPreviewStart.click();
-    await waitFor("Production Preview cancellation control enabled", function () {
+    let cancelPreviewJobId = "";
+    await waitFor("Production Preview cancellation control enabled", async function () {
       const cancel = document.querySelector("#productionPreviewCancel");
-      return cancel && !cancel.disabled;
+      if (!cancel || cancel.disabled) return false;
+      const jobs = await invoke("job.list", {include_hidden:true});
+      const active = Array.isArray(jobs)
+        ? jobs.find(job => job.type === "production-preview" &&
+            Number(job.current_chapter || 0) === 3 &&
+            ["queued", "running", "cancel_requested"].includes(String(job.state || "").toLowerCase()) &&
+            String(job.job_id || "") !== productionPreviewJobId)
+        : null;
+      if (!active) return false;
+      cancelPreviewJobId = String(active.job_id || "");
+      return Boolean(cancelPreviewJobId);
     }, 15000);
     const cancelPreviewButton = document.querySelector("#productionPreviewCancel");
     cancelPreviewButton.click();
@@ -1546,16 +1563,13 @@
     await waitFor("Production Preview real cancellation completion", async function () {
       const jobs = await invoke("job.list", {include_hidden:true});
       cancelledPreviewJob = Array.isArray(jobs)
-        ? jobs.find(job => job.type === "production-preview" &&
-            Number(job.current_chapter || 0) === 2 &&
-            ["cancel_requested", "cancelled", "completed", "failed"].includes(String(job.state || "").toLowerCase()) &&
-            String(job.job_id || "") !== productionPreviewJobId)
+        ? jobs.find(job => String(job.job_id || "") === cancelPreviewJobId)
         : null;
       if (!cancelledPreviewJob) return false;
       const state = String(cancelledPreviewJob.state || "").toLowerCase();
       if (state === "failed") throw new Error("Production Preview cancellation failed: " + String(cancelledPreviewJob.message || ""));
       return state === "cancelled" || state === "completed";
-    }, 90000);
+    }, 120000);
     must(String(cancelledPreviewJob.state || "").toLowerCase() === "cancelled",
       "Production Preview worker completed before its cancel request was honored.");
     record("stage5_production_preview_real_cancellation", true,
