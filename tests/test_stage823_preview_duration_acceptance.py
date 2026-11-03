@@ -143,6 +143,37 @@ class TestPreviewDurationAcceptance(unittest.TestCase):
         self.assertGreaterEqual(actual_seconds, 0.60)
         self.assertLess(actual_seconds, 0.61)
 
+    def test_preview_trims_final_segment_overrun_but_does_not_pad_short_chapters(self):
+        class FixedDurationProvider:
+            def __init__(self, segment_seconds):
+                self.segment_seconds = segment_seconds
+
+            def synthesize(self, _text, output_path, voice=None):
+                _write_tone(Path(output_path), self.segment_seconds)
+
+        with tempfile.TemporaryDirectory() as temp:
+            cases = ((20.58, 10.0), (6.0, 6.0))
+            for segment_seconds, expected_seconds in cases:
+                with self.subTest(segment_seconds=segment_seconds):
+                    output = Path(temp) / f"preview-{segment_seconds}.wav"
+                    with patch("app.tts.preview._normalize", side_effect=_copy_normalized), patch(
+                        "app.tts.preview._concat", side_effect=_concat_wavs
+                    ):
+                        result = build_voice_preview(
+                            "One complete sentence for the duration-limited preview test.",
+                            FixedDurationProvider(segment_seconds),
+                            "Narrator",
+                            output,
+                            narration_speed=1.0,
+                            pacing_profile="off",
+                            target_seconds=10.0,
+                        )
+                    with wave.open(str(result.output_path), "rb") as wav:
+                        actual_seconds = wav.getnframes() / float(wav.getframerate())
+                    self.assertAlmostEqual(actual_seconds, expected_seconds, places=2)
+                    self.assertEqual(result.segments, 1)
+                    self.assertEqual(result.output_path, output)
+
     def test_supported_preview_durations_meet_requested_audio_budget(self):
         class FastLocalProvider:
             def __init__(self):

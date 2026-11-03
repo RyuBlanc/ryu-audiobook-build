@@ -154,6 +154,46 @@ def _preview_units(
     return units
 
 
+def _trim_wav_to_duration(path: Path, target_seconds: float) -> None:
+    """Cap a generated preview WAV at the requested duration without padding short source audio."""
+    target = float(target_seconds or 0.0)
+    if target <= 0:
+        return
+    source_path = Path(path)
+    temporary_path = source_path.with_name(f"{source_path.stem}.duration-limited{source_path.suffix}")
+    try:
+        with wave.open(str(source_path), "rb") as source:
+            channels = source.getnchannels()
+            sample_width = source.getsampwidth()
+            frame_rate = source.getframerate()
+            frame_count = source.getnframes()
+            target_frames = max(1, int(target * frame_rate))
+            if frame_count <= target_frames:
+                return
+            audio_frames = source.readframes(target_frames)
+            expected_bytes = target_frames * channels * sample_width
+            if len(audio_frames) != expected_bytes:
+                raise RuntimeError("The generated preview WAV ended before the requested duration.")
+        with wave.open(str(temporary_path), "wb") as limited:
+            limited.setnchannels(channels)
+            limited.setsampwidth(sample_width)
+            limited.setframerate(frame_rate)
+            limited.writeframes(audio_frames)
+        if not temporary_path.is_file() or temporary_path.stat().st_size < 1024:
+            raise RuntimeError("The duration-limited preview WAV could not be validated.")
+        with wave.open(str(temporary_path), "rb") as limited:
+            actual_seconds = limited.getnframes() / float(max(1, limited.getframerate()))
+        if actual_seconds > target + (1.0 / max(1, frame_rate)):
+            raise RuntimeError("The duration-limited preview WAV exceeds the requested duration.")
+        temporary_path.replace(source_path)
+    except (wave.Error, OSError) as exc:
+        raise RuntimeError(
+            "The requested preview duration could not be enforced on the generated audio."
+        ) from exc
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
 def build_voice_preview(
     text: str,
     provider: TTSProvider,
@@ -324,6 +364,12 @@ def build_voice_preview(
         check_cancelled()
         report("finalizing", 0, 1)
         _concat(normalized, output_path)
+        check_cancelled()
+        # Synthesis proceeds on sentence/chunk boundaries, so its final segment
+        # can overshoot the selected duration substantially. Keep useful short
+        # chapters untouched, but cap longer output to the actual requested
+        # preview length before it reaches Sound Design, playback or Save As.
+        _trim_wav_to_duration(output_path, target)
         check_cancelled()
         report("finalizing", 1, 1)
 
