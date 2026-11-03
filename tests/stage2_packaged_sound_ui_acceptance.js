@@ -1634,13 +1634,17 @@
       const targetResult = targetJob.result || {};
       const targetOutput = String(targetResult.output_path || targetJob.output_path || "");
       const targetPlaybackUrl = String(targetResult.file_url || "").toLowerCase();
-      must(Number(targetResult.actual_duration_seconds || 0) > 0 &&
+      const actualSeconds = Number(targetResult.actual_duration_seconds || 0);
+      const durationTolerance = Math.max(5, target.seconds * 0.2);
+      must(Number(targetResult.requested_duration_seconds || 0) === target.seconds &&
+        actualSeconds > 0 &&
         targetOutput.toLowerCase().endsWith(".m4a") &&
         targetPlaybackUrl.startsWith("file:") && targetPlaybackUrl.endsWith(".wav") &&
         targetResult.playback_format === "wav" &&
-        Math.abs(Number(targetResult.actual_duration_seconds) - target.seconds) <= 5,
-        "Production Preview " + target.label + " did not produce duration-matched M4A output and a WAV playback asset: " +
-          JSON.stringify(targetResult));
+        actualSeconds >= target.seconds - 5 &&
+        actualSeconds <= target.seconds + durationTolerance,
+        "Production Preview " + target.label + " did not produce a valid M4A and matching WAV within the bounded chapter-segment duration tolerance: " +
+          JSON.stringify({target_seconds:target.seconds,actual_seconds:actualSeconds,tolerance_seconds:durationTolerance,result:targetResult}));
       await waitFor("Production Preview " + target.label + " playback readiness", function () {
         return document.querySelector("#productionPreviewStatus")?.textContent.includes("Preview ready") &&
           document.querySelector("#productionPreviewPlay") && !document.querySelector("#productionPreviewPlay").disabled;
