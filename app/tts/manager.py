@@ -176,7 +176,7 @@ class GenerationManager:
         self._thread.start()
 
     def pause(self) -> None:
-        """Pause at the next safe chapter boundary; never interrupt an audio chunk."""
+        """Pause at the next persisted chunk/batch boundary; never interrupt synthesis."""
         if self._thread and self._thread.is_alive():
             self.pause_event.set()
 
