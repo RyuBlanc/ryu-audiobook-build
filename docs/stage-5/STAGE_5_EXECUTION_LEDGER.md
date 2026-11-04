@@ -857,3 +857,15 @@ All earlier failed candidates are retained as failed history. No failed candidat
 - Preserve the #2251 passed Stage 5.4 full-generation ownership checks.
 - Installer, portable package and SHA-256 manifest uploads must pass. Public release publishing remains disabled.
 - Stage 6 does not start until this packaged checkpoint is green and the artifacts are present.
+
+
+## 36. Stage 5.5 final frozen-Windows acceptance and artifact checkpoint — 4 November 2026
+
+- Final exact-head run: [Build Windows App #2253](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41770098774), run ID `41770098774`, commit `5315a75b1b0324796d884bdbc49a7a5eb0116a28`; conclusion SUCCESS.
+- Tests: **1,141 passed in 54.553 seconds**. Installer JS syntax, app freeze, frozen EXE verification, bundled voice assets and critical-module checks all passed.
+- Packaged acceptance passed all Stage 5.5 markers: `stage55_final_m4b_embedded_chapters`, `stage55_browser_compatible_playback_source`, and `stage55_audiobooks_real_playback_chapter_seek_and_position`.
+- The same frozen acceptance re-passed Stage 5.4 full multi-chapter generation, saved narrator, chapter order/skip counts, job/History ownership, Background Jobs Retry/Recover controls, real pause/resume/cancel, retry ownership, live Dashboard readiness, library opening, restart interruption and actual recover-to-completion.
+- Packaging gates: Inno Setup, core installer payload, functional HTML installer, logo transparency/hash generation, Microsoft Defender scan, installer upload, SHA-256 manifest upload and portable app upload all SUCCESS. Publish verified installer release was SKIPPED by design (not a failure).
+- Uploaded artifacts: installer ID `13295407817`; manifest ID `13295567412`; portable ID `13295113479`. All were non-expired at checkpoint creation; expiry 4 December 2026.
+- **Stage 5.5 exit decision: CLOSED / COMPLETE.** No outstanding Stage 5.5 automated acceptance or release-artifact gate remains. User-device perceptual listening remains optional manual confirmation, not a blocker claimed as CI evidence.
+- Stage 6 may start from this exact-head stable artifact checkpoint. Preserve #2253 artifacts and Stage 5.4 accepted branch unchanged.

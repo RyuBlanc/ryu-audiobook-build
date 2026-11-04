@@ -7,8 +7,10 @@
 - Stage 5.4 Windows artifact checkpoint: [Build Windows App #2235](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41755362901).
 - Stage 5.4 closeout regression: [Build Windows App #2236](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41758947383).
 - Stage 5.5 branch: `stage-5/step-5-m4b-library-integration`.
-- Stage 5.5 current application candidate: `5d620525e98668fede228cd19b3836078346152f`.
+- Stage 5.5 application candidate: `5d620525e98668fede228cd19b3836078346152f`.
+- Stage 5.5 artifact-checkpoint/documentation commit: `5315a75b1b0324796d884bdbc49a7a5eb0116a28`.
 - Matching regression workflow: [Build Windows App #2252](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41769708812).
+- Final Windows artifact checkpoint: [Build Windows App #2253](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41770098774), SUCCESS on exact HEAD `5315a75b1b0324796d884bdbc49a7a5eb0116a28`.
 - All Stage 5.5 changes remain isolated from the accepted Stage 5.4 branch and artifacts.
 
 ## Scope
@@ -57,19 +59,43 @@ Stage 5.5 closes the final-output and Audiobooks handoff boundary retained in th
 
 All failed runs remain historical. None was manually cancelled or counted as a successful checkpoint. #2251 produced no installer, portable app or SHA-256 artifact because packaged acceptance failed.
 
-## Windows artifact acceptance — pending
+## Windows artifact acceptance — PASSED (#2253)
 
-The next exact-head `[artifact-checkpoint]` workflow must run the frozen Windows application and prove all Stage 5.5 markers:
+The exact-head `[artifact-checkpoint]` workflow ran the frozen Windows application and proved all Stage 5.5 markers:
 
 1. `stage55_final_m4b_embedded_chapters` — actual embedded chapter titles and contiguous timing read back from the original M4B.
 2. `stage55_browser_compatible_playback_source` — the Audiobooks backend returns a cached playback derivative linked to the exact authoritative M4B source.
 3. `stage55_audiobooks_real_playback_chapter_seek_and_position` — real audio plays in the packaged Audiobooks page, chapter navigation seeks to the second embedded M4B marker and listening position persists to the owning project.
 4. Preserve the prior Stage 5.4 packaged generation, job ownership, Retry and restart-recovery acceptance.
 
-The installer, portable package and SHA-256 manifest must be created only after the exact-head packaged acceptance passes. No version tag or public release is part of Stage 5.5.
+After exact-head packaged acceptance passed, the installer, portable package and SHA-256 manifest were created, Defender-scanned and uploaded. No version tag or public release is part of Stage 5.5.
+
+### Final packaged acceptance evidence
+
+All markers passed in [#2253](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41770098774):
+
+- `stage54_packaged_real_multi_chapter_full_generation` — two eligible chapters synthesized in saved order with the saved bundled Offline Neural narrator; empty and excluded chapters skipped; one GenerationManager job and identical History job ID; output attached only to its owning project.
+- `stage55_final_m4b_embedded_chapters` — two actual embedded M4B chapter markers read back with titles and valid ordered start/end timing.
+- `stage55_browser_compatible_playback_source` — the chaptered AAC M4B remains the library asset and the Audiobooks player receives an MP3 derivative decoded from that exact source.
+- `stage55_audiobooks_real_playback_chapter_seek_and_position` — real finished-book audio played in Premium V2, chapter navigation sought to the second embedded marker, and listening position persisted to the owning project.
+- Stage 5.4 cross-module acceptance re-passed: Background Jobs Retry/Recover controls; real Pause/Resume/Cancel at persisted chunk checkpoints; Retry with project/History/output ownership; readiness/Dashboard ownership; restart interruption and native Recover to completion; real Library open fallback.
+
+### Final build and release artifacts
+
+All required artifact-producing steps passed. Public release publishing was skipped by design.
+
+| Artifact | GitHub artifact | Size | SHA-256 of uploaded artifact ZIP |
+|---|---|---:|---|
+| Windows Installer | `Ryu-Audiobook-Installer-2253` ([download](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41770098774/artifacts/13295407817)) | 884,314,151 bytes | `f07889555938fadab7a6078c42127c6d7f7e0e81b823d6ab941523ef0a9cf099` |
+| Portable Windows App | `Ryu-Audiobook-Portable-2253` ([download](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41770098774/artifacts/13295113479)) | 1,367,975,026 bytes | `fa6934374005fe37beac718afdb01d0ad114123845ee9c42a7063548a9e57f5b` |
+| SHA-256 Manifest | `Ryu-Audiobook-Release-SHA256-2253` ([download](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41770098774/artifacts/13295567412)) | 777 bytes | `8b65eed768b325c4d908655af96f9354b0304e68e7f7c1ec5918d8817a7c6ec2` |
+
+Artifacts were created 4 November 2026 and expire 4 December 2026 unless retained/downloaded elsewhere. The hashes above identify the ZIP artifact files, not the inner installer/EXE files; the uploaded manifest contains the release-file hashes.
 
 ## Status
 
-**REGRESSION GREEN — WINDOWS PACKAGED ACCEPTANCE PENDING.**
+**STAGE 5.5 COMPLETE — AUTOMATED FROZEN-WINDOWS ACCEPTANCE AND ARTIFACT CHECKPOINT PASSED (#2253).**
+
+Manual listening/perceptual acceptance on the user's own device remains a separate optional hardware/user experience check; it is not a blocker to the automated Stage 5.5 exit criteria and is not claimed as completed by CI. Stage 6 may now be started from the #2253 exact-head checkpoint.
 
 Manual listening on the user's own device remains a separate perceptual/hardware check. It is not claimed by automated CI.
