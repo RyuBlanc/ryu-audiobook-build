@@ -200,3 +200,28 @@ Run #2289's Music Library, cue, BGM, and preview checks before the Production me
 **Next action:** run one corrected-head artifact checkpoint. The exact required path is 1,159+ regression tests, frozen app, bundled assets, complete packaged acceptance including 1.25x / 37% preference persistence, then Inno Setup, functional HTML installer, logo verification, SHA-256, Defender and installer/portable uploads.
 
 **Current decision:** Stage 6 Step 3 remains IN PROGRESS. #2300 and #2301 are failed historical checkpoints; #2301 passed source tests, freeze, and bundled assets, but its packaged acceptance timed out on player preference read-back. The new explicit acknowledgement/read-back correction has not yet been verified by CI.
+
+## Mini-player / AI recovery audit and player preference root-cause correction — 4 November 2026
+
+### Historical failures reviewed
+
+- **#2286 — visible Dashboard mini-player acceptance:** packaged test failed while waiting for the visible mini-player to pause the selected audio. This was the original mini-player toggle issue.
+- **#2287 — mini-player toggle + AI JSON recovery:** source regression failed because the test searched the wrapper `_safe_analyze_chapter` for `for repair_attempt in range(2)`, although the bounded retry loop belongs to `app/ai/brain.py` and the wrapper delegates to `_original_analyze_chapter`. This was a stale source-location assertion, not evidence that the live AI retry loop failed.
+- **#2288 — AI repair regression contract:** the test contract was corrected; the full 1,157-test source suite passed.
+- **#2306 — current packaged player issue:** the visible Dashboard mini-player shared-audio acceptance passed. The AI malformed-JSON bounded-repair test and all three mini-player source contracts also passed in the 1,159-test suite. The only packaged acceptance error was player rate/volume persistence.
+
+### Root cause isolated
+
+- A document-level capture-phase `click` handler intercepted the full-player speed buttons and called `stopImmediatePropagation()`, preventing the target `onclick` installed by `bindAudiobookPlayerControls()` from running.
+- That capture handler changed `playerAudio.playbackRate` directly and updated the active button, but bypassed `applyPlayerRate()` / `savePlayerPreferences()`. This made the real audio speed and UI look correct while the durable settings remained unchanged, explaining the repeated timeout in #2290 and #2306.
+- The speed-button capture handler now routes through `await applyPlayerRate(rate, true)`. On save failure, the shared handler already surfaces the error; the capture handler does not emit a second duplicate error.
+
+### Guardrails added
+
+- Added a source regression asserting the capture-phase speed branch calls `applyPlayerRate(rate, true)` and no longer writes `playerAudio.playbackRate` directly.
+- Split packaged persistence acceptance into independent strict read-backs for volume (37%) and playback speed (1.25x). Both `settings.get` and `player.get_active` must confirm each value. The actual media controls remain separately asserted.
+- No changes were made to the mini-player implementation or AI runtime/recovery implementation because their current regression and packaged checks are passing.
+
+**Next action:** verify this targeted change with the source suite and one artifact checkpoint. Confirm mini-player shared-audio acceptance, AI bounded JSON repair, volume persistence and speed persistence; then complete installer, portable, Defender and SHA-256 gates. Do not close Step 3 or publish until all gates pass.
+
+**Current decision:** Stage 6 Step 3 remains IN PROGRESS. #2286/#2287 historical causes are corrected and their current regression contracts pass; #2306 is a historical packaged preference failure. The capture-phase speed persistence correction is committed with targeted regression and isolated packaged acceptance, but matching-head CI/package verification is pending.
