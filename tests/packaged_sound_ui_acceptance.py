@@ -421,31 +421,67 @@ def _run(args: argparse.Namespace) -> int:
         "genre": metadata_history["genre"],
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # Stage 5.3 full-generation acceptance uses a small, isolated project and
-    # the real bundled Offline Neural profile. This exercises the frozen app's
-    # saved-profile resolver, GenerationManager, chunk synthesis, durable job,
-    # History and final output hand-off without adding long-book TTS to the run.
-    full_generation_project_folder = app_root / "Library" / f"Stage 5.3 Full Generation {token}"
+    # Stage 5.4 full-generation acceptance uses a short, isolated multi-chapter
+    # project and the real bundled Offline Neural profile. The packaged app must
+    # synthesize two eligible chapters in saved order, skip one excluded chapter
+    # and one empty chapter, then persist one job/History/output ownership chain.
+    full_generation_project_folder = app_root / "Library" / f"Stage 5.4 Full Generation {token}"
     full_generation_project_folder.mkdir(parents=True, exist_ok=False)
     generation_cover = full_generation_project_folder / "assets" / "cover.png"
     write_png_fixture(generation_cover)
-    full_generation_output_path = temp_root / "stage5.3-real-full-generation.m4b"
-    full_generation_title = f"Stage 5.3 Full Generation {token}"
+    full_generation_output_path = temp_root / "stage5.4-real-full-generation.m4b"
+    full_generation_title = f"Stage 5.4 Full Generation {token}"
+    full_generation_chapters = [
+        {
+            "number": 1,
+            "title": "Real Production Generation Chapter One",
+            "chapter_id": f"stage54-{token}-chapter-1",
+            "text": (
+                "This packaged acceptance chapter verifies the first real generation chapter. "
+                "Its saved order and stable chapter identity must be preserved in the final M4B."
+            ),
+            "dialogue_assignments": [],
+            "review_status": "complete",
+            "skip_for_generation": False,
+        },
+        {
+            "number": 2,
+            "title": "Real Production Generation Chapter Two",
+            "chapter_id": f"stage54-{token}-chapter-2",
+            "text": (
+                "This packaged acceptance chapter verifies the second real generation chapter. "
+                "It must be synthesized after Chapter One and associated with the same full-book job."
+            ),
+            "dialogue_assignments": [],
+            "review_status": "complete",
+            "skip_for_generation": False,
+        },
+        {
+            "number": 3,
+            "title": "Explicitly Excluded Acceptance Chapter",
+            "chapter_id": f"stage54-{token}-chapter-3",
+            "text": "This non-empty chapter is explicitly excluded and must not be synthesized.",
+            "dialogue_assignments": [],
+            "review_status": "complete",
+            "skip_for_generation": True,
+        },
+        {
+            "number": 4,
+            "title": "Empty Acceptance Chapter",
+            "chapter_id": f"stage54-{token}-chapter-4",
+            "text": "   ",
+            "dialogue_assignments": [],
+            "review_status": "complete",
+            "skip_for_generation": False,
+        },
+    ]
     (full_generation_project_folder / "project.json").write_text(json.dumps({
         "title": full_generation_title, "source_file": None,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
-    (full_generation_project_folder / "chapters.json").write_text(json.dumps([{
-        "number": 1,
-        "title": "Real Production Generation Chapter",
-        "text": (
-            "This packaged acceptance chapter verifies real full audiobook generation. "
-            "The saved Offline Neural narrator must synthesize this chapter and publish "
-            "one completed output owned by this project and its generation job."
-        ),
-        "dialogue_assignments": [],
-        "review_status": "complete",
-        "skip_for_generation": False,
-    }], ensure_ascii=False, indent=2), encoding="utf-8")
+    (full_generation_project_folder / "chapters.json").write_text(
+        json.dumps(full_generation_chapters, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
     (full_generation_project_folder / "state.json").write_text(json.dumps({
         "status": "new",
         "author": f"Stage 5.3 Author {token}",
@@ -578,8 +614,8 @@ def _run(args: argparse.Namespace) -> int:
                 )
         if "stage5_production_preview_real_save_as" not in (first_result.get("checks") or {}):
             raise AssertionError("The packaged UI did not report completion of the Production Preview Save As action.")
-        if "stage53_packaged_real_full_generation" not in (first_result.get("checks") or {}):
-            raise AssertionError("The packaged UI did not complete real Stage 5.3 full-generation acceptance.")
+        if "stage54_packaged_real_multi_chapter_full_generation" not in (first_result.get("checks") or {}):
+            raise AssertionError("The packaged UI did not complete real Stage 5.4 multi-chapter full-generation acceptance.")
         full_generation_output = Path(str(json.loads(config.read_text(encoding="utf-8")).get("full_generation_output_path") or ""))
         if not full_generation_output.is_file() or full_generation_output.stat().st_size < 1024:
             raise AssertionError(
@@ -594,7 +630,7 @@ def _run(args: argparse.Namespace) -> int:
                     + str(full_generation_output)
                 )
         print(
-            "PACKAGED STAGE 5.3 REAL FULL GENERATION VERIFIED: "
+            "PACKAGED STAGE 5.4 REAL MULTI-CHAPTER FULL GENERATION VERIFIED: "
             + json.dumps({"path":str(full_generation_output),"bytes":full_generation_output.stat().st_size}, ensure_ascii=False)
         )
         print(

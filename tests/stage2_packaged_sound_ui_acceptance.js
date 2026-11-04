@@ -115,8 +115,8 @@
     row = await refreshSyntheticJobs("pause_requested");
     must(JSON.stringify(actionNames(row)) === JSON.stringify(["cancel"]),
       "A pending pause must not expose a misleading Resume control: " + JSON.stringify(actionNames(row)));
-    must(row.textContent.includes("Pausing at the next chapter boundary"),
-      "Background Jobs must communicate the pending safe-boundary pause.");
+    must(row.textContent.includes("Pausing at the next saved chunk/batch boundary"),
+      "Background Jobs must communicate the pending saved chunk/batch pause.");
     row = await refreshSyntheticJobs("paused");
     must(JSON.stringify(actionNames(row)) === JSON.stringify(["resume","cancel"]),
       "Paused generation must expose Resume and Cancel only: " + JSON.stringify(actionNames(row)));
@@ -128,6 +128,29 @@
     row = await refreshSyntheticJobs("cancel_requested");
     must(actionNames(row).length === 0 && row.textContent.includes("Cancelling…"),
       "A pending cancellation must show its state and disable further actions.");
+
+    const failedFilter = document.querySelector('[data-job-filter="failed"]');
+    must(failedFilter, "Background Jobs failed/cancelled filter is missing.");
+    failedFilter.click();
+    stage53.rows[0].recoverable = true;
+    stage53.rows[0].error = {code:"cancelled"};
+    row = await refreshSyntheticJobs("cancelled");
+    must(JSON.stringify(actionNames(row)) === JSON.stringify(["retry"]),
+      "Cancelled generation must expose Retry only: " + JSON.stringify(actionNames(row)));
+    row.querySelector('[data-job-action="retry"]').click();
+    await waitFor("Retry command", () => stage53.commands.some(item => item.command === "job.retry"), 5000);
+
+    stage53.rows[0].state = "failed";
+    stage53.rows[0].recoverable = true;
+    stage53.rows[0].error = {code:"interrupted"};
+    row = await refreshSyntheticJobs("failed");
+    must(JSON.stringify(actionNames(row)) === JSON.stringify(["recover"]),
+      "Interrupted generation must expose Recover only: " + JSON.stringify(actionNames(row)));
+    row.querySelector('[data-job-action="recover"]').click();
+    await waitFor("Recover command", () => stage53.commands.some(item => item.command === "job.recover"), 5000);
+    record("stage54_background_job_retry_recovery_controls", true,
+      "Packaged Background Jobs exposes Retry for cancelled generation and Recover for interrupted generation, dispatching job.retry and job.recover.");
+
     record("stage53_background_job_state_controls", true,
       "Packaged Background Jobs shows mutually exclusive running/pause-pending/paused/cancel-pending controls and dispatches the real bridge command names.");
 
@@ -212,9 +235,13 @@
         if (stage53Ui && command === "job.list") {
           return Promise.resolve({success:true,data:stage53Ui.rows});
         }
-        if (stage53Ui && ["job.pause","job.resume","job.cancel"].includes(command)) {
+        if (stage53Ui && ["job.pause","job.resume","job.cancel","job.retry","job.recover"].includes(command)) {
           stage53Ui.commands.push({command:command,payload:request});
-          const nextState = {"job.pause":"pause_requested","job.resume":"running","job.cancel":"cancel_requested"}[command];
+          const nextState = {
+            "job.pause":"pause_requested", "job.resume":"running",
+            "job.cancel":"cancel_requested", "job.retry":"running",
+            "job.recover":"running"
+          }[command];
           const owned = stage53Ui.rows.find(row => String(row.job_id || "") === String(request.job_id || ""));
           if (owned) owned.state = nextState;
           return Promise.resolve({success:true,data:{job_id:request.job_id,state:nextState}});
@@ -1935,8 +1962,11 @@
     const normalizeOutputPath = value => String(value || "").replace(/\\/g, "/").toLowerCase();
     const expectedGenerationOutput = normalizeOutputPath(config.full_generation_output_path);
     must(fullGenerationJob.state === "completed" &&
-      normalizeOutputPath(fullGenerationJob.output_path) === expectedGenerationOutput,
-      "The full-generation job did not complete with the requested output path: " +
+      normalizeOutputPath(fullGenerationJob.output_path) === expectedGenerationOutput &&
+      Number(fullGenerationJob.result?.chapter_count || 0) === 2 &&
+      Number(fullGenerationJob.result?.empty_chapters_skipped || 0) === 1 &&
+      Number(fullGenerationJob.result?.excluded_chapters_skipped || 0) === 1,
+      "The full-generation job did not complete two eligible chapters in order while skipping one empty and one excluded chapter: " +
         JSON.stringify({job:fullGenerationJob, expected:config.full_generation_output_path}));
     must(historyGenerationJob && historyGenerationJob.state === "completed" &&
       String(historyGenerationJob.job_id || "") === fullGenerationJobId &&
@@ -1946,11 +1976,13 @@
     must(String(completedGenerationProject.folder || "") === String(config.full_generation_project_folder || "") &&
       completedGenerationProject.completed === true &&
       String(completedGenerationProject.status || "").toLowerCase() === "completed" &&
-      Number(completedGenerationProject.completed_chapter_count || 0) === 1 &&
+      Number(completedGenerationProject.completed_chapter_count || 0) === 2 &&
+      Number(completedGenerationProject.empty_chapters_skipped || 0) === 1 &&
+      Number(completedGenerationProject.excluded_chapters_skipped || 0) === 1 &&
       normalizeOutputPath(completedGenerationProject.output_path) === expectedGenerationOutput,
-      "The completed full-generation output was not visible on its owning project summary.");
-    record("stage53_packaged_real_full_generation", true,
-      "The frozen Windows app synthesized a real chapter with the saved bundled Offline Neural narrator, completed a full GenerationManager job, persisted its identical History job ID, and associated the M4B output only with its owning project.");
+      "The completed two-chapter output and empty/excluded counts were not visible on its owning project summary.");
+    record("stage54_packaged_real_multi_chapter_full_generation", true,
+      "The frozen Windows app synthesized two eligible chapters in saved order with the saved bundled Offline Neural narrator, skipped one empty and one excluded chapter, completed one GenerationManager job, persisted its identical History job ID, and associated the M4B output only with its owning project.");
     await openProjectFromDashboard(config.project_folder, "Primary");
     await waitFor("Primary preview project restored after full-generation acceptance", async function () {
       const active = await invoke("project.get_active", {});
