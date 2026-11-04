@@ -260,3 +260,16 @@ Run #2289's Music Library, cue, BGM, and preview checks before the Production me
 - **#2318** is the next frozen-app artifact checkpoint and includes the latest source plus both corrected contracts. It must re-run the packaged test that previously failed at Next-to-second-chapter navigation.
 
 **Acceptance focus:** confirm Next from the first embedded chapter seeks to the second marker, Previous returns to the first, first/last boundaries stay clamped, and all previously passed packaged checks (mini-player shared audio; 37% volume and 1.25x speed persistence; keyboard chapter selection; AI recovery regression) remain green. Do not skip packaged acceptance or close Step 3 on source tests alone.
+
+## #2318 packaged acceptance diagnosis and audiobook Open correction — 5 November 2026
+
+- #2318 passed the entire packaged sequence through Sound Design, Music Library, Stage 5.3 real preview/generation, Stage 5.4 multi-chapter generation, M4B metadata, browser-compatible playback, Stage 6 play/pause, mini-player, persisted volume/rate, seek, chapter selection, continuous playback, keyboard chapter controls, Previous/Next navigation and boundary clamps.
+- The sole failure in #2318 was `Timed out waiting for Stage 6 Open loads the selected audiobook without autoplay` at the new compact Audiobooks Library Open-card acceptance.
+- The card handler calls `openPlayer(folder, {autoplay:false})`; the player creates a metadata-preload Audio object and renders metadata on `loadedmetadata`. A project-list refresh can also run concurrently and clears the default player display when no audio source is attached yet. This made the Open/load-only state susceptible to an idle-display reset while metadata was loading.
+- Targeted correction in the card action: validate the requested project folder, keep `autoplay:false`, do not launch a redundant project refresh in the Open action, and retain the project-list card refresh without reloading project state. No changes to generation, sound design, audio synthesis, AI, or mini-player playback.
+- Added `test_open_action_preserves_selected_book_during_metadata_load`, asserting the Open action remains load-only, does not refresh projects, and keeps the metadata-loading path.
+- **#2320 source verification passed** with the new Open regression contract. JavaScript syntax, native Qt lifecycle and full source regression suite all passed.
+
+**Next action:** verify the exact #2320 commit in the frozen Windows application. The acceptance must prove Open loads the correct M4B/MP3 derivative, project metadata and embedded chapter while remaining paused; Play must then start that same decoded audio. Reconfirm the prior green Stage 5.3 and Stage 6 checks, then continue the Inno Setup/HTML installer, SHA-256, logo, Defender and artifact-upload steps.
+
+**Current decision:** Stage 6 Step 3 remains IN PROGRESS until matching-head frozen Windows packaged acceptance passes. Stage 5.3 generation and preview acceptance passed in #2318; preserve that work and do not re-open or rewrite its implementation to solve this separate Open-card defect.
