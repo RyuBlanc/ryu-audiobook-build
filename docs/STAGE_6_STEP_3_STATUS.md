@@ -188,3 +188,15 @@ Run #2289's Music Library, cue, BGM, and preview checks before the Production me
 - #2297 is closed as a failed validation attempt and did not enter packaging. The current corrected-head checkpoint will establish the releasable state; no version bump or public release is authorized until it passes.
 
 **Current decision:** Step 3 remains IN PROGRESS; matching-head source and packaged Windows verification remain mandatory.
+
+## #2300 / #2301 packaged player-preference persistence review — 4 November 2026
+
+- Both artifact checkpoints passed source regressions, frozen application verification, and bundled voice/critical-module checks. Both packaged acceptance runs reached the Stage 6 player controls after passing Sound Design, Music Library, Production metadata gate, Stage 5.3 preview/generation, M4B chapters, browser-compatible playback and mini-player shared-audio checks.
+- Both packaged runs failed only at the final wait for persisted playback rate (1.25x) and volume (37%). The six-second cue rejection and deterministic cue/manifest/metadata save failures in the logs are required negative tests and did not fail their individual acceptance markers.
+- The player UI applied rate and volume to the actual media and updated the active speed button, but `player.get_active` did not return the saved preference values. The prior asynchronous-save correction alone was therefore insufficient.
+- Native read-back is now made explicit: `settings.get` returns validated `player_rate` and `player_volume`; `settings.save` returns those values in its acknowledgement; the player read path syncs QSettings before loading saved rate/volume. The frontend rejects an acknowledgement that does not match the requested value. Packaged acceptance checks both settings read-back and the player response, while regression tests cover these contracts.
+- These changes are diagnostic and strict; no expected values or acceptance steps have been removed or reduced.
+
+**Next action:** run one corrected-head artifact checkpoint. The exact required path is 1,159+ regression tests, frozen app, bundled assets, complete packaged acceptance including 1.25x / 37% preference persistence, then Inno Setup, functional HTML installer, logo verification, SHA-256, Defender and installer/portable uploads.
+
+**Current decision:** Stage 6 Step 3 remains IN PROGRESS. #2300 and #2301 are failed historical checkpoints; #2301 passed source tests, freeze, and bundled assets, but its packaged acceptance timed out on player preference read-back. The new explicit acknowledgement/read-back correction has not yet been verified by CI.
