@@ -2194,6 +2194,100 @@
     record("stage55_audiobooks_real_playback_chapter_seek_and_position", true,
       "The real finished M4B played in Premium V2, chapter navigation sought to its embedded second marker, and the owning project's playback position was persisted.");
 
+    // Stage 6 AB-01: verify multiple compact cards against real completed M4B outputs,
+    // then exercise Open (load paused), Play (actual audio), and switching book identity.
+    const libraryFixtures = Array.isArray(config.audiobook_library_fixtures) ? config.audiobook_library_fixtures : [];
+    must(libraryFixtures.length >= 2, "Stage 6 Audiobooks Library requires two completed M4B fixtures.");
+    window.go("player");
+    await waitFor("Stage 6 Premium V2 Audiobooks library page", function () {
+      return document.querySelector("#player")?.classList.contains("active") === true;
+    }, 15000);
+    await waitFor("Stage 6 multiple completed audiobook cards", function () {
+      const cards = Array.from(document.querySelectorAll("#backendAudiobookLibrary .audiobook-library-card"));
+      return libraryFixtures.every(fixture => cards.some(card =>
+        String(card.dataset.projectFolder || "") === String(fixture.folder || "")));
+    }, 20000);
+    const libraryCards = Array.from(document.querySelectorAll("#backendAudiobookLibrary .audiobook-library-card"));
+    for (const fixture of libraryFixtures) {
+      const card = libraryCards.find(item =>
+        String(item.dataset.projectFolder || "") === String(fixture.folder || ""));
+      must(card, "A completed audiobook card is missing for " + fixture.title + ".");
+      const status = card.querySelector("[data-audiobook-status]");
+      const cover = card.querySelector(".audiobook-card-cover");
+      const openButton = card.querySelector("[data-open-project-folder]");
+      const playButton = card.querySelector("[data-play-project-folder]");
+      must(card.querySelector(".audiobook-card-title")?.textContent.trim() === fixture.title &&
+        status?.dataset.status === "completed" && status.textContent.trim() === "Completed" &&
+        cover && Boolean(cover.style.backgroundImage) &&
+        cover.style.backgroundImage.includes(fixture.cover_file_name) &&
+        openButton && playButton,
+        "Audiobook card title, actual status, cover association or Open/Play actions are incorrect: " +
+          JSON.stringify({title:fixture.title,status:status?.textContent,cover:cover?.style.backgroundImage}));
+    }
+    record("stage6_audiobooks_compact_multiple_real_output_cards", true,
+      "Multiple compact Premium V2 audiobook cards show each fixture's own cover, title, backend completion status and separate Open/Play actions.");
+
+    const firstFixture = libraryFixtures[0];
+    const firstCard = libraryCards.find(item =>
+      String(item.dataset.projectFolder || "") === String(firstFixture.folder || ""));
+    const audioCountBeforeOpen = (window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__ || []).length;
+    firstCard.querySelector("[data-open-project-folder]").click();
+    await waitFor("Stage 6 Open loads the selected audiobook without autoplay", function () {
+      const audio = latestAcceptanceAudio();
+      const title = document.querySelector("#player .player-grid > .card:first-child h2");
+      return Boolean(audio && (window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__ || []).length > audioCountBeforeOpen &&
+        audio.readyState >= 1 && audio.paused &&
+        title && title.textContent.trim() === firstFixture.title);
+    }, 20000);
+    const firstOpenedAudio = latestAcceptanceAudio();
+    const firstOpenedData = await invoke("player.get_active", {folder:firstFixture.folder});
+    must(normalizeOutputPath(firstOpenedData.output_path) === normalizeOutputPath(firstFixture.output_path) &&
+      String(firstOpenedData.title || "") === firstFixture.title &&
+      String(firstOpenedData.author || "") === firstFixture.author &&
+      String(firstOpenedData.narrator || "") === firstFixture.narrator &&
+      String(firstOpenedData.playback_format || "").toLowerCase() === "mp3" &&
+      String(firstOpenedData.format || "").toLowerCase() === ".m4b" &&
+      Array.isArray(firstOpenedData.chapters) && firstOpenedData.chapters.length === 1 &&
+      String(firstOpenedData.chapters[0].title || "") === firstFixture.chapter_title &&
+      normalizeOutputPath(firstOpenedData.cover_path).endsWith(normalizeOutputPath(firstFixture.cover_file_name)),
+      "Open mapped the selected book to the wrong output, metadata, cover, narrator or embedded chapter: " +
+        JSON.stringify(firstOpenedData));
+    must(String(firstOpenedAudio.src || "").toLowerCase().endsWith(".mp3"),
+      "Open did not attach the browser-compatible playback derivative for the selected M4B.");
+    record("stage6_audiobooks_open_loads_correct_book_paused", true,
+      "Open selected the exact project and authoritative M4B output, resolved its checked MP3 playback derivative, retained cover/title/author/narrator/chapter association, and remained paused.");
+
+    firstCard.querySelector("[data-play-project-folder]").click();
+    await waitFor("Stage 6 Play starts actual audiobook audio", function () {
+      return Boolean(firstOpenedAudio.readyState >= 2 && firstOpenedAudio.currentTime > 0.05 &&
+        !firstOpenedAudio.paused && !firstOpenedAudio.error);
+    }, 20000);
+    firstOpenedAudio.pause();
+    record("stage6_audiobooks_play_action_starts_real_audio", true,
+      "The card's Play action started the selected book's actual decoded local audio; it was not a decorative or metadata-only control.");
+
+    const secondFixture = libraryFixtures[1];
+    const secondCard = libraryCards.find(item =>
+      String(item.dataset.projectFolder || "") === String(secondFixture.folder || ""));
+    const audioCountBeforeSwitch = (window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__ || []).length;
+    secondCard.querySelector("[data-open-project-folder]").click();
+    await waitFor("Stage 6 switching to the second audiobook", function () {
+      const audio = latestAcceptanceAudio();
+      const title = document.querySelector("#player .player-grid > .card:first-child h2");
+      return Boolean((window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__ || []).length > audioCountBeforeSwitch &&
+        audio && audio.readyState >= 1 && audio.paused &&
+        title && title.textContent.trim() === secondFixture.title);
+    }, 20000);
+    const secondOpenedData = await invoke("player.get_active", {folder:secondFixture.folder});
+    must(firstOpenedAudio.paused &&
+      normalizeOutputPath(secondOpenedData.output_path) === normalizeOutputPath(secondFixture.output_path) &&
+      String(secondOpenedData.title || "") === secondFixture.title &&
+      String(secondOpenedData.author || "") === secondFixture.author &&
+      String(secondOpenedData.narrator || "") === secondFixture.narrator,
+      "Switching audiobook left stale audio or cross-associated metadata/output.");
+    record("stage6_audiobooks_switch_preserves_project_output_identity", true,
+      "Switching books paused the previous audio and loaded the second book's own M4B, cover and metadata without leaking the first project's identity.");
+
     window.go("dashboard");
     await waitFor("Dashboard restored after Stage 5.5 Audiobooks acceptance", function () {
       const page = document.querySelector("#dashboard");

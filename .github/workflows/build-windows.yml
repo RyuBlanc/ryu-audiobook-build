@@ -30,6 +30,7 @@ on:
       - stage-4/step-3-preview-assembly
       - stage-4/step-4-audio-assembly
       - stage-5/**
+      - stage-6/**
   workflow_dispatch:
 
 # Build artifacts are produced and verified on every main build.

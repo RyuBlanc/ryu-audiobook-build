@@ -209,7 +209,7 @@ def validate_imported_audio_metadata(
             raise AssertionError(f"Imported cue metadata mismatch for {path.name}: {metadata!r}")
 
 
-def write_png_fixture(path: Path) -> None:
+def write_png_fixture(path: Path, rgba: tuple[int, int, int, int] = (255, 0, 0, 255)) -> None:
     """Write a tiny valid RGBA PNG which QImageReader can decode in the frozen app."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -219,7 +219,7 @@ def write_png_fixture(path: Path) -> None:
         return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", checksum)
 
     header = struct.pack(">IIBBBBB", 1, 1, 8, 6, 0, 0, 0)
-    scanline = bytes((0, 255, 0, 0, 255))
+    scanline = bytes((0, *rgba))
     signature = bytes((137, 80, 78, 71, 13, 10, 26, 10))
     content = (
         signature
@@ -229,6 +229,78 @@ def write_png_fixture(path: Path) -> None:
     )
     path.write_bytes(content)
 
+
+
+def create_stage6_audiobook_library_fixtures(library_folder: Path, token: str) -> list[dict]:
+    """Create two independently-owned, completed M4B books for Stage 6 UI acceptance."""
+    from app.audio.assembler import assemble_m4b
+    from app.chapters.detector import Chapter
+    from app.core.project import Project
+    from app.core.state import save_state
+
+    library_folder = Path(library_folder).expanduser().resolve()
+    library_folder.mkdir(parents=True, exist_ok=True)
+    specifications = (
+        ("ALPHA", "Stage 6 Library Alpha " + token, "Stage 6 Author Alpha", "Stage 6 Narrator Alpha", 440.0, (220, 45, 75, 255)),
+        ("BETA", "Stage 6 Library Beta " + token, "Stage 6 Author Beta", "Stage 6 Narrator Beta", 660.0, (45, 105, 190, 255)),
+    )
+    fixtures = []
+    for key, title, author, narrator, frequency, rgba in specifications:
+        folder = library_folder / title
+        if folder.exists():
+            raise FileExistsError("Unique Stage 6 audiobook fixture already exists: " + str(folder))
+        folder.mkdir(parents=True)
+        cover = folder / "cover.png"
+        write_png_fixture(cover, rgba=rgba)
+        chapter_title = "Acceptance " + key.title() + " Chapter"
+        chapter_dir = folder / "working_audio" / ("001_" + chapter_title)
+        write_tone_fixture(chapter_dir / "chunks" / "00001.wav", frequency, duration_seconds=3.0)
+        output = folder / "finished-output.m4b"
+        assemble_m4b(
+            chapter_dirs=[chapter_dir],
+            output_path=output,
+            title=title,
+            author=author,
+            cover=cover,
+            chapter_titles=[chapter_title],
+            metadata={
+                "title": title,
+                "author": author,
+                "narrator": narrator,
+                "language": "en",
+                "genre": "Acceptance",
+            },
+            bitrate=128,
+        )
+        Project(
+            title=title,
+            folder=folder,
+            source_path=None,
+            chapters=[Chapter(1, chapter_title, "A short packaged audiobook library acceptance fixture.")],
+        ).save()
+        save_state(folder, {
+            "status": "completed",
+            "output_path": str(output.resolve()),
+            "cover_path": str(cover.resolve()),
+            "author": author,
+            "narrator": narrator,
+            "voice_profile": narrator,
+            "completed_chapters": [1],
+            "completed_chapter_count": 1,
+            "genre": "Acceptance",
+            "audio_bitrate": 128,
+        })
+        fixtures.append({
+            "folder": str(folder.resolve()),
+            "title": title,
+            "author": author,
+            "narrator": narrator,
+            "output_path": str(output.resolve()),
+            "cover_path": str(cover.resolve()),
+            "cover_file_name": cover.name,
+            "chapter_title": chapter_title,
+        })
+    return fixtures
 
 def validate_saved_metadata(project_folder: Path, expected: dict) -> dict:
     """Verify real project metadata and project-local cover after the first app process."""
@@ -333,6 +405,8 @@ def _run(args: argparse.Namespace) -> int:
     for path in imported_paths:
         if path.exists() or path.with_name(path.name + ".license.json").exists():
             raise FileExistsError(f"Unique acceptance fixture unexpectedly exists already: {path}")
+
+    stage6_audiobook_fixtures = create_stage6_audiobook_library_fixtures(app_root / "Library", token)
 
     project_folder = app_root / "Library" / f"Stage 2 UI Acceptance {token}"
     project_folder.mkdir(parents=True, exist_ok=False)
@@ -622,6 +696,7 @@ def _run(args: argparse.Namespace) -> int:
         "narrator_profile_name": narrator_profile_name,
         "metadata_history": metadata_history,
         "metadata_cover_path": str(metadata_cover_source.resolve()),
+        "audiobook_library_fixtures": stage6_audiobook_fixtures,
     }, ensure_ascii=True, indent=2), encoding="utf-8")
 
     environment = os.environ.copy()
@@ -804,6 +879,8 @@ def _run(args: argparse.Namespace) -> int:
         shutil.rmtree(full_generation_project_folder, ignore_errors=True)
         shutil.rmtree(control_project_folder, ignore_errors=True)
         shutil.rmtree(recovery_project_folder, ignore_errors=True)
+        for fixture in stage6_audiobook_fixtures:
+            shutil.rmtree(Path(fixture["folder"]), ignore_errors=True)
         shutil.rmtree(temp_root, ignore_errors=True)
 
 

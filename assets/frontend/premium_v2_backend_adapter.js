@@ -777,530 +777,59 @@
     if (!container) {
       container = document.createElement('section');
       container.id = 'backendAudiobookLibrary';
-      container.className = 'section';
-      page.insertBefore(container, page.firstElementChild);
+      container.className = 'section audiobook-library-section';
+      const pageHead = page.querySelector(':scope > .page-head');
+      if (pageHead && pageHead.parentElement === page) pageHead.insertAdjacentElement('afterend', container);
+      else page.insertBefore(container, page.firstElementChild);
     }
-    const available = rows.filter(project => project.completed && project.output_path);
-    const signature = JSON.stringify(available.map(project => [project.folder,project.title,project.output_path,project.narrator,project.chapter_count,project.cover_path]));
+    const available = (Array.isArray(rows) ? rows : []).filter(project =>
+      Boolean(project && project.completed === true &&
+        typeof project.output_path === 'string' && project.output_path.trim())
+    );
+    const signature = JSON.stringify({
+      rows:available.map(project => [
+        project.folder,project.title,project.status,project.output_path,project.author,
+        project.narrator,project.chapter_count,project.cover_path
+      ]),
+      selected:selectedAudiobookFolder
+    });
     if (container.dataset.audiobookLibrarySignature === signature) return;
     container.dataset.audiobookLibrarySignature = signature;
-    container.innerHTML = '<div class="section-head"><div><p class="eyebrow">YOUR LIBRARY</p><h2>Generated audiobooks</h2></div><p class="muted">' +
-      available.length + ' ready to play</p></div><div class="recent-grid">' +
-      (available.map(project => '<article class="card project-card" data-project-folder="' + esc(project.folder || '') +
-        '" data-cover-path="' + esc(project.cover_path || '') + '"><div class="book-cover"></div><div class="project-pad"><span class="badge">Ready</span><h3>' +
-        esc(project.title || 'Untitled audiobook') + '</h3><p class="muted">' + esc(project.narrator || 'Narrator not set') + ' · ' +
-        Number(project.chapter_count || 0) + ' chapters</p><button class="btn small" type="button" data-play-project-folder="' +
-        esc(project.folder || '') + '">Play audiobook</button></div></article>').join('') ||
-        '<p class="muted">No finished audiobooks yet. Generate one in Production Studio to see it here.</p>') + '</div>';
+    const cards = available.map(project => {
+      const folder = String(project.folder || '');
+      const statusValue = String(project.status || 'completed').trim().toLowerCase();
+      const statusLabel = statusValue.replace(/[_-]+/g,' ')
+        .replace(/\b\w/g, letter => letter.toUpperCase());
+      const title = String(project.title || 'Untitled audiobook');
+      const author = String(project.author || '').trim();
+      const narrator = String(project.narrator || '').trim();
+      const details = [
+        author,
+        narrator ? 'Narrated by ' + narrator : '',
+        Number(project.chapter_count || 0) + ' chapters'
+      ].filter(Boolean).join(' · ');
+      const selectedClass = folder && folder === selectedAudiobookFolder ? ' is-selected' : '';
+      return '<article class="card audiobook-library-card' + selectedClass +
+        '" data-project-folder="' + esc(folder) + '" data-cover-path="' + esc(project.cover_path || '') + '">' +
+        '<div class="book-cover audiobook-card-cover" role="img" aria-label="Cover for ' + esc(title) + '"></div>' +
+        '<div class="audiobook-card-content"><div class="audiobook-card-status-row">' +
+        '<span class="badge" data-audiobook-status data-status="' + esc(statusValue) + '">' + esc(statusLabel) + '</span>' +
+        '<span class="audiobook-card-playable">Ready to play</span></div>' +
+        '<h3 class="audiobook-card-title" title="' + esc(title) + '">' + esc(title) + '</h3>' +
+        '<p class="audiobook-card-meta">' + esc(details) + '</p>' +
+        '<div class="audiobook-card-actions">' +
+        '<button class="btn small secondary" type="button" data-open-project-folder="' + esc(folder) +
+        '" aria-label="Open ' + esc(title) + ' in the audiobook player">Open</button>' +
+        '<button class="btn small" type="button" data-play-project-folder="' + esc(folder) +
+        '" aria-label="Play ' + esc(title) + '">Play</button></div></div></article>';
+    }).join('');
+    container.innerHTML = '<div class="audiobook-library-head"><div><p class="eyebrow">YOUR LIBRARY</p>' +
+      '<h2>Generated audiobooks</h2></div><p class="muted">' + available.length +
+      ' completed · ready to play</p></div>' +
+      (cards ? '<div class="audiobook-library-grid">' + cards + '</div>' :
+        '<p class="audiobook-library-empty">No finished audiobooks yet. Generate a book in Production Studio to see it here.</p>');
     applyProjectCovers(container);
   }
-  function dashboardGenerationCard(root) {
-    const title = dashboardFindText(root, 'production status') || dashboardFindText(root, 'active generation');
-    let node = title?.parentElement || null;
-    while (node && node !== root) {
-      const text = dashboardText(node.textContent);
-      const buttons = [...node.querySelectorAll('button,[role="button"],a')];
-      if (text.includes('current chapter') && text.includes('processing stage') &&
-          buttons.some(button => button.dataset.dashboardGenerationControl === '1' ||
-            ['view job','pause','resume'].includes(dashboardText(button.textContent)))) return node;
-      node = node.parentElement;
-    }
-    return null;
-  }
-  function setDashboardRow(root, label, value) {
-    const leaf = dashboardFindText(root, label);
-    if (!leaf) return;
-    let node = leaf;
-    for (let depth = 0; depth < 4 && node.parentElement; depth++) {
-      const parent = node.parentElement;
-      const siblings = [...parent.children].filter(child => child !== node && dashboardText(child.textContent) !== dashboardText(label));
-      if (siblings.length) { writeTextIfChanged(siblings[siblings.length - 1], value); return; }
-      node = parent;
-    }
-  }
-  function refreshDashboardGeneration(jobs = []) {
-    const root = $('dashboard');
-    const card = root && dashboardGenerationCard(root);
-    if (!card) return;
-    const resumableStates = ['queued','running','pause_requested','paused','cancel_requested','retrying'];
-    const active = jobs.filter(job => String(job.type || '').toLowerCase() === 'audiobook-generation' &&
-      resumableStates.includes(String(job.state || '').toLowerCase()))
-      .sort((a,b) => (Date.parse(b.updated_at || b.queued_at || '') || 0) - (Date.parse(a.updated_at || a.queued_at || '') || 0));
-    const job = active[0] || null;
-    // Bind by position within the static job card. These spans are deliberately
-    // cleared when there is no job, so searching for their display text breaks
-    // the next time generation starts.
-    const progressLine = [...card.querySelectorAll('.job-line')][2] || null;
-    const percentLabel = progressLine?.children?.[0] || null;
-    const etaLabel = progressLine?.children?.[1] || null;
-    const track = card.querySelector('.progress,.progress-track,.progress-bar,progress,[role="progressbar"]');
-    const fill = card.querySelector('.progress i,.progress-fill,.progress-bar-fill,[role="progressbar"],progress,[style*="width:"]');
-    const buttons = [...card.querySelectorAll('button,[role="button"],a')];
-    const view = buttons.find(button => dashboardText(button.textContent) === 'view job');
-    const control = buttons.find(button => button.dataset.dashboardGenerationControl === '1' ||
-      ['pause','resume'].includes(dashboardText(button.textContent)));
-    if (control) control.dataset.dashboardGenerationControl = '1';
-    if (!job) {
-      const selectedProject = dashboardProject || null;
-      setDashboardRow(card, 'current chapter', selectedProject
-        ? (Number(selectedProject.completed_chapter_count || 0) + ' chapters prepared')
-        : 'No project selected');
-      setDashboardRow(card, 'processing stage', selectedProject
-        ? (selectedProject.completed && selectedProject.output_path ? 'Audiobook ready' :
-          ('Setup checkpoint · ' + (savedResumeStage(selectedProject) || routeForResume(selectedProject))))
-        : 'No active generation job');
-      writeTextIfChanged(percentLabel, '');
-      writeTextIfChanged(etaLabel, '');
-      writeStyleIfChanged(fill, 'width', '0%');
-      writeAttributeIfChanged(fill, 'aria-valuenow', '0');
-      if (fill?.tagName === 'PROGRESS' && fill.value !== 0) fill.value = 0;
-      writeStyleIfChanged(track, 'visibility', 'hidden');
-      if (view) {
-        writeBooleanIfChanged(view, 'disabled', true);
-        if (view.dataset.dashboardJobId) delete view.dataset.dashboardJobId;
-      }
-      if (control) {
-        writeBooleanIfChanged(control, 'disabled', true);
-        if (control.dataset.dashboardJobId) delete control.dataset.dashboardJobId;
-        if (control.dataset.dashboardGenerationAction) delete control.dataset.dashboardGenerationAction;
-      }
-      return;
-    }
-    const project = projects.find(row => row.folder === job.project_folder);
-    const total = Number(job.chapters_total || project?.chapter_count || 0);
-    const current = Number(job.current_chapter || 0);
-    setDashboardRow(card, 'current chapter', current > 0 ? current + ' of ' + (total || '—') : (total ? '0 of ' + total : '—'));
-    setDashboardRow(card, 'processing stage', job.stage || job.message || 'Working');
-    const percent = Math.max(0, Math.min(100, Math.round(Number(job.progress || 0))));
-    writeTextIfChanged(percentLabel, percent + '% complete');
-    const eta = Number(job.eta_seconds);
-    writeTextIfChanged(etaLabel, Number.isFinite(eta) && eta > 0 ? Math.floor(eta/60) + 'm ' + String(Math.floor(eta%60)).padStart(2,'0') + 's remaining' : '');
-    writeStyleIfChanged(track, 'visibility', '');
-    writeStyleIfChanged(fill, 'width', percent + '%');
-    writeAttributeIfChanged(fill, 'aria-valuenow', String(percent));
-    if (fill?.tagName === 'PROGRESS' && fill.value !== percent) fill.value = percent;
-    if (view) {
-      writeBooleanIfChanged(view, 'disabled', false);
-      writeAttributeIfChanged(view, 'data-dashboard-job-id', job.job_id || '');
-    }
-    if (control) {
-      const controlState = String(job.state || '').toLowerCase();
-      const controlAction = controlState === 'running' ? 'pause' :
-        controlState === 'paused' ? 'resume' : '';
-      const controlLabel = controlState === 'pause_requested' ? 'Pausing…' :
-        controlState === 'cancel_requested' ? 'Cancelling…' :
-        controlState === 'queued' ? 'Queued…' :
-        controlState === 'retrying' ? 'Retrying…' :
-        controlState === 'paused' ? 'Resume' : 'Pause';
-      writeTextIfChanged(control, controlLabel);
-      writeBooleanIfChanged(control, 'disabled', !controlAction);
-      if (controlAction) writeAttributeIfChanged(control, 'data-dashboard-generation-action', controlAction);
-      else if (control.dataset.dashboardGenerationAction) delete control.dataset.dashboardGenerationAction;
-      writeAttributeIfChanged(control, 'data-dashboard-job-id', job.job_id || '');
-    }
-  }
-  function audiobookPageActive() {
-    const nav = [...document.querySelectorAll('nav .active,aside .active,.sidebar .active,[aria-current="page"]')]
-      .find(node => /audiobooks/i.test(node.textContent || ''));
-    if (nav) return true;
-    const page = $('player');
-    if (!page || page.hidden || page.classList.contains('hidden')) return false;
-    const style = window.getComputedStyle(page);
-    return style.display !== 'none' && style.visibility !== 'hidden' && page.getClientRects().length > 0;
-  }
-  function syncMiniPlayer() {
-    const dock = $('miniPlayer');
-    const visible = Boolean(playerAudio && playerAudio.src && !miniPlayerDismissed && !audiobookPageActive());
-    if (dock && dock.classList.contains('hidden') === visible) {
-      dock.classList.toggle('hidden', !visible);
-    }
-    const body = document.body;
-    if (body && body.classList.contains('ryu-mini-player-visible') !== visible) {
-      body.classList.toggle('ryu-mini-player-visible', visible);
-    }
-  }
-  function dashboardPageActive() {
-    const page = $('dashboard');
-    if (!page || page.hidden || page.classList.contains('hidden')) return false;
-    const style = window.getComputedStyle(page);
-    return style.display !== 'none' && style.visibility !== 'hidden' && page.getClientRects().length > 0;
-  }
-  function bindMiniPlayerNavigation() {
-    if (typeof window.go === 'function' && !window.go.__ryuMiniPlayerWrapped) {
-      const original = window.go;
-      const wrapped = function(...args) {
-        const result = original.apply(this,args);
-        const page = String(args[0] || '').trim().toLowerCase();
-        const aliases = {
-          import:'import', chapters:'chapters', voice:'narrator', narrator:'narrator',
-          characters:'characters', character:'characters', sound:'sound', sounds:'sound',
-          production:'production', generator:'production', generation:'production', player:'player'
-        };
-        const stage = aliases[page];
-        if (stage && dashboardProject?.folder) writeResumeCheckpoint(dashboardProject.folder, stage);
-        setTimeout(() => {
-          syncMiniPlayer();
-          refreshProjects().catch(() => {});
-        },0);
-        return result;
-      };
-      wrapped.__ryuMiniPlayerWrapped = true;
-      window.go = wrapped;
-    }
-    if (!window.__ryuMiniPlayerNavBound) {
-      window.__ryuMiniPlayerNavBound = true;
-      document.addEventListener('click', event => {
-        if (event.target.closest('nav,aside,.sidebar,[data-page],[data-view]')) {
-          setTimeout(syncMiniPlayer,0);
-        }
-      }, true);
-    }
-    if (!window.__ryuDashboardProjectTimer) {
-      window.__ryuDashboardProjectTimer = setInterval(() => {
-        if (dashboardPageActive()) refreshProjects().catch(() => {});
-      }, 3000);
-    }
-  }
-  function updateProjectDeleteButton() {
-    const count = selectedProjectFolders.size;
-    const trashButton = $('deleteSelectedProjects');
-    if (trashButton) {
-      trashButton.textContent = 'Move to Trash (' + count + ')';
-      trashButton.disabled = count === 0;
-      trashButton.title = count ? 'Move ' + count + ' selected book(s) to recoverable Deleted Books' : 'Select one or more books first';
-      trashButton.style.opacity = count ? '1' : '.55';
-    }
-    const permanentButton = $('permanentlyDeleteSelectedProjects');
-    if (permanentButton) {
-      permanentButton.textContent = 'Permanently Delete (' + count + ')';
-      permanentButton.disabled = count === 0;
-      permanentButton.title = count ? 'Permanently delete ' + count + ' selected book(s); History and shared Character Library data are retained' : 'Select one or more books first';
-      permanentButton.style.opacity = count ? '1' : '.55';
-    }
-  }
-
-  async function deleteSelectedProjects() {
-    const selected = projects.filter(project => selectedProjectFolders.has(String(project.folder)));
-    if (!selected.length) {
-      selectedProjectFolders.clear();
-      updateProjectDeleteButton();
-      return;
-    }
-    const titles = selected.slice(0, 8).map(project => '• ' + (project.title || 'Untitled')).join('\n');
-    const remaining = selected.length > 8 ? '\n• … and ' + (selected.length - 8) + ' more' : '';
-    if (!window.confirm('Move ' + selected.length + ' selected book(s) to Deleted Books? You can restore them later.\n\n' + titles + remaining)) return;
-    const button = $('deleteSelectedProjects');
-    if (button) button.disabled = true;
-    let moved = 0;
-    const failures = [];
-    for (const project of selected) {
-      try {
-        await call('project.trash', {folder: project.folder});
-        selectedProjectFolders.delete(String(project.folder));
-        moved += 1;
-      } catch (error) {
-        failures.push((project.title || 'Untitled') + ': ' + (error?.message || String(error)));
-      }
-    }
-    await refreshProjects();
-    updateProjectDeleteButton();
-    if (failures.length) {
-      message('Moved ' + moved + ' book(s) to Deleted Books. Not moved: ' + failures.join(' | '), true);
-    } else {
-      message('Moved ' + moved + ' book(s) to Deleted Books. Their saved work is recoverable until permanently purged.');
-    }
-  }
-  async function deleteSelectedProjectsPermanently() {
-    const selected = projects.filter(project => selectedProjectFolders.has(String(project.folder)));
-    if (!selected.length) {
-      selectedProjectFolders.clear();
-      updateProjectDeleteButton();
-      return;
-    }
-    const titles = selected.slice(0, 8).map(project => '• ' + (project.title || 'Untitled')).join('\n');
-    const remaining = selected.length > 8 ? '\n• … and ' + (selected.length - 8) + ' more' : '';
-    const confirmed = window.confirm(
-      'Permanently delete ' + selected.length + ' selected book(s)? This cannot be undone.\n\n' +
-      titles + remaining +
-      '\n\nProject/source files and saved generated output will be removed. History records and shared Character Library data will be retained.'
-    );
-    if (!confirmed) return;
-    const button = $('permanentlyDeleteSelectedProjects');
-    if (button) button.disabled = true;
-    let deleted = 0;
-    const failures = [];
-    for (const project of selected) {
-      try {
-        await call('project.delete', {folder: project.folder});
-        selectedProjectFolders.delete(String(project.folder));
-        deleted += 1;
-      } catch (error) {
-        failures.push((project.title || 'Untitled') + ': ' + (error?.message || String(error)));
-      }
-    }
-    await refreshProjects();
-    updateProjectDeleteButton();
-    if (failures.length) {
-      message('Permanently deleted ' + deleted + ' book(s). Not deleted: ' + failures.join(' | '), true);
-    } else {
-      message('Permanently deleted ' + deleted + ' book(s). History records and shared Character Library data were retained.');
-    }
-  }
-
-  function ensureProjectTrashControl() {
-    const root = $('library');
-    if (!root) return;
-    const search = $('librarySearch');
-    const filters = $('libraryFilters');
-    const parent = filters?.parentElement || search?.parentElement || root;
-    if (!$('deleteSelectedProjects')) {
-      const deleteButton = document.createElement('button');
-      deleteButton.id = 'deleteSelectedProjects';
-      deleteButton.type = 'button';
-      deleteButton.className = 'btn small ghost library-delete';
-      deleteButton.textContent = 'Move to Trash (0)';
-      deleteButton.title = 'Select one or more books first';
-      deleteButton.style.cssText = 'margin-left:8px;white-space:nowrap;';
-      deleteButton.addEventListener('click', () => deleteSelectedProjects().catch(err => message(err?.message || String(err), true)));
-      parent.appendChild(deleteButton);
-    }
-    if (!$('permanentlyDeleteSelectedProjects')) {
-      const permanentButton = document.createElement('button');
-      permanentButton.id = 'permanentlyDeleteSelectedProjects';
-      permanentButton.type = 'button';
-      permanentButton.className = 'btn small danger library-delete';
-      permanentButton.textContent = 'Permanently Delete (0)';
-      permanentButton.title = 'Select one or more books first';
-      permanentButton.style.cssText = 'margin-left:8px;white-space:nowrap;';
-      permanentButton.addEventListener('click', () => deleteSelectedProjectsPermanently().catch(err => message(err?.message || String(err), true)));
-      parent.appendChild(permanentButton);
-    }
-    if (!$('openProjectTrashBin')) {
-      const button = document.createElement('button');
-      button.id = 'openProjectTrashBin';
-      button.type = 'button';
-      button.className = 'btn small secondary';
-      button.textContent = 'Deleted Books / Recover';
-      button.title = 'Restore a book or permanently purge it from managed Trash';
-      button.style.cssText = 'margin-left:8px;white-space:nowrap;';
-      button.addEventListener('click', () => openProjectTrashBin().catch(err => message(err?.message || String(err), true)));
-      parent.appendChild(button);
-    }
-    updateProjectDeleteButton();
-  }
-  function ensureProjectTrashModal() {
-    let modal = $('projectTrashModal');
-    if (modal) return modal;
-    modal = document.createElement('div');
-    modal.id = 'projectTrashModal';
-    modal.style.cssText = 'display:none;position:fixed;inset:0;z-index:100001;background:rgba(4,7,12,.84);backdrop-filter:blur(7px);align-items:center;justify-content:center;padding:22px;box-sizing:border-box;';
-    modal.innerHTML = '<div role="dialog" aria-modal="true" aria-labelledby="projectTrashTitle" style="width:min(760px,96vw);max-height:84vh;overflow:auto;background:#10141d;border:1px solid #343b49;border-radius:16px;padding:22px;box-shadow:0 24px 80px rgba(0,0,0,.5);color:#f4f5f8"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><h2 id="projectTrashTitle" style="margin:0">Deleted Books</h2><p class="muted" style="margin:6px 0 0">Restore a book to the active Library or permanently purge it when you are sure.</p></div><button type="button" class="btn small secondary" data-close-project-trash>Close</button></div><div id="projectTrashEntries" style="display:grid;gap:10px;margin-top:18px"></div></div>';
-    modal.addEventListener('click', async event => {
-      if (event.target === modal || event.target.closest('[data-close-project-trash]')) {
-        modal.style.display = 'none';
-        return;
-      }
-      const restore = event.target.closest('[data-restore-project]');
-      const purge = event.target.closest('[data-purge-project]');
-      if (!restore && !purge) return;
-      const button = restore || purge;
-      const id = button.dataset.restoreProject || button.dataset.purgeProject;
-      const record = projectTrashEntries.find(item => String(item.id) === String(id));
-      button.disabled = true;
-      try {
-        if (restore) {
-          await call('project.trash.restore', {id});
-          message('Restored "' + (record?.title || 'book') + '" to the active Library.');
-        } else {
-          if (!window.confirm('Permanently delete "' + (record?.title || 'this book') + '" and its trashed generated files? This cannot be undone.')) return;
-          await call('project.trash.purge', {id});
-          message('Permanently purged "' + (record?.title || 'book') + '".');
-        }
-        await refreshProjects();
-        await loadProjectTrashEntries(modal);
-      } catch (error) {
-        message(error?.message || String(error), true);
-      } finally {
-        button.disabled = false;
-      }
-    });
-    document.body.appendChild(modal);
-    return modal;
-  }
-  let projectTrashEntries = [];
-  let selectedProjectFolders = new Set();
-  async function loadProjectTrashEntries(modal) {
-    projectTrashEntries = await call('project.trash.list');
-    const list = $('projectTrashEntries');
-    if (list) list.innerHTML = projectTrashEntries.map(item => {
-      const when = item.deleted_at ? new Date(item.deleted_at).toLocaleString() : 'Deletion date unavailable';
-      return '<article class="card" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:14px"><div><b>' + esc(item.title || 'Untitled book') + '</b><div class="muted" style="margin-top:4px">Moved to Trash · ' + esc(when) + '</div></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn small secondary" data-restore-project="' + esc(item.id) + '">Restore</button><button type="button" class="btn small ghost library-delete" data-purge-project="' + esc(item.id) + '">Delete permanently</button></div></article>';
-    }).join('') || '<div class="card" style="padding:18px"><b>Deleted Books is empty</b><p class="muted">Books moved from the active Library will appear here and can be restored.</p></div>';
-    if (modal) modal.style.display = 'flex';
-  }
-  async function openProjectTrashBin() {
-    const modal = ensureProjectTrashModal();
-    await loadProjectTrashEntries(modal);
-  }
-
-  function setProjectCardStatus(status) {
-    const card = document.querySelector('.project-mini');
-    const parts = card?.querySelectorAll('.pm-body small');
-    const statusNode = parts?.length ? parts[parts.length - 1] : null;
-    const text = String(status || '').trim();
-    if (statusNode && text && statusNode.textContent !== text) statusNode.textContent = text;
-  }
-
-  async function refreshCurrentProjectCard(statusOverride = '') {
-    const requestToken = ++activeProjectCardEpoch;
-    let active = null;
-    try { active = await call('project.get_active'); }
-    catch (_) {
-      if (requestToken !== activeProjectCardEpoch) return window.ryuPremiumActiveProject || null;
-      return null; // Preserve the last confirmed UI state on a transient bridge error.
-    }
-    // Concurrent open/rename/hydration calls can complete out of order. Ignore
-    // stale results before they can replace the project's current identity.
-    if (requestToken !== activeProjectCardEpoch) return window.ryuPremiumActiveProject || null;
-    if (active) window.ryuPremiumActiveProject = active;
-    const card = document.querySelector('.project-mini');
-    const titleNode = card?.querySelector('.pm-body b');
-    const crumb = document.querySelector('.topbar .crumb span');
-    const previousTitle = String(titleNode?.textContent || '');
-    const folder = String(active?.folder || '');
-    const title = String(active?.title || '').trim();
-    if (!active || !folder || !title) {
-      window.ryuPremiumActiveProject = null;
-      activeProjectCardFolder = null;
-      if (titleNode && titleNode.textContent !== 'No project selected') titleNode.textContent = 'No project selected';
-      if (titleNode) titleNode.title = 'Open a project from Library to begin';
-      if (crumb && crumb.textContent !== 'No project selected') crumb.textContent = 'No project selected';
-      setProjectCardStatus('No project selected');
-      return null;
-    }
-    const changedProject = folder !== activeProjectCardFolder;
-    const renamed = !changedProject && previousTitle && previousTitle !== title;
-    if (changedProject) {
-      // Do not let old-project chapter selections, casts or queued suggestions
-      // remain visible while the newly opened project is being hydrated.
-      chapterListEpoch++;
-      chapterSelectionEpoch++;
-      characterListEpoch++;
-      characterSuggestionsEpoch++;
-      chapters = [];
-      characters = [];
-      characterDialogueSuggestions = [];
-      characterNarrationSegments = [];
-      characterAnalysisStatus = {analyzed:false, updated_at:null, dialogue_total:0, unassigned_dialogue:0, suggestion_count:0};
-      characterStudioSelectedChapter = null;
-      characterStudioSelectedSeries = '';
-      window.ryuPremiumSelectedCharacter = '';
-      window.ryuPremiumSelectedCharacterSeries = '';
-      window.ryuPremiumSelectedAssignedDialogueKey = '';
-      window.ryuPremiumSelectedChapter = null;
-      window.ryuPremiumSelectedDialogueId = '';
-      window.ryuPremiumAiChapterNumber = null;
-      window.ryuPremiumDialogueReviewItems = [];
-      const manualStory = $('manualStory');
-      if (manualStory) manualStory.dataset.liveSignature = '';
-      const aiStory = document.querySelector('#characters .ai-document');
-      if (aiStory) aiStory.dataset.liveSignature = '';
-      renderCharacterStudioLive();
-      renderDialogueReview();
-    }
-    activeProjectCardFolder = folder;
-    if (titleNode && titleNode.textContent !== title) titleNode.textContent = title;
-    if (titleNode) {
-      titleNode.title = title;
-      titleNode.setAttribute('aria-label', 'Current project: ' + title);
-    }
-    if (crumb && crumb.textContent !== title + ' · Local project') crumb.textContent = title + ' · Local project';
-    if (statusOverride) setProjectCardStatus(statusOverride);
-    else if (changedProject) setProjectCardStatus('Project open · saved locally');
-    else if (renamed) setProjectCardStatus('Renamed · saved locally');
-    await refreshSeriesNarratorControls();
-    return active;
-  }
-
-  function installProjectCardStatusObserver() {
-    if (projectCardStatusObserver) projectCardStatusObserver.disconnect();
-    const saveState = $('saveState');
-    if (!saveState || typeof MutationObserver === 'undefined') return;
-    projectCardStatusObserver = new MutationObserver(() => {
-      const status = String(saveState.textContent || '').replace(/\\s+/g, ' ').trim();
-      if (status && activeProjectCardFolder) setProjectCardStatus(status);
-    });
-    projectCardStatusObserver.observe(saveState, {subtree:true,childList:true,characterData:true});
-  }
-
-  async function refreshProjects() {
-    const requestToken = ++projectListEpoch;
-    const loadedProjects = await call('project.list');
-    if (requestToken !== projectListEpoch) return projects;
-    projects = (Array.isArray(loadedProjects) ? loadedProjects : []).sort((a,b) => (Date.parse(b.modified_at || '') || 0) - (Date.parse(a.modified_at || '') || 0));
-    selectedProjectFolders = new Set([...selectedProjectFolders].filter(folder => projects.some(project => String(project.folder) === folder)));
-    const grid = $('libraryGrid');
-    ensureProjectTrashControl();
-    const search = ($('librarySearch')?.value || '').trim().toLowerCase();
-    const filter = $('libraryFilters')?.querySelector('button.active')?.textContent?.trim().toLowerCase() || 'all';
-    const visible = projects.filter(p => {
-      const complete = Boolean(p.completed), status = String(p.status || '').toLowerCase();
-      const matchesFilter = filter === 'all' || (filter === 'completed' && complete) ||
-        (filter === 'active' && !complete && !['failed','error','attention'].includes(status)) ||
-        (filter === 'attention' && (['failed','error','attention'].includes(status) || !Number(p.chapter_count || 0)));
-      return matchesFilter && (!search || (p.title + ' ' + (p.source_path || '') + ' ' + status).toLowerCase().includes(search));
-    });
-    const librarySignature = JSON.stringify({
-      rows:visible.map(p => [p.folder,p.title,p.completed,p.status,p.source_path,p.chapter_count,p.cover_path,p.modified_at]),
-      search, filter, selected:[...selectedProjectFolders].sort()
-    });
-    if (grid && grid.dataset.projectRenderSignature !== librarySignature) {
-      grid.dataset.projectRenderSignature = librarySignature;
-      grid.innerHTML = visible.map(p => {
-        const complete = Boolean(p.completed), status = complete ? 'Completed' : (p.status || 'New');
-        return '<article class="card project-card" data-name="' + esc(p.title) + '" data-project-folder="' + esc(p.folder) +
-          '" data-cover-path="' + esc(p.cover_path || '') + '"><div class="book-cover"></div><div class="project-pad"><span class="badge ' +
-          (complete ? '' : 'info') + '">' + esc(status) + '</span><h3>' + esc(p.title) + '</h3><p class="muted">' +
-          Number(p.chapter_count || 0) + ' chapters · Local project</p><p class="muted">' + esc(p.source_path || 'Source path unavailable') +
-          '</p><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px"><label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#abb4c4;cursor:pointer"><input type="checkbox" data-select-project="' + esc(p.folder) + '" ' + (selectedProjectFolders.has(String(p.folder)) ? 'checked' : '') + ' aria-label="Select ' + esc(p.title) + ' for bulk deletion" style="accent-color:#c62951"> Select</label><button class="btn small" type="button" data-open-project="' + esc(p.folder) + '">Open project</button><button class="btn small ghost library-delete" type="button" data-delete-project="' + esc(p.folder) + '" aria-label="Move ' + esc(p.title) + ' to Deleted Books">Delete</button></div></div></article>';
-      }).join('') || '<p class="muted">No local projects found. Import a book to start your library.</p>';
-      applyProjectCovers(grid);
-    }
-    const dash = $('dashboard');
-    if (dash) {
-      const metrics = dash.querySelectorAll('.metrics .metric strong');
-      const completed = projects.filter(p => p.completed).length;
-      const active = projects.filter(p => !p.completed && !['failed','error','attention'].includes(String(p.status || '').toLowerCase())).length;
-      const attention = projects.filter(p => ['failed','error','attention'].includes(String(p.status || '').toLowerCase()) || !Number(p.chapter_count || 0)).length;
-      [projects.length, completed, active, attention].forEach((value, index) => { if (metrics[index]) metrics[index].textContent = value; });
-      const recent = dash.querySelector('.recent-grid');
-      const recentSignature = JSON.stringify(projects.slice(0, 3).map(p => [p.folder,p.title,p.status,p.chapter_count,p.completed,p.cover_path]));
-      if (recent && recent.dataset.projectRenderSignature !== recentSignature) {
-        recent.dataset.projectRenderSignature = recentSignature;
-        recent.innerHTML = projects.slice(0, 3).map(p => {
-          const status = String(p.status || 'new').toLowerCase();
-          const badge = p.completed ? 'Completed' : (['failed','error','attention'].includes(status) || !Number(p.chapter_count || 0) ? 'Attention' : 'Active');
-          const badgeClass = badge === 'Completed' ? '' : (badge === 'Attention' ? 'warn' : 'info');
-          return '<article class="card project-card" data-project-folder="' + esc(p.folder) + '" data-cover-path="' +
-            esc(p.cover_path || '') + '"><div class="book-cover"></div><div class="project-pad"><span class="badge ' +
-            badgeClass + '">● ' + badge + '</span><h3>' + esc(p.title) + '</h3><p class="muted">' +
-            Number(p.chapter_count || 0) + ' chapters · ' + esc(p.status || 'Local project') + '</p></div></article>';
-        }).join('') || '<p class="muted">No local projects yet. Import a book to see it here.</p>';
-        applyProjectCovers(recent);
-      }
-    }
-    await refreshDashboardHero(projects);
-    await refreshCurrentProjectCard();
-    renderAudiobookLibrary(projects);
-    if (!playerAudio || !playerAudio.src) clearAudiobookPlayerDisplay();
-    if (isVisiblePage('generate')) await refreshProductionSummary();
-    return projects;
-  }
-  const voiceLibraryTitles = {
-    offline:'Offline Neural Voices', sapi:'Windows SAPI', customvoice:'Qwen CustomVoice',
-    voicedesign:'Qwen VoiceDesign', qwenclone:'Qwen Voice Clone', customref:'Chatterbox Reference Voice',
-    edge:'Edge TTS', eleven:'ElevenLabs'
-  };
   function voiceLanguageFacet(row) {
     const raw = String(row.language_name || row.language || row.locale || row.locale_code || '').trim();
     if (!raw) return 'Unknown';
@@ -7264,7 +6793,8 @@
     applyPlayerRate(playerRate, false);
     applyPlayerVolume(playerVolume * 100, false);
   }
-  async function openPlayer(projectFolder = selectedAudiobookFolder) {
+  async function openPlayer(projectFolder = selectedAudiobookFolder, options = {}) {
+    const autoplay = options?.autoplay !== false;
     const folder = String(projectFolder || '').trim();
     if (!folder) throw new Error('Select a finished audiobook from the Audiobooks library before playing.');
     const data = await call('player.get_active', {folder});
@@ -7276,7 +6806,9 @@
       playerAudio.playbackRate = playerRate;
       playerAudio.volume = playerVolume;
       renderSelectedAudiobook(data);
-      if (playerAudio.paused) await playerAudio.play(); else playerAudio.pause();
+      if (autoplay) {
+        if (playerAudio.paused) await playerAudio.play(); else playerAudio.pause();
+      }
       syncMiniPlayer();
       setPlaybackButtonState();
       return;
@@ -7334,7 +6866,8 @@
       syncMiniPlayer();
       message('The local audiobook file could not be opened in the embedded player.', true);
     };
-    await audio.play();
+    if (autoplay) await audio.play();
+    else audio.load();
     miniPlayerDismissed = false;
     renderSelectedAudiobook(data);
     syncMiniPlayer();
@@ -7809,6 +7342,19 @@
         try { await fn(); }
         catch (err) { message(err?.message || String(err), true); }
       };
+      if (button && button.dataset.openProjectFolder) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        void runAction(async () => {
+          const folder = button.dataset.openProjectFolder;
+          selectedAudiobookFolder = folder;
+          miniPlayerDismissed = false;
+          await openPlayer(folder, {autoplay:false});
+          renderAudiobookLibrary(projects);
+          message('Opened ' + (projects.find(project => project.folder === folder)?.title || 'selected audiobook') +
+            ' in the player. Press Play when ready.');
+        });
+        return;
+      }
       if (button && button.dataset.playProjectFolder) {
         e.preventDefault(); e.stopImmediatePropagation();
         void runAction(async () => {
