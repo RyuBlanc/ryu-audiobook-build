@@ -151,5 +151,21 @@ class Stage6AudiobookLibraryContractTests(unittest.TestCase):
         self.assertIn("formatTime(end)", renderer)
         self.assertIn("Timing unavailable", renderer)
 
+    def test_mini_player_acceptance_uses_visible_dashboard_surface(self):
+        self.assertIn('window.go("dashboard")', self.packaged_js)
+        self.assertIn("mini-player becomes visible outside the Audiobooks page", self.packaged_js)
+        self.assertIn('window.go("player")', self.packaged_js)
+
+    def test_full_and_mini_player_share_selected_audio_toggle_handler(self):
+        start = self.adapter.index("const playSelectedAudiobook = () =>")
+        end = self.adapter.index("clearAudiobookPlayerDisplay();", start)
+        bindings = self.adapter[start:end]
+        self.assertIn("if ($('mainPlay')) $('mainPlay').onclick = playSelectedAudiobook;", bindings)
+        self.assertIn("if ($('miniPlay')) $('miniPlay').onclick = playSelectedAudiobook;", bindings)
+        player_start = self.adapter.index("async function openPlayer(")
+        player_end = self.adapter.index("const formatTime =", player_start)
+        open_player = self.adapter[player_start:player_end]
+        self.assertIn("playerAudio.src === data.file_url", open_player)
+        self.assertIn("if (playerAudio.paused) await playerAudio.play(); else playerAudio.pause();", open_player)
 if __name__ == "__main__":
     unittest.main()

@@ -113,4 +113,20 @@ The first Step 3 implementation commit is `ab08b17746a8a722bc3f8c97c8f00900a3e84
 
 The next checkpoint adds the valid start/end interval guard for previous/next chapter navigation, explicit no-valid-marker regression coverage, and packaged checks for mini-player shared-audio behavior, keyboard chapter selection, saved rate/volume preferences, elapsed-time display and first/last chapter boundaries. These acceptance markers are required before AB-03/AB-04 can be signed off.
 
-**Current decision:** Step 3 officially started. Baseline audit is complete; implementation is in progress and packaged acceptance is pending.
+## Packaged CI failure review — 4 November 2026
+
+The screenshot-listed runs #2282–#2285 are all complete and failed at the same packaged assertion. Their job reports show that the stage6_player_full_controls_actual_audio marker passed, then the harness timed out waiting for the mini-player to pause the selected audio. No subsequent Step 3 markers ran in those builds.
+
+**Root cause:** the acceptance harness clicked #miniPlay while the Audiobooks page (#player) was active. The product intentionally hides the mini-player on that page. The test therefore interacted with a hidden control and did not prove a mini-player runtime defect. Source inspection confirms the full-player and mini-player buttons share playSelectedAudiobook; when the current media URL already matches the selected book, openPlayer toggles play/pause on the existing playerAudio.
+
+**Correction prepared for the next single checkpoint:**
+- Navigate to Dashboard, wait until the mini-player is actually visible and has a rendered client rect, then click Pause and Resume.
+- Verify both the mini-player and full-player icons follow the same real Audio element and the Audio-instance count does not increase.
+- Return to the Audiobooks page after the check.
+- Add a source regression contract proving mainPlay and miniPlay share the selected-audiobook callback and same-URL openPlayer toggles the existing Audio element.
+
+This is a correction to the test's page-state setup, not a weakening of the acceptance. The mini-player interaction remains a required real packaged test.
+
+**Run discipline:** all runs #2282–#2285 are completed; there are no active Stage 6 Step 3 runs at this review point. Do not dispatch another checkpoint while one is active. Wait for the next single run to complete, inspect its final conclusion and failure markers, then fix the cause before dispatching any subsequent run.
+
+**Current decision:** Step 3 remains IN PROGRESS. Source regression is green through 1,153 tests on the preceding commit; final packaged acceptance is still required.

@@ -2218,18 +2218,25 @@
     await waitFor("Play resumes same audio",()=>!finishedM4bAudio.paused&&stage6MainPlay.textContent.trim()!=="▶",5000);
     must((window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__||[]).length===stage6BeforeAudioCount,"Play/Pause created duplicate audio.");
     record("stage6_player_full_controls_actual_audio",true,"Play/Pause control toggled the actual decoded media element.");
-    const stage6MiniPlay=document.querySelector("#miniPlay");
+    window.go("dashboard");
+    const stage6MiniDock=document.querySelector("#miniPlayer");
+    await waitFor("mini-player becomes visible outside the Audiobooks page",()=>
+      Boolean(stage6MiniDock&&!stage6MiniDock.classList.contains("hidden")&&stage6MiniDock.getClientRects().length),5000);
+    const stage6MiniPlay=stage6MiniDock.querySelector("#miniPlay");
     must(stage6MiniPlay,"Persistent mini-player Play/Pause button is missing.");
     stage6MiniPlay.click();
-    await waitFor("mini-player pauses the selected audio",()=>finishedM4bAudio.paused&&
+    await waitFor("visible mini-player pauses the selected audio",()=>finishedM4bAudio.paused&&
       stage6MainPlay.textContent.trim()==="▶"&&stage6MiniPlay.textContent.trim()==="▶",5000);
     stage6MiniPlay.click();
-    await waitFor("mini-player resumes the same audio",()=>!finishedM4bAudio.paused&&
+    await waitFor("visible mini-player resumes the same audio",()=>!finishedM4bAudio.paused&&
       stage6MainPlay.textContent.trim()!=="▶"&&stage6MiniPlay.textContent.trim()!=="▶",5000);
     must((window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__||[]).length===stage6BeforeAudioCount,
       "Mini-player Play/Pause created a second Audio element.");
     record("stage6_mini_player_shares_full_player_audio_session",true,
-      "Mini-player and full-player Play/Pause control the same real Audio object and synchronize their icons.");
+      "The visible Dashboard mini-player and full-player controls operate the same real Audio object and synchronize their icons.");
+    window.go("player");
+    await waitFor("Audiobooks page returns after mini-player acceptance",()=>
+      document.querySelector("#player")?.classList.contains("active")===true,5000);
 
     stage6Timeline.value="10"; stage6Timeline.dispatchEvent(new Event("input",{bubbles:true}));
     await waitFor("seek slider changes real currentTime",()=>Math.abs(finishedM4bAudio.currentTime-stage6ActualDuration*0.1)<1,5000);
