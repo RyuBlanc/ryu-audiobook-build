@@ -2159,9 +2159,19 @@
       return Boolean(finishedBookButton);
     }, 20000);
     finishedBookButton.click();
+    must(normalizeOutputPath(finalM4b.playback_output_path) &&
+      String(finalM4b.playback_format || "").toLowerCase() === "mp3" &&
+      String(finalM4b.source_file_url || "").toLowerCase().includes(
+        String(config.full_generation_output_path || "").split(/[\\/]/).pop().toLowerCase()
+      ),
+      "Audiobooks did not return a browser-compatible playback copy linked to the authoritative M4B: " +
+        JSON.stringify({output_path:finalM4b.output_path,source_file_url:finalM4b.source_file_url,
+          playback_output_path:finalM4b.playback_output_path,playback_format:finalM4b.playback_format}));
+    record("stage55_browser_compatible_playback_source", true,
+      "The original chaptered AAC M4B remains the library asset; the player received a cached MP3 decoded from that exact source for Qt WebEngine compatibility.");
     const finishedM4bAudio = await waitForRealPlayback(
-      "real completed M4B playback in Premium V2 Audiobooks",
-      config.full_generation_output_path
+      "real completed M4B audio through the Audiobooks player",
+      finalM4b.playback_output_path
     );
     await waitFor("Audiobooks renders actual embedded chapter rows", function () {
       const rows = Array.from(document.querySelectorAll("#player [data-audiobook-chapter-start]"));

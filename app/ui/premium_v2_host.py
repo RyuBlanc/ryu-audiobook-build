@@ -29,6 +29,7 @@ from PySide6.QtWidgets import QApplication, QFileDialog, QLabel, QMainWindow, QP
 from PySide6.QtGui import QDesktopServices, QImageReader, QPixmap
 
 from app.core.paths import app_root, audiobooks_root, ensure_roots, library_root, settings_root
+from app.audio.playback import is_iso_bmff_file, prepare_audiobook_playback_source
 from app.ui.frontend_assets import (
     FrontendAssetError,
     load_premium_v2_adapter,
@@ -5896,6 +5897,8 @@ class PremiumV2Bridge(QObject):
         actual = Path(summary.output_path) if getattr(summary, "output_path", None) else output
         valid = actual.is_file() and actual.stat().st_size > 0
         success = valid and not summary.cancelled and not summary.packaging_failed and not summary.chapters_failed and summary.chapters_completed == summary.chapters_total
+        playback_output = None
+        playback_error = ""
         state = load_state(project.folder)
         current_project_job_id = str(state.get("generation_job_id") or "").strip()
         callback_job_id = str(job_id or "").strip()
@@ -5958,14 +5961,42 @@ class PremiumV2Bridge(QObject):
                 self._generators.pop(job_id, None)
             return
 
+        if success and is_iso_bmff_file(actual):
+            # This callback runs on GenerationManager's worker thread. Prepare
+            # the WebEngine-compatible MP3 before publishing the book as ready;
+            # the authoritative chaptered AAC M4B remains untouched.
+            self._job_update(
+                job_id,
+                stage="Preparing Audiobooks playback",
+                progress=98,
+                message="Preparing a browser-compatible playback copy from the validated M4B.",
+            )
+            try:
+                playback_output = prepare_audiobook_playback_source(actual)
+            except Exception as exc:
+                playback_error = (
+                    "The M4B was assembled, but its browser-compatible playback copy "
+                    f"could not be prepared: {exc}"
+                )
+                log.exception("Could not prepare Audiobooks playback source for %s", actual)
+                success = False
+
         if success:
+            source_stat = actual.stat()
             state.update({"status": "completed", "output_path": str(actual), "voice_profile": voice_name,
+                          "playback_output_path": str(playback_output) if playback_output else None,
+                          "playback_source_path": str(actual.resolve()) if playback_output else None,
+                          "playback_source_size": int(source_stat.st_size) if playback_output else None,
+                          "playback_source_mtime_ns": int(source_stat.st_mtime_ns) if playback_output else None,
+                          "playback_error": None,
                           "completed_chapters": list(summary.chapters_completed_numbers or []),
                           "failed_chapters": [], "generation_completed_at": self._now()})
             save_state(project.folder, state)
             self._job_update(job_id, state="completed", stage="Audiobook ready", progress=100,
-                             message="Generator completed and the final output file was validated",
+                             message="Generator completed; the M4B and Audiobooks playback copy are ready",
                              output_path=str(actual), result={"output_path": str(actual), "file_url": actual.resolve().as_uri(),
+                                 "playback_output_path": str(playback_output) if playback_output else None,
+                                 "playback_format": playback_output.suffix.lower().lstrip(".") if playback_output else None,
                                  "file_size": actual.stat().st_size, "chapters_total": summary.chapters_total,
                                  "chapters_completed": summary.chapters_completed,
                                  "chapter_count": summary.chapters_total,
@@ -5978,8 +6009,10 @@ class PremiumV2Bridge(QObject):
             status = "cancelled" if summary.cancelled else "failed"
             state.update({"status": status, "failed_chapters": list(summary.chapters_failed or []),
                           "completed_chapters": list(summary.chapters_completed_numbers or [])})
+            if playback_error:
+                state["playback_error"] = playback_error
             save_state(project.folder, state)
-            detail = summary.packaging_error or ("; ".join(str(v) for v in (summary.failure_details or {}).values())
+            detail = playback_error or summary.packaging_error or ("; ".join(str(v) for v in (summary.failure_details or {}).values())
                                                 if summary.failure_details else "Generated output did not pass final validation.")
             current = self._jobs.get(job_id, {}).get("progress", 0)
             self._job_update(job_id, state=status, stage="Generation " + status,
@@ -6282,6 +6315,40 @@ class PremiumV2Bridge(QObject):
             raise FileNotFoundError("This project does not have a validated generated audiobook yet.")
         summary = self._project_summary(project)
         actual_chapters = _read_audio_chapter_metadata(output)
+        playback_path = output
+        if is_iso_bmff_file(output):
+            try:
+                source_stat = output.stat()
+                stored_playback = Path(str(state.get("playback_output_path") or "")).expanduser()
+                stored_source = str(state.get("playback_source_path") or "")
+                stored_size = int(state.get("playback_source_size") or -1)
+                stored_mtime = int(state.get("playback_source_mtime_ns") or -1)
+                cache_matches = (
+                    stored_playback.is_file()
+                    and stored_source == str(output.resolve())
+                    and stored_size == int(source_stat.st_size)
+                    and stored_mtime == int(source_stat.st_mtime_ns)
+                )
+                if cache_matches:
+                    playback_path = stored_playback.resolve()
+                else:
+                    # Backward compatibility for books created before Stage 5.5:
+                    # prepare a playback copy from the authoritative M4B and
+                    # persist its source identity for subsequent opens.
+                    playback_path = prepare_audiobook_playback_source(output)
+                    state["playback_output_path"] = str(playback_path.resolve())
+                    state["playback_source_path"] = str(output.resolve())
+                    state["playback_source_size"] = int(source_stat.st_size)
+                    state["playback_source_mtime_ns"] = int(source_stat.st_mtime_ns)
+                    state["playback_error"] = None
+                    save_state(project.folder, state)
+            except Exception as exc:
+                message = (
+                    "The finished M4B is safe in the library, but a browser-compatible "
+                    f"playback copy could not be prepared: {exc}"
+                )
+                log.exception("Could not prepare playback for audiobook %s", output)
+                raise RuntimeError(message) from exc
         chapters = actual_chapters or [
             {"number": c.number, "title": c.title}
             for c in project.chapters
@@ -6310,7 +6377,10 @@ class PremiumV2Bridge(QObject):
             "author": str(state.get("author") or ""),
             "narrator": str(state.get("narrator") or state.get("voice_profile") or ""),
             "output_path": str(output.resolve()),
-            "file_url": output.resolve().as_uri(),
+            "source_file_url": output.resolve().as_uri(),
+            "file_url": playback_path.resolve().as_uri(),
+            "playback_output_path": str(playback_path.resolve()),
+            "playback_format": playback_path.suffix.lower().lstrip("."),
             "chapters": chapters,
             "format": output.suffix.lower(),
             "file_size": output.stat().st_size,
