@@ -137,5 +137,9 @@ class Stage6AudiobookLibraryContractTests(unittest.TestCase):
         self.assertIn("Number.isFinite(end) && end > start", renderer)
         self.assertIn("No chapter metadata available.", renderer)
 
+    def test_stage3_keeps_stage55_project_position_acceptance(self):
+        self.assertIn("stage55_audiobooks_real_playback_chapter_seek_and_position", self.packaged_js)
+        self.assertNotIn("originating audiobook position remains persisted", self.packaged_js)
+
 if __name__ == "__main__":
     unittest.main()

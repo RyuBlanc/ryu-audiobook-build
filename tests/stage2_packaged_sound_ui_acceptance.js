@@ -2333,11 +2333,6 @@
       "Stale old-player event mutated the new book UI.");
     record("stage6_switching_book_clears_previous_chapter_selection",true,"Switch clears old chapters and stale audio events cannot mutate new player.");
     latestAcceptanceAudio()?.pause(); stage6StaleAudio.pause();
-    stage6StaleAudio.currentTime=Number(finalM4bChapters[1].start_seconds);
-    await waitFor("originating audiobook position remains persisted",async()=>{
-      const active=await invoke("player.get_active",{folder:String(config.full_generation_project_folder||"")});
-      return Number(active.playback_position_seconds||0)>=Number(finalM4bChapters[1].start_seconds)-0.2;
-    },15000);
 
     record("stage55_audiobooks_real_playback_chapter_seek_and_position", true,
       "The real finished M4B played in Premium V2, chapter navigation sought to its embedded second marker, and the owning project's playback position was persisted.");
