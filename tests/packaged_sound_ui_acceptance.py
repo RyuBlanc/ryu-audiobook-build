@@ -865,6 +865,7 @@ def _run(args: argparse.Namespace) -> int:
         restart_checks = restart_result.get("checks") or {}
         for required_check in (
             "stage54_real_restart_recovery",
+            "stage6_cross_module_production_audiobooks_player_job_history_identity",
             "stage6_playback_position_restored_after_process_restart",
             "stage6_mini_player_navigation_and_close_after_restart",
             "stage6_history_real_search_date_status_and_details",

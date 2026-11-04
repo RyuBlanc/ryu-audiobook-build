@@ -494,6 +494,70 @@
       record("stage54_real_restart_recovery", true,
         "A real paused job survived process termination as interrupted, was recovered through the installed Background Jobs button/native bridge, reused its project checkpoints, and completed with the same project/History/output identity.");
 
+      // Step 7: compare the completed production operation across its owning project,
+      // History, Background Jobs, Audiobooks card and actual Full Player media source.
+      const stage7Folder = String(config.recovery_project_folder || "");
+      const stage7Output = String(config.recovery_output_path || "");
+      const stage7Player = await invoke("player.get_active", {folder:stage7Folder});
+      const stage7Path = value => String(value || "").replace(/\\/g,"/").toLowerCase();
+      must(stage7Folder && stage7Output &&
+        stage7Path(stage7Player.output_path) === stage7Path(stage7Output),
+        "Audiobooks player lookup returned a different project output from Production.");
+      const stage7Jobs = await invoke("job.list", {include_hidden:true});
+      const stage7Job = Array.isArray(stage7Jobs)
+        ? stage7Jobs.find(row => String(row.job_id || "") === String(recoveredJobId)) : null;
+      must(stage7Job && String(stage7Job.state || "").toLowerCase() === "completed" &&
+        String(stage7Job.project_folder || "") === stage7Folder &&
+        stage7Path(stage7Job.output_path) === stage7Path(stage7Output) &&
+        String(recoveredHistoryRow.project_folder || "") === stage7Folder &&
+        stage7Path(recoveredHistoryRow.output_path) === stage7Path(stage7Output),
+        "Production, Background Jobs and History do not share the recovered project's job/output identity.");
+      must(String(stage7Player.title || "") === String(recoveredProject.title || ""),
+        "Audiobooks title differs from the recovered Production project.");
+      window.go("player");
+      await waitFor("Audiobooks page opens for recovered project", () =>
+        Boolean(document.querySelector("#player")?.classList.contains("active") &&
+          document.querySelector("#backendAudiobookLibrary")), 12000);
+      let stage7Card = null;
+      await waitFor("recovered production output appears in Audiobooks", () => {
+        stage7Card = Array.from(document.querySelectorAll("#backendAudiobookLibrary .audiobook-library-card"))
+          .find(card => String(card.dataset.projectFolder || "") === stage7Folder) || null;
+        return Boolean(stage7Card);
+      }, 12000);
+      must(stage7Card.querySelector("[data-open-project-folder]") &&
+        stage7Card.querySelector("[data-play-project-folder]"),
+        "Recovered Audiobooks card is missing Open or Play.");
+      stage7Card.querySelector("[data-open-project-folder]").click();
+      await waitFor("Full Player opens recovered project without autoplay", () => {
+        const audio = latestAcceptanceAudio();
+        return Boolean(audio && String(audio.dataset.projectFolder || "") === stage7Folder &&
+          audio.readyState >= 1 && audio.paused);
+      }, 18000);
+      const stage7Audio = latestAcceptanceAudio();
+      must(audioUsesPath(stage7Audio, stage7Player.playback_output_path || stage7Player.file_url),
+        "Full Player loaded media from a different project/output.");
+      const stage7Rows = Array.from(document.querySelectorAll("#player [data-audiobook-chapter-start]"));
+      const stage7Chapters = Array.isArray(stage7Player.chapters) ? stage7Player.chapters : [];
+      must(stage7Rows.length === stage7Chapters.length && stage7Rows.every((row,index) =>
+        Math.abs(Number(row.dataset.audiobookChapterStart)-Number(stage7Chapters[index].start_seconds)) < 0.05 &&
+        Math.abs(Number(row.dataset.audiobookChapterEnd)-Number(stage7Chapters[index].end_seconds)) < 0.05),
+        "Full Player chapters differ from the recovered M4B embedded chapter intervals.");
+      stage7Card.querySelector("[data-play-project-folder]").click();
+      await waitFor("Audiobooks Play starts the recovered M4B", () =>
+        !stage7Audio.paused && stage7Audio.readyState >= 2 && stage7Audio.currentTime > 0.05, 12000);
+      must(latestAcceptanceAudio() === stage7Audio &&
+        audioUsesPath(stage7Audio,stage7Player.playback_output_path || stage7Player.file_url),
+        "Audiobooks Play switched to stale or different-project audio.");
+      window.go("dashboard");
+      await waitFor("Mini-Player preserves recovered-project playback across navigation", () => {
+        const mini = document.querySelector("#miniPlayer");
+        return Boolean(mini && !mini.classList.contains("hidden") && mini.getClientRects().length &&
+          latestAcceptanceAudio() === stage7Audio);
+      }, 8000);
+      stage7Audio.pause();
+      record("stage6_cross_module_production_audiobooks_player_job_history_identity", true,
+        "Production, Background Jobs, History, Audiobooks, embedded chapters, Full Player and Mini-Player all retained the same recovered project/output identity.");
+
       // HIS-01 to HIS-03: query real durable History, filter it, and open details.
       must(recoveredHistoryRow && recoveredHistoryRow.completed_at,
         "The recovered History record does not expose its completion timestamp.");

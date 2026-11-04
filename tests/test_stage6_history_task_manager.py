@@ -120,5 +120,14 @@ class Stage6HistoryTaskManagerTests(unittest.TestCase):
             self.assertIn(marker, runner)
 
 
+    def test_packaged_acceptance_requires_stage6_cross_module_ownership_integration(self) -> None:
+        packaged = (ROOT / "tests" / "stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
+        runner = (ROOT / "tests" / "packaged_sound_ui_acceptance.py").read_text(encoding="utf-8")
+        marker = "stage6_cross_module_production_audiobooks_player_job_history_identity"
+        self.assertIn(marker, packaged)
+        self.assertIn(marker, runner)
+        self.assertIn("job.list", packaged)
+        self.assertIn("player.get_active", packaged)
+
+
 if __name__ == "__main__":
-    unittest.main()
