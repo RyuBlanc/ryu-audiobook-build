@@ -9563,35 +9563,10 @@
         message(label === 'empty' ? 'Showing empty chapters.' : label === 'review' ? 'Showing chapters that still need review.' : 'Showing all chapters.');
         return;
       }
-      if (button.closest('#player')) {
-        const audioLabel = label.replace(/\s+/g,'');
-        if (['↶15','15↷','0.75×','1×','1.25×','1.5×','◀','▶'].includes(audioLabel)) {
-          stop();
-          (async () => {
-            if (!playerAudio) await openPlayer();
-            if (!playerAudio) throw new Error('No audiobook is loaded in the player.');
-            if (audioLabel === '↶15') playerAudio.currentTime = Math.max(0, playerAudio.currentTime - 15);
-            else if (audioLabel === '15↷') playerAudio.currentTime = Math.min(playerAudio.duration || Infinity, playerAudio.currentTime + 15);
-            else if (['0.75×','1×','1.25×','1.5×'].includes(audioLabel)) {
-              const rate = Number(audioLabel.replace('×',''));
-              // This capture-phase handler prevents the target onclick from
-              // running. Route through the shared control path so the same
-              // action updates real media, active state and durable settings.
-              try {
-                await applyPlayerRate(rate, true);
-              } catch (_) {
-                // applyPlayerRate already surfaces the backend save error.
-                return;
-              }
-              message('Playback speed set to ' + playerRate + '×.');
-            } else if (audioLabel === '◀') playerAudio.currentTime = Math.max(0, playerAudio.currentTime - 15);
-            else {
-              if (playerAudio.paused) await playerAudio.play(); else playerAudio.pause();
-            }
-          })().catch(err => message(err?.message || String(err), true));
-          return;
-        }
-      }
+      // Player transport buttons are bound directly by bindAudiobookPlayerControls()
+      // and the shared mainPlay handler. Do not intercept them in capture phase:
+      // the previous '◀'/'▶' glyph routing confused chapter navigation with
+      // 15-second seeking and Play/Pause, because Next and mainPlay share '▶'.
       if (button.id === 'backgroundJobsButton') {
         stop();
         $('backgroundJobsModal')?.classList.add('show');
