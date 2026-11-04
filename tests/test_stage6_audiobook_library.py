@@ -50,6 +50,24 @@ class Stage6AudiobookLibraryContractTests(unittest.TestCase):
         self.assertIn("else audio.load();", self.adapter)
         self.assertIn("const data = await call('player.get_active', {folder});", self.adapter)
 
+    def test_open_action_preserves_selected_book_during_metadata_load(self):
+        open_start = self.adapter.index("if (button && button.dataset.openProjectFolder)")
+        play_start = self.adapter.index("if (button && button.dataset.playProjectFolder)", open_start)
+        open_action = self.adapter[open_start:play_start]
+        self.assertIn("await openPlayer(folder, {autoplay:false})", open_action)
+        self.assertIn("renderAudiobookLibrary(projects)", open_action)
+        self.assertNotIn("refreshProjects()", open_action)
+        player_start = self.adapter.index("async function openPlayer(")
+        player_end = self.adapter.index("const formatTime =", player_start)
+        open_player = self.adapter[player_start:player_end]
+        self.assertIn("audio.preload = 'metadata'", open_player)
+        self.assertIn("else audio.load()", open_player)
+        self.assertIn("audio.onloadedmetadata =", open_player)
+        refresh_start = self.adapter.index("async function refreshProjects()")
+        refresh_end = self.adapter.index("const voiceLibraryTitles", refresh_start)
+        refresh = self.adapter[refresh_start:refresh_end]
+        self.assertIn("if (!playerAudio || !playerAudio.src) clearAudiobookPlayerDisplay();", refresh)
+
     def test_completed_output_validation_and_m4b_derivative_are_preserved(self):
         summary_start = self.host.index("def _project_summary(")
         player_start = self.host.index("def _player_get_active(")
