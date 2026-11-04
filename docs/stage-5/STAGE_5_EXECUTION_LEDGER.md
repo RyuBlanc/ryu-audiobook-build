@@ -765,3 +765,55 @@ These failures remain historical attempts and are not represented as successful.
 - **Step 5.3 remains ACTIVE** until the exact implementation candidate receives the Windows artifact-checkpoint run and package acceptance is inspected. Manual installed-app operation with an actual selected production TTS profile and real generated audiobook listening is not claimed as completed by the deterministic local-provider regression.
 - GEN-05, chaptered M4B assembly/metadata/cover/full-stream validation, remains Stage 5.4. The integration tests' assembler stub must not be misreported as actual M4B output validation.
 - Stage 5.1 and Stage 5.2 remain closed; no completed preview or metadata work was reopened.
+
+
+## 34. Stage 5.5 M4B finalization and Audiobooks integration — 4 November 2026
+
+### Handoff and scope alignment
+
+- Stage 5.5 begins from the accepted Stage 5.4 documentation closeout commit `c300e2039d469b54a11a759fdba8d045393ed4b5`; the accepted Stage 5.4 application code baseline remains `8132097b6028a17d44ddc2f03c8f514d4cd88598`.
+- Working branch: `stage-5/step-5-m4b-library-integration`.
+- The Stage 5.4 closeout explicitly leaves final M4B metadata/chapter-marker validation and Audiobooks handoff for Stage 5.5. Older Stage 5 register/ledger wording that placed GEN-05 in Step 5.4 predates that closeout; this section follows the accepted Stage 5.4 exit decision without rewriting historical entries.
+- This branch preserves the Stage 5.4 branch and its uploaded installer/portable/hash artifacts unchanged.
+
+### Implementation and regression checkpoint
+
+- Source candidate: `9234cd4a9da632050dbfac873975fd05051bd343`.
+- Matching successful regression workflow: [Build Windows App #2250](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41763886592).
+- Tests job passed **1,138 tests in 52.028 seconds**; frontend JavaScript syntax and isolated native Qt lifecycle checks passed.
+- Final output test passed with actual FFmpeg-created M4B tags, ISO language stream marker, two chapter markers, attached MJPEG cover, image decode and complete AAC audio decode.
+- This was a regression-only run; the Windows Build job was skipped by the artifact-checkpoint policy. Do not describe #2250 as packaged acceptance or as creating installer artifacts.
+
+### Source changes retained on the Stage 5.5 branch
+
+- Final FFmpeg M4B creation uses the known-good `+faststart` mux path to preserve the attached cover image and chapter stream.
+- Mutagen writes standard MP4 metadata atoms and iTunes freeform narrator/publisher/series/series-number fields in-place after the final cover-bearing file is assembled; no extra FFmpeg remux is used for metadata.
+- The final validator reads the saved tags back, checks audio stream language, chapter titles and contiguous timing, attached MJPEG cover disposition and image decoding, full audio decode and minimum bitrate.
+- The existing Premium V2 Audiobooks page and `player.get_active` bridge are reused. Packaged acceptance opens the finished M4B, plays it, seeks the second embedded chapter and checks project-scoped listening-position persistence.
+
+### Candidate run failures and reconciliation
+
+| Run | Failure / finding | Correction |
+|---|---|---|
+| #2238 | Double-escaped validator patterns caused multiple test errors | Fixed expression escaping in later candidates. |
+| #2239 | Coverless mocked preview paths reached the final tag inspector; custom tags were also lost through FFmpeg remux | Scope final-book inspection to cover-bearing outputs and revise metadata persistence. |
+| #2240–#2241 | Audio language not found as a global metadata tag | Write and verify ISO-639-2 language code on the audio stream. |
+| #2242–#2246 | `+use_metadata_tags` candidates emitted no MJPEG cover stream in the resulting file | Restore `+faststart`; validate the attached image stream by disposition and image decode. |
+| #2247 | Cover stream restored but custom narrator tag dropped by standard MP4 muxer | Write custom MP4 metadata atoms in-place with Mutagen. |
+| #2248 | Mutagen path tried to tag mock preview outputs and test expected stream-level cover labels | Restrict tag writer to final cover-bearing output and validate attached picture disposition. |
+| #2249 | Test used `re` without importing it | Add import; exact-head #2250 passed. |
+
+All earlier failed candidates are retained as failed history. No failed candidate is presented as acceptance evidence.
+
+### Requirement/acceptance status
+
+- GEN-05: **REGRESSION PASSED** — final M4B tags, chapter timing/count, language, cover, audio decode and bitrate are verified by the #2250 suite. **Frozen Windows acceptance pending.**
+- PROD-04 final-output metadata/cover reflection: regression-side output verification passed; **frozen Windows output and Audiobooks handoff pending**.
+- Existing Premium V2 Audiobooks page/backend player bridge are retained; **actual frozen Windows play/seek/position persistence pending**.
+- GEN-01 through GEN-04 and PROD-14 remain accepted under Stage 5.4 #2235; they are not reopened by this Stage 5.5 branch.
+
+### Next checkpoint
+
+- Trigger an exact-head `[artifact-checkpoint]` run from the tested #2250 source.
+- Verify both `stage55_final_m4b_embedded_chapters` and `stage55_audiobooks_real_playback_chapter_seek_and_position` markers in the frozen Windows acceptance log.
+- Preserve Stage 5.4 baseline and do not tag/publish a version as part of this step.
