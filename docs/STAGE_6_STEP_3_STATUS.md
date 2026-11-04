@@ -140,3 +140,14 @@ This is a correction to the test's page-state setup, not a weakening of the acce
 - The mini-player test still failed after Dashboard navigation. The visibility predicate used a stale Audiobooks sidebar active label even when the player page panel was no longer visible. The rendered #player panel is now authoritative. Full and mini controls also share a direct toggle of the already-loaded Audio when its project folder matches, avoiding a backend round-trip race.
 
 The original M4B, its embedded chapter table, and its browser-compatible playback derivative are not modified. Step 3 remains open pending one complete frozen Windows packaged acceptance.
+
+## #2287 / #2288 review and next artifact checkpoint — 4 November 2026
+
+- **Build #2287** (ce8c712...) stopped in the test job before Windows packaging. The failing test was test_core_ai_malformed_json_uses_two_compact_bounded_repair_attempts: it used inspect.getsource(AudiobookBrain.analyze_chapter), but app.ai.robust replaces that method with a wrapper. The source-contract test therefore inspected the wrapper rather than the implementation in app/ai/brain.py. This was a regression-contract defect, not an application-source failure.
+- **Build #2288** (d908f8f...) corrected that contract to read app/ai/brain.py directly. All 1,157 regression tests passed. Its Windows build job was skipped because this commit was not labelled as an artifact checkpoint.
+- The current source includes the rendered-page-authoritative mini-player visibility rule, direct same-audio play/pause toggle keyed by project folder, and two bounded compact JSON repair attempts for the core AI pass. Deterministic fallback remains warning-producing; the live AI smoke test remains strict.
+- The M4B assembler, original chaptered M4B, embedded chapter markers, validation, and browser-compatible playback derivative remain preserved.
+
+**Next action:** run one artifact checkpoint against the current d908f8f... source. Wait for that run to complete, inspect every failed step and packaged acceptance report, and fix any actual defect before creating another run. Do not stack checkpoints.
+
+**Current decision:** Step 3 remains IN PROGRESS. Source regression is green (1,157 tests); final frozen Windows packaged acceptance and release artifact checks remain pending.
