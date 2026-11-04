@@ -7986,12 +7986,16 @@
       if (button && button.dataset.openProjectFolder) {
         e.preventDefault(); e.stopImmediatePropagation();
         void runAction(async () => {
-          const folder = button.dataset.openProjectFolder;
+          const folder = String(button.dataset.openProjectFolder || '').trim();
+          if (!folder) throw new Error('The selected audiobook card has no project folder.');
           selectedAudiobookFolder = folder;
           miniPlayerDismissed = false;
           await openPlayer(folder, {autoplay:false});
+          // Opening a completed book must remain a load-only operation. Refreshing
+          // project cards here can run concurrently with media metadata loading
+          // and previously allowed the idle-player reset to clear the just-opened UI.
           renderAudiobookLibrary(projects);
-          message('Opened ' + (projects.find(project => project.folder === folder)?.title || 'selected audiobook') +
+          message('Opened ' + (projects.find(project => String(project.folder) === folder)?.title || 'selected audiobook') +
             ' in the player. Press Play when ready.');
         });
         return;
