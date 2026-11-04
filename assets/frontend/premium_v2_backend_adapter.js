@@ -7268,7 +7268,7 @@
   function savePlayerPreferences(patch) {
     // Serialize preference updates so rapid rate/volume changes cannot let an
     // older response overwrite a newer setting. Return the real backend save.
-    playerPreferenceSave = playerPreferenceSave.then(async () => {
+    playerPreferenceSave = playerPreferenceSave.catch(() => {}).then(async () => {
       const saved = await call('settings.save', patch);
       if (saved?.saved === false) throw new Error('Player preferences were not saved.');
       return saved;
