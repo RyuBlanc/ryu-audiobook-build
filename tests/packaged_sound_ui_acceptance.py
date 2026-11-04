@@ -234,9 +234,6 @@ def write_png_fixture(path: Path, rgba: tuple[int, int, int, int] = (255, 0, 0, 
 def create_stage6_audiobook_library_fixtures(library_folder: Path, token: str) -> list[dict]:
     """Create two independently-owned, completed M4B books for Stage 6 UI acceptance."""
     from app.audio.assembler import assemble_m4b
-    from app.chapters.detector import Chapter
-    from app.core.project import Project
-    from app.core.state import save_state
 
     library_folder = Path(library_folder).expanduser().resolve()
     library_folder.mkdir(parents=True, exist_ok=True)
@@ -272,24 +269,41 @@ def create_stage6_audiobook_library_fixtures(library_folder: Path, token: str) -
             },
             bitrate=128,
         )
-        Project(
-            title=title,
-            folder=folder,
-            source_path=None,
-            chapters=[Chapter(1, chapter_title, "A short packaged audiobook library acceptance fixture.")],
-        ).save()
-        save_state(folder, {
-            "status": "completed",
+        project_payload = {"title": title, "source_file": None}
+        chapter_payload = [{
+            "number": 1,
+            "title": chapter_title,
+            "text": "A short packaged audiobook library acceptance fixture.",
+            "dialogue_assignments": [],
+            "review_status": "reviewed",
+            "skip_for_generation": False,
+            "chapter_id": uuid.uuid4().hex,
+        }]
+        state_payload = {
+            "voice_id": None,
+            "voice_profile": narrator,
             "output_path": str(output.resolve()),
             "cover_path": str(cover.resolve()),
+            "backend": "automatic",
+            "status": "completed",
+            "background_audio_volume": 0.18,
+            "completed_chapters": [1],
+            "failed_chapters": [],
             "author": author,
             "narrator": narrator,
-            "voice_profile": narrator,
-            "completed_chapters": [1],
             "completed_chapter_count": 1,
             "genre": "Acceptance",
             "audio_bitrate": 128,
-        })
+        }
+        (folder / "project.json").write_text(
+            json.dumps(project_payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        (folder / "chapters.json").write_text(
+            json.dumps(chapter_payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        (folder / "state.json").write_text(
+            json.dumps(state_payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         fixtures.append({
             "folder": str(folder.resolve()),
             "title": title,

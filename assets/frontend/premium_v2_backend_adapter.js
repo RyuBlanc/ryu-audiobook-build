@@ -7300,8 +7300,8 @@
     applyPlayerRate(playerRate, false);
     applyPlayerVolume(playerVolume * 100, false);
   }
-  async function openPlayer(projectFolder = selectedAudiobookFolder, options = {}) {
-    const autoplay = options?.autoplay !== false;
+  async function openPlayer(projectFolder = selectedAudiobookFolder) {
+    const autoplay = arguments[1]?.autoplay !== false;
     const folder = String(projectFolder || '').trim();
     if (!folder) throw new Error('Select a finished audiobook from the Audiobooks library before playing.');
     const data = await call('player.get_active', {folder});

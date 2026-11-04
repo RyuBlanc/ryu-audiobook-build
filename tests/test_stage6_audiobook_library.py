@@ -30,7 +30,7 @@ class Stage6AudiobookLibraryContractTests(unittest.TestCase):
     def test_library_only_renders_real_completed_projects_with_output_paths(self):
         renderer = self.adapter[
             self.adapter.index("function renderAudiobookLibrary("):
-            self.adapter.index("function voiceLibraryTitles", self.adapter.index("function renderAudiobookLibrary("))
+            self.adapter.index("const voiceLibraryTitles", self.adapter.index("function renderAudiobookLibrary("))
         ]
         self.assertIn("project.completed === true", renderer)
         self.assertIn("typeof project.output_path === 'string'", renderer)
@@ -45,7 +45,7 @@ class Stage6AudiobookLibraryContractTests(unittest.TestCase):
         self.assertIn("data-open-project-folder", self.adapter)
         self.assertIn("data-play-project-folder", self.adapter)
         self.assertIn("openPlayer(folder, {autoplay:false})", self.adapter)
-        self.assertIn("options?.autoplay !== false", self.adapter)
+        self.assertIn("arguments[1]?.autoplay !== false", self.adapter)
         self.assertIn("if (autoplay) await audio.play();", self.adapter)
         self.assertIn("else audio.load();", self.adapter)
         self.assertIn("const data = await call('player.get_active', {folder});", self.adapter)
@@ -68,6 +68,7 @@ class Stage6AudiobookLibraryContractTests(unittest.TestCase):
         self.assertIn('"chapters": chapters', player)
 
     def test_frozen_windows_acceptance_uses_two_real_completed_m4b_books(self):
+        compile(self.packaged_py, str(PACKAGED_PY), "exec")
         self.assertIn("def create_stage6_audiobook_library_fixtures", self.packaged_py)
         self.assertIn("assemble_m4b(", self.packaged_py)
         self.assertIn('"status": "completed"', self.packaged_py)
