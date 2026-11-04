@@ -3782,6 +3782,29 @@ Rias Gremory
         self.assertIn("self._navigate_workflow_step(target)", source)
 
 
+    def test_stage6_player_preferences_use_serialized_acknowledged_backend_saves(self):
+        adapter = Path("assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        host = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        save_start = adapter.index("  function savePlayerPreferences(patch) {")
+        save_end = adapter.index("  function applyPlayerRate(", save_start)
+        save_helper = adapter[save_start:save_end]
+        rate_start = adapter.index("  function applyPlayerRate(value, persist = true) {")
+        rate_end = adapter.index("  function seekPlayerBy(", rate_start)
+        player_controls = adapter[rate_start:rate_end]
+        settings_start = host.index("    def _settings_save(")
+        settings_end = host.index("    def _assert_no_active_model_lifecycle(", settings_start)
+        settings_handler = host[settings_start:settings_end]
+
+        self.assertIn("playerPreferenceSave = playerPreferenceSave.then", save_helper)
+        self.assertIn("await call('settings.save', patch)", save_helper)
+        self.assertIn("return playerPreferenceSave", save_helper)
+        self.assertIn("return savePlayerPreferences({player_rate:rate})", player_controls)
+        self.assertIn("return savePlayerPreferences({player_volume:playerVolume})", player_controls)
+        self.assertIn('"player_rate": "player/playback_rate"', settings_handler)
+        self.assertIn('"player_volume": "player/playback_volume"', settings_handler)
+        self.assertIn("self.settings.sync()", settings_handler)
+
+
 if __name__ == "__main__":
     unittest.main()
 
