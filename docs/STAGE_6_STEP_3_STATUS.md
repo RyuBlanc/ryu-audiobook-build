@@ -2,7 +2,7 @@
 
 **Status:** IN PROGRESS — official kickoff, 4 November 2026  
 **Branch:** `stage-6/baseline-audit`  
-**Kickoff source HEAD:** `b32e3991fb96f7dfb1813ba6042946fa5c4b3079`  
+**Kickoff commit / source HEAD:** `d409780802b2f39913f4971348534647ecd6edd5`  
 **Accepted Step 2 packaged source:** `c60354c995d9adce886984fc37a9be3c13ee04a4`  
 **Step 2 evidence:** [Build #2274](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41806424525)  
 **Requirements:** AB-03 and AB-04  

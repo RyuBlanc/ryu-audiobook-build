@@ -7142,12 +7142,14 @@
     activePlayerChapters = chapters;
     const chapterList = grid?.querySelector('aside.card .list');
     if (chapterList) {
-      chapterList.innerHTML = chapters.map(chapter => {
-        const start = Number(chapter.start_seconds);
-        const hasTiming = Number.isFinite(start) && start >= 0;
+      chapterList.innerHTML = chapters.map((chapter, index) => {
+        const start = Number(chapter.start_seconds), end = Number(chapter.end_seconds);
+        const hasTiming = Number.isFinite(start) && start >= 0 && Number.isFinite(end) && end > start;
         return '<div class="list-item" role="button" tabindex="' + (hasTiming ? '0' : '-1') +
-          '" data-audiobook-chapter-start="' + (hasTiming ? String(start) : '') + '"' +
-          (hasTiming ? '' : ' aria-disabled="true"') + '>' +
+          '" data-audiobook-chapter-index="' + String(index) + '"' +
+          ' data-audiobook-chapter-start="' + (hasTiming ? String(start) : '') + '"' +
+          ' data-audiobook-chapter-end="' + (hasTiming ? String(end) : '') + '"' +
+          ' aria-pressed="false"' + (hasTiming ? '' : ' aria-disabled="true"') + '>' +
           esc('Chapter ' + Number(chapter.number || 0) + ' · ' + String(chapter.title || 'Untitled chapter')) +
           '</div>';
       }).join('') || '<div class="list-item">No chapter metadata available.</div>';
@@ -7169,8 +7171,11 @@
       playerButtons[3].disabled = !hasTimedChapters;
       playerButtons[3].title = hasTimedChapters ? 'Next chapter' : 'Chapter navigation is unavailable for this audiobook file';
     }
-    const duration = playerAudio?.duration || 0;
-    if ($('playerTimeline')) { $('playerTimeline').value = duration ? (playerAudio.currentTime / duration) * 100 : 0; $('playerTimeline').disabled = false; }
+    const duration = Number(playerAudio?.duration) || 0;
+    if ($('playerTimeline')) {
+      $('playerTimeline').value = duration > 0 ? (playerAudio.currentTime / duration) * 100 : 0;
+      $('playerTimeline').disabled = !(playerAudio && playerAudio.src && Number.isFinite(duration) && duration > 0);
+    }
     if ($('currentTime')) $('currentTime').textContent = formatTime(playerAudio?.currentTime || 0);
     if ($('miniProgress')) $('miniProgress').style.width =
       (playerAudio?.duration ? playerAudio.currentTime / playerAudio.duration * 100 : 0) + '%';
@@ -7186,7 +7191,34 @@
       if (time) time.textContent = formatTime(playerAudio?.currentTime || 0);
       applyProjectCover(mini.querySelector('.mini-cover,.book-cover,.project-cover,[data-project-cover],img[alt*="cover" i]'), data.cover_path || '');
     }
+    syncActivePlayerChapter(playerAudio);
     setPlaybackButtonState();
+  }
+  function syncActivePlayerChapter(audio = playerAudio) {
+    if (!audio || audio !== playerAudio) return null;
+    const current = Number(audio.currentTime), chapters = Array.isArray(activePlayerChapters) ? activePlayerChapters : [];
+    const activeIndex = Number.isFinite(current) && current >= 0
+      ? chapters.findIndex(chapter => {
+          const start = Number(chapter.start_seconds), end = Number(chapter.end_seconds);
+          return Number.isFinite(start) && Number.isFinite(end) && end > start &&
+            current >= start && current < end;
+        }) : -1;
+    const rows = [...($('player')?.querySelectorAll('[data-audiobook-chapter-start]') || [])];
+    rows.forEach((row,index) => {
+      const selected = index === activeIndex;
+      row.classList.toggle('active',selected);
+      row.setAttribute('aria-pressed',selected ? 'true' : 'false');
+      if (selected) row.setAttribute('aria-current','true');
+      else row.removeAttribute('aria-current');
+    });
+    const heading = $('player')?.querySelector('.player-grid > .card:nth-child(2) h2');
+    if (heading) {
+      const chapter = activeIndex >= 0 ? chapters[activeIndex] : null;
+      heading.textContent = chapter
+        ? 'Chapter ' + Number(chapter.number || activeIndex + 1) + ' · ' + String(chapter.title || 'Untitled chapter')
+        : 'Full audiobook';
+    }
+    return activeIndex >= 0 ? chapters[activeIndex] : null;
   }
   function persistPlayerPosition(force = false, reset = false, folder = selectedAudiobookFolder, audio = playerAudio) {
     if (!folder || !audio || !audio.src) return;
@@ -7279,23 +7311,33 @@
       volumeControl.oninput = () => applyPlayerVolume(volumeControl.value, false);
       volumeControl.onchange = () => applyPlayerVolume(volumeControl.value, true);
     }
-    page.addEventListener('click', event => {
-      const chapter = event.target.closest('[data-audiobook-chapter-start]');
+    const playSelectedChapter = async chapter => {
       if (!chapter || chapter.getAttribute('aria-disabled') === 'true') return;
-      if (!playerAudio || !playerAudio.src) {
-        message('Choose Play audiobook on a finished title before selecting a chapter.', true);
+      const audio = playerAudio, start = Number(chapter.dataset.audiobookChapterStart),
+        end = Number(chapter.dataset.audiobookChapterEnd);
+      if (!audio || !audio.src || !Number.isFinite(audio.duration) ||
+          !Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) {
+        message('This audiobook chapter has no usable embedded playback timing.', true);
         return;
       }
-      const start = Number(chapter.dataset.audiobookChapterStart);
-      if (Number.isFinite(start) && start >= 0) playerAudio.currentTime = start;
+      audio.currentTime = Math.max(0,Math.min(audio.duration,start));
+      syncActivePlayerChapter(audio);
+      try { await audio.play(); }
+      catch (error) { message(error?.message || 'The selected chapter could not be started.',true); }
+    };
+    page.addEventListener('click', event => {
+      const chapter = event.target && typeof event.target.closest === 'function'
+        ? event.target.closest('[data-audiobook-chapter-start]') : null;
+      if (!chapter || chapter.getAttribute('aria-disabled') === 'true') return;
+      void playSelectedChapter(chapter);
     });
     page.addEventListener('keydown', event => {
       if (event.key !== 'Enter' && event.key !== ' ') return;
-      const chapter = event.target.closest('[data-audiobook-chapter-start]');
+      const chapter = event.target && typeof event.target.closest === 'function'
+        ? event.target.closest('[data-audiobook-chapter-start]') : null;
       if (!chapter || chapter.getAttribute('aria-disabled') === 'true') return;
       event.preventDefault();
-      const start = Number(chapter.dataset.audiobookChapterStart);
-      if (playerAudio && playerAudio.src && Number.isFinite(start) && start >= 0) playerAudio.currentTime = start;
+      void playSelectedChapter(chapter);
     });
     applyPlayerRate(playerRate, false);
     applyPlayerVolume(playerVolume * 100, false);
@@ -7336,29 +7378,39 @@
     audio.preload = 'metadata';
     audio.playbackRate = playerRate;
     audio.volume = playerVolume;
-    audio.ontimeupdate = () => {
-      const duration = audio.duration || 0, current = audio.currentTime || 0;
-      if ($('playerTimeline') && duration) $('playerTimeline').value = current / duration * 100;
-      if ($('miniProgress') && duration) $('miniProgress').style.width = current / duration * 100 + '%';
+    const updateAudioPositionUi = () => {
+      if (audio !== playerAudio || audioFolder !== selectedAudiobookFolder) return;
+      const duration = Number(audio.duration) || 0, current = Number(audio.currentTime) || 0;
+      if ($('playerTimeline')) {
+        $('playerTimeline').value = duration > 0 ? current / duration * 100 : 0;
+        $('playerTimeline').disabled = !(audio.src && Number.isFinite(duration) && duration > 0);
+      }
+      if ($('miniProgress') && duration > 0) $('miniProgress').style.width = current / duration * 100 + '%';
       if ($('currentTime')) $('currentTime').textContent = formatTime(current);
       const time = $('miniPlayer')?.querySelector('span.muted');
       if (time) time.textContent = formatTime(current);
+      syncActivePlayerChapter(audio);
       setPlaybackButtonState();
-      persistPlayerPosition(false, false, audioFolder, audio);
+      persistPlayerPosition(false,false,audioFolder,audio);
     };
-    audio.onplay = () => { setPlaybackButtonState(); syncMiniPlayer(); };
+    audio.ontimeupdate = updateAudioPositionUi;
+    audio.onseeked = updateAudioPositionUi;
+    audio.onplay = () => {
+      if (audio !== playerAudio || audioFolder !== selectedAudiobookFolder) return;
+      setPlaybackButtonState(); syncMiniPlayer();
+    };
     audio.onpause = () => {
-      persistPlayerPosition(true, false, audioFolder, audio);
-      setPlaybackButtonState();
-      syncMiniPlayer();
+      if (audio !== playerAudio || audioFolder !== selectedAudiobookFolder) return;
+      persistPlayerPosition(true,false,audioFolder,audio);
+      setPlaybackButtonState(); syncMiniPlayer();
     };
     audio.onended = () => {
-      persistPlayerPosition(true, true, audioFolder, audio);
-      setPlaybackButtonState();
-      syncMiniPlayer();
+      if (audio !== playerAudio || audioFolder !== selectedAudiobookFolder) return;
+      persistPlayerPosition(true,true,audioFolder,audio);
+      setPlaybackButtonState(); syncMiniPlayer();
     };
     audio.onloadedmetadata = () => {
-      if (playerAudio !== audio) return;
+      if (audio !== playerAudio || audioFolder !== selectedAudiobookFolder) return;
       const duration = Number(audio.duration) || 0;
       const savedPosition = Math.max(0, Number(data.playback_position_seconds) || 0);
       if (duration > 0 && savedPosition > 0 && savedPosition < duration - 1) {
@@ -7369,6 +7421,7 @@
       renderSelectedAudiobook(data);
     };
     audio.onerror = () => {
+      if (audio !== playerAudio || audioFolder !== selectedAudiobookFolder) return;
       miniPlayerDismissed = true;
       syncMiniPlayer();
       message('The local audiobook file could not be opened in the embedded player.', true);
@@ -8752,8 +8805,7 @@
     });
     // setBookDefaultTrack is handled by the single delegated backend listener.
     // saveSoundPresetAdvanced is handled by the single delegated backend listener.
-    ['mainPlay','miniPlay'].forEach(id=>{if($(id))$(id).onclick=act(openPlayer);});
-    if ($('playerTimeline')) $('playerTimeline').oninput=()=>{if(playerAudio&&playerAudio.duration)playerAudio.currentTime=Number($('playerTimeline').value)/100*playerAudio.duration;};
+    // Player controls and the timeline are bound once earlier; preserve those handlers.
     if ($('hideMini')) $('hideMini').onclick=()=>{
       miniPlayerDismissed = true;
       $('miniPlayer')?.classList.add('hidden');

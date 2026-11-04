@@ -219,4 +219,4 @@ Step 2 is **COMPLETE**. Step 3 is the next scoped task: AB-03 full-player contro
 
 ## Step 3 official kickoff — 4 November 2026
 
-Step 3 is now IN PROGRESS on `stage-6/baseline-audit`, beginning from source HEAD `b32e3991fb96f7dfb1813ba6042946fa5c4b3079`. The detailed baseline, concrete player-handler/chapter-playhead gaps, test-first verification matrix and exit gate are recorded in `docs/STAGE_6_STEP_3_STATUS.md`. The initial implementation priority is to fix and test full-player Play/Pause event binding, then add active-chapter synchronization from embedded marker intervals. AB-02 and AB-07 remain protected carry-forward requirements.
+Step 3 is now IN PROGRESS on `stage-6/baseline-audit`, beginning from kickoff commit/source HEAD `d409780802b2f39913f4971348534647ecd6edd5`. The detailed baseline, concrete player-handler/chapter-playhead gaps, test-first verification matrix and exit gate are recorded in `docs/STAGE_6_STEP_3_STATUS.md`. The initial implementation priority is to fix and test full-player Play/Pause event binding, then add active-chapter synchronization from embedded marker intervals. AB-02 and AB-07 remain protected carry-forward requirements.

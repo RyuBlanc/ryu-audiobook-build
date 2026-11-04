@@ -82,5 +82,34 @@ class Stage6AudiobookLibraryContractTests(unittest.TestCase):
             self.assertIn(marker, self.packaged_js)
 
 
+
+    def test_embedded_chapter_intervals_drive_selected_chapter(self):
+        self.assertIn("data-audiobook-chapter-start", self.adapter)
+        self.assertIn("data-audiobook-chapter-end", self.adapter)
+        self.assertIn("current >= start && current < end", self.adapter)
+        self.assertIn("aria-current", self.adapter)
+        self.assertIn("syncActivePlayerChapter(playerAudio)", self.adapter)
+
+    def test_chapter_click_and_keyboard_start_actual_media(self):
+        start = self.adapter.index("function bindAudiobookPlayerControls()")
+        end = self.adapter.index("async function openPlayer(", start)
+        controls = self.adapter[start:end]
+        self.assertIn("chapter.dataset.audiobookChapterStart", controls)
+        self.assertIn("chapter.dataset.audiobookChapterEnd", controls)
+        self.assertIn("await audio.play()", controls)
+        self.assertIn("event.key !== 'Enter' && event.key !== ' '", controls)
+
+    def test_legacy_player_and_timeline_overrides_removed(self):
+        self.assertNotIn("act(openPlayer)", self.adapter)
+        self.assertEqual(self.adapter.count("playerTimeline').oninput = () =>"), 1)
+        self.assertIn("const playSelectedAudiobook = () =>", self.adapter)
+
+    def test_stale_audio_events_are_ignored_after_book_switch(self):
+        start = self.adapter.index("playerAudio = new Audio(data.file_url)")
+        end = self.adapter.index("const formatTime =", start)
+        handlers = self.adapter[start:end]
+        self.assertIn("audio !== playerAudio || audioFolder !== selectedAudiobookFolder", handlers)
+        self.assertIn("audio.onseeked = updateAudioPositionUi", handlers)
+
 if __name__ == "__main__":
     unittest.main()
