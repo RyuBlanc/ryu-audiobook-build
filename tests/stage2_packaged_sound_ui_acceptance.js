@@ -2257,7 +2257,10 @@
     record("stage6_audiobooks_open_loads_correct_book_paused", true,
       "Open selected the exact project and authoritative M4B output, resolved its checked MP3 playback derivative, retained cover/title/author/narrator/chapter association, and remained paused.");
 
-    firstCard.querySelector("[data-play-project-folder]").click();
+    const refreshedFirstCard = Array.from(document.querySelectorAll("#backendAudiobookLibrary .audiobook-library-card"))
+      .find(card => String(card.dataset.projectFolder || "") === String(firstFixture.folder || ""));
+    must(refreshedFirstCard, "The first audiobook card disappeared after Open refreshed the selected-card state.");
+    refreshedFirstCard.querySelector("[data-play-project-folder]").click();
     await waitFor("Stage 6 Play starts actual audiobook audio", function () {
       return Boolean(firstOpenedAudio.readyState >= 2 && firstOpenedAudio.currentTime > 0.05 &&
         !firstOpenedAudio.paused && !firstOpenedAudio.error);
@@ -2267,8 +2270,9 @@
       "The card's Play action started the selected book's actual decoded local audio; it was not a decorative or metadata-only control.");
 
     const secondFixture = libraryFixtures[1];
-    const secondCard = libraryCards.find(item =>
-      String(item.dataset.projectFolder || "") === String(secondFixture.folder || ""));
+    const secondCard = Array.from(document.querySelectorAll("#backendAudiobookLibrary .audiobook-library-card"))
+      .find(item => String(item.dataset.projectFolder || "") === String(secondFixture.folder || ""));
+    must(secondCard, "The second audiobook card disappeared after selecting the first book.");
     const audioCountBeforeSwitch = (window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__ || []).length;
     secondCard.querySelector("[data-open-project-folder]").click();
     await waitFor("Stage 6 switching to the second audiobook", function () {
