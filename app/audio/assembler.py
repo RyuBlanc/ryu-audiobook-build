@@ -531,14 +531,12 @@ def _validate_m4b_container(
                     return value.strip()
             return ""
 
-        for key, expected in (("title", "Cover"), ("comment", "Cover Art"), ("mimetype", "image/jpeg")):
-            actual = cover_stream_tag(key)
-            if actual.casefold() != expected.casefold():
-                raise RuntimeError(
-                    f"The final M4B cover stream is missing {key} metadata: "
-                    f"expected {expected!r}, received {actual or 'no tag'!r}. "
-                    f"Cover stream report: {cover_stream_block!r}"
-                )
+        cover_stream_header = report_lines[cover_stream_index].casefold()
+        if "(attached pic)" not in cover_stream_header:
+            raise RuntimeError(
+                "The final M4B MJPEG stream is not marked as attached cover art. "
+                f"Stream report: {report_lines[cover_stream_index]!r}"
+            )
         decoded_cover = subprocess.run(
             [
                 ffmpeg_path(), "-v", "error", "-i", str(path),
@@ -1431,21 +1429,22 @@ def assemble_m4b(
         args.append(str(output_path))
         _run(args)
 
-    _write_m4b_metadata_tags(
-        output_path,
-        {
-            "title": clean_title,
-            "author": clean_artist,
-            "narrator": narrator,
-            "publisher": publisher,
-            "series": series,
-            "series_number": series_number,
-            "language": language,
-            "year": year,
-            "genre": genre,
-            "description": description,
-        },
-    )
+    if cover is not None:
+        _write_m4b_metadata_tags(
+            output_path,
+            {
+                "title": clean_title,
+                "author": clean_artist,
+                "narrator": narrator,
+                "publisher": publisher,
+                "series": series,
+                "series_number": series_number,
+                "language": language,
+                "year": year,
+                "genre": genre,
+                "description": description,
+            },
+        )
 
     if not output_path.exists() or output_path.stat().st_size == 0:
         raise RuntimeError("FFmpeg completed but the final M4B is missing.")

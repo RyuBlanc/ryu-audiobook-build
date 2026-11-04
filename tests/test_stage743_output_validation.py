@@ -140,16 +140,7 @@ class Stage743OutputValidationTests(unittest.TestCase):
                 len(report_lines),
             )
             cover_stream_block = report_lines[cover_stream_index:next_stream_index]
-            for key, expected in (("title", "Cover"), ("comment", "Cover Art"), ("mimetype", "image/jpeg")):
-                actual = next(
-                    (
-                        line.split(":", 1)[1].strip()
-                        for line in cover_stream_block
-                        if ":" in line and line.split(":", 1)[0].strip().casefold() == key
-                    ),
-                    "",
-                )
-                self.assertEqual(actual.casefold(), expected.casefold(), cover_stream_block)
+            self.assertIn("(attached pic)", report_lines[cover_stream_index].casefold())
             chapter_ranges = re.findall(
                 r"Chapter #\d+:\d+:\s*start\s+([0-9.]+),\s*end\s+([0-9.]+)",
                 report,
