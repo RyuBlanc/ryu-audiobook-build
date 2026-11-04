@@ -47,6 +47,7 @@ class Stage54GenerationJobUiStateTests(unittest.TestCase):
         self.assertIn('command === "job.list"', self.packaged)
         self.assertIn('["job.pause","job.resume","job.cancel","job.retry","job.recover"]', self.packaged)
         self.assertIn("stage54_background_job_retry_recovery_controls", self.packaged)
+        self.assertIn('[data-job-filter="all"]', self.packaged)
         self.assertIn("stage54_real_generation_pause_resume_cancel", self.packaged)
         self.assertIn("stage54_real_generation_retry_and_history_ownership", self.packaged)
         self.assertIn("stage54_real_readiness_and_dashboard_ownership", self.packaged)

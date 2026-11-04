@@ -129,9 +129,9 @@
     must(actionNames(row).length === 0 && row.textContent.includes("Cancelling…"),
       "A pending cancellation must show its state and disable further actions.");
 
-    const failedFilter = document.querySelector('[data-job-filter="failed"]');
-    must(failedFilter, "Background Jobs failed/cancelled filter is missing.");
-    failedFilter.click();
+    const allJobsFilter = document.querySelector('[data-job-filter="all"]');
+    must(allJobsFilter, "Background Jobs All filter is missing.");
+    allJobsFilter.click();
     stage53.rows[0].recoverable = true;
     stage53.rows[0].error = {code:"cancelled"};
     row = await refreshSyntheticJobs("cancelled");
@@ -358,9 +358,9 @@
       const jobsModal = document.querySelector("#backgroundJobsModal");
       must(jobsButton && jobsModal, "Background Jobs is unavailable for restart recovery acceptance.");
       if (!jobsModal.classList.contains("show")) jobsButton.click();
-      const failedJobsFilter = jobsModal.querySelector('[data-job-filter="failed"]');
-      must(failedJobsFilter, "Background Jobs failed filter is unavailable after application restart.");
-      failedJobsFilter.click();
+      const allJobsFilter = jobsModal.querySelector('[data-job-filter="all"]');
+      must(allJobsFilter, "Background Jobs All filter is unavailable after application restart.");
+      allJobsFilter.click();
       const sourceRowSelector = '[data-backend-job="' + recoverySourceJobId + '"]';
       await waitFor("interrupted generation appears in Background Jobs", function () {
         return Boolean(document.querySelector(sourceRowSelector));
@@ -2168,9 +2168,9 @@
     record("stage54_real_generation_pause_resume_cancel", true,
       "The installed Background Jobs Pause, Resume and Cancel buttons controlled a real saved-project GenerationManager job at persisted chunk checkpoints.");
 
-    const failedJobsFilter = jobsModal.querySelector('[data-job-filter="failed"]');
-    must(failedJobsFilter, "Background Jobs failed/cancelled filter is missing.");
-    failedJobsFilter.click();
+    const allJobsFilter = jobsModal.querySelector('[data-job-filter="all"]');
+    must(allJobsFilter, "Background Jobs All filter is missing.");
+    allJobsFilter.click();
     await waitFor("cancelled real generation job exposes Retry", function () {
       const row = document.querySelector(controlRowSelector);
       return Boolean(row && row.querySelector('[data-job-action="retry"]'));
