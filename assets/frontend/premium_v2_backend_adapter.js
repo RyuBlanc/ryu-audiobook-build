@@ -976,6 +976,7 @@
         setTimeout(() => {
           syncMiniPlayer();
           refreshProjects().catch(() => {});
+          if (page === 'history') refreshHistory().catch(() => {});
         },0);
         return result;
       };
@@ -5907,7 +5908,7 @@
       // and error contents are updated in place below; rebuilding every row
       // when a worker first emits a message flashes the entire job panel.
       const signature = jobs.map(j => [
-        j.job_id, j.state, j.type, j.title, Boolean(j.recoverable), String(j.error?.code || '')
+        j.job_id, j.state, j.type, j.title, j.project_title, Boolean(j.recoverable), String(j.error?.code || '')
       ].join('\u001f')).join('\u001e');
       if (box.dataset.backendJobsSignature !== signature) {
         box.innerHTML = jobs.map(j => {
@@ -5917,14 +5918,22 @@
           const canCancelImport = j.type === 'import';
           const canCancelPreview = ['voice-preview','production-preview','sound-design-preview'].includes(j.type);
           const actions = backgroundGenerationJobActions(j, id, action, canControlGeneration, canCancelImport, canCancelPreview);
+          const icon = j.type === 'audiobook-generation' ? '♪' :
+            (j.type === 'import' ? '⇧' : (String(j.type || '').includes('preview') ? '▶' : '⚙'));
+          const view = '<button class="btn small secondary" type="button" data-job-view="' + id + '">View</button>';
+          const pct = Math.max(0,Math.min(100,Number(j.progress || 0)));
+          const stateClass = state.toLowerCase().replace(/[^a-z0-9_-]/g,'-');
           return '<article class="job-row" data-backend-job="' + id + '">' +
-            '<b data-job-title>' + esc(j.title || j.type || id) + '</b>' +
-            '<p data-job-stage>' + esc(j.stage || j.message || state) + '</p>' +
-            '<div class="progress"><i data-job-progress style="width:' + Math.max(0,Math.min(100,Number(j.progress || 0))) + '%"></i></div>' +
-            '<small data-job-state>' + esc(state) + ' · ' + Math.round(Number(j.progress || 0)) + '%</small>' +
-            '<p data-job-message' + (j.message ? '' : ' hidden') + '>' + esc(j.message || '') + '</p>' +
-            '<p class="muted" data-job-error' + (j.error?.message ? '' : ' hidden') + '>' + esc(j.error?.message || '') + '</p>' +
-            '<div class="toolbar">' + actions + '</div></article>';
+            '<div class="job-type-icon" aria-hidden="true">' + icon + '</div>' +
+            '<div class="job-main">' +
+              '<h3 data-job-title>' + esc(j.title || j.type || id) + '</h3>' +
+              '<p data-job-stage>' + esc(j.stage || j.message || state) + '</p>' +
+              '<div class="job-meta" data-job-meta>' + esc(jobMetaSummary(j)) + '</div>' +
+              '<div class="job-progress-line"><div class="progress"><i data-job-progress style="width:' + pct + '%"></i></div>' +
+                '<small class="job-state-' + stateClass + '" data-job-state>' + esc(state) + ' · ' + Math.round(Number(j.progress || 0)) + '%</small></div>' +
+              '<p data-job-message' + (j.message ? '' : ' hidden') + '>' + esc(j.message || '') + '</p>' +
+              '<p class="muted" data-job-error' + (j.error?.message ? '' : ' hidden') + '>' + esc(j.error?.message || '') + '</p>' +
+            '</div><div class="job-actions">' + view + actions + '</div></article>';
         }).join('') || '<p class="muted" data-backend-empty="1">No backend jobs in this view.</p>';
         box.dataset.backendJobsSignature = signature;
       } else {
@@ -5935,11 +5944,13 @@
           const stage = row.querySelector('[data-job-stage]');
           const progress = row.querySelector('[data-job-progress]');
           const state = row.querySelector('[data-job-state]');
+          const meta = row.querySelector('[data-job-meta]');
           const messageNode = row.querySelector('[data-job-message]');
           const errorNode = row.querySelector('[data-job-error]');
           writeTextIfChanged(stage, j.stage || j.message || j.state || 'unknown');
           writeStyleIfChanged(progress, 'width', pct + '%');
           writeTextIfChanged(state, String(j.state || 'unknown') + ' · ' + Math.round(pct) + '%');
+          writeTextIfChanged(meta, jobMetaSummary(j));
           writeTextIfChanged(messageNode, j.message || '');
           writeBooleanIfChanged(messageNode, 'hidden', !j.message);
           writeTextIfChanged(errorNode, j.error?.message || '');
@@ -5948,7 +5959,7 @@
       }
       box.dataset.backendJobsRendered = '1';
     }
-    writeTextIfChanged($('jobsRunningCount'), allJobs.filter(j => ['running','pause_requested','cancel_requested'].includes(j.state)).length);
+    writeTextIfChanged($('jobsRunningCount'), allJobs.filter(j => ['running','pause_requested','cancel_requested','retrying'].includes(j.state)).length);
     writeTextIfChanged($('jobsQueuedCount'), allJobs.filter(j => j.state === 'queued').length);
     writeTextIfChanged($('jobsCompletedCount'), allJobs.filter(j => j.state === 'completed').length);
     writeTextIfChanged($('backgroundJobCount'), allJobs.filter(j => !['completed','failed','cancelled'].includes(j.state)).length + ' background jobs');
@@ -7509,22 +7520,216 @@
     const n = Math.max(0, Math.floor(Number(seconds) || 0)), h = Math.floor(n / 3600), m = Math.floor((n % 3600) / 60), sec = n % 60;
     return h ? h + ':' + String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0') : m + ':' + String(sec).padStart(2,'0');
   };
+  function ensureHistoryRangeControls(section) {
+    const filters = $('historyFilters');
+    if (!section || !filters || !filters.parentElement) return null;
+    let controls = $('historyRangeControls');
+    if (!controls) {
+      controls = document.createElement('div');
+      controls.id = 'historyRangeControls';
+      controls.className = 'toolbar';
+      controls.style.display = 'flex';
+      controls.style.flexWrap = 'wrap';
+      controls.style.alignItems = 'end';
+      controls.style.gap = '10px';
+      controls.style.margin = '12px 0 14px';
+      controls.innerHTML =
+        '<label style="display:grid;gap:4px;min-width:180px;flex:1;font-size:12px;color:var(--muted)">Search' +
+          '<input id="historySearchFilter" type="search" placeholder="Job, project, chapter or error" ' +
+          'style="min-width:0;width:100%;padding:9px 11px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:9px"></label>' +
+        '<label style="display:grid;gap:4px;min-width:140px;font-size:12px;color:var(--muted)">From Date' +
+          '<input id="historyFromDate" type="date" aria-label="History from date" ' +
+          'style="padding:9px 11px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:9px"></label>' +
+        '<label style="display:grid;gap:4px;min-width:140px;font-size:12px;color:var(--muted)">To Date' +
+          '<input id="historyToDate" type="date" aria-label="History to date" ' +
+          'style="padding:9px 11px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:9px"></label>' +
+        '<button class="btn small secondary" id="clearHistoryFilters" type="button">Clear filters</button>' +
+        '<small id="historyFilterHint" class="muted" role="status" aria-live="polite"></small>';
+      filters.insertAdjacentElement('afterend', controls);
+      const refresh = () => {
+        section.dataset.historyRenderSignature = '';
+        refreshHistory().catch(error => message(error?.message || String(error), true));
+      };
+      controls.querySelectorAll('input').forEach(input => {
+        input.addEventListener('input', refresh);
+        input.addEventListener('change', refresh);
+      });
+      $('clearHistoryFilters')?.addEventListener('click', () => {
+        const search = $('historySearchFilter'), from = $('historyFromDate'), to = $('historyToDate');
+        if (search) search.value = '';
+        if (from) from.value = '';
+        if (to) to.value = '';
+        refresh();
+      });
+    }
+    // Remove prototype sample records after the page is connected to real data.
+    section.querySelectorAll('.history-row:not([data-backend-history])').forEach(row => row.remove());
+    return controls;
+  }
+
+  function jobDateValue(job) {
+    return job?.completed_at || job?.updated_at || job?.started_at || job?.queued_at || job?.created_at || '';
+  }
+
+  function jobMetaSummary(job) {
+    const project = String(job?.project_title || job?.project_name || '').trim() || 'Project unavailable';
+    const phase = String(job?.chapter_title || job?.stage || job?.phase || '').trim();
+    const elapsed = Number(job?.elapsed_seconds);
+    const elapsedText = Number.isFinite(elapsed) && elapsed >= 0 ? formatTime(elapsed) : 'Elapsed time unavailable';
+    const dateValue = jobDateValue(job);
+    const dateText = dateValue && Number.isFinite(Date.parse(dateValue))
+      ? new Date(dateValue).toLocaleString() : 'Timestamp unavailable';
+    return [project, phase, elapsedText, dateText].filter(Boolean).join(' · ');
+  }
+
+  function ensureJobDetailsModal() {
+    let root = $('jobDetailsModal');
+    if (root) return root;
+    root = document.createElement('div');
+    root.id = 'jobDetailsModal';
+    root.className = 'modal-back';
+    root.innerHTML =
+      '<div class="modal" role="dialog" aria-modal="true" aria-labelledby="jobDetailsTitle" ' +
+      'style="width:min(760px,calc(100vw - 28px));max-height:calc(100vh - 36px);overflow:auto">' +
+        '<div class="modal-title"><div><span class="eyebrow">OPERATION DETAILS</span>' +
+          '<h2 id="jobDetailsTitle">Background job</h2><p class="muted" id="jobDetailsSubtitle"></p></div>' +
+          '<button class="icon-btn" type="button" data-job-detail-close aria-label="Close job details">×</button></div>' +
+        '<div id="jobDetailsFields" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px"></div>' +
+        '<div id="jobDetailsError" class="muted" style="margin-top:12px;white-space:pre-wrap"></div>' +
+        '<div id="jobDetailsActions" class="toolbar" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px"></div>' +
+        '<div class="toolbar" style="display:flex;justify-content:flex-end;margin-top:14px">' +
+          '<button class="btn small secondary" type="button" id="jobDetailsOpenTaskManager">Open Task Manager</button>' +
+          '<button class="btn small ghost" type="button" data-job-detail-close>Close</button>' +
+        '</div></div>';
+    document.body.appendChild(root);
+    root.addEventListener('click', event => {
+      if (event.target === root || event.target.closest('[data-job-detail-close]')) root.classList.remove('show');
+      if (event.target.closest('#jobDetailsOpenTaskManager')) {
+        root.classList.remove('show');
+        $('backgroundJobsButton')?.click();
+      }
+    });
+    if (!window.__ryuJobDetailsEscapeBound) {
+      window.__ryuJobDetailsEscapeBound = true;
+      document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') $('jobDetailsModal')?.classList.remove('show');
+      });
+    }
+    return root;
+  }
+
+  function renderJobDetails(job) {
+    const root = ensureJobDetailsModal();
+    const id = String(job?.job_id || job?.id || '');
+    const state = String(job?.state || 'unknown');
+    const error = job?.error && typeof job.error === 'object'
+      ? String(job.error.message || '') : String(job?.error || '');
+    const result = job?.result && typeof job.result === 'object'
+      ? String(job.result.summary || job.result.message || '')
+      : String(job?.result || '');
+    const fields = [
+      ['Job ID', id],
+      ['Type', job?.type || job?.operation || 'Unknown'],
+      ['Project', job?.project_title || job?.project_name || 'Project unavailable'],
+      ['Status', state],
+      ['Progress', Number.isFinite(Number(job?.progress)) ? Math.round(Number(job.progress)) + '%' : 'Unavailable'],
+      ['Chapter', job?.chapter_title || job?.chapter_number || job?.chapter || 'Not applicable'],
+      ['Phase', job?.stage || job?.phase || 'Not reported'],
+      ['Elapsed time', Number.isFinite(Number(job?.elapsed_seconds)) ? formatTime(job.elapsed_seconds) : 'Unavailable'],
+      ['Queued', job?.queued_at || 'Unavailable'],
+      ['Started', job?.started_at || 'Unavailable'],
+      ['Finished', job?.completed_at || 'Not finished'],
+      ['Output', job?.output_path || job?.result?.output_path || 'No output registered'],
+      ['Result', result || 'No result summary reported'],
+      ['Recovery', job?.recoverable ? 'Recoverable' : 'Not marked recoverable']
+    ];
+    $('jobDetailsTitle').textContent = String(job?.title || job?.type || 'Background job');
+    $('jobDetailsSubtitle').textContent = (job?.project_title || 'Local task') + ' · ' + state;
+    $('jobDetailsFields').innerHTML = fields.map(([label,value]) =>
+      '<div style="padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--surface);min-width:0">' +
+        '<small class="muted">' + esc(label) + '</small><div data-job-detail-field="' +
+        esc(label.toLowerCase().replace(/[^a-z0-9]+/g,'-')) +
+        '" style="margin-top:4px;overflow-wrap:anywhere">' + esc(value) + '</div></div>'
+    ).join('');
+    $('jobDetailsError').textContent = error ? 'Failure details: ' + error : '';
+    const action = (name,label,cls) =>
+      '<button class="btn small ' + cls + '" data-job-action="' + name + '" data-job-id="' + esc(id) + '">' + label + '</button>';
+    const isGeneration = String(job?.type || '') === 'audiobook-generation';
+    const isImport = String(job?.type || '') === 'import';
+    const isPreview = ['voice-preview','production-preview','sound-design-preview'].includes(String(job?.type || ''));
+    const stateActions = backgroundGenerationJobActions(job || {}, esc(id), action, isGeneration, isImport, isPreview);
+    $('jobDetailsActions').innerHTML = stateActions || '<small class="muted">No additional operation is available for this job state.</small>';
+    root.classList.add('show');
+  }
+
+  async function openJobDetails(jobId) {
+    const id = String(jobId || '').trim();
+    if (!id) throw new Error('Select a job before opening its details.');
+    const [jobs, history] = await Promise.all([
+      call('job.list', {include_hidden:true}),
+      call('history.list')
+    ]);
+    const jobRows = Array.isArray(jobs) ? jobs : [];
+    const historyRows = Array.isArray(history) ? history : [];
+    const historyMatch = historyRows.find(row => String(row.job_id || row.id || '') === id);
+    const queueMatch = jobRows.find(row => String(row.job_id || row.id || '') === id);
+    const job = historyMatch || queueMatch;
+    if (!job) throw new Error('This job is no longer available in History or the task queue.');
+    renderJobDetails(job);
+    return job;
+  }
+
   async function refreshHistory() {
     const requestToken = ++historyListEpoch;
+    const section = $('history');
+    ensureHistoryRangeControls(section);
+    const filters = $('historyFilters');
+    const host = filters?.parentElement;
+    const filter = filters?.querySelector('button.active')?.textContent?.trim().toLowerCase() || 'all';
+    const query = String($('historySearchFilter')?.value || '').trim().toLowerCase();
+    const fromDate = String($('historyFromDate')?.value || '').trim();
+    const toDate = String($('historyToDate')?.value || '').trim();
+    const hint = $('historyFilterHint');
+    if (fromDate && toDate && fromDate > toDate) {
+      if (hint) hint.textContent = 'From Date must be on or before To Date.';
+      if (section) section.querySelectorAll('[data-backend-history]').forEach(el => el.remove());
+      if (host) {
+        let empty = host.querySelector('[data-history-empty]');
+        if (!empty) { empty = document.createElement('p'); empty.dataset.historyEmpty='1'; empty.className='muted'; host.appendChild(empty); }
+        empty.textContent = 'Choose a valid date range to view History.';
+      }
+      return [];
+    }
+    if (hint) hint.textContent = '';
     const loaded = await call('history.list');
     if (requestToken !== historyListEpoch) return [];
     const rows = Array.isArray(loaded) ? loaded : [];
-    const section = $('history');
-    const filter = $('historyFilters')?.querySelector('button.active')?.textContent?.trim().toLowerCase() || 'all';
-    const host = $('historyFilters')?.parentElement;
-    const visible = rows.filter(j => {
-      const state = String(j.state || '').toLowerCase();
-      if (filter === 'completed') return state === 'completed';
-      if (filter === 'running') return ['queued','running','pause_requested','paused','retrying'].includes(state);
-      if (filter === 'failed') return ['failed','cancelled'].includes(state);
+    const fromTime = fromDate ? new Date(fromDate + 'T00:00:00').getTime() : null;
+    const toTime = toDate ? new Date(toDate + 'T23:59:59.999').getTime() : null;
+    const activeStates = ['queued','running','pause_requested','paused','cancel_requested','retrying'];
+    const visible = rows.filter(job => {
+      const state = String(job.state || '').toLowerCase();
+      if (filter === 'completed' && state !== 'completed') return false;
+      if (filter === 'running' && !activeStates.includes(state)) return false;
+      if (filter === 'failed' && !['failed','cancelled'].includes(state)) return false;
+      const timestamp = Date.parse(jobDateValue(job));
+      if (fromTime !== null && (!Number.isFinite(timestamp) || timestamp < fromTime)) return false;
+      if (toTime !== null && (!Number.isFinite(timestamp) || timestamp > toTime)) return false;
+      if (query) {
+        const searchable = [
+          job.job_id,job.title,job.type,job.operation,job.project_title,job.project_name,
+          job.project_folder,job.chapter_title,job.chapter_number,job.stage,job.phase,
+          job.message,job.error?.code,job.error?.message,job.output_path
+        ].map(value => String(value ?? '')).join(' ').toLowerCase();
+        if (!searchable.includes(query)) return false;
+      }
       return true;
     });
-    const signature = JSON.stringify({filter,rows:visible.map(j => [j.job_id,j.title,j.type,j.project_title,j.stage,j.message,j.state,j.elapsed_seconds,j.progress,j.error?.message])});
+    const signature = JSON.stringify({
+      filter,query,fromDate,toDate,
+      rows:visible.map(job => [job.job_id,job.title,job.type,job.project_title,job.stage,job.message,
+        job.state,job.elapsed_seconds,job.progress,job.error?.message,jobDateValue(job)])
+    });
     if (section && host && section.dataset.historyRenderSignature === signature) return rows;
     if (section) section.querySelectorAll('[data-backend-history]').forEach(el => el.remove());
     if (host) {
@@ -7533,17 +7738,34 @@
         if (!empty) { empty = document.createElement('p'); empty.dataset.historyEmpty='1'; empty.className='muted'; host.appendChild(empty); }
         empty.textContent = 'No matching backend jobs yet.';
       } else if (empty) empty.remove();
-      visible.forEach(j => {
+      visible.forEach(job => {
         const row = document.createElement('div');
-        row.className = 'history-row'; row.dataset.backendHistory='1';
-        const label = String(j.state || 'queued');
-        const duration = j.elapsed_seconds ? formatTime(j.elapsed_seconds) : 'Elapsed time unavailable';
-        row.innerHTML = '<div><b>' + esc(j.title || j.type || 'Background task') + '</b><br><span class="muted">' +
-          esc(j.project_title || 'Local task') + ' · ' + esc(j.stage || j.message || '') + ' · ' + esc(duration) +
-          '</span></div><span class="badge ' + (label==='failed'?'red':label==='running'?'info':'') + '">' + esc(label) +
-          '</span><span>' + Math.round(Number(j.progress || 0)) + '%</span><button class="btn small secondary" data-history-job="' +
-          esc(j.job_id) + '">View</button>';
-        if (host) host.appendChild(row);
+        const id = String(job.job_id || job.id || '');
+        const state = String(job.state || 'unknown').toLowerCase();
+        const label = state.replace(/_/g,' ');
+        const elapsed = Number(job.elapsed_seconds);
+        const duration = Number.isFinite(elapsed) && elapsed >= 0 ? formatTime(elapsed) : 'Elapsed time unavailable';
+        const progress = Number(job.progress);
+        const progressText = Number.isFinite(progress) ? Math.round(progress) + '%' : '—';
+        const timestamp = jobDateValue(job);
+        const timestampText = timestamp && Number.isFinite(Date.parse(timestamp))
+          ? new Date(timestamp).toLocaleString() : 'Timestamp unavailable';
+        const phase = [job.chapter_title || (job.chapter_number ? 'Chapter ' + job.chapter_number : ''),
+          job.stage || job.phase || ''].filter(Boolean).join(' · ');
+        const project = job.project_title || job.project_name || 'Project unavailable';
+        const errorText = job.error?.message
+          ? '<small class="muted" style="color:var(--danger)">Error: ' + esc(job.error.message) + '</small>' : '';
+        row.className = 'history-row';
+        row.dataset.backendHistory = '1';
+        row.dataset.historyJob = id;
+        row.innerHTML =
+          '<div><b>' + esc(job.title || job.type || 'Background task') + '</b><br>' +
+            '<span class="muted">' + esc(project) + ' · ' + esc(phase || job.message || 'No phase reported') + ' · ' + esc(duration) + '</span><br>' +
+            '<small class="muted">' + esc(timestampText) + '</small><br>' + errorText +
+          '</div><span class="badge ' + (state === 'failed' || state === 'cancelled' ? 'red' : ['running','queued','pause_requested','paused','retrying'].includes(state) ? 'info' : '') + '">' +
+            esc(label) + '</span><span>' + esc(progressText) + '</span>' +
+          '<button class="btn small secondary" type="button" data-history-job="' + esc(id) + '">View</button>';
+        host.appendChild(row);
       });
       if (section) section.dataset.historyRenderSignature = signature;
     }
@@ -8058,18 +8280,16 @@
         refreshHistory().catch(err => message(err?.message || String(err), true));
         return;
       }
+      const jobView = e.target.closest('[data-job-view]');
+      if (jobView) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        openJobDetails(jobView.dataset.jobView).catch(err => message(err?.message || String(err), true));
+        return;
+      }
       const historyJob = e.target.closest('[data-history-job]');
       if (historyJob) {
         e.preventDefault(); e.stopImmediatePropagation();
-        (async()=> {
-          const id = historyJob.dataset.historyJob;
-          const rows = await call('history.list');
-          const job = rows.find(j => String(j.job_id) === String(id));
-          if (!job) throw new Error('This history job is no longer available. Refresh History and try again.');
-          await refreshJobs();
-          $('backgroundJobsButton')?.click();
-          message((job.title || job.type || 'Background task') + ' · ' + (job.stage || job.message || job.state) + ' · ' + Math.round(Number(job.progress || 0)) + '%');
-        })().catch(err => message(err?.message || String(err), true));
+        openJobDetails(historyJob.dataset.historyJob).catch(err => message(err?.message || String(err), true));
         return;
       }
       const add=e.target.closest('#addLibraryCharacter'), imp=e.target.closest('#importCharacterLibrary'), edit=e.target.closest('[data-edit-library]'), remove=e.target.closest('[data-delete-library]'), test=e.target.closest('[data-test-library]'), studio=e.target.closest('[data-character-studio]'), save=e.target.closest('#saveCharacterProfile'), del=e.target.closest('#deleteCharacter');
@@ -8164,15 +8384,7 @@
         });
       }
     });
-    if ($('historyFilters')) $('historyFilters').querySelectorAll('button').forEach(button => button.addEventListener('click', () => {
-      $('historyFilters').querySelectorAll('button').forEach(b=>b.classList.toggle('active',b===button));
-      refreshHistory().catch(e=>message(e.message,true));
-    }));
-    if ($('history')) $('history').addEventListener('click', e => {
-      const b=e.target.closest('[data-history-job]'); if(!b)return;
-      const jobId=b.dataset.historyJob;
-      call('job.list',{include_hidden:true}).then(rows=>{const j=rows.find(x=>x.job_id===jobId);if(j)message((j.title||j.type)+' — '+(j.state||'unknown')+' · '+(j.stage||j.message||''));}).catch(x=>message(x.message,true));
-    });
+
     if ($('checkModelUpdates')) $('checkModelUpdates').onclick=act(async()=>{await refreshModels();message('Local model catalogue refreshed. This checks the local catalogue; it does not contact an online update service.');});
     if ($('startQwenInstall')) $('startQwenInstall').onclick=act(async()=>{
       const choice=document.querySelector('input[name="qwenInstall"]:checked')?.value||'customvoice';

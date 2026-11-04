@@ -1843,12 +1843,34 @@ class PremiumV2Bridge(QObject):
         return sorted(rows, key=lambda j: str(j.get("queued_at") or ""), reverse=True)
 
     def _history_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
-        # History is independent of queue visibility and survives queue cleanup.
+        """Return durable terminal history together with current live job snapshots.
+
+        The independent journal remains authoritative for terminal records.
+        Active queue rows are merged by stable job_id so Running and Queued
+        operations appear in History without coupling retention to queue cleanup.
+        """
         with self._jobs_lock:
-            rows = [dict(row) for row in self._history.values()]
+            rows_by_id = {
+                str(row.get("job_id") or row.get("id") or ""): dict(row)
+                for row in self._history.values()
+                if isinstance(row, dict) and (row.get("job_id") or row.get("id"))
+            }
+            for current in self._jobs.values():
+                if not isinstance(current, dict) or current.get("hidden"):
+                    continue
+                job_id = str(current.get("job_id") or current.get("id") or "").strip()
+                if not job_id or job_id in rows_by_id:
+                    continue
+                # Include queue-only snapshots as a compatibility fallback.
+                # A journaled terminal record always wins over its queue copy.
+                rows_by_id[job_id] = dict(current)
+            rows = list(rows_by_id.values())
         return sorted(
             rows,
-            key=lambda row: str(row.get("completed_at") or row.get("updated_at") or row.get("queued_at") or ""),
+            key=lambda row: str(
+                row.get("completed_at") or row.get("updated_at")
+                or row.get("started_at") or row.get("queued_at") or ""
+            ),
             reverse=True,
         )
 

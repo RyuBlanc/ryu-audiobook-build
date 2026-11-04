@@ -316,3 +316,26 @@ Run #2289's Music Library, cue, BGM, and preview checks before the Production me
 **Stage 6 Step 3 status:** source verification green; #2322 packaged Stage 6 mini-player, preferences, controls, chapters, Audiobooks Open/Play and project-switch acceptance green. The remaining combined packaged blocker is Stage 5.4's job-control start-readiness fixture, now corrected but awaiting frozen Windows verification. Inno Setup, HTML installer, logo/SHA-256, Defender, installer/portable uploads and publishing have not yet run.
 
 **Next action:** run the Windows frozen package on the #2327-tested source commit; verify the Stage 5.4 Start button becomes enabled for the source-backed job-control project, then execute real start/pause/resume/cancel/retry/recovery. Preserve all prior Stage 5.3 and Stage 6 passing checks before release packaging.
+
+
+## Latest verified closeout — 5 November 2026
+
+Build #2328 on \`stage-6/baseline-audit\`, commit
+\`43b31405039f6651401fbc1e046cbd2779aa7441\`, passed the complete packaged
+Windows build job. Its frozen-app acceptance emitted all 13 Stage 6 Step 3
+player/chapter markers, including actual decoded playback, seek, volume,
+speed, embedded chapter selection, playhead synchronization, chapter
+navigation, audiobook switching and shared mini-player audio. The source
+regression job passed 1,164 tests.
+
+The associated Stage 5.4 source-backed fixture gate also passed in #2328.
+This supersedes the earlier #2322 timeout recorded above; the production
+readiness gate was not weakened.
+
+**Step 3 disposition:** automated packaged acceptance passed. The user's
+physical manual installation check is explicitly excluded from this
+continuation and is not represented as performed.
+
+The next work is Stage 6 Step 4 playback restoration and mini-player
+acceptance, followed by Steps 5–9. No Version 1.2.0 release is authorized
+by this checkpoint alone.
