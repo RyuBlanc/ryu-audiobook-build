@@ -97,6 +97,15 @@ class Stage6AudiobookLibraryContractTests(unittest.TestCase):
         self.assertIn('"output_path": str(output.resolve())', player)
         self.assertIn('"chapters": chapters', player)
 
+    def test_stage54_job_control_fixtures_have_real_source_files(self):
+        fixture_start = self.packaged_py.index("def create_generation_project(")
+        fixture_end = self.packaged_py.index("long_job_sentence =", fixture_start)
+        fixture_builder = self.packaged_py[fixture_start:fixture_end]
+        self.assertIn('source_path = folder / "source.txt"', fixture_builder)
+        self.assertIn("source_path.write_text(chapter_text, encoding=\"utf-8\")", fixture_builder)
+        self.assertIn('"source_file": str(source_path.resolve())', fixture_builder)
+        self.assertNotIn('"source_file": None', fixture_builder)
+
     def test_frozen_windows_acceptance_uses_two_real_completed_m4b_books(self):
         compile(self.packaged_py, str(PACKAGED_PY), "exec")
         self.assertIn("def create_stage6_audiobook_library_fixtures", self.packaged_py)
