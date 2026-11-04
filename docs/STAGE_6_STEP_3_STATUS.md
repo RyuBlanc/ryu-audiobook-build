@@ -251,3 +251,12 @@ Run #2289's Music Library, cue, BGM, and preview checks before the Production me
 **Next action:** run source tests on the targeted fix, then one new artifact checkpoint. The frozen acceptance must demonstrate actual first-to-second and second-to-first chapter navigation, first/last boundary behavior, and preserve the already-passing mini-player, AI, 37% volume and 1.25x persistence checks. Only then proceed to Inno Setup, functional HTML installer, release hashes, logo and Defender gates.
 
 **Current decision:** Step 3 remains IN PROGRESS. #2312 confirmed the previous mini-player/AI/player-preference acceptance; chapter navigation was its sole packaged blocker. The targeted capture-handler fix is committed but not yet verified by CI.
+
+## Final direct-transport contract alignment and next checkpoint — 5 November 2026
+
+- The first correction removing the global capture-phase player transport handler exposed two source contracts that still assumed the deleted handler existed: the Stage 6 speed test and the Premium V2 integration contract. These tests failed with `ValueError: substring not found`; they did not report a runtime player regression.
+- Both contracts now validate the intended direct event paths: Previous/Next call `jumpPlayerChapter`, rewind/forward call the bounded `seekPlayerBy`, `#mainPlay` and `#miniPlay` share `playSelectedAudiobook`, and speed calls `applyPlayerRate(rate, true)` followed by `savePlayerPreferences`.
+- **#2317** is running the full suite on the code and test-contract corrections. Frontend syntax and native Qt lifecycle gates passed; its full regression step is still in progress.
+- **#2318** is the next frozen-app artifact checkpoint and includes the latest source plus both corrected contracts. It must re-run the packaged test that previously failed at Next-to-second-chapter navigation.
+
+**Acceptance focus:** confirm Next from the first embedded chapter seeks to the second marker, Previous returns to the first, first/last boundaries stay clamped, and all previously passed packaged checks (mini-player shared audio; 37% volume and 1.25x speed persistence; keyboard chapter selection; AI recovery regression) remain green. Do not skip packaged acceptance or close Step 3 on source tests alone.
