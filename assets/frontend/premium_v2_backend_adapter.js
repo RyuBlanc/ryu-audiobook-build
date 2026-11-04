@@ -9573,9 +9573,17 @@
             if (audioLabel === '↶15') playerAudio.currentTime = Math.max(0, playerAudio.currentTime - 15);
             else if (audioLabel === '15↷') playerAudio.currentTime = Math.min(playerAudio.duration || Infinity, playerAudio.currentTime + 15);
             else if (['0.75×','1×','1.25×','1.5×'].includes(audioLabel)) {
-              playerAudio.playbackRate = Number(audioLabel.replace('×',''));
-              button.parentElement?.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === button));
-              message('Playback speed set to ' + playerAudio.playbackRate + '×.');
+              const rate = Number(audioLabel.replace('×',''));
+              // This capture-phase handler prevents the target onclick from
+              // running. Route through the shared control path so the same
+              // action updates real media, active state and durable settings.
+              try {
+                await applyPlayerRate(rate, true);
+              } catch (_) {
+                // applyPlayerRate already surfaces the backend save error.
+                return;
+              }
+              message('Playback speed set to ' + playerRate + '×.');
             } else if (audioLabel === '◀') playerAudio.currentTime = Math.max(0, playerAudio.currentTime - 15);
             else {
               if (playerAudio.paused) await playerAudio.play(); else playerAudio.pause();
