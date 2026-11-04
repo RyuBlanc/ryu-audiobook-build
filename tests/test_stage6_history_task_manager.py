@@ -86,6 +86,16 @@ class Stage6HistoryTaskManagerTests(unittest.TestCase):
         self.assertIn("writeTextIfChanged(meta, jobMetaSummary(j))", self.adapter)
         self.assertIn("data-job-view", self.adapter)
 
+    def test_packaged_runner_requires_real_two_process_player_restoration(self) -> None:
+        runner = (ROOT / "tests" / "packaged_sound_ui_acceptance.py").read_text(encoding="utf-8")
+        for marker in (
+            "stage6_playback_position_persisted_before_process_restart",
+            "stage6_mini_player_close_preserves_active_session",
+            "stage6_playback_position_restored_after_process_restart",
+            "stage6_mini_player_navigation_and_close_after_restart",
+        ):
+            self.assertIn(marker, runner)
+
 
 if __name__ == "__main__":
     unittest.main()

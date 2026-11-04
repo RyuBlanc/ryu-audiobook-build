@@ -779,6 +779,8 @@ def _run(args: argparse.Namespace) -> int:
             raise AssertionError("The packaged UI did not report completion of the Production Preview Save As action.")
         first_checks = first_result.get("checks") or {}
         for required_check in (
+            "stage6_playback_position_persisted_before_process_restart",
+            "stage6_mini_player_close_preserves_active_session",
             "stage54_packaged_real_multi_chapter_full_generation",
             "stage54_real_generation_pause_resume_cancel",
             "stage54_real_generation_retry_and_history_ownership",
@@ -860,8 +862,13 @@ def _run(args: argparse.Namespace) -> int:
         if process.returncode != 0:
             raise RuntimeError(f"Restarted packaged app returned exit code {process.returncode} after reporting success.")
         restart_checks = restart_result.get("checks") or {}
-        if "stage54_real_restart_recovery" not in restart_checks:
-            raise AssertionError("The restarted packaged app did not complete real interrupted-generation recovery.")
+        for required_check in (
+            "stage54_real_restart_recovery",
+            "stage6_playback_position_restored_after_process_restart",
+            "stage6_mini_player_navigation_and_close_after_restart",
+        ):
+            if required_check not in restart_checks:
+                raise AssertionError("The restarted packaged app did not complete required acceptance: " + required_check)
         recovery_output_path = Path(str(json.loads(config.read_text(encoding="utf-8")).get("recovery_output_path") or ""))
         if not recovery_output_path.is_file() or recovery_output_path.stat().st_size < 1024:
             raise AssertionError("Real restart recovery did not create a non-empty M4B output: " + str(recovery_output_path))

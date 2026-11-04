@@ -293,6 +293,60 @@
       record("production_metadata_application_restart", true,
         "Book metadata, project-local cover and the selected Voice Studio narrator profile were reloaded by a new frozen-app process.");
 
+      // AB-06: prove the position survives an actual frozen-app process restart.
+      const stage6RestartFixture = (config.audiobook_library_fixtures || [])[0];
+      must(stage6RestartFixture && stage6RestartFixture.folder,
+        "The Stage 6 audiobook fixture is unavailable to the restarted process.");
+      const stage6PersistedPlayer = await invoke("player.get_active", {folder:stage6RestartFixture.folder});
+      must(Math.abs(Number(stage6PersistedPlayer.playback_position_seconds) - 1.25) < 0.35,
+        "The audiobook playback position was not retained in project state after the app restarted.");
+      window.go("player");
+      await waitFor("Audiobooks page restored in the second process", () =>
+        document.querySelector("#player")?.classList.contains("active") === true, 12000);
+      const stage6RestartCard = Array.from(document.querySelectorAll("#backendAudiobookLibrary .audiobook-library-card"))
+        .find(card => String(card.dataset.projectFolder || "") === String(stage6RestartFixture.folder || ""));
+      must(stage6RestartCard, "The previously selected audiobook is missing after process restart.");
+      stage6RestartCard.querySelector("[data-open-project-folder]").click();
+      await waitFor("actual decoded audio restores the saved position", () => {
+        const audio = latestAcceptanceAudio();
+        return Boolean(audio && String(audio.dataset.projectFolder || "") === String(stage6RestartFixture.folder || "") &&
+          audio.readyState >= 1 && Math.abs(Number(audio.currentTime) - 1.25) < 0.35);
+      }, 18000);
+      const stage6RestoredAudio = latestAcceptanceAudio();
+      must(Math.abs(Number(stage6RestoredAudio.volume) - Number(stage6PersistedPlayer.playback_volume)) < 0.02 &&
+        Math.abs(Number(stage6RestoredAudio.playbackRate) - Number(stage6PersistedPlayer.playback_rate)) < 0.02,
+        "The restored player did not apply the selected audiobook's saved volume and playback speed.");
+      record("stage6_playback_position_restored_after_process_restart", true,
+        "A second frozen-app process restored the correct audiobook and sought real decoded audio to its saved timestamp.");
+
+      // The mini-player remains the same media session after restart and navigation.
+      await stage6RestoredAudio.play();
+      window.go("dashboard");
+      const stage6RestoredMini = document.querySelector("#miniPlayer");
+      await waitFor("restored mini-player is available after navigation", () =>
+        Boolean(stage6RestoredMini && !stage6RestoredMini.classList.contains("hidden") &&
+          stage6RestoredMini.getClientRects().length), 8000);
+      const stage6RestoredMiniPlay = stage6RestoredMini.querySelector("#miniPlay");
+      must(stage6RestoredMiniPlay, "The restored mini-player has no Play/Pause control.");
+      const stage6RestartAudioCount = (window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__ || []).length;
+      stage6RestoredMiniPlay.click();
+      await waitFor("restored mini-player pauses the same audio object", () =>
+        stage6RestoredAudio.paused && stage6RestoredMiniPlay.textContent.trim() === "▶", 5000);
+      stage6RestoredMiniPlay.click();
+      await waitFor("restored mini-player resumes the same audio object", () =>
+        !stage6RestoredAudio.paused && stage6RestoredMiniPlay.textContent.trim() !== "▶", 5000);
+      must(latestAcceptanceAudio() === stage6RestoredAudio &&
+        (window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__ || []).length === stage6RestartAudioCount,
+        "The mini-player created a duplicate playback instance after process restart.");
+      document.querySelector("#hideMini")?.click();
+      await waitFor("restored mini-player close hides the dock", () =>
+        stage6RestoredMini.classList.contains("hidden"), 5000);
+      must(!stage6RestoredAudio.paused && latestAcceptanceAudio() === stage6RestoredAudio,
+        "Closing the restored mini-player interrupted playback.");
+      stage6RestoredAudio.pause();
+      record("stage6_mini_player_navigation_and_close_after_restart", true,
+        "After restart, mini-player Play/Pause controlled the restored media object and closing its dock did not stop playback.");
+
       const catalogue = await invoke("sound.catalog", {});
       const saved = await invoke("sound.chapter_bgm.get", {});
       const cues = await invoke("sound.cues.get", {});
@@ -2481,6 +2535,65 @@
       "Switching audiobook left stale audio or cross-associated metadata/output.");
     record("stage6_audiobooks_switch_preserves_project_output_identity", true,
       "Switching books paused the previous audio and loaded the second book's own M4B, cover and metadata without leaking the first project's identity.");
+
+    // AB-06: persist a measured position from real decoded audio before process exit.
+    const stage6PositionCard = Array.from(document.querySelectorAll("#backendAudiobookLibrary .audiobook-library-card"))
+      .find(card => String(card.dataset.projectFolder || "") === String(firstFixture.folder || ""));
+    must(stage6PositionCard, "The first audiobook card is unavailable for playback-position acceptance.");
+    stage6PositionCard.querySelector("[data-open-project-folder]").click();
+    await waitFor("Stage 6 position fixture opens paused", () => {
+      const audio = latestAcceptanceAudio();
+      return Boolean(audio && String(audio.dataset.projectFolder || "") === String(firstFixture.folder || "") &&
+        audio.readyState >= 1 && audio.paused);
+    }, 15000);
+    const stage6PositionAudio = latestAcceptanceAudio();
+    const stage6TargetPosition = 1.25;
+    must(Number(stage6PositionAudio.duration) > stage6TargetPosition + 1,
+      "The Stage 6 playback-position fixture is too short for a reliable restart assertion.");
+    stage6PositionAudio.currentTime = stage6TargetPosition;
+    await stage6PositionAudio.play();
+    await waitFor("position fixture has actually started", () => !stage6PositionAudio.paused, 5000);
+    stage6PositionAudio.pause();
+    let stage6SavedPlayer = null;
+    await waitFor("pause saves playback position to project state", async () => {
+      stage6SavedPlayer = await invoke("player.get_active", {folder:firstFixture.folder});
+      return Math.abs(Number(stage6SavedPlayer.playback_position_seconds) - stage6TargetPosition) < 0.35;
+    }, 12000);
+    record("stage6_playback_position_persisted_before_process_restart", true,
+      "Pause on the real decoded audiobook persisted its measured timestamp to the selected audiobook's own project state.");
+
+    // AB-05: the mini-player must operate the same Audio object and close only its dock.
+    await stage6PositionAudio.play();
+    window.go("dashboard");
+    const stage6PositionMini = document.querySelector("#miniPlayer");
+    await waitFor("mini-player appears after navigation", () =>
+      Boolean(stage6PositionMini && !stage6PositionMini.classList.contains("hidden") &&
+        stage6PositionMini.getClientRects().length), 8000);
+    const stage6PositionMiniPlay = stage6PositionMini.querySelector("#miniPlay");
+    must(stage6PositionMiniPlay, "The persistent mini-player Play/Pause control is missing.");
+    const stage6AudioCount = (window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__ || []).length;
+    stage6PositionMiniPlay.click();
+    await waitFor("mini-player pauses the same audiobook", () =>
+      stage6PositionAudio.paused && stage6PositionMiniPlay.textContent.trim() === "▶", 5000);
+    stage6PositionMiniPlay.click();
+    await waitFor("mini-player resumes the same audiobook", () =>
+      !stage6PositionAudio.paused && stage6PositionMiniPlay.textContent.trim() !== "▶", 5000);
+    must(latestAcceptanceAudio() === stage6PositionAudio &&
+      (window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__ || []).length === stage6AudioCount,
+      "Mini-player created a duplicate audio session or changed audiobook identity.");
+    document.querySelector("#hideMini")?.click();
+    await waitFor("manual mini-player close hides only the dock", () =>
+      stage6PositionMini.classList.contains("hidden"), 5000);
+    must(!stage6PositionAudio.paused && latestAcceptanceAudio() === stage6PositionAudio,
+      "Closing the mini-player stopped playback or replaced the active audiobook.");
+    record("stage6_mini_player_close_preserves_active_session", true,
+      "Closing the mini-player hid the dock but preserved the active audiobook and its media session.");
+    stage6PositionAudio.currentTime = stage6TargetPosition;
+    stage6PositionAudio.pause();
+    await waitFor("position is durably saved before process exit", async () => {
+      stage6SavedPlayer = await invoke("player.get_active", {folder:firstFixture.folder});
+      return Math.abs(Number(stage6SavedPlayer.playback_position_seconds) - stage6TargetPosition) < 0.35;
+    }, 12000);
 
     window.go("dashboard");
     await waitFor("Dashboard restored after Stage 5.5 Audiobooks acceptance", function () {

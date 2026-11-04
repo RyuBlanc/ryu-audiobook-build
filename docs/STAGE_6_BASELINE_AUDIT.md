@@ -220,3 +220,21 @@ Step 2 is **COMPLETE**. Step 3 is the next scoped task: AB-03 full-player contro
 ## Step 3 official kickoff — 4 November 2026
 
 Step 3 is now IN PROGRESS on `stage-6/baseline-audit`, beginning from kickoff commit/source HEAD `d409780802b2f39913f4971348534647ecd6edd5`. The detailed baseline, concrete player-handler/chapter-playhead gaps, test-first verification matrix and exit gate are recorded in `docs/STAGE_6_STEP_3_STATUS.md`. The implementation fixes and expands acceptance for full-player Play/Pause, one authoritative timeline binding, embedded chapter intervals, playhead synchronization, keyboard/click chapter playback and stale-event protection. AB-02 and AB-07 remain protected carry-forward requirements.
+
+
+## Stage 6 Step 4 — automated restart acceptance added (5 November 2026)
+
+The packaged Windows acceptance script now verifies playback-position persistence
+across two separate launches of the frozen executable. The first process opens
+and plays an actual completed audiobook, pauses at a known media timestamp, and
+waits for the native project-state value to confirm the save. The second process
+reopens the same project and checks that the actual decoded audio seeks to the
+saved timestamp, with the same saved player volume/rate.
+
+The same acceptance navigates between Audiobooks and Dashboard, verifies that
+the mini-player controls the same audio object, and checks that manually closing
+the mini-player hides only the dock without stopping or replacing playback.
+
+The checks execute in the CI-packaged Windows application. The user's physical
+manual installation check remains excluded and is not claimed as performed.
+Matching-head CI verification is pending.
