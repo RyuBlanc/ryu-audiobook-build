@@ -7264,11 +7264,22 @@
     void call('player.position.save', {folder, position_seconds:seconds})
       .catch(error => console.warn('[Ryu player position]', error?.message || error));
   }
+  let playerPreferenceSave = Promise.resolve();
+  function savePlayerPreferences(patch) {
+    // Serialize preference updates so rapid rate/volume changes cannot let an
+    // older response overwrite a newer setting. Return the real backend save.
+    playerPreferenceSave = playerPreferenceSave.then(async () => {
+      const saved = await call('settings.save', patch);
+      if (saved?.saved === false) throw new Error('Player preferences were not saved.');
+      return saved;
+    });
+    return playerPreferenceSave;
+  }
   function applyPlayerRate(value, persist = true) {
     const rate = Number(value);
     if (!Number.isFinite(rate) || rate < 0.5 || rate > 2) {
       message('Playback speed must be between 0.5× and 2.0×.', true);
-      return;
+      return Promise.reject(new Error('Playback speed must be between 0.5× and 2.0×.'));
     }
     playerRate = rate;
     if (playerAudio) playerAudio.playbackRate = rate;
@@ -7277,18 +7288,20 @@
       const candidate = Number(String(button.textContent || '').replace('×','').trim());
       button.classList.toggle('active', Number.isFinite(candidate) && Math.abs(candidate-rate) < 0.01);
     });
-    if (persist) void call('settings.save', {player_rate:rate})
-      .catch(error => message(error?.message || String(error), true));
+    if (!persist) return Promise.resolve({playback_rate:rate});
+    return savePlayerPreferences({player_rate:rate})
+      .catch(error => { message(error?.message || String(error), true); throw error; });
   }
   function applyPlayerVolume(value, persist = false) {
     const amount = Number(value);
-    if (!Number.isFinite(amount)) return;
+    if (!Number.isFinite(amount)) return Promise.resolve(null);
     playerVolume = Math.max(0, Math.min(1, amount / 100));
     if (playerAudio) playerAudio.volume = playerVolume;
     const control = $('player')?.querySelector('.player-grid .toolbar input.range');
     if (control) control.value = String(Math.round(playerVolume * 100));
-    if (persist) void call('settings.save', {player_volume:playerVolume})
-      .catch(error => message(error?.message || String(error), true));
+    if (!persist) return Promise.resolve({playback_volume:playerVolume});
+    return savePlayerPreferences({player_volume:playerVolume})
+      .catch(error => { message(error?.message || String(error), true); throw error; });
   }
   function seekPlayerBy(seconds) {
     if (!playerAudio || !playerAudio.src || !Number.isFinite(playerAudio.duration)) {
