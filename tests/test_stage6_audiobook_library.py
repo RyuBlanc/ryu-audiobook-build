@@ -178,6 +178,13 @@ class Stage6AudiobookLibraryContractTests(unittest.TestCase):
         self.assertIn("current.play().catch", self.adapter)
         self.assertIn("current.pause();", self.adapter)
 
+    def test_player_speed_capture_handler_uses_persisted_preference_path(self):
+        player_start = self.adapter.index("if (button.closest('#player')) {")
+        player_end = self.adapter.index("if (button.id === 'backgroundJobsButton')", player_start)
+        capture_handler = self.adapter[player_start:player_end]
+        self.assertIn("await applyPlayerRate(rate, true)", capture_handler)
+        self.assertNotIn("playerAudio.playbackRate = Number(audioLabel.replace('×',''))", capture_handler)
+
     def test_production_generation_gate_combines_metadata_and_active_jobs(self):
         gate_start = self.adapter.index("function renderProductionMetadataGate(")
         gate_end = self.adapter.index("function populateMetadataHistory(", gate_start)
