@@ -301,3 +301,18 @@ Run #2289's Music Library, cue, BGM, and preview checks before the Production me
 **Stage 6 Step 3 status:** source tests and frozen build pass; packaged Stage 6 player/mini-player/Open/Play/book-switch/chapter/preferences checks pass on #2322; remaining blocker is Stage 5.4 job-control metadata gate in the combined packaged acceptance. Inno Setup, HTML installer, logo/hash checks, Defender scan, installer/portable uploads and publish have not run because the single combined acceptance step failed.
 
 **Next action:** diagnose only the Stage 5.4 job-control metadata timeout against the UI's actual modal/filter/poll state. Preserve Stage 5.3 implementation and the passing Stage 6 player path. Verify on a new matching frozen Windows checkpoint before proceeding to release gates.
+
+## #2322 Stage 5.4 readiness root cause and corrected fixture — 5 November 2026
+
+- **#2322 compared with #2318:** both pass source tests, frozen executable preparation, bundled assets, Sound Design/Music Library, Stage 5.3 preview/generation and the listed Stage 6 player, mini-player, Open/Play, project-switch, chapter-navigation and preference checks. #2318's final error was the Stage 6 Open-card paused-load gate; #2322 fixed and passed that gate.
+- **#2322's actual final failure:** `Timed out waiting for Stage 5.4 job-control metadata gate` in the combined packaged UI acceptance. It occurs after the Stage 5.3 and Stage 6 acceptance sections; the installer steps were skipped because the combined gate exited non-zero.
+- Root cause from the acceptance fixture: `create_generation_project()` made the Stage 5.4 job-control and recovery projects with `project.json` `source_file: None`, despite their chapters, metadata, saved narrator and output destination being populated. The Production readiness gate correctly kept Start disabled for a source-less project.
+- Targeted fixture correction: create a deterministic local `source.txt` from the same chapter text and set `project.json.source_file` to its absolute path for both Stage 5.4 job-control and restart-recovery fixtures. No readiness rule or application runtime code is weakened.
+- A subsequent partial-file write attempt temporarily truncated `tests/packaged_sound_ui_acceptance.py`; that was detected by #2325/#2326. The full 918-line file was restored from the last intact #2322 commit, then the intended fixture correction was applied to the complete file.
+- **#2327 passed:** JavaScript syntax validation, isolated native Qt lifecycle regression and full source regression. Test count and full test summary recorded below once logs are available.
+
+**Stage 5.3 status:** packaged Stage 5.3 real chapter preview/generation (30/60/90-second chapter-only audio, cancellation, save and Voice Only/BGM state restoration) passed in #2318 and #2322; no Stage 5.3 implementation change was made in this correction.
+
+**Stage 6 Step 3 status:** source verification green; #2322 packaged Stage 6 mini-player, preferences, controls, chapters, Audiobooks Open/Play and project-switch acceptance green. The remaining combined packaged blocker is Stage 5.4's job-control start-readiness fixture, now corrected but awaiting frozen Windows verification. Inno Setup, HTML installer, logo/SHA-256, Defender, installer/portable uploads and publishing have not yet run.
+
+**Next action:** run the Windows frozen package on the #2327-tested source commit; verify the Stage 5.4 Start button becomes enabled for the source-backed job-control project, then execute real start/pause/resume/cancel/retry/recovery. Preserve all prior Stage 5.3 and Stage 6 passing checks before release packaging.
