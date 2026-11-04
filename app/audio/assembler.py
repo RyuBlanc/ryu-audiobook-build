@@ -309,6 +309,87 @@ def _iso639_2_language_code(value: str) -> str:
     return ""
 
 
+def _m4b_text_value(value) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace").strip()
+    return " ".join(str(value).split())
+
+
+def _write_m4b_metadata_tags(path: Path, metadata: dict[str, str]) -> None:
+    """Write standard and iTunes freeform audiobook tags without remuxing media streams."""
+    from mutagen.mp4 import MP4, MP4FreeForm
+
+    audio_file = MP4(str(path))
+    if audio_file.tags is None:
+        audio_file.add_tags()
+    tags = audio_file.tags
+    if tags is None:
+        raise RuntimeError("Could not create the final audiobook MP4 metadata container.")
+
+    title = _safe_title(metadata.get("title") or path.stem)
+    standard_tags = {
+        "©nam": title,
+        "©alb": title,
+        "©ART": sanitize_metadata(metadata.get("author")),
+        "©gen": sanitize_metadata(metadata.get("genre"), "Audiobook"),
+        "©day": sanitize_metadata(metadata.get("year")),
+        "desc": sanitize_metadata(metadata.get("description")),
+        "cprt": sanitize_metadata(metadata.get("publisher")),
+        "©grp": sanitize_metadata(metadata.get("series")),
+    }
+    for atom, value in standard_tags.items():
+        if value:
+            tags[atom] = [value]
+
+    freeform_tags = {
+        "narrator": sanitize_metadata(metadata.get("narrator")),
+        "publisher": sanitize_metadata(metadata.get("publisher")),
+        "series": sanitize_metadata(metadata.get("series")),
+        "series_number": sanitize_metadata(metadata.get("series_number")),
+    }
+    for name, value in freeform_tags.items():
+        if value:
+            tags[f"----:com.apple.iTunes:{name}"] = [
+                MP4FreeForm(value.encode("utf-8"))
+            ]
+    audio_file.save()
+
+
+def _validate_m4b_metadata_tags(path: Path, metadata: dict[str, str]) -> None:
+    """Read the saved MP4 atoms back and fail if any supplied book tag was lost."""
+    from mutagen.mp4 import MP4
+
+    audio_file = MP4(str(path))
+    tags = audio_file.tags or {}
+
+    expected_atoms = {
+        "title": ("©nam", _safe_title(metadata.get("title") or path.stem)),
+        "album": ("©alb", _safe_title(metadata.get("title") or path.stem)),
+        "artist": ("©ART", sanitize_metadata(metadata.get("author"))),
+        "genre": ("©gen", sanitize_metadata(metadata.get("genre"), "Audiobook")),
+        "date": ("©day", sanitize_metadata(metadata.get("year"))),
+        "description": ("desc", sanitize_metadata(metadata.get("description"))),
+        "publisher": ("----:com.apple.iTunes:publisher", sanitize_metadata(metadata.get("publisher"))),
+        "series": ("----:com.apple.iTunes:series", sanitize_metadata(metadata.get("series"))),
+        "series_number": ("----:com.apple.iTunes:series_number", sanitize_metadata(metadata.get("series_number"))),
+        "narrator": ("----:com.apple.iTunes:narrator", sanitize_metadata(metadata.get("narrator"))),
+    }
+    for label, (atom, expected) in expected_atoms.items():
+        if not expected:
+            continue
+        values = tags.get(atom) or []
+        actual_values = [_m4b_text_value(value) for value in values]
+        normalized_expected = " ".join(str(expected).split())
+        if not any(
+            " ".join(actual.split()).casefold() == normalized_expected.casefold()
+            for actual in actual_values
+        ):
+            raise RuntimeError(
+                f"Final M4B metadata tag '{label}' is missing or incorrect. "
+                f"Expected {normalized_expected!r}; received {actual_values!r}."
+            )
+
+
 def _ffmpeg_probe_report(path: Path) -> str:
     """Return the final container report emitted by FFmpeg for a finished file."""
     result = subprocess.run(
@@ -346,34 +427,7 @@ def _validate_m4b_container(
     chapter_start = re.search(r"(?im)^\s*Chapter #", report)
     global_section = report[:chapter_start.start()] if chapter_start else report
 
-    title = _safe_title(metadata.get("title") or path.stem)
-    artist = sanitize_metadata(metadata.get("author"))
-    expected_tags = {
-        "title": title,
-        "album": title,
-        "genre": sanitize_metadata(metadata.get("genre"), "Audiobook"),
-        "artist": artist,
-        "narrator": sanitize_metadata(metadata.get("narrator")),
-        "publisher": sanitize_metadata(metadata.get("publisher")),
-        "series": sanitize_metadata(metadata.get("series")),
-        "series_number": sanitize_metadata(metadata.get("series_number")),
-        "date": sanitize_metadata(metadata.get("year")),
-        "description": sanitize_metadata(metadata.get("description")),
-    }
-    for key, expected in expected_tags.items():
-        if not expected:
-            continue
-        match = re.search(
-            rf"(?im)^\s*{re.escape(key)}\s*:\s*(.*?)\s*$",
-            global_section,
-        )
-        actual = " ".join(match.group(1).split()) if match else ""
-        normalized_expected = " ".join(str(expected).split())
-        if not match or actual.casefold() != normalized_expected.casefold():
-            raise RuntimeError(
-                f"Final M4B metadata tag '{key}' is missing or incorrect. "
-                f"Expected {normalized_expected!r}; received {actual or 'no tag'!r}."
-            )
+    _validate_m4b_metadata_tags(path, metadata)
 
     language = sanitize_metadata(metadata.get("language"))
     if language:
@@ -1376,6 +1430,22 @@ def assemble_m4b(
             args += ["-metadata", f"description={description}"]
         args.append(str(output_path))
         _run(args)
+
+    _write_m4b_metadata_tags(
+        output_path,
+        {
+            "title": clean_title,
+            "author": clean_artist,
+            "narrator": narrator,
+            "publisher": publisher,
+            "series": series,
+            "series_number": series_number,
+            "language": language,
+            "year": year,
+            "genre": genre,
+            "description": description,
+        },
+    )
 
     if not output_path.exists() or output_path.stat().st_size == 0:
         raise RuntimeError("FFmpeg completed but the final M4B is missing.")
