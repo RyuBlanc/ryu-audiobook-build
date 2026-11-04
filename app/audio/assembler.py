@@ -441,28 +441,40 @@ def _validate_m4b_container(
         previous_end = end_seconds
 
     if cover is not None:
-        streams = list(re.finditer(r"(?im)^\s*Stream #\d+:\d+[^\r\n]*", report))
-        cover_stream = None
-        cover_stream_block = ""
-        for index, stream in enumerate(streams):
-            stop = streams[index + 1].start() if index + 1 < len(streams) else len(report)
-            block = report[stream.start():stop]
-            if re.search(r"(?i)Video:\s*mjpeg\b", stream.group(0)):
-                cover_stream = stream
-                cover_stream_block = block
-                break
+        stream_headers = [
+            line.strip()
+            for line in report.splitlines()
+            if "stream #" in line.casefold()
+        ]
+        cover_stream = re.search(
+            r"(?im)^\\s*Stream #[^\\r\\n]*\\bVideo:\\s*mjpeg\\b[^\\r\\n]*",
+            report,
+        )
         if cover_stream is None:
-            raise RuntimeError("The final M4B does not contain an embedded MJPEG cover stream.")
+            raise RuntimeError(
+                "The final M4B does not contain an embedded MJPEG cover stream. "
+                f"FFmpeg reported streams: {stream_headers!r}"
+            )
+        next_stream = re.search(
+            r"(?im)^\\s*Stream #",
+            report[cover_stream.end():],
+        )
+        block_end = (
+            cover_stream.end() + next_stream.start()
+            if next_stream else len(report)
+        )
+        cover_stream_block = report[cover_stream.start():block_end]
         for key, expected in (("title", "Cover"), ("comment", "Cover Art"), ("mimetype", "image/jpeg")):
             tag = re.search(
-                rf"(?im)^\s*{re.escape(key)}\s*:\s*(.*?)\s*$",
+                rf"(?im)^\\s*{re.escape(key)}\\s*:\\s*(.*?)\\s*$",
                 cover_stream_block,
             )
             actual = tag.group(1).strip() if tag else ""
             if not tag or actual.casefold() != expected.casefold():
                 raise RuntimeError(
                     f"The final M4B cover stream is missing {key} metadata: "
-                    f"expected {expected!r}, received {actual or 'no tag'!r}."
+                    f"expected {expected!r}, received {actual or 'no tag'!r}. "
+                    f"Cover stream report: {cover_stream_block!r}"
                 )
         decoded_cover = subprocess.run(
             [
