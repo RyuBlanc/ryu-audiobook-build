@@ -289,3 +289,15 @@ Run #2289's Music Library, cue, BGM, and preview checks before the Production me
 - The additional regression contract prevents reintroducing a duplicate Audio object solely to satisfy the Open test.
 
 **Next action:** verify the revised acceptance on a fresh frozen Windows build. Stage 5.3 generation implementation remains unchanged; all Stage 5.3-specific packaged checks observed in #2318 passed.
+
+## #2322 and #2323 checkpoint comparison — 5 November 2026
+
+- **#2322 (commit `2621c826c05edee68e710c5b8bb3719d9ec3267d`) source job passed:** 1,162 tests in 54.430s. Frozen application build, executable verification, bundled voice assets and critical modules also passed.
+- **#2322 packaged Stage 6 checks passed:** compact audiobook cards, Open loads correct selected audiobook paused, Play starts actual decoded audio, switching books preserves project/output identity, player controls and chapter navigation, mini-player shared audio, volume/speed persistence. It also passed `stage54_background_job_retry_recovery_controls`, `stage53_background_job_state_controls`, `stage53_dashboard_job_state_controls`, and `stage54_library_open_fallback`.
+- **#2322 sole packaged failure:** timed out waiting for `Stage 5.4 job-control metadata gate` at acceptance line 2501. The full run output proves the earlier Stage 5.3 generation/preview checks and all listed Stage 6 audiobook acceptance passed. The terminal error is not an Open-card failure.
+- **#2323 (commit `b4d30ad7cbb6d8ddb50905342a252d4953f69215`) succeeded as a source-only run:** it validates the same-book load-only Open reuse correction. It had no build job (the build job was skipped by workflow conditions), so it is not a frozen-app/package success and does not supersede #2322's packaged result.
+- **Why the workflow step says “including Stage 5.3 generation UI”:** this is the name of a combined packaged acceptance step inherited from the Stage 2 Sound Design checkpoint. The script also contains Stage 5.3, Stage 5.4, Stage 5.5 and Stage 6 assertions. It does not mean the current task or stage has reverted to Stage 5.3.
+
+**Stage 6 Step 3 status:** source tests and frozen build pass; packaged Stage 6 player/mini-player/Open/Play/book-switch/chapter/preferences checks pass on #2322; remaining blocker is Stage 5.4 job-control metadata gate in the combined packaged acceptance. Inno Setup, HTML installer, logo/hash checks, Defender scan, installer/portable uploads and publish have not run because the single combined acceptance step failed.
+
+**Next action:** diagnose only the Stage 5.4 job-control metadata timeout against the UI's actual modal/filter/poll state. Preserve Stage 5.3 implementation and the passing Stage 6 player path. Verify on a new matching frozen Windows checkpoint before proceeding to release gates.
