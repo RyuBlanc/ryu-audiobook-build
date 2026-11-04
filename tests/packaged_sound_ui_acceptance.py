@@ -780,6 +780,7 @@ def _run(args: argparse.Namespace) -> int:
         first_checks = first_result.get("checks") or {}
         for required_check in (
             "stage6_playback_position_persisted_before_process_restart",
+            "stage6_player_volume_rate_persisted_before_restart",
             "stage6_mini_player_close_preserves_active_session",
             "stage54_packaged_real_multi_chapter_full_generation",
             "stage54_real_generation_pause_resume_cancel",
@@ -866,6 +867,8 @@ def _run(args: argparse.Namespace) -> int:
             "stage54_real_restart_recovery",
             "stage6_playback_position_restored_after_process_restart",
             "stage6_mini_player_navigation_and_close_after_restart",
+            "stage6_history_real_search_date_status_and_details",
+            "stage6_task_manager_real_records_filters_details_and_counts",
         ):
             if required_check not in restart_checks:
                 raise AssertionError("The restarted packaged app did not complete required acceptance: " + required_check)

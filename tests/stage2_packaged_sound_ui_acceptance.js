@@ -297,9 +297,18 @@
       const stage6RestartFixture = (config.audiobook_library_fixtures || [])[0];
       must(stage6RestartFixture && stage6RestartFixture.folder,
         "The Stage 6 audiobook fixture is unavailable to the restarted process.");
-      const stage6PersistedPlayer = await invoke("player.get_active", {folder:stage6RestartFixture.folder});
+      const [stage6PersistedPlayer,stage6PersistedSettings] = await Promise.all([
+        invoke("player.get_active", {folder:stage6RestartFixture.folder}),
+        invoke("settings.get", {})
+      ]);
       must(Math.abs(Number(stage6PersistedPlayer.playback_position_seconds) - 1.25) < 0.35,
         "The audiobook playback position was not retained in project state after the app restarted.");
+      must(Math.abs(Number(stage6PersistedPlayer.playback_rate) - 1.25) < 0.01 &&
+        Math.abs(Number(stage6PersistedPlayer.playback_volume) - 0.42) < 0.01 &&
+        Math.abs(Number(stage6PersistedSettings.player_rate) - 1.25) < 0.01 &&
+        Math.abs(Number(stage6PersistedSettings.player_volume) - 0.42) < 0.01,
+        "Global player settings did not survive restart: " +
+          JSON.stringify({player:stage6PersistedPlayer,settings:stage6PersistedSettings}));
       window.go("player");
       await waitFor("Audiobooks page restored in the second process", () =>
         document.querySelector("#player")?.classList.contains("active") === true, 12000);
@@ -313,9 +322,15 @@
           audio.readyState >= 1 && Math.abs(Number(audio.currentTime) - 1.25) < 0.35);
       }, 18000);
       const stage6RestoredAudio = latestAcceptanceAudio();
-      must(Math.abs(Number(stage6RestoredAudio.volume) - Number(stage6PersistedPlayer.playback_volume)) < 0.02 &&
-        Math.abs(Number(stage6RestoredAudio.playbackRate) - Number(stage6PersistedPlayer.playback_rate)) < 0.02,
-        "The restored player did not apply the selected audiobook's saved volume and playback speed.");
+      const stage6RestoreDiagnostics = {
+        expectedVolume:Number(stage6PersistedPlayer.playback_volume),
+        actualVolume:Number(stage6RestoredAudio.volume),
+        expectedRate:Number(stage6PersistedPlayer.playback_rate),
+        actualRate:Number(stage6RestoredAudio.playbackRate)
+      };
+      must(Math.abs(stage6RestoreDiagnostics.actualVolume-stage6RestoreDiagnostics.expectedVolume) < 0.02 &&
+        Math.abs(stage6RestoreDiagnostics.actualRate-stage6RestoreDiagnostics.expectedRate) < 0.02,
+        "The restored player did not apply saved volume/rate to real audio: " + JSON.stringify(stage6RestoreDiagnostics));
       record("stage6_playback_position_restored_after_process_restart", true,
         "A second frozen-app process restored the correct audiobook and sought real decoded audio to its saved timestamp.");
 
@@ -478,7 +493,113 @@
         "The recovered M4B is not attached to the original recovered project.");
       record("stage54_real_restart_recovery", true,
         "A real paused job survived process termination as interrupted, was recovered through the installed Background Jobs button/native bridge, reused its project checkpoints, and completed with the same project/History/output identity.");
+
+      // HIS-01 to HIS-03: query real durable History, filter it, and open details.
+      must(recoveredHistoryRow && recoveredHistoryRow.completed_at,
+        "The recovered History record does not expose its completion timestamp.");
+      const stage6HistoryDate = new Date(recoveredHistoryRow.completed_at);
+      const stage6HistoryDay = stage6HistoryDate.getFullYear() + "-" +
+        String(stage6HistoryDate.getMonth()+1).padStart(2,"0") + "-" +
+        String(stage6HistoryDate.getDate()).padStart(2,"0");
+      window.go("history");
+      await waitFor("History controls mount in the frozen application", () =>
+        Boolean(document.querySelector("#historySearchFilter") &&
+          document.querySelector("#historyFromDate") && document.querySelector("#historyToDate")), 12000);
+      const stage6HistorySearch = document.querySelector("#historySearchFilter");
+      const stage6HistoryFrom = document.querySelector("#historyFromDate");
+      const stage6HistoryTo = document.querySelector("#historyToDate");
+      stage6HistorySearch.value = String(recoveredJobId);
+      stage6HistoryFrom.value = stage6HistoryDay;
+      stage6HistoryTo.value = stage6HistoryDay;
+      const stage6CompletedHistoryFilter = Array.from(document.querySelectorAll("#historyFilters button"))
+        .find(button => button.textContent.trim().toLowerCase() === "completed");
+      must(stage6CompletedHistoryFilter, "History is missing the Completed status filter.");
+      stage6CompletedHistoryFilter.click();
+      stage6HistorySearch.dispatchEvent(new Event("input",{bubbles:true}));
+      stage6HistoryFrom.dispatchEvent(new Event("change",{bubbles:true}));
+      stage6HistoryTo.dispatchEvent(new Event("change",{bubbles:true}));
+      await waitFor("History applies exact job search, Completed status and inclusive date range", () => {
+        const rows = Array.from(document.querySelectorAll("#history [data-backend-history]"));
+        return rows.length === 1 && String(rows[0].dataset.historyJob || "") === String(recoveredJobId);
+      }, 12000);
+      const stage6HistoryView = document.querySelector('#history [data-history-job="' + String(recoveredJobId) + '"]');
+      must(stage6HistoryView, "The filtered History row has no View action.");
+      stage6HistoryView.click();
+      await waitFor("History View opens actual job details", () =>
+        Boolean(document.querySelector("#jobDetailsModal.show [data-job-detail-field='job-id']")), 8000);
+      must(document.querySelector("#jobDetailsModal [data-job-detail-field='job-id']").textContent.trim() ===
+        String(recoveredJobId), "History View opened a different job's details.");
+      document.querySelector("#jobDetailsModal [data-job-detail-close]")?.click();
+      record("stage6_history_real_search_date_status_and_details", true,
+        "History displayed the recovered generation job, applied exact search/status/date filters, and opened its matching details.");
+
+      // JOB-01 to JOB-05: verify the visible Task Manager against native job.list.
+      window.go("dashboard");
+      const stage6JobsButton = document.querySelector("#backgroundJobsButton");
+      must(stage6JobsButton && jobsModal, "Task Manager is unavailable after History acceptance.");
+      if (!jobsModal.classList.contains("show")) stage6JobsButton.click();
+      await waitFor("Task Manager modal opens", () => jobsModal.classList.contains("show"), 8000);
+      const stage6TaskSource = await invoke("job.list", {include_hidden:false});
+      must(Array.isArray(stage6TaskSource) && stage6TaskSource.length > 0,
+        "Task Manager acceptance has no real job.list records.");
+      const stage6TaskAll = jobsModal.querySelector('[data-job-filter="all"]');
+      const stage6TaskActive = jobsModal.querySelector('[data-job-filter="active"]');
+      const stage6TaskCompleted = jobsModal.querySelector('[data-job-filter="completed"]');
+      must(stage6TaskAll && stage6TaskActive && stage6TaskCompleted,
+        "Task Manager is missing All, Active or Completed filters.");
+      stage6TaskAll.click();
+      await waitFor("Task Manager All filter displays native jobs", () =>
+        document.querySelectorAll("#backgroundJobsList [data-backend-job]").length === stage6TaskSource.length, 10000);
+      const stage6AllRows = Array.from(document.querySelectorAll("#backgroundJobsList [data-backend-job]"));
+      const stage6RenderedIds = stage6AllRows.map(row => String(row.dataset.backendJob || "")).sort();
+      const stage6SourceIds = stage6TaskSource.map(row => String(row.job_id || "")).sort();
+      must(JSON.stringify(stage6RenderedIds) === JSON.stringify(stage6SourceIds),
+        "Task Manager All filter does not match native job.list identities.");
+      must(stage6AllRows.every(row => row.children.length === 3 &&
+        row.children[0].classList.contains("job-type-icon") &&
+        row.children[1].classList.contains("job-main") &&
+        row.children[2].classList.contains("job-actions")),
+        "Task Manager rows do not use the responsive icon/details/actions layout.");
+      const expectedRunningCount = stage6TaskSource.filter(row =>
+        ["running","pause_requested","cancel_requested","retrying"].includes(row.state)).length;
+      const expectedQueuedCount = stage6TaskSource.filter(row => row.state === "queued").length;
+      const expectedCompletedCount = stage6TaskSource.filter(row => row.state === "completed").length;
+      must(Number(document.querySelector("#jobsRunningCount").textContent) === expectedRunningCount &&
+        Number(document.querySelector("#jobsQueuedCount").textContent) === expectedQueuedCount &&
+        Number(document.querySelector("#jobsCompletedCount").textContent) === expectedCompletedCount,
+        "Task Manager summary counts do not match native job.list.");
+      stage6TaskCompleted.click();
+      await waitFor("Task Manager Completed filter", () => {
+        const rows = Array.from(document.querySelectorAll("#backgroundJobsList [data-backend-job]"));
+        return rows.length === expectedCompletedCount && rows.every(row => {
+          const job = stage6TaskSource.find(item => String(item.job_id) === String(row.dataset.backendJob));
+          return Boolean(job && job.state === "completed");
+        });
+      }, 8000);
+      stage6TaskActive.click();
+      await waitFor("Task Manager Active filter", () => {
+        const expected = stage6TaskSource.filter(row => !["completed","failed","cancelled"].includes(row.state));
+        const rows = Array.from(document.querySelectorAll("#backgroundJobsList [data-backend-job]"));
+        return rows.length === expected.length && rows.every(row => {
+          const job = stage6TaskSource.find(item => String(item.job_id) === String(row.dataset.backendJob));
+          return Boolean(job && !["completed","failed","cancelled"].includes(job.state));
+        });
+      }, 8000);
+      stage6TaskAll.click();
+      const stage6TaskRow = document.querySelector("#backgroundJobsList [data-backend-job]");
+      const stage6TaskJob = stage6TaskSource.find(item =>
+        String(item.job_id) === String(stage6TaskRow?.dataset.backendJob));
+      must(stage6TaskJob && stage6TaskRow.querySelector("[data-job-view]"),
+        "A Task Manager job row is missing its View action.");
+      stage6TaskRow.querySelector("[data-job-view]").click();
+      await waitFor("Task Manager View opens actual job details", () =>
+        Boolean(document.querySelector("#jobDetailsModal.show [data-job-detail-field='job-id']")), 8000);
+      must(document.querySelector("#jobDetailsModal [data-job-detail-field='job-id']").textContent.trim() ===
+        String(stage6TaskJob.job_id), "Task Manager View opened a different job's details.");
+      document.querySelector("#jobDetailsModal [data-job-detail-close]")?.click();
       jobsModal.classList.remove("show");
+      record("stage6_task_manager_real_records_filters_details_and_counts", true,
+        "Task Manager All/Active/Completed views, row layout, summary counts and operation details matched native jobs.");
       publish("passed");
       return;
     }
@@ -2547,6 +2668,30 @@
         audio.readyState >= 1 && audio.paused);
     }, 15000);
     const stage6PositionAudio = latestAcceptanceAudio();
+    const stage6SpeedButton = Array.from(document.querySelectorAll("#player .player-grid .toolbar .segmented button"))
+      .find(button => button.textContent.trim() === "1.25×");
+    must(stage6SpeedButton, "The player speed control does not expose 1.25×.");
+    stage6SpeedButton.click();
+    const stage6VolumeControl = document.querySelector("#player .player-grid .toolbar input.range");
+    must(stage6VolumeControl, "The player volume control is unavailable.");
+    stage6VolumeControl.value = "42";
+    stage6VolumeControl.dispatchEvent(new Event("input",{bubbles:true}));
+    stage6VolumeControl.dispatchEvent(new Event("change",{bubbles:true}));
+    await waitFor("actual player controls persist 1.25× and 42% preferences", async () => {
+      const [settings, player] = await Promise.all([
+        invoke("settings.get", {}),
+        invoke("player.get_active", {folder:firstFixture.folder})
+      ]);
+      return Math.abs(Number(settings.player_rate)-1.25) < 0.01 &&
+        Math.abs(Number(settings.player_volume)-0.42) < 0.01 &&
+        Math.abs(Number(player.playback_rate)-1.25) < 0.01 &&
+        Math.abs(Number(player.playback_volume)-0.42) < 0.01 &&
+        Math.abs(Number(stage6PositionAudio.playbackRate)-1.25) < 0.01 &&
+        Math.abs(Number(stage6PositionAudio.volume)-0.42) < 0.02;
+    }, 12000);
+    record("stage6_player_volume_rate_persisted_before_restart", true,
+      "Real player speed and volume controls saved 1.25× and 42%; native Settings and player read-back acknowledged them.");
+
     const stage6TargetPosition = 1.25;
     must(Number(stage6PositionAudio.duration) > stage6TargetPosition + 1,
       "The Stage 6 playback-position fixture is too short for a reliable restart assertion.");

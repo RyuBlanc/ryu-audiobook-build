@@ -238,3 +238,39 @@ the mini-player hides only the dock without stopping or replacing playback.
 The checks execute in the CI-packaged Windows application. The user's physical
 manual installation check remains excluded and is not claimed as performed.
 Matching-head CI verification is pending.
+
+
+## Failed-run audit and corrected acceptance — 5 November 2026
+
+### #2329 — failed, source test gate
+Commit \`c019ec153df8e4955e79333b2ff8884de3cd09d9\`.
+The full suite reported three compatibility assertions: the terminal History
+test prohibited queue snapshots; the History DOM marker expected the exact
+old marker syntax; and the Task Manager row signature expected the prior
+field order. These were test-contract failures, not package/runtime failures.
+
+### #2330 — failed, source test gate
+Commit \`dfe0d29beceab94773b55b0a19dee64d5e21f5bc\`.
+It reproduced the same three source-contract failures (1,169 tests ran). The
+Windows build was skipped because the source-test job failed; this run did not
+execute the Stage 4 packaged restart acceptance.
+
+### #2331 — failed, packaged acceptance gate
+Commit \`ae082ad10794eceaae6015b676716df5713d1674\`.
+The full source gate passed (1,169 tests). The Windows executable built and
+bundled-asset checks passed. The frozen app reached the second process launch,
+restored project metadata and playback position, then failed at a new acceptance
+assertion comparing audio volume/rate against values inherited from earlier
+acceptance steps. The app already reads these preferences from Settings and
+applies them during \`openPlayer\`; the test had not first established known
+values for its selected audiobook.
+
+### Corrective acceptance
+The packaged test now sets 1.25× speed and 42% volume through the actual
+Audiobooks controls, waits for native Settings and player read-back, and checks
+those exact values after a separate frozen-app launch. The restart phase also
+checks real History search, Completed status, inclusive date filtering, job
+details, Task Manager All/Active/Completed views, job identity sets, summary
+counts, responsive row structure and operation details. These additions do
+not change playback implementation or weaken Stage 5.4/5.5 gates. Matching-head
+CI is required before these checks are considered passed.

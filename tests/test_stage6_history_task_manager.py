@@ -97,5 +97,17 @@ class Stage6HistoryTaskManagerTests(unittest.TestCase):
             self.assertIn(marker, runner)
 
 
+    def test_packaged_acceptance_requires_real_history_and_task_manager_interactions(self) -> None:
+        packaged = (ROOT / "tests" / "stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
+        runner = (ROOT / "tests" / "packaged_sound_ui_acceptance.py").read_text(encoding="utf-8")
+        for marker in (
+            "stage6_history_real_search_date_status_and_details",
+            "stage6_task_manager_real_records_filters_details_and_counts",
+            "stage6_player_volume_rate_persisted_before_restart",
+        ):
+            self.assertIn(marker, packaged)
+            self.assertIn(marker, runner)
+
+
 if __name__ == "__main__":
     unittest.main()
