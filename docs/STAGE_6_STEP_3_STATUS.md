@@ -180,3 +180,11 @@ Run #2289's Music Library, cue, BGM, and preview checks before the Production me
 - Run #2297 is the first artifact checkpoint for the player preference fix but was based on the immediately preceding commit, before these test-contract corrections. Its result must be treated as a validation checkpoint only; the final release checkpoint must run against the corrected branch HEAD.
 
 **Current decision:** Stage 6 Step 3 remains IN PROGRESS. Do not mark complete or publish Version 1.2.0 until corrected-head tests, packaged frozen acceptance, Windows installer/portable artifacts, Defender and SHA-256 checks all pass.
+
+## Corrected-head regression test status — 4 November 2026
+
+- The first #2297 artifact-checkpoint regression run used the earlier test-contract revision and failed two assertions: the existing dashboard test still expected the removed direct fire-and-forget call, and the new Stage 6 test expected the queue before its retry guard was added.
+- Both contracts are now corrected on branch HEAD: the Dashboard test asserts both preference paths route through savePlayerPreferences; the Stage 6 test asserts the catch-and-then serial queue, awaited settings.save, player read-back contract and backend persistence keys.
+- #2297 is closed as a failed validation attempt and did not enter packaging. The current corrected-head checkpoint will establish the releasable state; no version bump or public release is authorized until it passes.
+
+**Current decision:** Step 3 remains IN PROGRESS; matching-head source and packaged Windows verification remain mandatory.
