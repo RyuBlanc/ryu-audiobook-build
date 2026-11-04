@@ -3795,7 +3795,7 @@ Rias Gremory
         settings_end = host.index("    def _assert_no_active_model_lifecycle(", settings_start)
         settings_handler = host[settings_start:settings_end]
 
-        self.assertIn("playerPreferenceSave = playerPreferenceSave.then", save_helper)
+        self.assertIn("playerPreferenceSave = playerPreferenceSave.catch(() => {}).then", save_helper)
         self.assertIn("await call('settings.save', patch)", save_helper)
         self.assertIn("return playerPreferenceSave", save_helper)
         self.assertIn("return savePlayerPreferences({player_rate:rate})", player_controls)
