@@ -6371,6 +6371,10 @@ class PremiumV2Bridge(QObject):
             playback_position = 0.0
         if not math.isfinite(playback_position) or playback_position < 0:
             playback_position = 0.0
+        # QSettings may be updated by a queued UI preference save immediately
+        # before this read. Sync before reading so the player response confirms
+        # the persisted store rather than a stale in-memory snapshot.
+        self.settings.sync()
         try:
             playback_rate = float(self.settings.value("player/playback_rate", 1.0))
         except (TypeError, ValueError, OverflowError):
@@ -8186,6 +8190,18 @@ class PremiumV2Bridge(QObject):
 
     def _settings_get(self, _payload: dict[str, Any]) -> dict[str, Any]:
         self.settings.sync()
+        try:
+            player_rate = float(self.settings.value("player/playback_rate", 1.0))
+        except (TypeError, ValueError, OverflowError):
+            player_rate = 1.0
+        if not math.isfinite(player_rate) or not 0.5 <= player_rate <= 2.0:
+            player_rate = 1.0
+        try:
+            player_volume = float(self.settings.value("player/playback_volume", 0.8))
+        except (TypeError, ValueError, OverflowError):
+            player_volume = 0.8
+        if not math.isfinite(player_volume) or not 0.0 <= player_volume <= 1.0:
+            player_volume = 0.8
         return {
             "theme": self.settings.value("ui/theme", "dark"),
             "effects": self.settings.value("ui/effects", "high"),
@@ -8194,6 +8210,8 @@ class PremiumV2Bridge(QObject):
             "interface_scale": self.settings.value("ui/interface_scale", 100),
             "text_scale": self.settings.value("ui/text_scale", 100),
             "window_size": self.settings.value("ui/window_size", "auto"),
+            "player_rate": player_rate,
+            "player_volume": player_volume,
             "storage_root": str(app_root()),
             "library_root": str(library_root()),
             "output_root": str(audiobooks_root()),
