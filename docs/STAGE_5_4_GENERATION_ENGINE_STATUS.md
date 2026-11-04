@@ -6,13 +6,13 @@
 - Accepted Stage 5.3 commit: `18dc29585ebb0c72e346a9694166d65db27757b8`
 - Accepted Stage 5.3 Windows workflow: [#2211](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41689204000)
 - Stage 5.4 working branch: `stage-5/step-4-generation-engine`
-- Stage 5.4 implementation candidate: `25a0d1832b5753d483b0b17501874c660282618e`
-- Matching-head regression workflow: [#2225](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41742660649)
-- Matching-head artifact-checkpoint workflow: [#2226](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41743104231)
-- Regression result: **1,138 tests passed**; frontend JavaScript syntax validation passed; isolated native Qt lifecycle regression passed.
-- Windows frozen application build, executable self-test, bundled voice/module checks all passed on #2226.
-- #2226 packaged acceptance failed only at the stale UI assertion that expected the former chapter-boundary pause message; other Sound Design, preview, metadata, and one-chapter full-generation checks reported passed. This triggered the current Stage 5.4 acceptance update: chunk/batch pause label, packaged Retry/Recover UI interaction, and real two-chapter/empty-excluded generation.
-- The next artifact-checkpoint run must verify the final package flow on the exact new candidate; installer/artifact upload remains gated by the packaged acceptance.
+- Stage 5.4 final candidate/checkpoint: `8132097b6028a17d44ddc2f03c8f514d4cd88598`
+- Final matching-head Windows artifact-checkpoint workflow: [#2235](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41755362901)
+- Regression result on #2235: **1,138 tests passed**; frontend JavaScript syntax validation and isolated native Qt lifecycle regression passed.
+- Windows frozen application build, frozen executable verification, bundled voice assets/critical modules and packaged Stage 5.4 runtime acceptance all passed on #2235.
+- All eight Stage 5.4 packaged runtime markers passed, including real multi-chapter generation, empty/excluded skips, pause/resume/cancel, Retry, project/History/output ownership, Dashboard readiness, and process-termination/restart recovery.
+- Installer, portable Windows package and SHA-256 manifest were all successfully built and uploaded on the same code candidate. Installer release publishing was intentionally skipped; no public release was created.
+- Stage 5.4 engineering exit: **CLOSED** on candidate `8132097b...`, with a separate documentation closeout commit recording the evidence below.
 
 
 ## Historical Stage 5.4 workflow reconciliation
@@ -45,17 +45,17 @@ No Stage 5.3 accepted branch or its uploaded artifacts were rewritten. Supersede
 | #2233 | `3763c222…` | Stage 5.4 control project absent from Dashboard recent cards | Dashboard shows only the three latest projects; acceptance now falls back to the full Library grid's normal Open project action |
 | #2234 | `7d72008d…` | Dashboard running control timed out after Retry/Recover UI checks | The synthetic Background Jobs test left the filter on Failed / Cancelled; acceptance now restores Active before testing running/paused Dashboard states |
 
-The six-second cue import exception in these runs is the intentional negative test confirming that cue clips longer than five seconds are rejected. It is not a product regression. The Windows app build, frozen executable verification, bundled voice/module checks, 1,138-test regression suite, real two-chapter M4B creation and skip-count assertions passed on the latest package candidates; installer/portable/SHA uploads remain gated by the final installed-app controls and restart-recovery acceptance.
+The six-second cue import exception in the earlier candidate runs is the intentional negative test confirming that cue clips longer than five seconds are rejected. It is not a product regression. Those earlier failures were superseded by #2235, which passed the frozen-app Stage 5.4 acceptance and cleared the installer, portable-package and SHA-256 upload gates.
 
 ## Formal scope and current status
 
 | Requirement | Priority | Acceptance focus | Automated status |
 |---|---|---|---|
-| GEN-01 | P0 | Full generation consumes the active project's saved narrator, character assignments, pronunciation, BGM/cues, metadata and output settings | **AUTOMATED TESTS PASSED** on #2225; Windows packaged verification pending |
-| GEN-02 | P1 | Reuse only compatible chapter/chunk checkpoints; detect missing/corrupt/incompatible audio; preserve valid unaffected work | **AUTOMATED TESTS PASSED** on #2225; Windows packaged verification pending |
-| GEN-03 | P1 | Actual pause/resume/cancel/retry/recovery; safe checkpoint boundaries; backend-confirmed states | **AUTOMATED TESTS PASSED** on #2225; installed-app interaction acceptance pending |
-| GEN-04 | P1 | Skip empty/excluded chapters in saved order; reject all-ineligible projects | **AUTOMATED TESTS PASSED** on #2225 |
-| PROD-14 | P0 | One project/job identity and consistent terminal state across Production, Readiness, Background Jobs, History and output | **AUTOMATED TESTS PASSED** on #2225; installed-app consistency acceptance pending |
+| GEN-01 | P0 | Full generation consumes the active project's saved narrator, character assignments, pronunciation, BGM/cues, metadata and output settings | **PASSED** — regression suite + frozen Windows packaged generation on #2235 |
+| GEN-02 | P1 | Reuse only compatible chapter/chunk checkpoints; detect missing/corrupt/incompatible audio; preserve valid unaffected work | **PASSED** — regression suite + packaged multi-chapter/checkpoint acceptance on #2235 |
+| GEN-03 | P1 | Actual pause/resume/cancel/retry/recovery; safe checkpoint boundaries; backend-confirmed states | **PASSED** — real packaged UI controls and process-restart recovery on #2235 |
+| GEN-04 | P1 | Skip empty/excluded chapters in saved order; reject all-ineligible projects | **PASSED** — two eligible chapters generated in saved order; empty and excluded chapters skipped on #2235 |
+| PROD-14 | P0 | One project/job identity and consistent terminal state across Production, Readiness, Background Jobs, History and output | **PASSED** — GenerationManager, Background Jobs, History, Dashboard readiness and M4B output ownership reconciled on #2235 |
 
 ## Implementation retained and hardened
 
@@ -115,18 +115,31 @@ The six-second cue import exception in these runs is the intentional negative te
 - Background Jobs exposes and routes actual Retry/Recover commands.
 - Existing preflight, saved character voice, durable restart recovery, stale callback, project ownership and History/terminal identity tests remain in the suite.
 
-## Remaining Stage 5.4 verification
+## Final Stage 5.4 verification — completed on #2235
 
-1. Obtain Windows build, frozen application, packaged acceptance, installer/portable package and SHA-256 artifact evidence on the exact Stage 5.4 checkpoint commit.
-2. Confirm packaged full generation consumes the saved narrator, saved cast, pronunciation, Sound Design and metadata configuration.
-3. Verify an actual multi-chapter generation scenario, including eligible chapter order and empty/excluded chapter skips.
-4. Exercise pause/resume within a chapter, cancel at a saved checkpoint, retry after failed/cancelled generation, and interrupted-job recovery after app restart.
-5. Confirm Production Studio, Readiness, Background Jobs and History display the same project/job/terminal state and that output remains attached to the original project.
-6. Record installed Windows/manual acceptance separately from automated CI. Source-level tests and a successful package build alone do not establish all user-facing control flows as runtime-verified.
-7. The completed project summary and completed job result must retain both empty and explicitly excluded generation skip counts; these are now surfaced for packaged acceptance and project dashboards.
+| Exit check | Evidence | Result |
+|---|---|---|
+| Regression and frontend checks | 1,138 tests passed; frontend JavaScript syntax and isolated native Qt lifecycle checks passed | **PASS** |
+| Windows package | Application build, frozen executable verification and bundled voice assets/critical modules | **PASS** |
+| Saved-project generation | Frozen Windows app generated two eligible chapters in saved order using the saved bundled Offline Neural narrator | **PASS** |
+| Empty/excluded handling | One empty and one excluded chapter were skipped; final job/project summary retained the skip counts | **PASS** |
+| Actual generation controls | Background Jobs Pause, Resume and Cancel controlled a real GenerationManager job at persisted chunk checkpoints | **PASS** |
+| Retry and ownership | Retry reused compatible checkpoints and preserved original project identity across job, History and output; Dashboard readiness reflected the same completed project | **PASS** |
+| Restart recovery | A real paused generation job survived process termination as interrupted, was recovered via Background Jobs/native bridge in the next frozen-app process, reused checkpoints and completed with the same project/History/output identity | **PASS** |
+| Release artifacts | Installer, portable Windows app and SHA-256 manifest built and uploaded successfully | **PASS** |
+
+**Run:** [#2235 — Stage 5.4 artifact checkpoint](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41755362901)  
+**Code candidate:** `8132097b6028a17d44ddc2f03c8f514d4cd88598`
+
+Artifacts uploaded by #2235:
+- [Windows installer](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41755362901/artifacts/13289020554) — artifact SHA-256 `30946b5ce10a371a55128b19a697d5c4c5a25855ec434474b5111aceaab9eb39`
+- [Portable Windows app](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41755362901/artifacts/13289130038) — artifact SHA-256 `68f52ea14fc17ca9bd5c3abf82c832a3371c915489402d4c15a89e42d05803e0`
+- [Release SHA-256 manifest](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41755362901/artifacts/13288497252) — artifact SHA-256 `30e7c153e809c99203bb149e779713d76a86e2e571d54d493dcdde75d4e419b6`
+
+The Stage 5.4 CI acceptance exercised the frozen Windows application and real UI/native job commands, including a second process after termination. A separate hands-on installation and user-device smoke test is not represented by CI and remains a post-build operational check; it does not block the Stage 5.4 engineering exit recorded here. The verified installer release publishing step was intentionally skipped, so this closeout does not publish or tag version 1.2.0.
 
 ## Stage 5.4 exit decision
 
-**OPEN — NOT YET CLOSED.**
+**CLOSED — ACCEPTED on 4 November 2026.**
 
-Automated regression acceptance passed on #2225. Stage 5.4 cannot receive formal closure until the matching-head Windows build/packaged evidence and applicable installed-app generation/control/ownership acceptance are recorded. Stage 5.5 final M4B metadata/chapter-marker validation and Audiobooks handoff remain subsequent work. Version 1.2.0 must not be tagged/published at this point.
+All Stage 5.4 requirements GEN-01 through GEN-04 and PROD-14 passed their regression and frozen Windows packaged acceptance checkpoints on #2235. The historical failed candidate runs (#2226–#2234) have been reconciled by the final accepted build. Stage 5.5 final M4B assembly/metadata/chapter-marker validation and Audiobooks Library handoff remain subsequent work.
