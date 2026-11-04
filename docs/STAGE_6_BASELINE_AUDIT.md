@@ -274,3 +274,20 @@ details, Task Manager All/Active/Completed views, job identity sets, summary
 counts, responsive row structure and operation details. These additions do
 not change playback implementation or weaken Stage 5.4/5.5 gates. Matching-head
 CI is required before these checks are considered passed.
+
+
+## Stage 6 Step 8 — packaged viewport emulation added (5 November 2026)
+
+The frozen-app acceptance now clones the live Premium V2 DOM and the actual
+application stylesheet into an isolated Chromium iframe and emulates all 41
+requested resolutions across 4:3, 5:4, 16:10, 16:9, 21:9, 32:9, 3:2 and
+portrait modes. At each viewport it checks the player, History, mini-player,
+Audiobooks cards, Task Manager rows and job-details dialog for bounds and the
+expected responsive grid breakpoints.
+
+It also emulates restored, half-screen, quarter-screen, maximized, ultrawide
+and portrait viewport sizes and effective CSS viewport dimensions corresponding
+to 100%, 125%, 150% and 200% scaling. These results are browser viewport
+emulation in the packaged Windows application; they do not claim physical
+minimize/restore behaviour, mixed/extended monitor topology or OS-level DPI
+verification. Those require an actual Windows display session.

@@ -600,6 +600,166 @@
       jobsModal.classList.remove("show");
       record("stage6_task_manager_real_records_filters_details_and_counts", true,
         "Task Manager All/Active/Completed views, row layout, summary counts and operation details matched native jobs.");
+
+      // UI-06 / Step 8: emulate every requested CSS viewport against the actual
+      // Premium V2 DOM and stylesheet, including the Audiobooks, History,
+      // mini-player, Task Manager and operation-details components.
+      const stage6ResponsiveCss = Array.from(document.querySelectorAll("style"))
+        .map(style => style.textContent || "").join("\n");
+      const stage6ResponsiveApp = document.querySelector("#app")?.outerHTML || "";
+      const stage6ResponsiveJobs = jobsModal?.outerHTML || "";
+      const stage6ResponsiveDetails = document.querySelector("#jobDetailsModal")?.outerHTML || "";
+      must(stage6ResponsiveCss.length > 10000 &&
+        stage6ResponsiveApp.includes('id="player"') &&
+        stage6ResponsiveApp.includes('id="history"') &&
+        stage6ResponsiveApp.includes('id="miniPlayer"') &&
+        stage6ResponsiveJobs.includes('id="backgroundJobsList"') &&
+        stage6ResponsiveDetails.includes('id="jobDetailsModal"'),
+        "The responsive viewport fixture could not clone all required live Premium V2 surfaces.");
+      const stage6ResponsiveFrame = document.createElement("iframe");
+      stage6ResponsiveFrame.setAttribute("aria-hidden","true");
+      Object.assign(stage6ResponsiveFrame.style,{
+        position:"fixed",left:"-20000px",top:"-20000px",
+        width:"1920px",height:"1080px",border:"0",opacity:"0",
+        pointerEvents:"none",zIndex:"-1"
+      });
+      document.body.appendChild(stage6ResponsiveFrame);
+      const stage6ResponsiveTheme = document.documentElement.dataset.theme || "dark";
+      const stage6ResponsiveEffects = document.documentElement.dataset.effects || "high";
+      const stage6ResponsiveStyle = stage6ResponsiveCss.replace(/<\/style/gi,"<\\/style");
+      stage6ResponsiveFrame.srcdoc = '<!doctype html><html data-theme="' + stage6ResponsiveTheme +
+        '" data-effects="' + stage6ResponsiveEffects + '"><head><meta charset="utf-8">' +
+        '<meta name="viewport" content="width=device-width, initial-scale=1">' +
+        '<style>' + stage6ResponsiveStyle + '</style></head><body>' +
+        stage6ResponsiveApp + stage6ResponsiveJobs + stage6ResponsiveDetails + '</body></html>';
+      await waitFor("responsive CSS fixture loads",() => {
+        const frameDoc = stage6ResponsiveFrame.contentDocument;
+        return Boolean(frameDoc && frameDoc.readyState === "complete" &&
+          frameDoc.querySelector("#player") && frameDoc.querySelector("#history") &&
+          frameDoc.querySelector("#miniPlayer") && frameDoc.querySelector("#backgroundJobsList"));
+      },15000);
+      const stage6ResponsiveDoc = stage6ResponsiveFrame.contentDocument;
+      stage6ResponsiveDoc.body.style.margin = "0";
+      const stage6ResponsiveAppRoot = stage6ResponsiveDoc.querySelector("#app");
+      const stage6ResponsivePlayer = stage6ResponsiveDoc.querySelector("#player");
+      const stage6ResponsiveHistory = stage6ResponsiveDoc.querySelector("#history");
+      for (const page of stage6ResponsiveDoc.querySelectorAll(".page")) page.classList.remove("active");
+      stage6ResponsivePlayer.classList.add("active");
+      stage6ResponsiveHistory.classList.add("active");
+      stage6ResponsiveDoc.querySelector("#miniPlayer")?.classList.remove("hidden");
+      stage6ResponsiveDoc.querySelector("#backgroundJobsModal")?.classList.add("show");
+      stage6ResponsiveDoc.querySelector("#jobDetailsModal")?.classList.add("show");
+      stage6ResponsiveAppRoot.style.width = "100%";
+      const stage6ResponsiveLibrary = stage6ResponsiveDoc.querySelector("#player .audiobook-library-grid") ||
+        (() => {
+          const shelf = stage6ResponsiveDoc.createElement("div");
+          shelf.className = "audiobook-library-grid";
+          stage6ResponsivePlayer.insertBefore(shelf,stage6ResponsivePlayer.querySelector(".player-grid"));
+          return shelf;
+        })();
+      if (!stage6ResponsiveLibrary.querySelector(".audiobook-library-card")) {
+        stage6ResponsiveLibrary.innerHTML =
+          '<article class="audiobook-library-card"><div class="audiobook-card-cover"></div>' +
+          '<div class="audiobook-card-content"><h3 class="audiobook-card-title">Responsive audiobook acceptance</h3>' +
+          '<div class="audiobook-card-status-row"><span class="badge">Completed M4B</span></div>' +
+          '<div class="audiobook-card-actions"><button class="btn small secondary">Open</button>' +
+          '<button class="btn small">Play</button></div></div></article>';
+      }
+      const stage6ResponsiveJobList = stage6ResponsiveDoc.querySelector("#backgroundJobsList");
+      stage6ResponsiveJobList.innerHTML =
+        '<article class="job-row" data-backend-job="responsive-job">' +
+          '<div class="job-type-icon" aria-hidden="true">♪</div>' +
+          '<div class="job-main"><h3>Responsive generation job</h3>' +
+          '<p>Chapter 3 · Audio rendering</p><div class="job-meta">Test Project · Chapter 3 · 00:32</div>' +
+          '<div class="job-progress-line"><div class="progress"><i style="width:72%"></i></div>' +
+          '<small class="job-state-running">running · 72%</small></div></div>' +
+          '<div class="job-actions"><button class="btn small secondary">View</button>' +
+          '<button class="btn small danger">Cancel</button></div></article>';
+      const stage6ResponsiveViewports = [
+        ["1920x1080",1920,1080],["1366x768",1366,768],["1280x720",1280,720],
+        ["800x600",800,600],["1024x768",1024,768],["1280x960",1280,960],
+        ["1400x1050",1400,1050],["1600x1200",1600,1200],["2048x1536",2048,1536],
+        ["1280x1024",1280,1024],["1600x1280",1600,1280],
+        ["1280x800",1280,800],["1440x900",1440,900],["1680x1050",1680,1050],
+        ["1920x1200",1920,1200],["2560x1600",2560,1600],["3840x2400",3840,2400],
+        ["1024x576",1024,576],["1600x900",1600,900],["2560x1440",2560,1440],
+        ["3840x2160",3840,2160],["5120x2880",5120,2880],["7680x4320",7680,4320],
+        ["2560x1080",2560,1080],["3440x1440",3440,1440],["3840x1600",3840,1600],
+        ["5120x2160",5120,2160],["3840x1080",3840,1080],["5120x1440",5120,1440],
+        ["7680x2160",7680,2160],["960x640",960,640],["1440x960",1440,960],
+        ["2160x1440",2160,1440],["2880x1920",2880,1920],
+        ["600x800",600,800],["768x1024",768,1024],["800x1280",800,1280],
+        ["900x1440",900,1440],["1080x1920",1080,1920],["1440x2560",1440,2560],
+        ["2160x3840",2160,3840]
+      ];
+      const stage6CheckResponsiveViewport = async (label,width,height) => {
+        stage6ResponsiveFrame.style.width = width + "px";
+        stage6ResponsiveFrame.style.height = height + "px";
+        stage6ResponsiveAppRoot.style.minHeight = height + "px";
+        stage6ResponsiveFrame.contentWindow.dispatchEvent(new Event("resize"));
+        await sleep(25);
+        const d = stage6ResponsiveDoc;
+        const actualWidth = stage6ResponsiveFrame.contentWindow.innerWidth;
+        const actualHeight = stage6ResponsiveFrame.contentWindow.innerHeight;
+        must(actualWidth === width && actualHeight === height,
+          "Responsive emulation did not reach requested viewport " + label +
+            ": got " + actualWidth + "x" + actualHeight);
+        const playerGrid = d.querySelector("#player .player-grid");
+        const historyRow = d.querySelector("#history .history-row");
+        const mini = d.querySelector("#miniPlayer");
+        const jobsPanel = d.querySelector("#backgroundJobsModal .jobs-modal");
+        const jobRow = d.querySelector("#backgroundJobsList .job-row");
+        const libraryCard = d.querySelector("#player .audiobook-library-card");
+        const detailsPanel = d.querySelector("#jobDetailsModal .modal");
+        const rects = [
+          ["player-grid",playerGrid],["history-row",historyRow],["mini-player",mini],
+          ["Task Manager",jobsPanel],["job-row",jobRow],["audiobook-card",libraryCard],
+          ["job-details",detailsPanel]
+        ];
+        for (const [name,element] of rects) {
+          must(element, "Responsive fixture is missing " + name + " at " + label + ".");
+          const r = element.getBoundingClientRect();
+          must(r.width <= width + 2 && r.left >= -2 && r.right <= width + 2,
+            name + " exceeds the viewport at " + label + ": " +
+              JSON.stringify({left:r.left,right:r.right,width:r.width,viewport:width}));
+        }
+        const playerColumns = getComputedStyle(playerGrid).gridTemplateColumns.trim().split(/\s+/).length;
+        const historyColumns = getComputedStyle(historyRow).gridTemplateColumns.trim().split(/\s+/).length;
+        const jobColumns = getComputedStyle(jobRow).gridTemplateColumns.trim().split(/\s+/).length;
+        must(playerColumns === (width <= 1250 ? 1 : 3),
+          "Audiobooks player grid breakpoint mismatch at " + label + ": " + playerColumns + " columns.");
+        must(historyColumns === (width <= 800 ? 2 : 4),
+          "History row breakpoint mismatch at " + label + ": " + historyColumns + " columns.");
+        must(jobColumns === (width <= 650 ? 2 : 3),
+          "Task Manager row breakpoint mismatch at " + label + ": " + jobColumns + " columns.");
+        must(getComputedStyle(mini).position === "fixed",
+          "Mini-player stopped using its viewport-pinned layout at " + label + ".");
+      };
+      for (const viewport of stage6ResponsiveViewports) {
+        await stage6CheckResponsiveViewport(viewport[0],viewport[1],viewport[2]);
+      }
+      record("stage6_responsive_viewport_matrix_41_resolutions",true,
+        "All 41 requested aspect-ratio resolutions were emulated against the actual Premium V2 stylesheet and player, library, mini-player, History, Task Manager and job-details DOM.");
+
+      // Window-size and effective CSS viewport emulation. These are browser
+      // viewport checks, not assertions about physical monitor topology or OS DPI.
+      const stage6WindowViewports = [
+        ["restored-window",1366,768],["half-screen",960,1080],["quarter-screen",960,540],
+        ["ultrawide-window",3440,1440],["maximized-window",1920,1080],["portrait-window",800,1280]
+      ];
+      for (const viewport of stage6WindowViewports) {
+        await stage6CheckResponsiveViewport(viewport[0],viewport[1],viewport[2]);
+      }
+      const stage6ScaleViewports = [
+        ["100%",1920,1080],["125%",1536,864],["150%",1280,720],["200%",960,540]
+      ];
+      for (const viewport of stage6ScaleViewports) {
+        await stage6CheckResponsiveViewport("effective viewport at " + viewport[0],viewport[1],viewport[2]);
+      }
+      record("stage6_responsive_window_and_scale_emulation",true,
+        "Restored, half-screen, quarter-screen, maximized, ultrawide and portrait viewport cases plus effective 100/125/150/200% scale sizes passed CSS emulation. Physical minimized/mixed-monitor/extended-monitor/DPI verification remains a separate OS-level check.");
+      stage6ResponsiveFrame.remove();
+
       publish("passed");
       return;
     }

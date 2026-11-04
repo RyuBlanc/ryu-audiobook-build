@@ -109,5 +109,16 @@ class Stage6HistoryTaskManagerTests(unittest.TestCase):
             self.assertIn(marker, runner)
 
 
+    def test_packaged_acceptance_requires_responsive_viewport_matrix(self) -> None:
+        packaged = (ROOT / "tests" / "stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
+        runner = (ROOT / "tests" / "packaged_sound_ui_acceptance.py").read_text(encoding="utf-8")
+        for marker in (
+            "stage6_responsive_viewport_matrix_41_resolutions",
+            "stage6_responsive_window_and_scale_emulation",
+        ):
+            self.assertIn(marker, packaged)
+            self.assertIn(marker, runner)
+
+
 if __name__ == "__main__":
     unittest.main()
