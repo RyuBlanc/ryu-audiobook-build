@@ -2254,9 +2254,14 @@
     must(Math.abs(finishedM4bAudio.playbackRate-1.25)<0.01&&stage6Rate.classList.contains("active"),"Rate not applied to real media.");
     let stage6SavedPreferences=null;
     await waitFor("player rate and volume preferences persist",async()=>{
-      const player=await invoke("player.get_active",{folder:String(config.full_generation_project_folder||"")});
-      stage6SavedPreferences=player;
-      return Math.abs(Number(player.playback_rate)-1.25)<0.01&&
+      const [settings,player]=await Promise.all([
+        invoke("settings.get",{}),
+        invoke("player.get_active",{folder:String(config.full_generation_project_folder||"")})
+      ]);
+      stage6SavedPreferences={settings,player};
+      return Math.abs(Number(settings.player_rate)-1.25)<0.01&&
+        Math.abs(Number(settings.player_volume)-0.37)<0.02&&
+        Math.abs(Number(player.playback_rate)-1.25)<0.01&&
         Math.abs(Number(player.playback_volume)-0.37)<0.02;
     },12000);
     record("stage6_player_volume_and_rate_affect_audio",true,"Volume and playback stage6Rate modify actual Audio properties.");
