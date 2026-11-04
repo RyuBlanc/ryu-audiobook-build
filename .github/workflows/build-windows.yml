@@ -486,12 +486,12 @@ jobs:
           & $venvPython -c "import importlib.metadata as md; assert md.version('qwen-tts') == '0.1.1'; print('qwen_tts wheel bootstrap OK')"
           # Install the release logo validator's dependency in the durable private interpreter.
           # Do not rely on actions/setup-python's toolcache after the later installer steps.
-          & $privatePython -m pip install --disable-pip-version-check --timeout 60 --retries 2 'Pillow>=11,<13'
-          if ($LASTEXITCODE -ne 0) { throw "Private Python Pillow installation failed with exit code $LASTEXITCODE." }
-          $pillowProbe = & $privatePython -B -c "from PIL import Image; print('Private release Pillow=' + Image.__version__)" 2>&1
-          $pillowProbeExitCode = $LASTEXITCODE
-          $pillowProbe | Write-Host
-          if ($pillowProbeExitCode -ne 0) { throw "Private Python cannot import Pillow (exit $pillowProbeExitCode): $($pillowProbe -join ' ')" }
+          & $privatePython -m pip install --disable-pip-version-check --timeout 60 --retries 2 'Pillow>=11,<13' 'imageio-ffmpeg>=0.6,<1'
+          if ($LASTEXITCODE -ne 0) { throw "Private Python packaged-acceptance/release dependency installation failed with exit code $LASTEXITCODE." }
+          $privateDependencyProbe = & $privatePython -B -c "import imageio_ffmpeg; from PIL import Image; print('Private release Pillow=' + Image.__version__); print('Private acceptance FFmpeg=' + imageio_ffmpeg.get_ffmpeg_exe())" 2>&1
+          $privateDependencyProbeExitCode = $LASTEXITCODE
+          $privateDependencyProbe | Write-Host
+          if ($privateDependencyProbeExitCode -ne 0) { throw "Private Python is missing a required packaged-acceptance/release dependency (exit $privateDependencyProbeExitCode): $($privateDependencyProbe -join ' ')" }
 
       - name: Verify frozen application
         shell: pwsh
