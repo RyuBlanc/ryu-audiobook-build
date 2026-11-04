@@ -160,3 +160,15 @@ Run #2289 passed 1,157 regression tests, the live HTTP Audiobook AI smoke, froze
 **Correction:** the save bridge now returns the persisted metadata fields plus the authoritative completion/missing-field state; the adapter updates the active project immediately from that response. Both the metadata renderer and generation renderer now combine metadata completeness, unsaved metadata state, and active audio jobs for full generation. Preview remains enabled when metadata is incomplete and no audio operation is active.
 
 Run #2289's Music Library, cue, BGM, and preview checks before the Production metadata assertion passed. The six-second cue import exception in the log is the expected negative test. Step 3 remains IN PROGRESS until a subsequent single artifact-checkpoint reaches and passes the player acceptance markers and release-artifact checks.
+
+## #2289 / #2290 follow-up — player preference persistence — 4 November 2026
+
+- **Build #2289** failed at the Production metadata gate assertion. The following checkpoint, **Build #2290**, passed the full packaged metadata-dialog/history/save-error/Publisher-gate check. Preserve the correction already included in the current branch.
+- **Build #2290** passed the packaged M4B source/decoder integration, embedded chapter metadata, full-player controls, and shared mini-player session checks, then timed out waiting for playback-rate and volume preferences to persist.
+- The player control path applied the rate/volume to the live Audio element but dispatched settings.save as fire-and-forget work. Preference writes are now serialized, return their actual backend acknowledgement, remain retryable after an individual save error, and continue to use the validated native settings persistence.
+- Packaged acceptance now waits for the save operations and verifies the authoritative player.get_active read-back contains 1.25x playback rate and 37% volume. A source regression contract covers the serialized/acknowledged save path.
+- This is not a relaxation of acceptance: actual audio rate/volume behavior and persisted read-back remain required.
+
+**Next action:** one artifact checkpoint on the latest Stage 6 branch head. Verify the new regression test, full source suite, frozen app, complete packaged acceptance, installer, Defender scan, hashes and uploaded installer/portable artifacts. Inspect any new failed step before another checkpoint; do not cancel an active run or supersede completed successful work.
+
+**Current decision:** Stage 6 Step 3 remains IN PROGRESS. The two prior failures are diagnosed; the preference-persistence correction has source-level regression coverage, but matching-head CI and packaged Windows verification are still pending.
