@@ -2220,6 +2220,25 @@
     record("stage54_real_generation_retry_and_history_ownership", true,
       "The installed Retry action restarted the original project from compatible checkpoints and unified the new job, History and output ownership.");
     jobsModal.classList.remove("show");
+    window.go("dashboard");
+    await waitFor("Dashboard readiness flow updates for retried project", async function () {
+      const active = await invoke("project.get_active", {});
+      const stages = Array.from(document.querySelectorAll(".production-flow .flow-stage"));
+      const finalStage = stages[stages.length - 1];
+      const detail = finalStage?.querySelector(".flow-copy small");
+      return String(active.folder || "") === String(config.control_project_folder || "") &&
+        active.completed === true &&
+        Boolean(finalStage && finalStage.dataset.projectReady === "true" &&
+          String(detail?.textContent || "").includes("Audiobook ready"));
+    }, 20000);
+    const readinessProject = await invoke("project.get_active", {});
+    const readinessLabel = document.querySelector(".production-flow .flow-readiness span")?.textContent || "";
+    must(readinessProject.completed === true &&
+      String(readinessProject.status || "").toLowerCase() === "completed" &&
+      String(readinessLabel).includes("stages ready"),
+      "Dashboard production readiness did not reflect the completed retried audiobook.");
+    record("stage54_real_readiness_and_dashboard_ownership", true,
+      "Dashboard's live seven-stage production-readiness flow reported the retried project as Audiobook ready using the same completed project identity.");
 
     // Now leave a real job paused at a persisted chunk checkpoint. The runner
     // exits this frozen app process immediately after this marker; the next

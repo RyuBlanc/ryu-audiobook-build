@@ -49,6 +49,7 @@ class Stage54GenerationJobUiStateTests(unittest.TestCase):
         self.assertIn("stage54_background_job_retry_recovery_controls", self.packaged)
         self.assertIn("stage54_real_generation_pause_resume_cancel", self.packaged)
         self.assertIn("stage54_real_generation_retry_and_history_ownership", self.packaged)
+        self.assertIn("stage54_real_readiness_and_dashboard_ownership", self.packaged)
         self.assertIn("stage54_real_restart_interruption_staged", self.packaged)
         self.assertIn("stage54_real_restart_recovery", self.packaged)
         self.assertIn("recovery_of_job_id", self.packaged)
