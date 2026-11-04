@@ -2206,6 +2206,11 @@
       return h?h+":"+String(m).padStart(2,"0")+":"+String(s).padStart(2,"0"):m+":"+String(s).padStart(2,"0");};
     must(stage6TimeLabels[1].textContent.trim()===stage6FmtTime(stage6ActualDuration),"Total-time label differs from actual duration.");
     record("stage6_player_seek_and_time_display",true,"Time display uses the actual decoded audio duration.");
+    if (finishedM4bAudio.paused) {
+      stage6MainPlay.click();
+      await waitFor("selected audiobook is playing before Pause/Resume acceptance",()=>
+        !finishedM4bAudio.paused,5000);
+    }
     const stage6BeforeAudioCount=(window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__||[]).length;
     stage6MainPlay.click();
     await waitFor("Pause affects actual audio",()=>finishedM4bAudio.paused&&stage6MainPlay.textContent.trim()==="▶",5000);
