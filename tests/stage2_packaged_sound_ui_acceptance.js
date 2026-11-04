@@ -418,6 +418,7 @@
         "The recovered M4B is not attached to the original recovered project.");
       record("stage54_real_restart_recovery", true,
         "A real paused job survived process termination as interrupted, was recovered through the installed Background Jobs button/native bridge, reused its project checkpoints, and completed with the same project/History/output identity.");
+      jobsModal.classList.remove("show");
       publish("passed");
       return;
     }
@@ -2218,6 +2219,7 @@
       "The retried output is not attached to the original project summary.");
     record("stage54_real_generation_retry_and_history_ownership", true,
       "The installed Retry action restarted the original project from compatible checkpoints and unified the new job, History and output ownership.");
+    jobsModal.classList.remove("show");
 
     // Now leave a real job paused at a persisted chunk checkpoint. The runner
     // exits this frozen app process immediately after this marker; the next

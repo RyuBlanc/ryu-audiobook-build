@@ -714,6 +714,15 @@ def _run(args: argparse.Namespace) -> int:
             "PACKAGED PRODUCTION PREVIEW SAVE AS VERIFIED: "
             + json.dumps({"path":str(production_preview_save_path),"bytes":production_preview_save_path.stat().st_size}, ensure_ascii=False)
         )
+        control_output_path = Path(str(json.loads(config.read_text(encoding="utf-8")).get("control_output_path") or ""))
+        if not control_output_path.is_file() or control_output_path.stat().st_size < 1024:
+            raise AssertionError("The installed Retry flow did not create a non-empty M4B output: " + str(control_output_path))
+        with control_output_path.open("rb") as retried_book:
+            retried_book.seek(4)
+            if retried_book.read(4) != b"ftyp":
+                raise AssertionError("The retried audiobook output is not a valid ISO Base Media/M4B file: " + str(control_output_path))
+        print("PACKAGED STAGE 5.4 REAL RETRY M4B VERIFIED: " +
+            json.dumps({"path":str(control_output_path),"bytes":control_output_path.stat().st_size}, ensure_ascii=False))
         if process.returncode != 0:
             raise RuntimeError(f"Packaged app returned exit code {process.returncode} after reporting success.")
 
