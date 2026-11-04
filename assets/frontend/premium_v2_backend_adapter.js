@@ -7480,6 +7480,10 @@
     audio.onseeked = updateAudioPositionUi;
     audio.onplay = () => {
       if (audio !== playerAudio || audioFolder !== selectedAudiobookFolder) return;
+      // Reassert the selected project's current preference on the media element.
+      // Qt WebEngine may return a newly loaded element to 1× before playback starts.
+      audio.playbackRate = playerRate;
+      audio.volume = playerVolume;
       setPlaybackButtonState(); syncMiniPlayer();
     };
     audio.onpause = () => {
@@ -7494,6 +7498,11 @@
     };
     audio.onloadedmetadata = () => {
       if (audio !== playerAudio || audioFolder !== selectedAudiobookFolder) return;
+      // Apply persisted preferences after the browser has finished loading the
+      // media resource; setting playbackRate before load/metadata is not enough
+      // in every Qt WebEngine build.
+      audio.playbackRate = playerRate;
+      audio.volume = playerVolume;
       const duration = Number(audio.duration) || 0;
       const savedPosition = Math.max(0, Number(data.playback_position_seconds) || 0);
       if (duration > 0 && savedPosition > 0 && savedPosition < duration - 1) {

@@ -296,3 +296,15 @@ verification. Those require an actual Windows display session.
 ## Step 8 responsive defect correction — 5 November 2026
 
 The first 41-viewport matrix exposed a fixed-width three-column player layout that could exceed the usable workspace at 1280×720 and 1366×768. The stylesheet now uses fluid 220/320/220px minimum columns between 1251px and 1450px viewport widths. The existing one-column rule at 1250px and below and the wide-desktop 330/400/330px layout remain unchanged. A source regression contract locks this correction; matching-head packaged viewport acceptance is still required.
+
+
+## Step 4 runtime defect correction — 5 November 2026
+
+Build #2332's frozen-app acceptance confirmed the preference store was correct
+after restart (volume 0.42 and rate 1.25), and the restored media volume was
+0.42, but the actual newly loaded Audio element reported playbackRate 1.0.
+This was a genuine Qt WebEngine media-load restore defect, not a stale stored
+preference. The adapter now reapplies the current selected player rate and
+volume in both \`loadedmetadata\` and \`play\` handlers after the browser has
+loaded the resource. A regression test checks both event handlers, while the
+packaged acceptance continues to require the actual rate to be 1.25.

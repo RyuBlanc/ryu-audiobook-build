@@ -130,6 +130,13 @@ class Stage6HistoryTaskManagerTests(unittest.TestCase):
         self.assertIn("player.get_active", packaged)
 
 
+    def test_player_preferences_are_reapplied_after_media_metadata_load(self) -> None:
+        metadata_handler = self.adapter.split("audio.onloadedmetadata = () => {", 1)[1].split("audio.onerror = () =>", 1)[0]
+        play_handler = self.adapter.split("audio.onplay = () => {", 1)[1].split("audio.onpause = () =>", 1)[0]
+        for handler in (metadata_handler, play_handler):
+            self.assertIn("audio.playbackRate = playerRate;", handler)
+            self.assertIn("audio.volume = playerVolume;", handler)
+
     def test_player_grid_fits_the_1280_and_1366_workspace_without_overflow(self) -> None:
         html = (ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
         self.assertIn(
