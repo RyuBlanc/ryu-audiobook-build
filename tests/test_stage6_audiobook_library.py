@@ -90,6 +90,7 @@ class Stage6AudiobookLibraryContractTests(unittest.TestCase):
             "stage6_chapter_keyboard_activation_starts_audio",
             "stage6_chapter_continuous_playback_updates_active_row",
             "stage6_chapter_space_activation_starts_audio",
+            "stage6_chapter_embedded_timestamps_visible",
         ):
             self.assertIn(marker, self.packaged_js)
 
@@ -140,6 +141,15 @@ class Stage6AudiobookLibraryContractTests(unittest.TestCase):
     def test_stage3_keeps_stage55_project_position_acceptance(self):
         self.assertIn("stage55_audiobooks_real_playback_chapter_seek_and_position", self.packaged_js)
         self.assertNotIn("originating audiobook position remains persisted", self.packaged_js)
+
+    def test_chapter_rows_visibly_render_embedded_start_and_end_times(self):
+        start = self.adapter.index("function renderSelectedAudiobook(")
+        end = self.adapter.index("function syncActivePlayerChapter(", start)
+        renderer = self.adapter[start:end]
+        self.assertIn("data-audiobook-chapter-time", renderer)
+        self.assertIn("formatTime(start)", renderer)
+        self.assertIn("formatTime(end)", renderer)
+        self.assertIn("Timing unavailable", renderer)
 
 if __name__ == "__main__":
     unittest.main()

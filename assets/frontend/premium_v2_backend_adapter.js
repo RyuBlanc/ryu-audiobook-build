@@ -7151,6 +7151,10 @@
           ' data-audiobook-chapter-end="' + (hasTiming ? String(end) : '') + '"' +
           ' aria-pressed="false"' + (hasTiming ? '' : ' aria-disabled="true"') + '>' +
           esc('Chapter ' + Number(chapter.number || 0) + ' · ' + String(chapter.title || 'Untitled chapter')) +
+          '<small class="muted" data-audiobook-chapter-time="' + (hasTiming ? 'true' : 'false') +
+          '" style="display:block;margin-top:4px;font-size:11px">' +
+          esc(hasTiming ? formatTime(start) + ' – ' + formatTime(end) : 'Timing unavailable') +
+          '</small>' +
           '</div>';
       }).join('') || '<div class="list-item">No chapter metadata available.</div>';
     }

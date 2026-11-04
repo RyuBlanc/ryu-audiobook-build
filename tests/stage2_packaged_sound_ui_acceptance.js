@@ -2262,6 +2262,14 @@
       Math.abs(Number(row.dataset.audiobookChapterStart)-Number(finalM4bChapters[i].start_seconds))<0.001&&
       Math.abs(Number(row.dataset.audiobookChapterEnd)-Number(finalM4bChapters[i].end_seconds))<0.001),
       "Chapter intervals differ from embedded M4B marker table.");
+    must(stage6ChapterRows.every((row,i)=>{
+      const timeLabel=row.querySelector('[data-audiobook-chapter-time="true"]');
+      return Boolean(timeLabel) &&
+        timeLabel.textContent.includes(stage6FmtTime(finalM4bChapters[i].start_seconds)) &&
+        timeLabel.textContent.includes(stage6FmtTime(finalM4bChapters[i].end_seconds));
+    }),"Visible chapter timestamps do not match the embedded M4B start/end markers.");
+    record("stage6_chapter_embedded_timestamps_visible",true,
+      "Each chapter row visibly displays its embedded M4B start and end timestamp.");
     const stage6ActiveRow=()=>stage6ChapterRows.find(row=>row.classList.contains("active")&&row.getAttribute("aria-current")==="true"&&row.getAttribute("aria-pressed")==="true");
     const stage6Heading=()=>document.querySelector("#player .player-grid > .card:nth-child(2) h2")?.textContent.trim()||"";
     finishedM4bAudio.pause(); finishedM4bAudio.currentTime=Number(finalM4bChapters[0].start_seconds);
