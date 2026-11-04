@@ -3797,12 +3797,24 @@ Rias Gremory
 
         self.assertIn("playerPreferenceSave = playerPreferenceSave.catch(() => {}).then", save_helper)
         self.assertIn("await call('settings.save', patch)", save_helper)
+        self.assertIn("saved?.player_rate", save_helper)
+        self.assertIn("saved?.player_volume", save_helper)
         self.assertIn("return playerPreferenceSave", save_helper)
         self.assertIn("return savePlayerPreferences({player_rate:rate})", player_controls)
         self.assertIn("return savePlayerPreferences({player_volume:playerVolume})", player_controls)
         self.assertIn('"player_rate": "player/playback_rate"', settings_handler)
         self.assertIn('"player_volume": "player/playback_volume"', settings_handler)
         self.assertIn("self.settings.sync()", settings_handler)
+        settings_get_start = host.index("    def _settings_get(")
+        settings_get_end = host.index("\n\nclass DiagnosticQWebEnginePage", settings_get_start)
+        settings_get = host[settings_get_start:settings_get_end]
+        self.assertIn('"player_rate": player_rate', settings_get)
+        self.assertIn('"player_volume": player_volume', settings_get)
+        player_get_start = host.index("    def _player_get_active(")
+        player_get_end = host.index("    def _player_position_save(", player_get_start)
+        player_get = host[player_get_start:player_get_end]
+        self.assertIn("self.settings.sync()", player_get)
+        self.assertLess(player_get.index("self.settings.sync()"), player_get.index('self.settings.value("player/playback_rate"'))
 
 
 if __name__ == "__main__":
