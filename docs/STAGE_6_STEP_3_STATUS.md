@@ -225,3 +225,15 @@ Run #2289's Music Library, cue, BGM, and preview checks before the Production me
 **Next action:** verify this targeted change with the source suite and one artifact checkpoint. Confirm mini-player shared-audio acceptance, AI bounded JSON repair, volume persistence and speed persistence; then complete installer, portable, Defender and SHA-256 gates. Do not close Step 3 or publish until all gates pass.
 
 **Current decision:** Stage 6 Step 3 remains IN PROGRESS. #2286/#2287 historical causes are corrected and their current regression contracts pass; #2306 is a historical packaged preference failure. The capture-phase speed persistence correction is committed with targeted regression and isolated packaged acceptance, but matching-head CI/package verification is pending.
+
+## Corrected player-speed source gate and latest regression verification — 4 November 2026
+
+- Runs #2307–#2310 reached source regression but failed because `tests/test_premium_v2_integration_contract.py` still required the removed direct speed assignment `playerAudio.playbackRate = Number(audioLabel.replace(...))`. That assertion described the old non-persisting behavior and was incompatible with the new shared persisted-save path.
+- The integration contract now inspects the capture-phase player handler, requires `await applyPlayerRate(rate, true)`, forbids the old direct assignment, and verifies the shared helper calls `savePlayerPreferences({player_rate:rate})`.
+- **#2311 passed:** 1,160 tests in 52.824s, including the AI malformed-JSON bounded-repair test, the three mini-player source/acceptance contracts, the new player-speed persistence contract, and the updated legacy-control integration contract. JavaScript syntax and isolated native Qt lifecycle checks also passed.
+- Packaged acceptance now checks player volume persistence and playback speed persistence separately, each requiring matching `settings.get` and `player.get_active` values. This retains strict 37% / 1.25x acceptance while making any future failure specific to one control.
+- The application diff since #2306 is limited to `assets/frontend/premium_v2_backend_adapter.js`, `tests/stage2_packaged_sound_ui_acceptance.js`, `tests/test_stage6_audiobook_library.py`, `tests/test_premium_v2_integration_contract.py` and this status record. Mini-player and AI runtime implementation remain untouched.
+
+**Next action:** run one artifact checkpoint against the corrected source state. Confirm 1,160+ regression tests, frozen app, bundled assets, packaged Sound Design and Stage 5.3 generation, mini-player shared-audio behavior, 37% volume persistence and 1.25x speed persistence; then continue installer, HTML installer, logo, SHA-256, Defender and artifact uploads.
+
+**Current decision:** Stage 6 Step 3 remains IN PROGRESS. #2311 is a green source-test run; the packaged Windows acceptance and release artifacts still require matching-head verification.
