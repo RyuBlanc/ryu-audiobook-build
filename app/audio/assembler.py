@@ -441,11 +441,46 @@ def _validate_m4b_container(
         previous_end = end_seconds
 
     if cover is not None:
-        if not re.search(
-            r"(?im)^\s*Stream #\d+:\d+.*Video:.*\(attached pic\)",
-            report,
-        ):
-            raise RuntimeError("The final M4B does not contain the required embedded attached cover image.")
+        streams = list(re.finditer(r"(?im)^\\s*Stream #\\d+:\\d+[^\\r\\n]*", report))
+        cover_stream = None
+        cover_stream_block = ""
+        for index, stream in enumerate(streams):
+            stop = streams[index + 1].start() if index + 1 < len(streams) else len(report)
+            block = report[stream.start():stop]
+            if re.search(r"(?i)Video:\\s*mjpeg\\b", stream.group(0)):
+                cover_stream = stream
+                cover_stream_block = block
+                break
+        if cover_stream is None:
+            raise RuntimeError("The final M4B does not contain an embedded MJPEG cover stream.")
+        for key, expected in (("title", "Cover"), ("comment", "Cover Art"), ("mimetype", "image/jpeg")):
+            tag = re.search(
+                rf"(?im)^\\s*{re.escape(key)}\\s*:\\s*(.*?)\\s*$",
+                cover_stream_block,
+            )
+            actual = tag.group(1).strip() if tag else ""
+            if not tag or actual.casefold() != expected.casefold():
+                raise RuntimeError(
+                    f"The final M4B cover stream is missing {key} metadata: "
+                    f"expected {expected!r}, received {actual or 'no tag'!r}."
+                )
+        decoded_cover = subprocess.run(
+            [
+                ffmpeg_path(), "-v", "error", "-i", str(path),
+                "-map", "0:v:0", "-frames:v", "1", "-f", "null", "-",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            check=False,
+        )
+        if decoded_cover.returncode != 0:
+            detail = (decoded_cover.stderr or decoded_cover.stdout or "").strip()
+            raise RuntimeError(
+                "The embedded M4B cover stream could not be decoded. " + detail
+            )
 
 
 def _selected_music_recipe(
