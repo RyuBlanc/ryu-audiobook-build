@@ -45,6 +45,8 @@ The accepted Stage 5.5 Windows build #2253 remains the previous packaged evidenc
 | AB-02 | VERIFIED COMPLETE (carry-forward) | Preserve #2253 M4B-to-WebEngine playback path; reopen only on regression. |
 | AB-07 | VERIFIED COMPLETE (carry-forward) | Preserve project/output/cover/title/author/narrator/chapter association; reopen only on regression. |
 
+**Formal closeout:** Step 2 COMPLETE — exact-head Build #2274 passed and artifacts were uploaded. This section retains the implementation-head identifier for the original code commit; accepted package head is `c60354c995d9adce886984fc37a9be3c13ee04a4`.
+
 ## Explicit non-goals
 
 No rewrite of the full player controls, chapter/playhead synchronization, mini-player, playback-position persistence, History, Task Manager, legacy native Audiobooks UI, or the Stage 5.5 output pipeline. Those remain in their assigned Stage 6 steps.
