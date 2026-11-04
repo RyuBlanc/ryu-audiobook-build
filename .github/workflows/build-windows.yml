@@ -484,14 +484,15 @@ jobs:
           & $venvPython -m pip --version
           & $venvPython -m pip install --disable-pip-version-check --timeout 60 --retries 2 --no-deps qwen-tts==0.1.1
           & $venvPython -c "import importlib.metadata as md; assert md.version('qwen-tts') == '0.1.1'; print('qwen_tts wheel bootstrap OK')"
-          # Install the release logo validator's dependency in the durable private interpreter.
-          # Do not rely on actions/setup-python's toolcache after the later installer steps.
-          & $privatePython -m pip install --disable-pip-version-check --timeout 60 --retries 2 'Pillow>=11,<13' 'imageio-ffmpeg>=0.6,<1'
+          # Install every dependency used by the release logo validator and by the
+          # source-side M4B fixture generator in packaged acceptance. The frozen EXE
+          # is separate; this interpreter runs tests/packaged_sound_ui_acceptance.py.
+          & $privatePython -m pip install --disable-pip-version-check --timeout 60 --retries 2 'Pillow>=11,<13' 'imageio-ffmpeg>=0.6,<1' 'mutagen>=1.47,<2'
           if ($LASTEXITCODE -ne 0) { throw "Private Python packaged-acceptance/release dependency installation failed with exit code $LASTEXITCODE." }
-          $privateDependencyProbe = & $privatePython -B -c "import imageio_ffmpeg; from PIL import Image; print('Private release Pillow=' + Image.__version__); print('Private acceptance FFmpeg=' + imageio_ffmpeg.get_ffmpeg_exe())" 2>&1
+          $privateDependencyProbe = & $privatePython -B -c "import imageio_ffmpeg, mutagen; from PIL import Image; from app.audio.assembler import assemble_m4b; print('Private release Pillow=' + Image.__version__); print('Private acceptance Mutagen=' + mutagen.version_string); print('Private acceptance assembler=' + assemble_m4b.__name__); print('Private acceptance FFmpeg=' + imageio_ffmpeg.get_ffmpeg_exe())" 2>&1
           $privateDependencyProbeExitCode = $LASTEXITCODE
           $privateDependencyProbe | Write-Host
-          if ($privateDependencyProbeExitCode -ne 0) { throw "Private Python cannot import Pillow or imageio_ffmpeg (exit $privateDependencyProbeExitCode): $($privateDependencyProbe -join ' ')" }
+          if ($privateDependencyProbeExitCode -ne 0) { throw "Private Python cannot import Pillow, imageio_ffmpeg, mutagen or the M4B fixture assembler (exit $privateDependencyProbeExitCode): $($privateDependencyProbe -join ' ')" }
           if ($privateDependencyProbeExitCode -ne 0) { throw "Private Python cannot import Pillow (exit $privateDependencyProbeExitCode): $($privateDependencyProbe -join ' ')" }
 
       - name: Verify frozen application
