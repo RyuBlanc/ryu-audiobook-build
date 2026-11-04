@@ -78,6 +78,14 @@ class Stage6AudiobookLibraryContractTests(unittest.TestCase):
             "stage6_audiobooks_open_loads_correct_book_paused",
             "stage6_audiobooks_play_action_starts_real_audio",
             "stage6_audiobooks_switch_preserves_project_output_identity",
+            "stage6_player_full_controls_actual_audio",
+            "stage6_player_seek_and_time_display",
+            "stage6_player_volume_and_rate_affect_audio",
+            "stage6_player_15_second_seek_clamps",
+            "stage6_chapter_select_seeks_to_embedded_marker",
+            "stage6_chapter_playhead_highlight_tracks_boundaries",
+            "stage6_previous_next_chapter_navigation",
+            "stage6_switching_book_clears_previous_chapter_selection",
         ):
             self.assertIn(marker, self.packaged_js)
 

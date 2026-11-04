@@ -316,13 +316,6 @@ def create_stage6_audiobook_library_fixtures(library_folder: Path, token: str) -
         })
     return fixtures
 
-  const formatAcceptanceTime = seconds => {
-    const n = Math.max(0, Math.floor(Number(seconds) || 0));
-    const h = Math.floor(n / 3600), m = Math.floor((n % 3600) / 60), s = n % 60;
-    return h ? h + ":" + String(m).padStart(2,"0") + ":" + String(s).padStart(2,"0")
-      : m + ":" + String(s).padStart(2,"0");
-  };
-
 def validate_saved_metadata(project_folder: Path, expected: dict) -> dict:
     """Verify real project metadata and project-local cover after the first app process."""
     project_folder = Path(project_folder).resolve()
