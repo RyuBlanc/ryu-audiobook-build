@@ -5796,6 +5796,23 @@
   }
 
   let backendJobFilter = 'active';
+  function ensureFailedJobsFilter() {
+    // Failed and cancelled audiobook jobs can be retried or recovered from
+    // Background Jobs. Expose a dedicated filter instead of making users
+    // hunt through every active/completed row in the All view.
+    const modal = $('backgroundJobsModal');
+    const activeFilter = modal?.querySelector('[data-job-filter="active"]');
+    const group = activeFilter?.parentElement;
+    if (!group || group.querySelector('[data-job-filter="failed"]')) return;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = String(activeFilter.className || '').replace(/\bactive\b/g, '').trim();
+    button.dataset.jobFilter = 'failed';
+    button.textContent = 'Failed / Cancelled';
+    button.setAttribute('aria-label', 'Show failed and cancelled background jobs');
+    group.appendChild(button);
+  }
+
   async function refreshJobs() {
     // Multiple callers share one in-flight refresh so the 1.5s heartbeat, job
     // monitor and manual refresh cannot issue overlapping DOM updates.
@@ -5806,6 +5823,7 @@
     finally { if (jobsRefreshPromise === refreshPromise) jobsRefreshPromise = null; }
   }
   async function refreshJobsImpl() {
+    ensureFailedJobsFilter();
     const allJobs = await call('job.list', {include_hidden:false});
     if (isVisiblePage('dashboard')) refreshDashboardGeneration(allJobs);
     if (isVisiblePage('generate')) renderProductionGeneration(allJobs);
