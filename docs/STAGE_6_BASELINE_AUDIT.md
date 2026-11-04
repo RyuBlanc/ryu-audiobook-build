@@ -111,7 +111,7 @@ Statuses use the definitions in the master register. “RUNTIME ACCEPTANCE PENDI
 
 | Requirement | Status | Existing implementation / evidence | Remaining Stage 6 gap |
 |---|---|---|---|
-| AB-01 — compact multiple-audiobook cards | AUTOMATED TESTS PASSED | Premium V2 renders bounded responsive cards from backend project summaries, requiring a completed project and non-empty real output path. Cover/title/status are bound to the owning project; Open and Play are separate actions. `tests/test_stage6_audiobook_library.py`; exact-head Build #2258 passed 1,146 tests, JavaScript syntax and isolated Qt lifecycle. | #2259 built and self-tested the frozen EXE and verified bundled assets; packaged UI acceptance did not execute because private Python lacked `imageio_ffmpeg`. #2266 passed all regressions, frozen EXE and assets, then failed when the source-side M4B fixture helper imported missing `mutagen`. The private bootstrap now installs Pillow, imageio-ffmpeg and mutagen and probes `app.audio.assembler` before acceptance. A new exact-head checkpoint with all four Stage 6 UI markers remains the closure gate. Preserve Premium V2 as the default. |
+| AB-01 — compact multiple-audiobook cards | VERIFIED COMPLETE | Premium V2 renders bounded responsive cards from backend project summaries, requiring a completed project and non-empty real output path. Cover/title/status are bound to the owning project; Open and Play are separate actions. `tests/test_stage6_audiobook_library.py`; Build #2274 passed 1,146 tests, syntax, Qt lifecycle, frozen EXE and all four packaged Audiobooks markers. | Step 2 completed on exact source SHA `c60354c995d9adce886984fc37a9be3c13ee04a4`; installer, portable package and SHA-256 manifest uploaded; Defender scan passed. Preserve Premium V2 as the default. |
 | AB-02 — actual audio-file loading | VERIFIED COMPLETE | `app/audio/playback.py` validates M4B/MP4 source and produces a decoded, duration-checked browser-compatible derivative. `PremiumV2Bridge._player_get_active` validates the saved output and source/cache identity. `tests/test_audiobook_playback.py`; Stage 5.5 runtime markers #2253. | Preserve. Reopen only if the integrated Stage 6 tests reveal a regression or another supported source format fails. |
 | AB-03 — full player controls | RUNTIME ACCEPTANCE PENDING | Premium V2 adapter owns a real Audio session and binds play/pause, seek, time, volume, playback rate and ±15-second seek controls. #2253 proves real playback, chapter seek and position save. | Run a control-by-control installed-app acceptance for every control, including bounds, displayed time and actual audio effect. |
 | AB-04 — actual chapter playback and synchronization | RUNTIME ACCEPTANCE PENDING | Actual chapters are read from embedded M4B chapter metadata and rendered into the player. Previous/next chapter seek is implemented; #2253 passed the real embedded-chapter seek marker. | Explicitly verify clicking a chapter starts at its real timestamp, selected chapter follows the playhead during continuous playback, order/title are correct and switching audiobooks cannot leave stale chapter rows. |
@@ -180,7 +180,7 @@ These PRs are on older or divergent branch lineages; the Stage 5.5 branch is not
 
 ## 9. Exact Stage 6 implementation scope
 
-1. **Step 2 — Audiobooks Library / output integrity:** implement the missing compact multi-audiobook card collection (AB-01). Keep AB-02 and AB-07 closed unless regression evidence reopens them.
+1. **Step 2 — Audiobooks Library / output integrity:** **COMPLETE** on Build #2274. AB-01 compact multi-book cards / Open / Play / switching passed packaged acceptance; AB-02 and AB-07 remain verified carry-forward requirements.
 2. **Step 3 — Full player / chapter playback:** extend and verify AB-03/AB-04 control-by-control; do not rewrite the M4B source/derivative integration.
 3. **Step 4 — Mini-player / persistence:** complete installed-app and restart acceptance for AB-05/AB-06; fix only gaps demonstrated by tests.
 4. **Step 5 — History:** implement HIS-01 active/terminal reconciliation and full operation details, then HIS-02 date filtering. Preserve HIS-03 durable journal.
@@ -204,4 +204,14 @@ These PRs are on older or divergent branch lineages; the Stage 5.5 branch is not
 
 **Step 1 decision: COMPLETE.**  
 **Deliverable:** Stage 6 baseline and requirement-gap report.  
-**Next action:** Begin Stage 6 Step 2 on this branch, starting with the Premium V2 Audiobooks multi-book library and its real completed-output association. AB-02 / AB-07 remain closed unless new evidence shows regression.
+**Step 2 decision: COMPLETE.** Build #2274 passed the full exact-head packaged checkpoint and uploaded installer, portable and SHA-256 artifacts. **Next action: Stage 6 Step 3 — Full player controls and chapter playback/synchronization (AB-03 / AB-04).** AB-02 / AB-07 remain closed unless new evidence shows regression.
+
+
+### Step 2 exact-head closeout — Build #2274
+
+Packaged run: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41806424525  
+Accepted source SHA: `c60354c995d9adce886984fc37a9be3c13ee04a4`.
+
+All four packaged Audiobooks markers passed: compact multiple real-output cards; Open loads the selected book paused; Play starts its real decoded audio; switching books preserves project/output identity. The 1,146-test regression suite, frontend syntax, isolated Qt lifecycle, frozen EXE and bundled Piper/Kokoro/starter audio checks also passed. The combined Sound Design / Production Preview / Stage 5.4 generation-control / Stage 5.5 M4B playback and restart-recovery acceptance passed. Installer, portable package and SHA-256 manifest uploaded after functional HTML installer, logo/hash and Microsoft Defender checks.
+
+Step 2 is **COMPLETE**. Step 3 is the next scoped task: AB-03 full-player controls and AB-04 actual chapter playback/playhead synchronization. Do not rewrite the Stage 5.5 M4B assembler or browser playback derivative.
