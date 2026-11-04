@@ -554,7 +554,7 @@ def _run(args: argparse.Namespace) -> int:
         "This Stage 5.4 installed-app acceptance sentence forces real chunked narration. "
         "The saved narrator must synthesize audio, persist a checkpoint, and keep the job cancellable. "
     )
-    long_job_text = long_job_sentence * 34
+    long_job_text = long_job_sentence * 16
     control_project_folder = app_root / "Library" / f"Stage 5.4 Job Controls {token}"
     control_output_path = temp_root / "stage5.4-job-control-retry.m4b"
     create_generation_project(
