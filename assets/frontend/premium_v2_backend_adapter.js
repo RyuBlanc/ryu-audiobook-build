@@ -7355,13 +7355,13 @@
     speedButtons.forEach(button => {
       button.onclick = () => {
         const rate = Number(String(button.textContent || '').replace('×','').trim());
-        applyPlayerRate(rate, true);
+        void applyPlayerRate(rate, true);
       };
     });
     const volumeControl = page.querySelector('.player-grid .toolbar input.range');
     if (volumeControl) {
-      volumeControl.oninput = () => applyPlayerVolume(volumeControl.value, false);
-      volumeControl.onchange = () => applyPlayerVolume(volumeControl.value, true);
+      volumeControl.oninput = () => { void applyPlayerVolume(volumeControl.value, false); };
+      volumeControl.onchange = () => { void applyPlayerVolume(volumeControl.value, true); };
     }
     const playSelectedChapter = async chapter => {
       if (!chapter || chapter.getAttribute('aria-disabled') === 'true') return;
