@@ -8,8 +8,12 @@
 - Stage 5.4 working branch: `stage-5/step-4-generation-engine`
 - Stage 5.4 implementation candidate: `25a0d1832b5753d483b0b17501874c660282618e`
 - Matching-head regression workflow: [#2225](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41742660649)
+- Matching-head artifact-checkpoint workflow: [#2226](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41743104231)
 - Regression result: **1,138 tests passed**; frontend JavaScript syntax validation passed; isolated native Qt lifecycle regression passed.
-- Workflow #2225's Windows build job was skipped by the workflow's release-safety condition (build runs on `main`, a commit containing `[artifact-checkpoint]`, or `workflow_dispatch`). This status update intentionally uses the workflow's `[artifact-checkpoint]` trigger on the Stage 5.4 branch to obtain matching-head Windows packaging evidence. No merge to `main` is required.
+- Windows frozen application build, executable self-test, bundled voice/module checks all passed on #2226.
+- #2226 packaged acceptance failed only at the stale UI assertion that expected the former chapter-boundary pause message; other Sound Design, preview, metadata, and one-chapter full-generation checks reported passed. This triggered the current Stage 5.4 acceptance update: chunk/batch pause label, packaged Retry/Recover UI interaction, and real two-chapter/empty-excluded generation.
+- The next artifact-checkpoint run must verify the final package flow on the exact new candidate; installer/artifact upload remains gated by the packaged acceptance.
+
 
 ## Historical Stage 5.4 workflow reconciliation
 
@@ -106,6 +110,7 @@ No Stage 5.3 accepted branch or its uploaded artifacts were rewritten. Supersede
 4. Exercise pause/resume within a chapter, cancel at a saved checkpoint, retry after failed/cancelled generation, and interrupted-job recovery after app restart.
 5. Confirm Production Studio, Readiness, Background Jobs and History display the same project/job/terminal state and that output remains attached to the original project.
 6. Record installed Windows/manual acceptance separately from automated CI. Source-level tests and a successful package build alone do not establish all user-facing control flows as runtime-verified.
+7. The completed project summary and completed job result must retain both empty and explicitly excluded generation skip counts; these are now surfaced for packaged acceptance and project dashboards.
 
 ## Stage 5.4 exit decision
 

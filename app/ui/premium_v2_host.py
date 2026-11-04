@@ -833,6 +833,16 @@ class PremiumV2Bridge(QObject):
         completed_chapters = state.get("completed_chapters")
         completed_chapter_count = len(completed_chapters) if isinstance(completed_chapters, list) else 0
 
+        def saved_count(key: str) -> int:
+            try:
+                return max(0, int(state.get(key) or 0))
+            except (TypeError, ValueError, OverflowError):
+                return 0
+
+        empty_chapters_skipped = saved_count("empty_chapters_skipped")
+        excluded_chapters_skipped = saved_count("excluded_chapters_skipped")
+        chapters_skipped_for_generation = saved_count("chapters_skipped_for_generation")
+
         return {
             "title": project.title,
             "series_name": self._project_series_name(project, state),
@@ -843,6 +853,10 @@ class PremiumV2Bridge(QObject):
             "folder": str(project.folder.resolve()),
             "source_path": str(project.source_path) if project.source_path else None,
             "chapter_count": chapter_count,
+            "completed_chapter_count": completed_chapter_count,
+            "empty_chapters_skipped": empty_chapters_skipped,
+            "excluded_chapters_skipped": excluded_chapters_skipped,
+            "chapters_skipped_for_generation": chapters_skipped_for_generation,
             "status": str(state.get("status") or "new"),
             "output_path": str(output) if valid_output and output else None,
             "completed": bool(completed),
@@ -5954,6 +5968,10 @@ class PremiumV2Bridge(QObject):
                              output_path=str(actual), result={"output_path": str(actual), "file_url": actual.resolve().as_uri(),
                                  "file_size": actual.stat().st_size, "chapters_total": summary.chapters_total,
                                  "chapters_completed": summary.chapters_completed,
+                                 "chapter_count": summary.chapters_total,
+                                 "empty_chapters_skipped": int(state.get("empty_chapters_skipped") or 0),
+                                 "excluded_chapters_skipped": int(state.get("excluded_chapters_skipped") or 0),
+                                 "chapters_skipped_for_generation": int(state.get("chapters_skipped_for_generation") or 0),
                                  "chapters_failed": list(summary.chapters_failed), "voice_profile": voice_name},
                              error=None, recoverable=False)
         else:

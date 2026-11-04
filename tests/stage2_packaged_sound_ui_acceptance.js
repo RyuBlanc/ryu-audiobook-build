@@ -1963,7 +1963,8 @@
     const expectedGenerationOutput = normalizeOutputPath(config.full_generation_output_path);
     must(fullGenerationJob.state === "completed" &&
       normalizeOutputPath(fullGenerationJob.output_path) === expectedGenerationOutput &&
-      Number(fullGenerationJob.result?.chapter_count || 0) === 2 &&
+      Number(fullGenerationJob.result?.chapters_total || 0) === 2 &&
+      Number(fullGenerationJob.result?.chapters_completed || 0) === 2 &&
       Number(fullGenerationJob.result?.empty_chapters_skipped || 0) === 1 &&
       Number(fullGenerationJob.result?.excluded_chapters_skipped || 0) === 1,
       "The full-generation job did not complete two eligible chapters in order while skipping one empty and one excluded chapter: " +
