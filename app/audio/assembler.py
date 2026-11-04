@@ -264,6 +264,51 @@ def _probe_audio_bitrate_kbps(path: Path) -> int:
     return int(match.group(1))
 
 
+def _iso639_2_language_code(value: str) -> str:
+    """Normalize common ISO-639-1 codes and language names for an audio-track header."""
+    raw = str(value or "").strip().casefold()
+    base = re.split(r"[-_\s]", raw, maxsplit=1)[0]
+    codes = {
+        "en": "eng", "english": "eng",
+        "hi": "hin", "hindi": "hin",
+        "ta": "tam", "tamil": "tam",
+        "te": "tel", "telugu": "tel",
+        "ml": "mal", "malayalam": "mal",
+        "kn": "kan", "kannada": "kan",
+        "bn": "ben", "bengali": "ben",
+        "mr": "mar", "marathi": "mar",
+        "gu": "guj", "gujarati": "guj",
+        "pa": "pan", "punjabi": "pan",
+        "ur": "urd", "urdu": "urd",
+        "fr": "fra", "french": "fra",
+        "es": "spa", "spanish": "spa",
+        "de": "deu", "german": "deu",
+        "it": "ita", "italian": "ita",
+        "ja": "jpn", "japanese": "jpn",
+        "ko": "kor", "korean": "kor",
+        "zh": "zho", "chinese": "zho",
+        "ar": "ara", "arabic": "ara",
+        "pt": "por", "portuguese": "por",
+        "ru": "rus", "russian": "rus",
+        "tr": "tur", "turkish": "tur",
+        "nl": "nld", "dutch": "nld",
+        "sv": "swe", "swedish": "swe",
+        "pl": "pol", "polish": "pol",
+        "th": "tha", "thai": "tha",
+        "id": "ind", "indonesian": "ind",
+        "vi": "vie", "vietnamese": "vie",
+        "he": "heb", "hebrew": "heb",
+        "fa": "fas", "persian": "fas",
+    }
+    if raw in codes:
+        return codes[raw]
+    if base in codes:
+        return codes[base]
+    if len(base) == 3 and base.isalpha():
+        return base
+    return ""
+
+
 def _ffmpeg_probe_report(path: Path) -> str:
     """Return the final container report emitted by FFmpeg for a finished file."""
     result = subprocess.run(
@@ -312,7 +357,6 @@ def _validate_m4b_container(
         "publisher": sanitize_metadata(metadata.get("publisher")),
         "series": sanitize_metadata(metadata.get("series")),
         "series_number": sanitize_metadata(metadata.get("series_number")),
-        "language": sanitize_metadata(metadata.get("language")),
         "date": sanitize_metadata(metadata.get("year")),
         "description": sanitize_metadata(metadata.get("description")),
     }
@@ -329,6 +373,32 @@ def _validate_m4b_container(
             raise RuntimeError(
                 f"Final M4B metadata tag '{key}' is missing or incorrect. "
                 f"Expected {normalized_expected!r}; received {actual or 'no tag'!r}."
+            )
+
+    language = sanitize_metadata(metadata.get("language"))
+    if language:
+        expected_language_code = _iso639_2_language_code(language)
+        global_language = re.search(
+            r"(?im)^\s*language\s*:\s*(.*?)\s*$",
+            report,
+        )
+        stream_language = re.search(
+            r"(?im)^\s*Stream #\d+:\d+(?:\[[^\]]+\])?\(([^)]+)\):\s*Audio:",
+            report,
+        )
+        actual_language = (
+            stream_language.group(1).strip().casefold()
+            if stream_language else
+            (" ".join(global_language.group(1).split()).casefold() if global_language else "")
+        )
+        expected_language = expected_language_code or language.casefold()
+        if actual_language != expected_language and not (
+            global_language and global_language.group(1).strip().casefold() == language.casefold()
+        ):
+            raise RuntimeError(
+                "Final M4B audio-track language is missing or incorrect. "
+                f"Expected ISO-639-2 code {expected_language!r}; "
+                f"received {actual_language or 'no language marker'!r}."
             )
 
     chapter_pattern = re.compile(
@@ -1208,6 +1278,9 @@ def assemble_m4b(
             args += ["-metadata", f"series_number={series_number}"]
         if language:
             args += ["-metadata", f"language={language}"]
+            stream_language_code = _iso639_2_language_code(language)
+            if stream_language_code:
+                args += ["-metadata:s:a:0", f"language={stream_language_code}"]
         if year:
             args += ["-metadata", f"date={year}"]
         if genre:
@@ -1232,11 +1305,12 @@ def assemble_m4b(
             if not cover_jpg.exists() or cover_jpg.stat().st_size == 0:
                 raise RuntimeError("Cover image could not be converted to JPEG.")
 
-            _run([
+            cover_args = [
                 "-i", str(base_m4b),
                 "-i", str(cover_jpg),
                 "-map", "0:a:0",
                 "-map", "1:v:0",
+                "-map_metadata", "0",
                 "-map_chapters", "0",
                 "-c", "copy",
                 "-disposition:v:0", "attached_pic",
@@ -1244,9 +1318,13 @@ def assemble_m4b(
                 "-metadata:s:v:0", "comment=Cover Art",
                 "-metadata:s:v:0", "mimetype=image/jpeg",
                 "-metadata:s:v:0", "filename=cover.jpg",
-                "-movflags", "+faststart+use_metadata_tags",
-                str(output_path),
-            ])
+            ]
+            if language:
+                stream_language_code = _iso639_2_language_code(language)
+                if stream_language_code:
+                    cover_args += ["-metadata:s:a:0", f"language={stream_language_code}"]
+            cover_args += ["-movflags", "+faststart+use_metadata_tags", str(output_path)]
+            _run(cover_args)
         else:
             import shutil
             shutil.copy2(base_m4b, output_path)

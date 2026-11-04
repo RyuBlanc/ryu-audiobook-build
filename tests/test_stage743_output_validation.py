@@ -111,7 +111,7 @@ class Stage743OutputValidationTests(unittest.TestCase):
             self.assertIn("Ryu Test Press", report)
             self.assertIn("Dragon Archive", report)
             self.assertIn("series_number : 3", report)
-            self.assertIn("language : en", report)
+            self.assertRegex(report, r"Stream #\d+:\d+(?:\[[^\]]+\])?\(eng\): Audio:")
             self.assertIn("date : 2026", report)
             self.assertIn("genre : Fantasy", report)
             self.assertIn("Two chapter M4B metadata validation fixture", report)
