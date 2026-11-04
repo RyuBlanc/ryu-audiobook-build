@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from pathlib import Path
 import wave
 import re
@@ -261,6 +262,112 @@ def _probe_audio_bitrate_kbps(path: Path) -> int:
     if not match:
         raise RuntimeError(f"Could not determine audio bitrate of {path.name}")
     return int(match.group(1))
+
+
+def _ffmpeg_probe_report(path: Path) -> str:
+    """Return the final container report emitted by FFmpeg for a finished file."""
+    result = subprocess.run(
+        [ffmpeg_path(), "-hide_banner", "-i", str(path)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+        check=False,
+    )
+    report = str(result.stderr or "") + "\\n" + str(result.stdout or "")
+    if not report.strip():
+        raise RuntimeError(f"FFmpeg could not inspect the final audiobook: {path.name}")
+    return report
+
+
+def _validate_m4b_container(
+    path: Path,
+    *,
+    chapter_titles: list[str],
+    metadata: dict[str, str],
+    cover: Path | None,
+) -> None:
+    """Reject a playable audio file if its final M4B tags, chapters, or cover are incomplete."""
+    report = _ffmpeg_probe_report(path)
+    chapter_start = re.search(r"(?im)^\\s*Chapter #", report)
+    global_section = report[:chapter_start.start()] if chapter_start else report
+
+    title = _safe_title(metadata.get("title") or path.stem)
+    artist = sanitize_metadata(metadata.get("author"))
+    expected_tags = {
+        "title": title,
+        "album": title,
+        "genre": sanitize_metadata(metadata.get("genre"), "Audiobook"),
+        "artist": artist,
+        "narrator": sanitize_metadata(metadata.get("narrator")),
+        "publisher": sanitize_metadata(metadata.get("publisher")),
+        "series": sanitize_metadata(metadata.get("series")),
+        "series_number": sanitize_metadata(metadata.get("series_number")),
+        "language": sanitize_metadata(metadata.get("language")),
+        "date": sanitize_metadata(metadata.get("year")),
+        "description": sanitize_metadata(metadata.get("description")),
+    }
+    for key, expected in expected_tags.items():
+        if not expected:
+            continue
+        match = re.search(
+            rf"(?im)^\\s*{re.escape(key)}\\s*:\\s*(.*?)\\s*$",
+            global_section,
+        )
+        actual = " ".join(match.group(1).split()) if match else ""
+        normalized_expected = " ".join(str(expected).split())
+        if not match or actual.casefold() != normalized_expected.casefold():
+            raise RuntimeError(
+                f"Final M4B metadata tag '{key}' is missing or incorrect. "
+                f"Expected {normalized_expected!r}; received {actual or 'no tag'!r}."
+            )
+
+    chapter_pattern = re.compile(
+        r"(?m)^\\s*Chapter #\\d+:(\\d+):\\s*start\\s+([0-9]+(?:\\.[0-9]+)?),\\s*end\\s+([0-9]+(?:\\.[0-9]+)?)"
+    )
+    matches = list(chapter_pattern.finditer(report))
+    if len(matches) != len(chapter_titles):
+        raise RuntimeError(
+            f"Final M4B contains {len(matches)} chapter marker(s); "
+            f"{len(chapter_titles)} were expected."
+        )
+
+    previous_end = 0.0
+    for index, match in enumerate(matches):
+        block_end = matches[index + 1].start() if index + 1 < len(matches) else len(report)
+        block = report[match.start():block_end]
+        title_match = re.search(r"(?im)^\\s*title\\s*:\\s*(.*?)\\s*$", block)
+        actual_title = " ".join(title_match.group(1).split()) if title_match else ""
+        expected_title = " ".join(str(chapter_titles[index]).split())
+        try:
+            start_seconds = float(match.group(2))
+            end_seconds = float(match.group(3))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise RuntimeError(f"Final M4B chapter {index + 1} has invalid timing metadata.") from exc
+        if not math.isfinite(start_seconds) or not math.isfinite(end_seconds):
+            raise RuntimeError(f"Final M4B chapter {index + 1} has non-finite timing metadata.")
+        if start_seconds < 0 or end_seconds <= start_seconds:
+            raise RuntimeError(f"Final M4B chapter {index + 1} has an invalid start/end range.")
+        if index == 0 and start_seconds > 0.15:
+            raise RuntimeError("The first final M4B chapter marker does not begin at the start of the audiobook.")
+        if index > 0 and abs(start_seconds - previous_end) > 1.5:
+            raise RuntimeError(
+                f"Final M4B chapter {index + 1} does not begin at the preceding chapter boundary."
+            )
+        if not title_match or actual_title.casefold() != expected_title.casefold():
+            raise RuntimeError(
+                f"Final M4B chapter {index + 1} title is missing or incorrect. "
+                f"Expected {expected_title!r}; received {actual_title or 'no title'!r}."
+            )
+        previous_end = end_seconds
+
+    if cover is not None:
+        if not re.search(
+            r"(?im)^\\s*Stream #\\d+:\\d+.*Video:.*\\(attached pic\\)",
+            report,
+        ):
+            raise RuntimeError("The final M4B does not contain the required embedded attached cover image.")
 
 
 def _selected_music_recipe(
@@ -1162,5 +1269,23 @@ def assemble_m4b(
             f"Final audiobook bitrate is only {detected_kbps} kbps. "
             f"Ryu's Audiobook requires at least {MIN_AUDIO_BITRATE_KBPS} kbps."
         )
+
+    _validate_m4b_container(
+        output_path,
+        chapter_titles=names,
+        metadata={
+            "title": clean_title,
+            "author": clean_artist,
+            "narrator": narrator,
+            "publisher": publisher,
+            "series": series,
+            "series_number": series_number,
+            "language": language,
+            "year": year,
+            "genre": genre,
+            "description": description,
+        },
+        cover=cover,
+    )
 
     return output_path

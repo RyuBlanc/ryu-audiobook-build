@@ -2122,6 +2122,73 @@
       "The completed two-chapter output and empty/excluded counts were not visible on its owning project summary.");
     record("stage54_packaged_real_multi_chapter_full_generation", true,
       "The frozen Windows app synthesized two eligible chapters in saved order with the saved bundled Offline Neural narrator, skipped one empty and one excluded chapter, completed one GenerationManager job, persisted its identical History job ID, and associated the M4B output only with its owning project.");
+
+    // Stage 5.5 GEN-05 / Audiobooks handoff: inspect the finished file itself,
+    // not project.json fallback chapter names, then play and seek the embedded M4B.
+    const finalM4b = await invoke("player.get_active", {
+      folder:String(config.full_generation_project_folder || "")
+    });
+    const finalM4bChapters = Array.isArray(finalM4b.chapters) ? finalM4b.chapters : [];
+    must(normalizeOutputPath(finalM4b.output_path) === expectedGenerationOutput &&
+      String(finalM4b.format || "").toLowerCase() === ".m4b" &&
+      finalM4bChapters.length === 2 &&
+      finalM4bChapters.every(chapter =>
+        String(chapter.title || "").trim() &&
+        Number.isFinite(Number(chapter.start_seconds)) &&
+        Number.isFinite(Number(chapter.end_seconds)) &&
+        Number(chapter.end_seconds) > Number(chapter.start_seconds)),
+      "The finished M4B did not return its actual timed chapter-marker table to the Audiobooks player: " +
+        JSON.stringify({format:finalM4b.format,output_path:finalM4b.output_path,chapters:finalM4bChapters}));
+    must(Math.abs(Number(finalM4bChapters[0].start_seconds)) <= 0.15 &&
+      Number(finalM4bChapters[1].start_seconds) > Number(finalM4bChapters[0].start_seconds) &&
+      Math.abs(Number(finalM4bChapters[1].start_seconds) - Number(finalM4bChapters[0].end_seconds)) <= 1.5,
+      "The embedded chapter markers are not ordered at contiguous chapter boundaries: " +
+        JSON.stringify(finalM4bChapters));
+    record("stage55_final_m4b_embedded_chapters", true,
+      "The backend read two actual embedded M4B chapter markers with titles and valid ordered start/end timing from the completed output file.");
+
+    window.go("player");
+    await waitFor("Stage 5.5 Audiobooks page activation", function () {
+      const page = document.querySelector("#player");
+      return Boolean(page && page.classList.contains("active"));
+    }, 15000);
+    let finishedBookButton = null;
+    await waitFor("completed M4B appears in Premium V2 Audiobooks library", function () {
+      finishedBookButton = Array.from(document.querySelectorAll("#player [data-play-project-folder]"))
+        .find(button => String(button.dataset.playProjectFolder || "") === String(config.full_generation_project_folder || ""));
+      return Boolean(finishedBookButton);
+    }, 20000);
+    finishedBookButton.click();
+    const finishedM4bAudio = await waitForRealPlayback(
+      "real completed M4B playback in Premium V2 Audiobooks",
+      config.full_generation_output_path
+    );
+    await waitFor("Audiobooks renders actual embedded chapter rows", function () {
+      const rows = Array.from(document.querySelectorAll("#player [data-audiobook-chapter-start]"));
+      return rows.length === 2 && rows.every(row => row.getAttribute("aria-disabled") !== "true");
+    }, 15000);
+    const embeddedChapterRows = Array.from(document.querySelectorAll("#player [data-audiobook-chapter-start]"));
+    const expectedSecondStart = Number(finalM4bChapters[1].start_seconds);
+    embeddedChapterRows[1].click();
+    await waitFor("Audiobooks chapter navigation seeks to second embedded chapter", function () {
+      return Number.isFinite(Number(finishedM4bAudio.currentTime)) &&
+        Math.abs(Number(finishedM4bAudio.currentTime) - expectedSecondStart) <= 1.25;
+    }, 10000);
+    finishedM4bAudio.pause();
+    await waitFor("Audiobooks stores project-scoped listening position", async function () {
+      const refreshed = await invoke("player.get_active", {
+        folder:String(config.full_generation_project_folder || "")
+      });
+      return Number(refreshed.playback_position_seconds || 0) >= expectedSecondStart - 0.15;
+    }, 15000);
+    record("stage55_audiobooks_real_playback_chapter_seek_and_position", true,
+      "The real finished M4B played in Premium V2, chapter navigation sought to its embedded second marker, and the owning project's playback position was persisted.");
+
+    window.go("dashboard");
+    await waitFor("Dashboard restored after Stage 5.5 Audiobooks acceptance", function () {
+      const page = document.querySelector("#dashboard");
+      return Boolean(page && page.classList.contains("active"));
+    }, 15000);
     await openProjectFromDashboard(config.project_folder, "Primary");
     await waitFor("Primary preview project restored after full-generation acceptance", async function () {
       const active = await invoke("project.get_active", {});

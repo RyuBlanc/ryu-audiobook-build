@@ -79,8 +79,13 @@ class Stage743OutputValidationTests(unittest.TestCase):
                     "title": "Stage 7.4.3 Test Book",
                     "author": "Ryu Test Author",
                     "narrator": "Local Test Voice",
+                    "publisher": "Ryu Test Press",
+                    "series": "Dragon Archive",
+                    "series_number": "3",
                     "language": "en",
+                    "year": "2026",
                     "genre": "Fantasy",
+                    "description": "Two chapter M4B metadata validation fixture",
                 },
                 bitrate=128,
             )
@@ -102,11 +107,29 @@ class Stage743OutputValidationTests(unittest.TestCase):
             report = (probe.stderr or "") + "\n" + (probe.stdout or "")
             self.assertIn("Stage 7.4.3 Test Book", report)
             self.assertIn("Ryu Test Author", report)
+            self.assertIn("Local Test Voice", report)
+            self.assertIn("Ryu Test Press", report)
+            self.assertIn("Dragon Archive", report)
+            self.assertIn("series_number : 3", report)
+            self.assertIn("language : en", report)
+            self.assertIn("date : 2026", report)
+            self.assertIn("genre : Fantasy", report)
+            self.assertIn("Two chapter M4B metadata validation fixture", report)
             self.assertIn("Opening Chapter", report)
             self.assertIn("Final Chapter", report)
             self.assertIn("Chapter #0:0", report)
             self.assertIn("Chapter #0:1", report)
             self.assertRegex(report, r"Video: mjpeg.*attached pic|attached pic.*Video: mjpeg")
+            chapter_ranges = re.findall(
+                r"Chapter #\\d+:\\d+:\\s*start\\s+([0-9.]+),\\s*end\\s+([0-9.]+)",
+                report,
+            )
+            self.assertEqual(len(chapter_ranges), 2, report)
+            parsed_ranges = [(float(start), float(end)) for start, end in chapter_ranges]
+            self.assertAlmostEqual(parsed_ranges[0][0], 0.0, delta=0.15)
+            self.assertGreater(parsed_ranges[0][1], parsed_ranges[0][0])
+            self.assertAlmostEqual(parsed_ranges[1][0], parsed_ranges[0][1], delta=1.5)
+            self.assertGreater(parsed_ranges[1][1], parsed_ranges[1][0])
 
             # FFmpeg must be able to decode the complete primary audio stream from the final packaged file.
             decode = subprocess.run(
