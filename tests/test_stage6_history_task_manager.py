@@ -131,3 +131,4 @@ class Stage6HistoryTaskManagerTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    unittest.main()
