@@ -275,7 +275,7 @@ def _ffmpeg_probe_report(path: Path) -> str:
         timeout=30,
         check=False,
     )
-    report = str(result.stderr or "") + "\\n" + str(result.stdout or "")
+    report = str(result.stderr or "") + "\n" + str(result.stdout or "")
     if not report.strip():
         raise RuntimeError(f"FFmpeg could not inspect the final audiobook: {path.name}")
     return report
@@ -290,7 +290,7 @@ def _validate_m4b_container(
 ) -> None:
     """Reject a playable audio file if its final M4B tags, chapters, or cover are incomplete."""
     report = _ffmpeg_probe_report(path)
-    chapter_start = re.search(r"(?im)^\\s*Chapter #", report)
+    chapter_start = re.search(r"(?im)^\s*Chapter #", report)
     global_section = report[:chapter_start.start()] if chapter_start else report
 
     title = _safe_title(metadata.get("title") or path.stem)
@@ -312,7 +312,7 @@ def _validate_m4b_container(
         if not expected:
             continue
         match = re.search(
-            rf"(?im)^\\s*{re.escape(key)}\\s*:\\s*(.*?)\\s*$",
+            rf"(?im)^\s*{re.escape(key)}\s*:\s*(.*?)\s*$",
             global_section,
         )
         actual = " ".join(match.group(1).split()) if match else ""
@@ -324,7 +324,7 @@ def _validate_m4b_container(
             )
 
     chapter_pattern = re.compile(
-        r"(?m)^\\s*Chapter #\\d+:(\\d+):\\s*start\\s+([0-9]+(?:\\.[0-9]+)?),\\s*end\\s+([0-9]+(?:\\.[0-9]+)?)"
+        r"(?m)^\s*Chapter #\d+:(\d+):\s*start\s+([0-9]+(?:\.[0-9]+)?),\s*end\s+([0-9]+(?:\.[0-9]+)?)"
     )
     matches = list(chapter_pattern.finditer(report))
     if len(matches) != len(chapter_titles):
@@ -337,7 +337,7 @@ def _validate_m4b_container(
     for index, match in enumerate(matches):
         block_end = matches[index + 1].start() if index + 1 < len(matches) else len(report)
         block = report[match.start():block_end]
-        title_match = re.search(r"(?im)^\\s*title\\s*:\\s*(.*?)\\s*$", block)
+        title_match = re.search(r"(?im)^\s*title\s*:\s*(.*?)\s*$", block)
         actual_title = " ".join(title_match.group(1).split()) if title_match else ""
         expected_title = " ".join(str(chapter_titles[index]).split())
         try:
@@ -364,7 +364,7 @@ def _validate_m4b_container(
 
     if cover is not None:
         if not re.search(
-            r"(?im)^\\s*Stream #\\d+:\\d+.*Video:.*\\(attached pic\\)",
+            r"(?im)^\s*Stream #\d+:\d+.*Video:.*\(attached pic\)",
             report,
         ):
             raise RuntimeError("The final M4B does not contain the required embedded attached cover image.")

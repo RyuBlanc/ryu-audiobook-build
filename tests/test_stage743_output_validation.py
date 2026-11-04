@@ -121,7 +121,7 @@ class Stage743OutputValidationTests(unittest.TestCase):
             self.assertIn("Chapter #0:1", report)
             self.assertRegex(report, r"Video: mjpeg.*attached pic|attached pic.*Video: mjpeg")
             chapter_ranges = re.findall(
-                r"Chapter #\\d+:\\d+:\\s*start\\s+([0-9.]+),\\s*end\\s+([0-9.]+)",
+                r"Chapter #\d+:\d+:\s*start\s+([0-9.]+),\s*end\s+([0-9.]+)",
                 report,
             )
             self.assertEqual(len(chapter_ranges), 2, report)
