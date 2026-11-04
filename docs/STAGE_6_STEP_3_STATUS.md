@@ -80,6 +80,8 @@ The first implementation changes will be driven by failing regression tests and 
 - `stage6_switching_book_clears_previous_chapter_selection`
 - `stage6_mini_player_shares_full_player_audio_session`
 - `stage6_chapter_keyboard_activation_starts_audio`
+- `stage6_chapter_continuous_playback_updates_active_row`
+- `stage6_chapter_space_activation_starts_audio`
 
 These are target markers for Step 3. They are not claimed as passed until the frozen Windows application emits them.
 

@@ -88,6 +88,8 @@ class Stage6AudiobookLibraryContractTests(unittest.TestCase):
             "stage6_switching_book_clears_previous_chapter_selection",
             "stage6_mini_player_shares_full_player_audio_session",
             "stage6_chapter_keyboard_activation_starts_audio",
+            "stage6_chapter_continuous_playback_updates_active_row",
+            "stage6_chapter_space_activation_starts_audio",
         ):
             self.assertIn(marker, self.packaged_js)
 

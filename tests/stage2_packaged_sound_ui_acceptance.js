@@ -2274,12 +2274,34 @@
     finishedM4bAudio.pause(); finishedM4bAudio.currentTime=Number(finalM4bChapters[0].start_seconds);
     await waitFor("chapter highlight follows seek",()=>stage6ActiveRow()===stage6ChapterRows[0]&&stage6Heading().includes(String(finalM4bChapters[0].title)),5000);
     record("stage6_chapter_playhead_highlight_tracks_boundaries",true,"Current chapter row and stage6Heading track embedded marker interval.");
+    const stage6FirstStart=Number(finalM4bChapters[0].start_seconds);
+    const stage6SecondStart=Number(finalM4bChapters[1].start_seconds);
+    const stage6ApproachGap=Math.min(0.8,Math.max(0.15,(stage6SecondStart-stage6FirstStart)/2));
+    finishedM4bAudio.currentTime=Math.max(stage6FirstStart,stage6SecondStart-stage6ApproachGap);
+    await waitFor("first chapter active before continuous boundary crossing",()=>stage6ActiveRow()===stage6ChapterRows[0],5000);
+    await finishedM4bAudio.play();
+    await waitFor("continuous playback crosses into next embedded chapter",()=>!finishedM4bAudio.paused&&
+      finishedM4bAudio.currentTime>=stage6SecondStart&&stage6ActiveRow()===stage6ChapterRows[1]&&
+      stage6Heading().includes(String(finalM4bChapters[1].title)),10000);
+    record("stage6_chapter_continuous_playback_updates_active_row",true,
+      "While real audio played across the embedded boundary, the active chapter row and heading moved to the next chapter.");
+    finishedM4bAudio.pause();
+
     stage6ChapterRows[1].dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true}));
     await waitFor("keyboard Enter selects and plays embedded chapter",()=>!finishedM4bAudio.paused&&
       Math.abs(finishedM4bAudio.currentTime-Number(finalM4bChapters[1].start_seconds))<1&&
       stage6ActiveRow()===stage6ChapterRows[1],8000);
     record("stage6_chapter_keyboard_activation_starts_audio",true,
       "Keyboard Enter starts actual audio at the selected embedded chapter marker.");
+    finishedM4bAudio.pause();
+    finishedM4bAudio.currentTime=Number(finalM4bChapters[0].start_seconds);
+    await waitFor("first chapter active before Space activation",()=>stage6ActiveRow()===stage6ChapterRows[0],5000);
+    stage6ChapterRows[1].dispatchEvent(new KeyboardEvent("keydown",{key:" ",bubbles:true}));
+    await waitFor("keyboard Space selects and plays embedded chapter",()=>!finishedM4bAudio.paused&&
+      Math.abs(finishedM4bAudio.currentTime-Number(finalM4bChapters[1].start_seconds))<1&&
+      stage6ActiveRow()===stage6ChapterRows[1],8000);
+    record("stage6_chapter_space_activation_starts_audio",true,
+      "Keyboard Space starts actual audio at the selected embedded chapter marker.");
     finishedM4bAudio.pause();
     stage6Controls[3].click();
     await waitFor("Next Chapter",()=>Math.abs(finishedM4bAudio.currentTime-Number(finalM4bChapters[1].start_seconds))<1,5000);
