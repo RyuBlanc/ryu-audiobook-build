@@ -273,3 +273,9 @@ Run #2289's Music Library, cue, BGM, and preview checks before the Production me
 **Next action:** verify the exact #2320 commit in the frozen Windows application. The acceptance must prove Open loads the correct M4B/MP3 derivative, project metadata and embedded chapter while remaining paused; Play must then start that same decoded audio. Reconfirm the prior green Stage 5.3 and Stage 6 checks, then continue the Inno Setup/HTML installer, SHA-256, logo, Defender and artifact-upload steps.
 
 **Current decision:** Stage 6 Step 3 remains IN PROGRESS until matching-head frozen Windows packaged acceptance passes. Stage 5.3 generation and preview acceptance passed in #2318; preserve that work and do not re-open or rewrite its implementation to solve this separate Open-card defect.
+
+## #2321 source gate passed — ready for matching frozen Windows checkpoint
+
+- The source run for commit `7b5723c9a7de5da610e87aa9c81351f4287235ec` passed dependency installation, frontend JavaScript syntax validation, isolated native Qt lifecycle verification and the full regression suite.
+- The tested source includes the load-only Open-card guard and `test_open_action_preserves_selected_book_during_metadata_load`.
+- This is the verified source base for the next Windows artifact checkpoint; retain all previously passing Stage 5.3 real-generation and Stage 6 player/mini-player acceptance.
