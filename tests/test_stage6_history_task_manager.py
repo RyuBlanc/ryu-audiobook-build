@@ -130,5 +130,12 @@ class Stage6HistoryTaskManagerTests(unittest.TestCase):
         self.assertIn("player.get_active", packaged)
 
 
+    def test_player_grid_fits_the_1280_and_1366_workspace_without_overflow(self) -> None:
+        html = (ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
+        self.assertIn(
+            "@media(min-width:1251px) and (max-width:1450px){.player-grid{grid-template-columns:minmax(220px,.9fr) minmax(320px,1.3fr) minmax(220px,.9fr)}}",
+            html,
+        )
+
 if __name__ == "__main__":
     unittest.main()

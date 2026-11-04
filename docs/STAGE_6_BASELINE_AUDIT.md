@@ -291,3 +291,8 @@ to 100%, 125%, 150% and 200% scaling. These results are browser viewport
 emulation in the packaged Windows application; they do not claim physical
 minimize/restore behaviour, mixed/extended monitor topology or OS-level DPI
 verification. Those require an actual Windows display session.
+
+
+## Step 8 responsive defect correction — 5 November 2026
+
+The first 41-viewport matrix exposed a fixed-width three-column player layout that could exceed the usable workspace at 1280×720 and 1366×768. The stylesheet now uses fluid 220/320/220px minimum columns between 1251px and 1450px viewport widths. The existing one-column rule at 1250px and below and the wide-desktop 330/400/330px layout remain unchanged. A source regression contract locks this correction; matching-head packaged viewport acceptance is still required.
