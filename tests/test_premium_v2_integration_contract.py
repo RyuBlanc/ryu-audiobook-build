@@ -908,8 +908,14 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("document.querySelector('#soundSourceFilter [data-source].active')", adapter)
         self.assertIn("box.innerHTML = jobs.map(j =>", adapter)
         self.assertIn("dataset.jobAction", adapter)
-        # Player transport controls intentionally use visible labels; bind them to the real Audio element.
-        self.assertIn("playerAudio.playbackRate = Number(audioLabel.replace('×',''))", adapter)
+        # Player transport controls intentionally use visible labels. The capture-phase
+        # speed handler must route through the shared persisted preference path.
+        player_start = adapter.index("if (button.closest('#player')) {")
+        player_end = adapter.index("if (button.id === 'backgroundJobsButton')", player_start)
+        player_handler = adapter[player_start:player_end]
+        self.assertIn("await applyPlayerRate(rate, true)", player_handler)
+        self.assertNotIn("playerAudio.playbackRate = Number(audioLabel.replace('×',''))", player_handler)
+        self.assertIn("return savePlayerPreferences({player_rate:rate})", adapter)
         self.assertIn("playerAudio.currentTime = Math.max(0, playerAudio.currentTime - 15)", adapter)
         self.assertIn("playerAudio.currentTime = Math.min(playerAudio.duration || Infinity, playerAudio.currentTime + 15)", adapter)
         self.assertIn("const lengthGroup = [...document.querySelectorAll('#voices .toolbar')]", adapter)
