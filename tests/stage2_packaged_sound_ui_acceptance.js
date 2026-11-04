@@ -2249,22 +2249,29 @@
     stage6Volume.value="37"; stage6Volume.dispatchEvent(new Event("input",{bubbles:true}));
     stage6Volume.dispatchEvent(new Event("change",{bubbles:true}));
     must(Math.abs(finishedM4bAudio.volume-0.37)<0.02,"Volume control did not update actual media.");
+    let stage6SavedPreferences=null;
+    await waitFor("player volume preference persists",async()=>{
+      const [settings,player]=await Promise.all([
+        invoke("settings.get",{}),
+        invoke("player.get_active",{folder:String(config.full_generation_project_folder||"")})
+      ]);
+      stage6SavedPreferences={settings,player};
+      return Math.abs(Number(settings.player_volume)-0.37)<0.02&&
+        Math.abs(Number(player.playback_volume)-0.37)<0.02;
+    },8000);
     const stage6Rate=stage6SpeedButtons.find(b=>Math.abs(Number(b.textContent.replace("×","").trim())-1.25)<0.01);
     must(stage6Rate,"No 1.25× speed option."); stage6Rate.click();
     must(Math.abs(finishedM4bAudio.playbackRate-1.25)<0.01&&stage6Rate.classList.contains("active"),"Rate not applied to real media.");
-    let stage6SavedPreferences=null;
-    await waitFor("player rate and volume preferences persist",async()=>{
+    await waitFor("player playback speed preference persists",async()=>{
       const [settings,player]=await Promise.all([
         invoke("settings.get",{}),
         invoke("player.get_active",{folder:String(config.full_generation_project_folder||"")})
       ]);
       stage6SavedPreferences={settings,player};
       return Math.abs(Number(settings.player_rate)-1.25)<0.01&&
-        Math.abs(Number(settings.player_volume)-0.37)<0.02&&
-        Math.abs(Number(player.playback_rate)-1.25)<0.01&&
-        Math.abs(Number(player.playback_volume)-0.37)<0.02;
-    },12000);
-    record("stage6_player_volume_and_rate_affect_audio",true,"Volume and playback stage6Rate modify actual Audio properties.");
+        Math.abs(Number(player.playback_rate)-1.25)<0.01;
+    },8000);
+    record("stage6_player_volume_and_rate_affect_audio",true,"Volume and playback speed modify actual audio and both preferences persist.");
     finishedM4bAudio.currentTime=5; stage6Controls[0].click();
     await waitFor("rewind clamps to start",()=>finishedM4bAudio.currentTime<=0.15,5000);
     finishedM4bAudio.currentTime=Math.max(0,stage6ActualDuration-2); stage6Controls[4].click();
