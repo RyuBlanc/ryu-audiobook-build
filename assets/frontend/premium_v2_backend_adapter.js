@@ -5908,7 +5908,7 @@
       // and error contents are updated in place below; rebuilding every row
       // when a worker first emits a message flashes the entire job panel.
       const signature = jobs.map(j => [
-        j.job_id, j.state, j.type, j.title, j.project_title, Boolean(j.recoverable), String(j.error?.code || '')
+        j.job_id, j.state, j.type, j.title, Boolean(j.recoverable), j.project_title, String(j.error?.code || '')
       ].join('\u001f')).join('\u001e');
       if (box.dataset.backendJobsSignature !== signature) {
         box.innerHTML = jobs.map(j => {
@@ -7756,7 +7756,7 @@
         const errorText = job.error?.message
           ? '<small class="muted" style="color:var(--danger)">Error: ' + esc(job.error.message) + '</small>' : '';
         row.className = 'history-row';
-        row.dataset.backendHistory = '1';
+        row.dataset.backendHistory='1';
         row.dataset.historyJob = id;
         row.innerHTML =
           '<div><b>' + esc(job.title || job.type || 'Background task') + '</b><br>' +

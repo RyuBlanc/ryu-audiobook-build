@@ -523,7 +523,10 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         history_end = host.index("def _project_rename(", history_start)
         history = host[history_start:history_end]
         self.assertIn("self._history.values()", history)
-        self.assertNotIn("self._jobs.values()", history)
+        self.assertIn("for current in self._jobs.values()", history)
+        self.assertIn("if not job_id or job_id in rows_by_id", history)
+        self.assertIn("rows_by_id[job_id] = dict(current)", history)
+        self.assertIn("A journaled terminal record always wins over its queue copy.", history)
         clear_start = host.index("def _job_clear_completed(")
         clear_end = host.index("def _player_get_active(", clear_start)
         clear = host[clear_start:clear_end]
