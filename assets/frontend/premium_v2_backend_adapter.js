@@ -4744,11 +4744,14 @@
           : 'Incomplete metadata — complete: ' + (missing.join(', ') || 'required project details') + '.');
       status.style.color = complete && !unsaved ? 'var(--green)' : 'var(--amber)';
     }
+    const audioActive = productionJobIsActive(productionJobSnapshots.full) ||
+      productionJobIsActive(productionJobSnapshots.preview);
     if (start) {
-      start.disabled = !complete || unsaved;
+      start.disabled = !complete || unsaved || audioActive;
       start.title = start.disabled
-        ? (unsaved ? 'Save or discard Input Project Details changes before generation.'
-          : 'Complete the missing required metadata before full generation.')
+        ? (audioActive ? 'Finish or cancel the active Production audio operation first.'
+          : (unsaved ? 'Save or discard Input Project Details changes before generation.'
+            : 'Complete the missing required metadata before full generation.'))
         : 'Generate the full audiobook using saved project configuration.';
     }
   }
@@ -4888,9 +4891,30 @@
         }
         persisted = true;
         metadataDialogDirty = false;
+        // Update the in-memory Production gate from the same authoritative
+        // save response before the asynchronous project refresh can run.
+        window.ryuPremiumActiveProject = {
+          ...(window.ryuPremiumActiveProject || {}),
+          folder: String(result.project_folder || metadataDialogProjectFolder),
+          title: String(result.title || ''),
+          author: String(result.author || ''),
+          publisher: String(result.publisher || ''),
+          series: String(result.series || ''),
+          series_name: String(result.series_name || result.series || ''),
+          series_volume: String(result.series_volume || ''),
+          language: String(result.language || ''),
+          year: String(result.year || ''),
+          genre: String(result.genre || ''),
+          narrator: String(result.narrator || ''),
+          voice_profile: String(result.narrator || ''),
+          cover_path: String(result.cover_path || ''),
+          metadata_complete: result.metadata_complete === true,
+          metadata_missing_fields: Array.isArray(result.metadata_missing_fields)
+            ? result.metadata_missing_fields.slice() : []
+        };
         setMetadataDialogStatus('Project details saved successfully.', 'ready');
         dialog.close();
-        renderProductionMetadataGate(window.ryuPremiumActiveProject || null);
+        renderProductionMetadataGate(window.ryuPremiumActiveProject);
       } catch (error) {
         metadataDialogDirty = true;
         setMetadataDialogStatus('Save failed: ' + (error?.message || String(error)), 'error');
@@ -5479,8 +5503,12 @@
     const fullStart = $('startGenerate');
     const previewStart = $('previewGenerate');
     const anyAudioActive = fullActive || previewActive;
+    const metadataComplete = project?.metadata_complete === true && !metadataDialogDirty;
     syncProductionPreviewChapterSelector();
-    if (fullStart) fullStart.disabled = anyAudioActive;
+    // Job-state refreshes must never overwrite the required metadata gate.
+    if (fullStart) fullStart.disabled = anyAudioActive || !metadataComplete;
+    // Preview remains available when metadata is incomplete; only active audio
+    // work prevents a second full/preview operation.
     if (previewStart) previewStart.disabled = anyAudioActive;
     syncProductionPreviewControls();
   }

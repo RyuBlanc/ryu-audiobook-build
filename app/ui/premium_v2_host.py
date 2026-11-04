@@ -1278,11 +1278,23 @@ class PremiumV2Bridge(QObject):
                 "Project metadata could not be saved. The previous project details were restored."
             ) from save_error
         project.title = title
+        missing_metadata = missing_required_metadata_fields(title, persisted_state, narrator_profile)
         return {
             "saved": True,
             "project_folder": str(project.folder.resolve()),
             "title": title,
+            "author": str(persisted_state.get("author") or ""),
+            "publisher": str(persisted_state.get("publisher") or ""),
+            "series": str(persisted_state.get("series") or ""),
+            "series_name": str(persisted_state.get("series_name") or ""),
+            "series_volume": str(persisted_state.get("series_volume") or ""),
+            "language": str(persisted_state.get("language") or ""),
+            "year": str(persisted_state.get("year") or ""),
+            "genre": str(persisted_state.get("genre") or ""),
+            "narrator": str(persisted_state.get("narrator") or ""),
             "cover_path": str(cover_path) if cover_path else "",
+            "metadata_complete": not missing_metadata,
+            "metadata_missing_fields": missing_metadata,
         }
 
     def _active_project(self):

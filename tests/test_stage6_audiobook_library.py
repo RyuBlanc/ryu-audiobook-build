@@ -178,5 +178,31 @@ class Stage6AudiobookLibraryContractTests(unittest.TestCase):
         self.assertIn("current.play().catch", self.adapter)
         self.assertIn("current.pause();", self.adapter)
 
+    def test_production_generation_gate_combines_metadata_and_active_jobs(self):
+        gate_start = self.adapter.index("function renderProductionMetadataGate(")
+        gate_end = self.adapter.index("function populateMetadataHistory(", gate_start)
+        gate = self.adapter[gate_start:gate_end]
+        self.assertIn("start.disabled = !complete || unsaved || audioActive;", gate)
+
+        generation_start = self.adapter.index("function renderProductionGeneration(")
+        generation_end = self.adapter.index("async function refreshChapterBgm(", generation_start)
+        generation = self.adapter[generation_start:generation_end]
+        self.assertIn("const metadataComplete = project?.metadata_complete === true && !metadataDialogDirty;", generation)
+        self.assertIn("fullStart.disabled = anyAudioActive || !metadataComplete;", generation)
+        self.assertIn("previewStart.disabled = anyAudioActive;", generation)
+
+        save_start = self.adapter.index("project.metadata.save")
+        save_end = self.adapter.index("if (persisted)", save_start)
+        save_handler = self.adapter[save_start:save_end]
+        self.assertIn("metadata_complete: result.metadata_complete === true", save_handler)
+        self.assertIn("metadata_missing_fields: Array.isArray(result.metadata_missing_fields)", save_handler)
+
+        host_start = self.host.index("def _project_metadata_save(")
+        host_end = self.host.index("def _active_project(", host_start)
+        save_method = self.host[host_start:host_end]
+        self.assertIn("missing_metadata = missing_required_metadata_fields(title, persisted_state, narrator_profile)", save_method)
+        self.assertIn('"metadata_complete": not missing_metadata', save_method)
+        self.assertIn('"metadata_missing_fields": missing_metadata', save_method)
+
 if __name__ == "__main__":
     unittest.main()

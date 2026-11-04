@@ -151,3 +151,12 @@ The original M4B, its embedded chapter table, and its browser-compatible playbac
 **Next action:** run one artifact checkpoint against the current d908f8f... source. Wait for that run to complete, inspect every failed step and packaged acceptance report, and fix any actual defect before creating another run. Do not stack checkpoints.
 
 **Current decision:** Step 3 remains IN PROGRESS. Source regression is green (1,157 tests); final frozen Windows packaged acceptance and release artifact checks remain pending.
+## #2289 packaged failure review — Production metadata gate — 4 November 2026
+
+Run #2289 passed 1,157 regression tests, the live HTTP Audiobook AI smoke, frozen application verification, and bundled voice/critical-module checks. The packaged UI runner then failed in the Production metadata acceptance before reaching the later Step 3 controls.
+
+**Root cause:** renderProductionMetadataGate correctly disabled full generation when Publisher was missing, but renderProductionGeneration later overwrote the button state using only whether an audio job was active. The metadata-save response also omitted metadata_complete and metadata_missing_fields, forcing the UI to wait for an asynchronous project refresh before updating its in-memory gate.
+
+**Correction:** the save bridge now returns the persisted metadata fields plus the authoritative completion/missing-field state; the adapter updates the active project immediately from that response. Both the metadata renderer and generation renderer now combine metadata completeness, unsaved metadata state, and active audio jobs for full generation. Preview remains enabled when metadata is incomplete and no audio operation is active.
+
+Run #2289's Music Library, cue, BGM, and preview checks before the Production metadata assertion passed. The six-second cue import exception in the log is the expected negative test. Step 3 remains IN PROGRESS until a subsequent single artifact-checkpoint reaches and passes the player acceptance markers and release-artifact checks.
