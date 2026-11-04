@@ -337,6 +337,87 @@
       record("application_restart_music_library_persistence", true, "All imported Music Library assets and categories remained available after a new frozen-app process.");
       record("application_restart_chapter_bgm_persistence", true, "Strategy, default preference, assignments, No BGM, offsets, end policies and chapter volume survived restart.");
       record("application_restart_mix_and_cue_persistence", true, "Narration/BGM/cue levels and all three cue slots survived restart.");
+
+      // This process must discover the paused job left by the previous frozen
+      // app process. Durable-job startup reconciliation marks it interrupted;
+      // Recover must then pass through the actual Background Jobs UI/native bridge.
+      const durableJobsAfterRestart = await invoke("job.list", {include_hidden:true});
+      const interruptedSourceJob = Array.isArray(durableJobsAfterRestart)
+        ? durableJobsAfterRestart.find(item =>
+            item.type === "audiobook-generation" &&
+            String(item.project_folder || "") === String(config.recovery_project_folder || "") &&
+            String(item.state || "").toLowerCase() === "failed" &&
+            item.recoverable === true &&
+            String(item.error?.code || "").toLowerCase() === "interrupted")
+        : null;
+      must(interruptedSourceJob && interruptedSourceJob.job_id,
+        "The second frozen-app process did not reconcile the saved paused generation as an interrupted recoverable job: " +
+          JSON.stringify(interruptedSourceJob || durableJobsAfterRestart));
+      const recoverySourceJobId = String(interruptedSourceJob.job_id);
+      const jobsButton = document.querySelector("#backgroundJobsButton");
+      const jobsModal = document.querySelector("#backgroundJobsModal");
+      must(jobsButton && jobsModal, "Background Jobs is unavailable for restart recovery acceptance.");
+      if (!jobsModal.classList.contains("show")) jobsButton.click();
+      const failedJobsFilter = jobsModal.querySelector('[data-job-filter="failed"]');
+      must(failedJobsFilter, "Background Jobs failed filter is unavailable after application restart.");
+      failedJobsFilter.click();
+      const sourceRowSelector = '[data-backend-job="' + recoverySourceJobId + '"]';
+      await waitFor("interrupted generation appears in Background Jobs", function () {
+        return Boolean(document.querySelector(sourceRowSelector));
+      }, 20000);
+      await waitFor("interrupted generation exposes Recover", function () {
+        const row = document.querySelector(sourceRowSelector);
+        return Boolean(row && row.querySelector('[data-job-action="recover"]'));
+      }, 20000);
+      document.querySelector(sourceRowSelector).querySelector('[data-job-action="recover"]').click();
+
+      let recoveredJobId = "";
+      await waitFor("native Recover creates a linked generation job", async function () {
+        const jobs = await invoke("job.list", {include_hidden:true});
+        const row = Array.isArray(jobs) ? jobs.find(item =>
+          item.type === "audiobook-generation" &&
+          String(item.project_folder || "") === String(config.recovery_project_folder || "") &&
+          String(item.recovery_of_job_id || "") === recoverySourceJobId &&
+          Boolean(item.job_id)) : null;
+        if (!row) return false;
+        recoveredJobId = String(row.job_id);
+        return true;
+      }, 30000);
+      let recoveredJob = null;
+      await waitFor("recovered real audiobook generation completes", async function () {
+        const jobs = await invoke("job.list", {include_hidden:true});
+        recoveredJob = Array.isArray(jobs)
+          ? jobs.find(item => String(item.job_id || "") === recoveredJobId) : null;
+        if (!recoveredJob) return false;
+        const state = String(recoveredJob.state || "").toLowerCase();
+        if (state === "failed" || state === "cancelled") {
+          throw new Error("Real restart recovery ended " + state + ": " +
+            String(recoveredJob.error?.message || recoveredJob.message || ""));
+        }
+        return state === "completed";
+      }, 360000);
+
+      const recoveredHistory = await invoke("history.list", {});
+      const recoveredHistoryRow = Array.isArray(recoveredHistory)
+        ? recoveredHistory.find(item => String(item.job_id || "") === recoveredJobId) : null;
+      await openProjectFromDashboard(config.recovery_project_folder, "Stage 5.4 recovered project");
+      const recoveredProject = await invoke("project.get_active", {});
+      const normalizedRecoveryOutput = String(config.recovery_output_path || "").replace(/\\/g, "/").toLowerCase();
+      must(String(recoveredJob.recovery_of_job_id || "") === recoverySourceJobId &&
+        String(recoveredJob.state || "").toLowerCase() === "completed" &&
+        String(recoveredJob.output_path || "").replace(/\\/g, "/").toLowerCase() === normalizedRecoveryOutput,
+        "The recovered job did not complete with the original interrupted job as its recovery parent.");
+      must(recoveredHistoryRow && recoveredHistoryRow.state === "completed" &&
+        String(recoveredHistoryRow.project_folder || "") === String(config.recovery_project_folder || "") &&
+        String(recoveredHistoryRow.output_path || "").replace(/\\/g, "/").toLowerCase() === normalizedRecoveryOutput,
+        "History does not match the recovered generation job's project and output ownership.");
+      must(String(recoveredProject.folder || "") === String(config.recovery_project_folder || "") &&
+        recoveredProject.completed === true &&
+        String(recoveredProject.status || "").toLowerCase() === "completed" &&
+        String(recoveredProject.output_path || "").replace(/\\/g, "/").toLowerCase() === normalizedRecoveryOutput,
+        "The recovered M4B is not attached to the original recovered project.");
+      record("stage54_real_restart_recovery", true,
+        "A real paused job survived process termination as interrupted, was recovered through the installed Background Jobs button/native bridge, reused its project checkpoints, and completed with the same project/History/output identity.");
       publish("passed");
       return;
     }
@@ -1993,6 +2074,216 @@
     }, 20000);
 
     await runStage53JobUiAcceptance();
+
+    // Stage 5.4 installed-app job controls: use a real saved project and the
+    // actual Background Jobs buttons. No fake job.list or command interception
+    // is enabled in this portion of the acceptance.
+    await openProjectFromDashboard(config.control_project_folder, "Stage 5.4 job controls");
+    await waitFor("Stage 5.4 job-control project activation", async function () {
+      const active = await invoke("project.get_active", {});
+      return String(active.folder || "") === String(config.control_project_folder || "");
+    }, 20000);
+    const selectedControlNarrator = await invoke("voice.select", {
+      profile_name:narratorProfileName, backend:"automatic"
+    });
+    must(selectedControlNarrator && selectedControlNarrator.saved === true &&
+      String(selectedControlNarrator.name || "") === narratorProfileName,
+      "The Stage 5.4 job-control project could not persist the saved Offline Neural narrator.");
+    window.go("generate");
+    await waitFor("Stage 5.4 Production job-control page", function () {
+      return document.querySelector("#generate")?.classList.contains("active") === true &&
+        Boolean(document.querySelector("#startGenerate"));
+    }, 20000);
+    await waitFor("Stage 5.4 job-control metadata gate", function () {
+      const button = document.querySelector("#startGenerate");
+      return Boolean(button && !button.disabled);
+    }, 20000);
+
+    const jobsBeforeControlGeneration = await invoke("job.list", {include_hidden:true});
+    const previousControlIds = new Set((Array.isArray(jobsBeforeControlGeneration) ? jobsBeforeControlGeneration : [])
+      .filter(job => job.type === "audiobook-generation" &&
+        String(job.project_folder || "") === String(config.control_project_folder || ""))
+      .map(job => String(job.job_id || "")));
+    document.querySelector("#startGenerate").click();
+    let controlJobId = "";
+    const readJob = async jobId => {
+      const rows = await invoke("job.list", {include_hidden:true});
+      return Array.isArray(rows) ? rows.find(item => String(item.job_id || "") === String(jobId || "")) : null;
+    };
+    await waitFor("real Stage 5.4 control generation start", async function () {
+      const rows = await invoke("job.list", {include_hidden:true});
+      const job = Array.isArray(rows) ? rows.find(item =>
+        item.type === "audiobook-generation" &&
+        String(item.project_folder || "") === String(config.control_project_folder || "") &&
+        !previousControlIds.has(String(item.job_id || "")) &&
+        Boolean(item.job_id)) : null;
+      if (!job) return false;
+      controlJobId = String(job.job_id);
+      return true;
+    }, 30000);
+
+    const jobsButton = document.querySelector("#backgroundJobsButton");
+    const jobsModal = document.querySelector("#backgroundJobsModal");
+    must(jobsButton && jobsModal, "Installed Background Jobs controls are unavailable.");
+    if (!jobsModal.classList.contains("show")) jobsButton.click();
+    const activeJobsFilter = jobsModal.querySelector('[data-job-filter="active"]');
+    if (activeJobsFilter) activeJobsFilter.click();
+    const controlRowSelector = '[data-backend-job="' + controlJobId + '"]';
+    await waitFor("real control job appears in Background Jobs", function () {
+      return Boolean(document.querySelector(controlRowSelector));
+    }, 15000);
+    await waitFor("real control job exposes Pause", async function () {
+      const job = await readJob(controlJobId);
+      const row = document.querySelector(controlRowSelector);
+      return Boolean(job && job.state === "running" && row &&
+        row.querySelector('[data-job-action="pause"]'));
+    }, 90000);
+    document.querySelector(controlRowSelector).querySelector('[data-job-action="pause"]').click();
+    await waitFor("native GenerationManager reaches persisted paused state", async function () {
+      const job = await readJob(controlJobId);
+      return Boolean(job && job.state === "paused");
+    }, 120000);
+    await waitFor("Background Jobs exposes Resume for the paused native job", function () {
+      const row = document.querySelector(controlRowSelector);
+      return Boolean(row && row.querySelector('[data-job-action="resume"]'));
+    }, 20000);
+    document.querySelector(controlRowSelector).querySelector('[data-job-action="resume"]').click();
+    await waitFor("native GenerationManager resumes the real job", async function () {
+      const job = await readJob(controlJobId);
+      return Boolean(job && job.state === "running");
+    }, 20000);
+    await waitFor("Background Jobs exposes Cancel after Resume", function () {
+      const row = document.querySelector(controlRowSelector);
+      return Boolean(row && row.querySelector('[data-job-action="cancel"]'));
+    }, 15000);
+    document.querySelector(controlRowSelector).querySelector('[data-job-action="cancel"]').click();
+    await waitFor("native GenerationManager reaches cancelled terminal state", async function () {
+      const job = await readJob(controlJobId);
+      return Boolean(job && job.state === "cancelled");
+    }, 90000);
+    const cancelledControlJob = await readJob(controlJobId);
+    must(cancelledControlJob && cancelledControlJob.state === "cancelled",
+      "The installed Cancel button did not cancel the actual full-generation job.");
+    record("stage54_real_generation_pause_resume_cancel", true,
+      "The installed Background Jobs Pause, Resume and Cancel buttons controlled a real saved-project GenerationManager job at persisted chunk checkpoints.");
+
+    const failedJobsFilter = jobsModal.querySelector('[data-job-filter="failed"]');
+    must(failedJobsFilter, "Background Jobs failed/cancelled filter is missing.");
+    failedJobsFilter.click();
+    await waitFor("cancelled real generation job exposes Retry", function () {
+      const row = document.querySelector(controlRowSelector);
+      return Boolean(row && row.querySelector('[data-job-action="retry"]'));
+    }, 20000);
+    document.querySelector(controlRowSelector).querySelector('[data-job-action="retry"]').click();
+    let retriedControlJobId = "";
+    await waitFor("native Retry creates a linked generation attempt", async function () {
+      const rows = await invoke("job.list", {include_hidden:true});
+      const job = Array.isArray(rows) ? rows.find(item =>
+        item.type === "audiobook-generation" &&
+        String(item.project_folder || "") === String(config.control_project_folder || "") &&
+        String(item.retry_of_job_id || "") === controlJobId &&
+        Boolean(item.job_id)) : null;
+      if (!job) return false;
+      retriedControlJobId = String(job.job_id);
+      return true;
+    }, 30000);
+    let retriedControlJob = null;
+    await waitFor("real retried generation completes", async function () {
+      retriedControlJob = await readJob(retriedControlJobId);
+      if (!retriedControlJob) return false;
+      const state = String(retriedControlJob.state || "").toLowerCase();
+      if (state === "failed" || state === "cancelled") {
+        throw new Error("The real generation Retry ended " + state + ": " +
+          String(retriedControlJob.error?.message || retriedControlJob.message || ""));
+      }
+      return state === "completed";
+    }, 360000);
+    const controlHistory = await invoke("history.list", {});
+    const controlHistoryRow = Array.isArray(controlHistory)
+      ? controlHistory.find(item => String(item.job_id || "") === retriedControlJobId) : null;
+    const controlProjectSummary = await invoke("project.get_active", {});
+    const normalizeControlOutput = value => String(value || "").replace(/\\/g, "/").toLowerCase();
+    const expectedControlOutput = normalizeControlOutput(config.control_output_path);
+    must(retriedControlJob.state === "completed" &&
+      String(retriedControlJob.retry_of_job_id || "") === controlJobId &&
+      normalizeControlOutput(retriedControlJob.output_path) === expectedControlOutput,
+      "The completed retry is not linked to the cancelled source job and expected M4B output.");
+    must(controlHistoryRow && controlHistoryRow.state === "completed" &&
+      String(controlHistoryRow.project_folder || "") === String(config.control_project_folder || "") &&
+      normalizeControlOutput(controlHistoryRow.output_path) === expectedControlOutput,
+      "History did not preserve the retried job's original project/output identity.");
+    must(String(controlProjectSummary.folder || "") === String(config.control_project_folder || "") &&
+      controlProjectSummary.completed === true &&
+      normalizeControlOutput(controlProjectSummary.output_path) === expectedControlOutput,
+      "The retried output is not attached to the original project summary.");
+    record("stage54_real_generation_retry_and_history_ownership", true,
+      "The installed Retry action restarted the original project from compatible checkpoints and unified the new job, History and output ownership.");
+
+    // Now leave a real job paused at a persisted chunk checkpoint. The runner
+    // exits this frozen app process immediately after this marker; the next
+    // process must classify the durable paused job as interrupted and recover it.
+    await openProjectFromDashboard(config.recovery_project_folder, "Stage 5.4 restart recovery");
+    await waitFor("Stage 5.4 restart-recovery project activation", async function () {
+      const active = await invoke("project.get_active", {});
+      return String(active.folder || "") === String(config.recovery_project_folder || "");
+    }, 20000);
+    const selectedRecoveryNarrator = await invoke("voice.select", {
+      profile_name:narratorProfileName, backend:"automatic"
+    });
+    must(selectedRecoveryNarrator && selectedRecoveryNarrator.saved === true &&
+      String(selectedRecoveryNarrator.name || "") === narratorProfileName,
+      "The restart-recovery project could not persist the saved Offline Neural narrator.");
+    window.go("generate");
+    await waitFor("Stage 5.4 restart-recovery Production page", function () {
+      return document.querySelector("#generate")?.classList.contains("active") === true &&
+        Boolean(document.querySelector("#startGenerate"));
+    }, 20000);
+    await waitFor("Stage 5.4 restart-recovery metadata gate", function () {
+      const button = document.querySelector("#startGenerate");
+      return Boolean(button && !button.disabled);
+    }, 20000);
+    const jobsBeforeRecoveryStage = await invoke("job.list", {include_hidden:true});
+    const previousRecoveryIds = new Set((Array.isArray(jobsBeforeRecoveryStage) ? jobsBeforeRecoveryStage : [])
+      .filter(job => job.type === "audiobook-generation" &&
+        String(job.project_folder || "") === String(config.recovery_project_folder || ""))
+      .map(job => String(job.job_id || "")));
+    document.querySelector("#startGenerate").click();
+    let interruptedSourceJobId = "";
+    await waitFor("real restart-recovery generation start", async function () {
+      const rows = await invoke("job.list", {include_hidden:true});
+      const job = Array.isArray(rows) ? rows.find(item =>
+        item.type === "audiobook-generation" &&
+        String(item.project_folder || "") === String(config.recovery_project_folder || "") &&
+        !previousRecoveryIds.has(String(item.job_id || "")) &&
+        Boolean(item.job_id)) : null;
+      if (!job) return false;
+      interruptedSourceJobId = String(job.job_id);
+      return true;
+    }, 30000);
+    if (!jobsModal.classList.contains("show")) jobsButton.click();
+    const activeFilterForRecovery = jobsModal.querySelector('[data-job-filter="active"]');
+    if (activeFilterForRecovery) activeFilterForRecovery.click();
+    const recoveryRowSelector = '[data-backend-job="' + interruptedSourceJobId + '"]';
+    await waitFor("restart-recovery job appears as a real active row", function () {
+      return Boolean(document.querySelector(recoveryRowSelector));
+    }, 15000);
+    await waitFor("restart-recovery job exposes safe Pause", function () {
+      const row = document.querySelector(recoveryRowSelector);
+      return Boolean(row && row.querySelector('[data-job-action="pause"]'));
+    }, 60000);
+    document.querySelector(recoveryRowSelector).querySelector('[data-job-action="pause"]').click();
+    await waitFor("restart-recovery generation pauses at a saved chunk", async function () {
+      const job = await readJob(interruptedSourceJobId);
+      return Boolean(job && job.state === "paused");
+    }, 120000);
+    jobsModal.classList.remove("show");
+    await openProjectFromDashboard(config.project_folder, "Primary");
+    await waitFor("Primary project restored before forced app restart", async function () {
+      const active = await invoke("project.get_active", {});
+      return String(active.folder || "") === String(config.project_folder || "");
+    }, 20000);
+    record("stage54_real_restart_interruption_staged", true,
+      "A real saved-project GenerationManager job was paused at a committed chunk checkpoint and left durable for the next frozen-app process to recover.");
     publish("passed");
   } catch (error) {
     errors.push(String(error && error.stack || error));

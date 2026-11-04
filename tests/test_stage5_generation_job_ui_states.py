@@ -47,6 +47,12 @@ class Stage54GenerationJobUiStateTests(unittest.TestCase):
         self.assertIn('command === "job.list"', self.packaged)
         self.assertIn('["job.pause","job.resume","job.cancel","job.retry","job.recover"]', self.packaged)
         self.assertIn("stage54_background_job_retry_recovery_controls", self.packaged)
+        self.assertIn("stage54_real_generation_pause_resume_cancel", self.packaged)
+        self.assertIn("stage54_real_generation_retry_and_history_ownership", self.packaged)
+        self.assertIn("stage54_real_restart_interruption_staged", self.packaged)
+        self.assertIn("stage54_real_restart_recovery", self.packaged)
+        self.assertIn("recovery_of_job_id", self.packaged)
+        self.assertIn("data-job-action=\"recover\"", self.packaged)
 
     def test_production_preview_monitor_acceptance_reopens_page_before_render_assertion(self):
         preview_start = self.packaged.index("real Production Preview job start")
@@ -82,6 +88,8 @@ class Stage54GenerationJobUiStateTests(unittest.TestCase):
         self.assertIn("stage54_packaged_real_multi_chapter_full_generation", self.packaged)
         self.assertIn("chapter_id", packaged_runner)
         self.assertIn('"skip_for_generation": True', packaged_runner)
+        self.assertIn("control_project_folder", packaged_runner)
+        self.assertIn("recovery_project_folder", packaged_runner)
         self.assertIn('document.querySelector("#startGenerate").click()', self.packaged)
         self.assertIn('invoke("history.list", {})', self.packaged)
         self.assertIn('historyGenerationJob.project_folder', self.packaged)

@@ -508,6 +508,72 @@ def _run(args: argparse.Namespace) -> int:
         "characters": [],
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    def create_generation_project(folder: Path, title: str, output: Path, chapter_id: str, chapter_text: str) -> None:
+        folder.mkdir(parents=True, exist_ok=False)
+        cover = folder / "assets" / "cover.png"
+        write_png_fixture(cover)
+        (folder / "project.json").write_text(json.dumps({
+            "title": title, "source_file": None,
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+        (folder / "chapters.json").write_text(json.dumps([{
+            "number": 1,
+            "title": "Long Stage 5.4 Job-Control Chapter",
+            "chapter_id": chapter_id,
+            "text": chapter_text,
+            "dialogue_assignments": [],
+            "review_status": "complete",
+            "skip_for_generation": False,
+        }], ensure_ascii=False, indent=2), encoding="utf-8")
+        (folder / "state.json").write_text(json.dumps({
+            "status": "new",
+            "author": f"Stage 5.4 Author {token}",
+            "publisher": f"Stage 5.4 Press {token}",
+            "series": f"Stage 5.4 Series {token}",
+            "series_volume": "1",
+            "language": "en-US",
+            "year": "2026",
+            "genre": "Acceptance",
+            "cover_path": str(cover.resolve()),
+            "voice_profile": narrator_profile_name,
+            "narrator": narrator_profile_name,
+            "narrator_profile_source": "project_override",
+            "backend": "automatic",
+            "audio_bitrate": 128,
+            "output_path": str(output.resolve()),
+            "background_audio_mode": "off",
+            "background_audio_enabled": False,
+            "background_audio_path": "",
+            "background_audio_preferred_path": "",
+            "chapter_bgm_strategy": "same",
+            "chapter_bgm_overrides": {},
+            "sound_cues": {"opening": None, "chapter": None, "closing": None},
+            "characters": [],
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    long_job_sentence = (
+        "This Stage 5.4 installed-app acceptance sentence forces real chunked narration. "
+        "The saved narrator must synthesize audio, persist a checkpoint, and keep the job cancellable. "
+    )
+    long_job_text = long_job_sentence * 34
+    control_project_folder = app_root / "Library" / f"Stage 5.4 Job Controls {token}"
+    control_output_path = temp_root / "stage5.4-job-control-retry.m4b"
+    create_generation_project(
+        control_project_folder,
+        f"Stage 5.4 Job Controls {token}",
+        control_output_path,
+        f"stage54-{token}-control-chapter",
+        long_job_text,
+    )
+    recovery_project_folder = app_root / "Library" / f"Stage 5.4 Restart Recovery {token}"
+    recovery_output_path = temp_root / "stage5.4-restart-recovery.m4b"
+    create_generation_project(
+        recovery_project_folder,
+        f"Stage 5.4 Restart Recovery {token}",
+        recovery_output_path,
+        f"stage54-{token}-recovery-chapter",
+        long_job_text,
+    )
+
     previous_active = get_active_project_setting()
     set_active_project_setting(str(project_folder.resolve()))
 
@@ -547,6 +613,10 @@ def _run(args: argparse.Namespace) -> int:
         "secondary_project_folder": str(secondary_project_folder.resolve()),
         "full_generation_project_folder": str(full_generation_project_folder.resolve()),
         "full_generation_output_path": str(full_generation_output_path.resolve()),
+        "control_project_folder": str(control_project_folder.resolve()),
+        "control_output_path": str(control_output_path.resolve()),
+        "recovery_project_folder": str(recovery_project_folder.resolve()),
+        "recovery_output_path": str(recovery_output_path.resolve()),
         "original_project_title": project_title,
         "metadata": metadata_expected,
         "narrator_profile_name": narrator_profile_name,
@@ -614,8 +684,15 @@ def _run(args: argparse.Namespace) -> int:
                 )
         if "stage5_production_preview_real_save_as" not in (first_result.get("checks") or {}):
             raise AssertionError("The packaged UI did not report completion of the Production Preview Save As action.")
-        if "stage54_packaged_real_multi_chapter_full_generation" not in (first_result.get("checks") or {}):
-            raise AssertionError("The packaged UI did not complete real Stage 5.4 multi-chapter full-generation acceptance.")
+        first_checks = first_result.get("checks") or {}
+        for required_check in (
+            "stage54_packaged_real_multi_chapter_full_generation",
+            "stage54_real_generation_pause_resume_cancel",
+            "stage54_real_generation_retry_and_history_ownership",
+            "stage54_real_restart_interruption_staged",
+        ):
+            if required_check not in first_checks:
+                raise AssertionError("The packaged app did not complete required Stage 5.4 installed-app acceptance: " + required_check)
         full_generation_output = Path(str(json.loads(config.read_text(encoding="utf-8")).get("full_generation_output_path") or ""))
         if not full_generation_output.is_file() or full_generation_output.stat().st_size < 1024:
             raise AssertionError(
@@ -680,6 +757,18 @@ def _run(args: argparse.Namespace) -> int:
             )
         if process.returncode != 0:
             raise RuntimeError(f"Restarted packaged app returned exit code {process.returncode} after reporting success.")
+        restart_checks = restart_result.get("checks") or {}
+        if "stage54_real_restart_recovery" not in restart_checks:
+            raise AssertionError("The restarted packaged app did not complete real interrupted-generation recovery.")
+        recovery_output_path = Path(str(json.loads(config.read_text(encoding="utf-8")).get("recovery_output_path") or ""))
+        if not recovery_output_path.is_file() or recovery_output_path.stat().st_size < 1024:
+            raise AssertionError("Real restart recovery did not create a non-empty M4B output: " + str(recovery_output_path))
+        with recovery_output_path.open("rb") as recovered_book:
+            recovered_book.seek(4)
+            if recovered_book.read(4) != b"ftyp":
+                raise AssertionError("The recovered audiobook output is not a valid ISO Base Media/M4B file: " + str(recovery_output_path))
+        print("PACKAGED STAGE 5.4 REAL INTERRUPTED-JOB RECOVERY VERIFIED: " +
+            json.dumps({"path":str(recovery_output_path),"bytes":recovery_output_path.stat().st_size}, ensure_ascii=False))
 
         combined_checks = dict(first_result.get("checks") or {})
         combined_checks.update(restart_result.get("checks") or {})
@@ -704,6 +793,8 @@ def _run(args: argparse.Namespace) -> int:
         shutil.rmtree(project_folder, ignore_errors=True)
         shutil.rmtree(secondary_project_folder, ignore_errors=True)
         shutil.rmtree(full_generation_project_folder, ignore_errors=True)
+        shutil.rmtree(control_project_folder, ignore_errors=True)
+        shutil.rmtree(recovery_project_folder, ignore_errors=True)
         shutil.rmtree(temp_root, ignore_errors=True)
 
 
