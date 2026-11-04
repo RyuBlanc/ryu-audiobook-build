@@ -2336,23 +2336,60 @@
       .filter(job => job.type === "audiobook-generation" &&
         String(job.project_folder || "") === String(config.control_project_folder || ""))
       .map(job => String(job.job_id || "")));
-    document.querySelector("#startGenerate").click();
+    const controlGenerateButton = document.querySelector("#startGenerate");
+    const controlPreflight = {
+      project: await invoke("project.get_active", {}),
+      narrator: await invoke("voice.select.get", {}).catch(error => ({error:String(error)})),
+      readiness: await invoke("production.readiness", {}).catch(error => ({error:String(error)})),
+      button: controlGenerateButton ? {
+        disabled: controlGenerateButton.disabled,
+        title: controlGenerateButton.title,
+        text: controlGenerateButton.textContent.trim(),
+        ariaDisabled: controlGenerateButton.getAttribute("aria-disabled")
+      } : null
+    };
+    let controlStartResponse = null;
+    if (!controlGenerateButton) throw new Error("Stage 5.4 Start button disappeared before the real generation click.");
+    controlGenerateButton.click();
     let controlJobId = "";
     const readJob = async jobId => {
       const rows = await invoke("job.list", {include_hidden:true});
       return Array.isArray(rows) ? rows.find(item => String(item.job_id || "") === String(jobId || "")) : null;
     };
-    await waitFor("real Stage 5.4 control generation start", async function () {
-      const rows = await invoke("job.list", {include_hidden:true});
-      const job = Array.isArray(rows) ? rows.find(item =>
-        item.type === "audiobook-generation" &&
-        String(item.project_folder || "") === String(config.control_project_folder || "") &&
-        !previousControlIds.has(String(item.job_id || "")) &&
-        Boolean(item.job_id)) : null;
-      if (!job) return false;
-      controlJobId = String(job.job_id);
-      return true;
-    }, 30000);
+    try {
+      await waitFor("real Stage 5.4 control generation start", async function () {
+        const rows = await invoke("job.list", {include_hidden:true});
+        const job = Array.isArray(rows) ? rows.find(item =>
+          item.type === "audiobook-generation" &&
+          String(item.project_folder || "") === String(config.control_project_folder || "") &&
+          !previousControlIds.has(String(item.job_id || "")) &&
+          Boolean(item.job_id)) : null;
+        if (!job) return false;
+        controlJobId = String(job.job_id);
+        return true;
+      }, 30000);
+    } catch (startError) {
+      const activeAfterClick = await invoke("project.get_active", {}).catch(error => ({error:String(error)}));
+      const jobsAfterClick = await invoke("job.list", {include_hidden:true}).catch(error => ({error:String(error)}));
+      const generateStatus = document.querySelector("#generateStatus");
+      const statusText = document.querySelector("#generationStatus");
+      const diagnostic = {
+        preflight: controlPreflight,
+        activeAfterClick,
+        startResponse: controlStartResponse,
+        generateStatus: generateStatus ? generateStatus.textContent.trim() : null,
+        generationStatus: statusText ? statusText.textContent.trim() : null,
+        button: controlGenerateButton ? {
+          disabled: controlGenerateButton.disabled,
+          title: controlGenerateButton.title,
+          text: controlGenerateButton.textContent.trim(),
+          ariaDisabled: controlGenerateButton.getAttribute("aria-disabled")
+        } : null,
+        jobsAfterClick
+      };
+      throw new Error(String(startError?.message || startError) +
+        ". Stage 5.4 start diagnostic=" + JSON.stringify(diagnostic));
+    }
 
     const jobsButton = document.querySelector("#backgroundJobsButton");
     const jobsModal = document.querySelector("#backgroundJobsModal");
