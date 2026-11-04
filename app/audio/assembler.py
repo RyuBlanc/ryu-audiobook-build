@@ -288,7 +288,15 @@ def _validate_m4b_container(
     metadata: dict[str, str],
     cover: Path | None,
 ) -> None:
-    """Reject a playable audio file if its final M4B tags, chapters, or cover are incomplete."""
+    """Reject a final, cover-bearing M4B if its tags or chapter markers are incomplete.
+
+    Coverless M4A/M4B assemblies are used for Production preview parity and are
+    intentionally outside the final-book metadata/cover acceptance contract.
+    Production's required-metadata gate guarantees the final generation path
+    supplies a saved, project-local cover before invoking this check.
+    """
+    if cover is None:
+        return
     report = _ffmpeg_probe_report(path)
     chapter_start = re.search(r"(?im)^\s*Chapter #", report)
     global_section = report[:chapter_start.start()] if chapter_start else report
@@ -1236,7 +1244,7 @@ def assemble_m4b(
                 "-metadata:s:v:0", "comment=Cover Art",
                 "-metadata:s:v:0", "mimetype=image/jpeg",
                 "-metadata:s:v:0", "filename=cover.jpg",
-                "-movflags", "+faststart",
+                "-movflags", "+faststart+use_metadata_tags",
                 str(output_path),
             ])
         else:
