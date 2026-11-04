@@ -441,13 +441,13 @@ def _validate_m4b_container(
         previous_end = end_seconds
 
     if cover is not None:
-        streams = list(re.finditer(r"(?im)^\\s*Stream #\\d+:\\d+[^\\r\\n]*", report))
+        streams = list(re.finditer(r"(?im)^\s*Stream #\d+:\d+[^\r\n]*", report))
         cover_stream = None
         cover_stream_block = ""
         for index, stream in enumerate(streams):
             stop = streams[index + 1].start() if index + 1 < len(streams) else len(report)
             block = report[stream.start():stop]
-            if re.search(r"(?i)Video:\\s*mjpeg\\b", stream.group(0)):
+            if re.search(r"(?i)Video:\s*mjpeg\b", stream.group(0)):
                 cover_stream = stream
                 cover_stream_block = block
                 break
@@ -455,7 +455,7 @@ def _validate_m4b_container(
             raise RuntimeError("The final M4B does not contain an embedded MJPEG cover stream.")
         for key, expected in (("title", "Cover"), ("comment", "Cover Art"), ("mimetype", "image/jpeg")):
             tag = re.search(
-                rf"(?im)^\\s*{re.escape(key)}\\s*:\\s*(.*?)\\s*$",
+                rf"(?im)^\s*{re.escape(key)}\s*:\s*(.*?)\s*$",
                 cover_stream_block,
             )
             actual = tag.group(1).strip() if tag else ""

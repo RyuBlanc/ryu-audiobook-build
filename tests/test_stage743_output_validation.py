@@ -119,7 +119,7 @@ class Stage743OutputValidationTests(unittest.TestCase):
             self.assertIn("Final Chapter", report)
             self.assertIn("Chapter #0:0", report)
             self.assertIn("Chapter #0:1", report)
-            self.assertRegex(report, r"Video: mjpeg\\b")
+            self.assertRegex(report, r"Video: mjpeg\b")
             self.assertIn("title           : Cover", report)
             self.assertIn("comment         : Cover Art", report)
             self.assertIn("mimetype        : image/jpeg", report)
