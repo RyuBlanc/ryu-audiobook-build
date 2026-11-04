@@ -88,14 +88,17 @@ class AudiobookBrainTests(unittest.TestCase):
 
 
     def test_core_ai_malformed_json_uses_two_compact_bounded_repair_attempts(self):
-        import inspect
-        from app.ai.brain import AudiobookBrain
-        source = inspect.getsource(AudiobookBrain.analyze_chapter)
-        self.assertIn("for repair_attempt in range(2)", source)
-        self.assertIn("max_tokens=900", source)
-        self.assertIn("Required keys: characters, dialogue, pronunciation.", source)
-        self.assertIn("if core_data is None:", source)
-        self.assertIn("AI core pass fallback", source)
+        from pathlib import Path
+        brain_source = (
+            Path(__file__).resolve().parents[1] / "app" / "ai" / "brain.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("for repair_attempt in range(2)", brain_source)
+        self.assertIn("max_tokens=900", brain_source)
+        self.assertIn("Required keys: characters, dialogue, pronunciation.", brain_source)
+        self.assertIn("if core_data is None:", brain_source)
+        self.assertIn("AI core pass fallback", brain_source)
+
+
 
 if __name__ == "__main__":
     unittest.main()
