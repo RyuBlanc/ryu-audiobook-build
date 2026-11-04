@@ -50,12 +50,16 @@ class Stage54GenerationJobUiStateTests(unittest.TestCase):
         self.assertIn('[data-job-filter="failed"]', self.packaged)
         self.assertIn("function ensureFailedJobsFilter()", self.adapter)
         self.assertIn("Failed / Cancelled", self.adapter)
+        self.assertIn("ensureFailedJobsFilter();\n    if (isVisiblePage('dashboard'))", self.adapter)
         self.assertIn("stage54_real_generation_pause_resume_cancel", self.packaged)
         self.assertIn("stage54_real_generation_retry_and_history_ownership", self.packaged)
         self.assertIn("stage54_real_readiness_and_dashboard_ownership", self.packaged)
         self.assertIn("stage54_real_restart_interruption_staged", self.packaged)
         self.assertIn("stage54_real_restart_recovery", self.packaged)
         self.assertIn("recovery_of_job_id", self.packaged)
+        self.assertIn("dashboardActiveJobsFilter.click()", self.packaged)
+        self.assertIn("stage54_library_open_fallback", self.packaged)
+        self.assertIn("Library project card list", self.packaged)
         self.assertIn("data-job-action=\"recover\"", self.packaged)
 
     def test_production_preview_monitor_acceptance_reopens_page_before_render_assertion(self):
@@ -70,6 +74,8 @@ class Stage54GenerationJobUiStateTests(unittest.TestCase):
         self.assertLess(monitor_wait, audio_completion)
         self.assertIn("Production preview monitor diagnostic", self.packaged)
         self.assertIn("latestPreviewJob?.current_chapter_id", self.packaged)
+        self.assertIn("Production Preview saved chapter options loaded", self.packaged)
+        self.assertIn("const alternate = savedPreviewChapters.find", self.packaged)
     def test_frozen_app_acceptance_generates_real_audio_for_all_four_preview_durations(self):
         duration_loop_start = self.packaged.index(
             'for (const target of [', self.packaged.index("Production Preview actual Save As copy")

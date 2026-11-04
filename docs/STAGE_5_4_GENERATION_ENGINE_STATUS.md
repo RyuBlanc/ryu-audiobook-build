@@ -34,6 +34,19 @@
 
 No Stage 5.3 accepted branch or its uploaded artifacts were rewritten. Superseded/failed candidate runs are retained as history and are not counted as acceptance evidence.
 
+## Recent failed Stage 5.4 candidate runs and fixes
+
+| Run | Commit | Observed package failure | Root cause / disposition |
+|---|---|---|---|
+| #2226 | `7e5b9526…` | Background Jobs pause message assertion failed | Stale acceptance expected the former chapter-boundary wording; updated to the implemented saved chunk/batch boundary wording |
+| #2227 | `b4397e28…` | Multi-chapter completed-job assertion failed | Completed job result omitted the eligible/empty/excluded counts; retained the counters in the final job result and project summary |
+| #2228–#2231 | `9a71c7aa…`–`2ca809db…` | Failed / Cancelled filter was missing in the packaged UI test | The original modal only had Active/Completed/All; the dynamic Failed / Cancelled filter was added for retry/recovery |
+| #2232 | `9bf6d3c1…` | Production-owned Chapter 2 selection timed out | The adapter had already auto-selected Chapter 2, so dispatching a change to the same value was a no-op; acceptance now selects another chapter first, then Chapter 2 |
+| #2233 | `3763c222…` | Stage 5.4 control project absent from Dashboard recent cards | Dashboard shows only the three latest projects; acceptance now falls back to the full Library grid's normal Open project action |
+| #2234 | `7d72008d…` | Dashboard running control timed out after Retry/Recover UI checks | The synthetic Background Jobs test left the filter on Failed / Cancelled; acceptance now restores Active before testing running/paused Dashboard states |
+
+The six-second cue import exception in these runs is the intentional negative test confirming that cue clips longer than five seconds are rejected. It is not a product regression. The Windows app build, frozen executable verification, bundled voice/module checks, 1,138-test regression suite, real two-chapter M4B creation and skip-count assertions passed on the latest package candidates; installer/portable/SHA uploads remain gated by the final installed-app controls and restart-recovery acceptance.
+
 ## Formal scope and current status
 
 | Requirement | Priority | Acceptance focus | Automated status |

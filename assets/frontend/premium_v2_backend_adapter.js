@@ -5802,11 +5802,12 @@
     // hunt through every active/completed row in the All view.
     const modal = $('backgroundJobsModal');
     const activeFilter = modal?.querySelector('[data-job-filter="active"]');
-    const group = activeFilter?.parentElement;
+    const group = activeFilter?.parentElement || modal?.querySelector('.jobs-tabs');
     if (!group || group.querySelector('[data-job-filter="failed"]')) return;
+    const templateButton = activeFilter || group.querySelector('button[data-job-filter]');
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = String(activeFilter.className || '').replace(/\bactive\b/g, '').trim();
+    button.className = String(templateButton?.className || '').replace(/\bactive\b/g, '').trim();
     button.dataset.jobFilter = 'failed';
     button.textContent = 'Failed / Cancelled';
     button.setAttribute('aria-label', 'Show failed and cancelled background jobs');
@@ -5825,6 +5826,9 @@
   async function refreshJobsImpl() {
     ensureFailedJobsFilter();
     const allJobs = await call('job.list', {include_hidden:false});
+    // A poll can start before the modal is parsed and finish after it is mounted.
+    // Re-run the idempotent filter ensure after the asynchronous bridge call.
+    ensureFailedJobsFilter();
     if (isVisiblePage('dashboard')) refreshDashboardGeneration(allJobs);
     if (isVisiblePage('generate')) renderProductionGeneration(allJobs);
     const jobs = allJobs.filter(j => backendJobFilter === 'all' ||

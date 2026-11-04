@@ -154,6 +154,12 @@
     record("stage53_background_job_state_controls", true,
       "Packaged Background Jobs shows mutually exclusive running/pause-pending/paused/cancel-pending controls and dispatches the real bridge command names.");
 
+    const dashboardActiveJobsFilter = modal.querySelector('[data-job-filter="active"]');
+    must(dashboardActiveJobsFilter, "Background Jobs Active filter is missing before Dashboard control acceptance.");
+    dashboardActiveJobsFilter.click();
+    await waitFor("Background Jobs Active filter restored", function () {
+      return dashboardActiveJobsFilter.classList.contains("active");
+    }, 5000);
     modal.classList.remove("show");
     must(typeof window.go === "function", "Dashboard navigation is unavailable for Stage 5.3 job-state acceptance.");
     window.go("dashboard");
@@ -1602,10 +1608,32 @@
       await waitFor("Dashboard recent project cards", function () {
         return Boolean(document.querySelector("#dashboard .recent-grid [data-project-folder]"));
       }, 15000);
-      const card = Array.from(document.querySelectorAll("#dashboard .recent-grid [data-project-folder]"))
+      let card = Array.from(document.querySelectorAll("#dashboard .recent-grid [data-project-folder]"))
         .find(node => String(node.dataset.projectFolder || "") === String(folder));
-      must(card, label + " project card is missing from the real Dashboard recent-project list.");
-      card.click();
+      if (card) {
+        card.click();
+      } else {
+        // The Dashboard intentionally shows only the latest three projects.
+        // New acceptance fixtures may not be in that recent slice; use the full
+        // Library grid's normal Open project action instead of treating this as
+        // a product failure or bypassing the project's UI-open lifecycle.
+        window.go("library");
+        await waitFor("Library project card list", function () {
+          return Boolean(document.querySelector("#libraryGrid [data-project-folder]"));
+        }, 15000);
+        card = Array.from(document.querySelectorAll("#libraryGrid [data-project-folder]"))
+          .find(node => String(node.dataset.projectFolder || "") === String(folder));
+        must(card, label + " project is missing from the full local Library list.");
+        const openButton = card.querySelector("[data-open-project]");
+        must(openButton, label + " Library card has no real Open project action.");
+        openButton.click();
+        record("stage54_library_open_fallback", true,
+          "A Stage 5.4 fixture outside Dashboard's three recent cards was opened through the full Library grid's real Open project action.");
+      }
+      await waitFor(label + " project active after UI navigation", async function () {
+        const active = await invoke("project.get_active", {});
+        return String(active?.folder || "") === String(folder);
+      }, 20000);
     }
     await openProjectFromDashboard(config.secondary_project_folder, "Secondary");
     await waitFor("Secondary project active", async function () {
@@ -1656,17 +1684,45 @@
       "The Production Preview acceptance chapter has no saved narration text.");
     const chosenPreviewChapterId = String(chosenPreviewChapter.chapter_id || chosenPreviewChapter.id || "");
     const productionChapterPicker = document.querySelector("#productionPreviewChapterSelect");
+    await waitFor("Production Preview saved chapter options loaded", function () {
+      const options = Array.from(productionChapterPicker?.options || []);
+      return options.length === savedPreviewChapters.length &&
+        savedPreviewChapters.every(chapter => options.some(option =>
+          option.value === String(chapter.number) &&
+          option.textContent.includes(String(chapter.title || ""))));
+    }, 12000);
     async function selectProductionPreviewChapter(number, expectedTitle) {
+      const optionFor = chapterNumber => Array.from(productionChapterPicker.options || [])
+        .find(option => option.value === String(chapterNumber));
+      const waitForSelection = async chapterNumber => {
+        const expectedOption = optionFor(chapterNumber);
+        const expectedChapter = savedPreviewChapters.find(item => Number(item.number) === Number(chapterNumber));
+        await waitFor("Production-owned Chapter " + chapterNumber + " selection", function () {
+          const optionText = productionChapterPicker.selectedOptions?.[0]?.textContent || "";
+          const statusText = document.querySelector("#productionPreviewStatus")?.textContent || "";
+          return productionChapterPicker.value === String(chapterNumber) &&
+            Boolean(expectedOption && expectedOption.selected) &&
+            optionText.includes("Chapter " + chapterNumber) &&
+            (!expectedChapter?.title || optionText.includes(String(expectedChapter.title))) &&
+            statusText.includes("Chapter " + chapterNumber + " selected.");
+        }, 10000);
+      };
+      // If Chapter 2 is already auto-selected, a change to the same value is
+      // intentionally a no-op in the production UI. Select another saved
+      // chapter first so the target selection event is genuinely fired.
+      if (Number(productionChapterPicker.value) === Number(number)) {
+        const alternate = savedPreviewChapters.find(item => Number(item.number) !== Number(number));
+        must(alternate, "Production Preview needs at least two saved chapters to exercise chapter selection.");
+        productionChapterPicker.value = String(alternate.number);
+        productionChapterPicker.dispatchEvent(new Event("change", {bubbles:true}));
+        await waitForSelection(Number(alternate.number));
+      }
       productionChapterPicker.value = String(number);
       productionChapterPicker.dispatchEvent(new Event("change", {bubbles:true}));
-      await waitFor("Production-owned Chapter " + number + " selection", function () {
-        const optionText = productionChapterPicker.selectedOptions?.[0]?.textContent || "";
-        const statusText = document.querySelector("#productionPreviewStatus")?.textContent || "";
-        return productionChapterPicker.value === String(number) &&
-          optionText.includes("Chapter " + number) &&
-          (!expectedTitle || optionText.includes(expectedTitle)) &&
-          statusText.includes("Chapter " + number + " selected.");
-      }, 10000);
+      await waitForSelection(Number(number));
+      const selectedOption = optionFor(number);
+      must(selectedOption && (!expectedTitle || selectedOption.textContent.includes(expectedTitle)),
+        "Production Preview selected a chapter option with the wrong saved title.");
     }
     await selectProductionPreviewChapter(2, String(chosenPreviewChapter.title || ""));
     const durationButtons = Array.from(document.querySelectorAll("#generate .segmented button"));
