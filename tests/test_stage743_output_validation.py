@@ -6,6 +6,7 @@ replace playback tests in a desktop audiobook player.
 from __future__ import annotations
 
 import math
+import re
 import struct
 import subprocess
 import tempfile
