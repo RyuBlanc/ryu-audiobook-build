@@ -817,3 +817,43 @@ All earlier failed candidates are retained as failed history. No failed candidat
 - Trigger an exact-head `[artifact-checkpoint]` run from the tested #2250 source.
 - Verify both `stage55_final_m4b_embedded_chapters` and `stage55_audiobooks_real_playback_chapter_seek_and_position` markers in the frozen Windows acceptance log.
 - Preserve Stage 5.4 baseline and do not tag/publish a version as part of this step.
+
+
+## 35. Stage 5.5 Audiobooks browser playback compatibility — 4 November 2026
+
+### #2251 failure analysis
+
+- Artifact workflow: [Build Windows App #2251](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41764283352), source commit `759f682a3bcb9dadb7b4dc8423911cf08be3e186`.
+- Tests job: SUCCESS. Windows application preparation/freeze: SUCCESS. Frozen EXE verification: SUCCESS. Bundled offline assets/critical modules: SUCCESS.
+- Packaged acceptance passed `stage54_packaged_real_multi_chapter_full_generation`: two eligible chapters were synthesized in saved order, one empty and one excluded chapter were skipped, GenerationManager completed, History retained the same job ID, and the M4B output remained associated with the owning project.
+- Packaged acceptance passed `stage55_final_m4b_embedded_chapters`: two actual embedded M4B chapter markers were read from the finished source, with titles and valid ordered timing.
+- The sole failing acceptance was `waitForRealPlayback`: the finished AAC M4B was supplied directly to HTMLAudioElement by `player.get_active`; the packaged Qt WebEngine could not decode/play that AAC file. No play/seek/position-persistence result was achieved on #2251.
+- Installer creation, portable build and SHA-256 uploads were correctly skipped after the acceptance failure. #2251 is not a Stage 5.5 artifact checkpoint.
+
+### Corrective implementation
+
+- Source commit: `5d620525e98668fede228cd19b3836078346152f`.
+- New `app/audio/playback.py` detects an ISO BMFF source, creates a source-specific cached MP3 playback derivative with FFmpeg, validates duration parity and full decode, and leaves the original M4B bytes unchanged.
+- New generations create this derivative in the GenerationManager completion callback before marking the project/job completed. This preserves the original M4B as the deliverable and avoids running a potentially long conversion on the GUI thread.
+- Existing M4B projects without a saved derivative can prepare it lazily on first open. Cache validity is tied to source path, size and nanosecond mtime; replaced output files cannot reuse a stale derivative.
+- `_player_get_active` returns both the original M4B identity and the browser-compatible playback URL. It continues to read chapter titles/timing from the original M4B, so seeking remains tied to the embedded chapter map, not the derivative's metadata.
+- Packaged acceptance now checks `stage55_browser_compatible_playback_source`, waits for real playback using the derivative path, then seeks by the original M4B's second chapter marker and verifies project-scoped listening position persistence.
+
+### Regression evidence
+
+- [Build Windows App #2252](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41769708812) — SUCCESS on exact source `5d620525e98668fede228cd19b3836078346152f`.
+- **1,141 tests passed in 54.048 seconds.** Frontend JavaScript syntax and isolated native Qt lifecycle checks passed.
+- New tests passed:
+  - Real M4B to MP3 playback conversion preserves the original M4B bytes.
+  - Playback derivative is non-empty, duration-matched, fully decodable and reused from cache.
+  - Browser-supported source formats are returned unchanged.
+  - Invalid M4B/ISO BMFF input is rejected.
+- #2252 is regression-only; the Windows Build job was skipped by the test-only checkpoint policy. It did not produce installer/portable/manifest artifacts.
+
+### Remaining exit gate
+
+- Trigger an exact-head `[artifact-checkpoint]` run from the #2252-tested source.
+- Inspect all three Stage 5.5 markers: embedded M4B chapters, browser-compatible playback source, and real Audiobooks playback + chapter seek + persisted listening position.
+- Preserve the #2251 passed Stage 5.4 full-generation ownership checks.
+- Installer, portable package and SHA-256 manifest uploads must pass. Public release publishing remains disabled.
+- Stage 6 does not start until this packaged checkpoint is green and the artifacts are present.
