@@ -441,36 +441,45 @@ def _validate_m4b_container(
         previous_end = end_seconds
 
     if cover is not None:
+        report_lines = report.splitlines()
         stream_headers = [
-            line.strip()
-            for line in report.splitlines()
+            (index, line.strip())
+            for index, line in enumerate(report_lines)
             if "stream #" in line.casefold()
         ]
-        cover_stream = re.search(
-            r"(?im)^\\s*Stream #[^\\r\\n]*\\bVideo:\\s*mjpeg\\b[^\\r\\n]*",
-            report,
+        cover_stream_index = next(
+            (
+                index for index, line in stream_headers
+                if "video:" in line.casefold() and "mjpeg" in line.casefold()
+            ),
+            None,
         )
-        if cover_stream is None:
+        if cover_stream_index is None:
             raise RuntimeError(
                 "The final M4B does not contain an embedded MJPEG cover stream. "
-                f"FFmpeg reported streams: {stream_headers!r}"
+                f"FFmpeg reported streams: {[line for _, line in stream_headers]!r}"
             )
-        next_stream = re.search(
-            r"(?im)^\\s*Stream #",
-            report[cover_stream.end():],
+        next_stream_index = next(
+            (
+                index for index, _line in stream_headers
+                if index > cover_stream_index
+            ),
+            len(report_lines),
         )
-        block_end = (
-            cover_stream.end() + next_stream.start()
-            if next_stream else len(report)
-        )
-        cover_stream_block = report[cover_stream.start():block_end]
+        cover_stream_block = report_lines[cover_stream_index:next_stream_index]
+
+        def cover_stream_tag(tag_name: str) -> str:
+            for line in cover_stream_block:
+                if ":" not in line:
+                    continue
+                key, value = line.split(":", 1)
+                if key.strip().casefold() == tag_name.casefold():
+                    return value.strip()
+            return ""
+
         for key, expected in (("title", "Cover"), ("comment", "Cover Art"), ("mimetype", "image/jpeg")):
-            tag = re.search(
-                rf"(?im)^\\s*{re.escape(key)}\\s*:\\s*(.*?)\\s*$",
-                cover_stream_block,
-            )
-            actual = tag.group(1).strip() if tag else ""
-            if not tag or actual.casefold() != expected.casefold():
+            actual = cover_stream_tag(key)
+            if actual.casefold() != expected.casefold():
                 raise RuntimeError(
                     f"The final M4B cover stream is missing {key} metadata: "
                     f"expected {expected!r}, received {actual or 'no tag'!r}. "

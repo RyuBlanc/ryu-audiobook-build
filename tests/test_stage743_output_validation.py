@@ -119,10 +119,35 @@ class Stage743OutputValidationTests(unittest.TestCase):
             self.assertIn("Final Chapter", report)
             self.assertIn("Chapter #0:0", report)
             self.assertIn("Chapter #0:1", report)
-            self.assertRegex(report, r"Video: mjpeg\b")
-            self.assertIn("title           : Cover", report)
-            self.assertIn("comment         : Cover Art", report)
-            self.assertIn("mimetype        : image/jpeg", report)
+            report_lines = report.splitlines()
+            stream_lines = [
+                (index, line.strip())
+                for index, line in enumerate(report_lines)
+                if "stream #" in line.casefold()
+            ]
+            cover_stream_index = next(
+                (
+                    index for index, line in stream_lines
+                    if "video:" in line.casefold() and "mjpeg" in line.casefold()
+                ),
+                None,
+            )
+            self.assertIsNotNone(cover_stream_index, report)
+            next_stream_index = next(
+                (index for index, _line in stream_lines if index > cover_stream_index),
+                len(report_lines),
+            )
+            cover_stream_block = report_lines[cover_stream_index:next_stream_index]
+            for key, expected in (("title", "Cover"), ("comment", "Cover Art"), ("mimetype", "image/jpeg")):
+                actual = next(
+                    (
+                        line.split(":", 1)[1].strip()
+                        for line in cover_stream_block
+                        if ":" in line and line.split(":", 1)[0].strip().casefold() == key
+                    ),
+                    "",
+                )
+                self.assertEqual(actual.casefold(), expected.casefold(), cover_stream_block)
             chapter_ranges = re.findall(
                 r"Chapter #\d+:\d+:\s*start\s+([0-9.]+),\s*end\s+([0-9.]+)",
                 report,
