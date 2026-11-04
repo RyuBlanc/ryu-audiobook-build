@@ -936,9 +936,8 @@
     }
   }
   function audiobookPageActive() {
-    const nav = [...document.querySelectorAll('nav .active,aside .active,.sidebar .active,[aria-current="page"]')]
-      .find(node => /audiobooks/i.test(node.textContent || ''));
-    if (nav) return true;
+    // Rendered page state is authoritative. Sidebar labels can be stale during
+    // navigation and must not keep the dock hidden after Dashboard is visible.
     const page = $('player');
     if (!page || page.hidden || page.classList.contains('hidden')) return false;
     const style = window.getComputedStyle(page);
@@ -7386,6 +7385,7 @@
       ? Number(data.playback_volume) : 0.8;
     playerAudio = new Audio(data.file_url);
     const audio = playerAudio;
+    audio.dataset.projectFolder = folder;
     const audioFolder = folder;
     audio.preload = 'metadata';
     audio.playbackRate = playerRate;
@@ -7889,6 +7889,20 @@
     const playSelectedAudiobook = () => {
       if (!selectedAudiobookFolder) {
         message('Open Audiobooks and choose Play audiobook on a finished title first.', true);
+        return;
+      }
+      // Toggle the existing media object directly when the selected book is
+      // already loaded. This avoids a backend round-trip racing a mini-player click.
+      if (playerAudio && playerAudio.src &&
+          playerAudio.dataset?.projectFolder === selectedAudiobookFolder) {
+        const current = playerAudio;
+        if (current.paused) {
+          current.play().catch(err => message(err?.message || 'Audiobook playback could not be resumed.', true));
+        } else {
+          current.pause();
+        }
+        syncMiniPlayer();
+        setPlaybackButtonState();
         return;
       }
       openPlayer(selectedAudiobookFolder).catch(err => message(err?.message || String(err), true));

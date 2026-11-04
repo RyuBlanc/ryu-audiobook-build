@@ -87,5 +87,15 @@ class AudiobookBrainTests(unittest.TestCase):
             self.assertIn("no body text", result["warnings"][0].lower())
 
 
+    def test_core_ai_malformed_json_uses_two_compact_bounded_repair_attempts(self):
+        import inspect
+        from app.ai.brain import AudiobookBrain
+        source = inspect.getsource(AudiobookBrain.analyze_chapter)
+        self.assertIn("for repair_attempt in range(2)", source)
+        self.assertIn("max_tokens=900", source)
+        self.assertIn("Required keys: characters, dialogue, pronunciation.", source)
+        self.assertIn("if core_data is None:", source)
+        self.assertIn("AI core pass fallback", source)
+
 if __name__ == "__main__":
     unittest.main()

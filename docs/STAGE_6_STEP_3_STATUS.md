@@ -130,3 +130,13 @@ This is a correction to the test's page-state setup, not a weakening of the acce
 **Run discipline:** all runs #2282–#2285 are completed; there are no active Stage 6 Step 3 runs at this review point. Do not dispatch another checkpoint while one is active. Wait for the next single run to complete, inspect its final conclusion and failure markers, then fix the cause before dispatching any subsequent run.
 
 **Current decision:** Step 3 remains IN PROGRESS. Source regression is green through 1,153 tests on the preceding commit; final packaged acceptance is still required.
+
+
+## #2286 follow-up correction — 4 November 2026
+
+#2286 passed 1,155 source tests but failed its Windows package job.
+
+- The live Audiobook AI smoke received malformed core-pass JSON; the existing repair also failed and deterministic fallback was correctly reported. The core analysis now receives two bounded, compact, schema-aligned repair attempts. Fallback warnings remain strict failures in the live smoke.
+- The mini-player test still failed after Dashboard navigation. The visibility predicate used a stale Audiobooks sidebar active label even when the player page panel was no longer visible. The rendered #player panel is now authoritative. Full and mini controls also share a direct toggle of the already-loaded Audio when its project folder matches, avoiding a backend round-trip race.
+
+The original M4B, its embedded chapter table, and its browser-compatible playback derivative are not modified. Step 3 remains open pending one complete frozen Windows packaged acceptance.

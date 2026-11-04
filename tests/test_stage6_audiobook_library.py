@@ -167,5 +167,16 @@ class Stage6AudiobookLibraryContractTests(unittest.TestCase):
         open_player = self.adapter[player_start:player_end]
         self.assertIn("playerAudio.src === data.file_url", open_player)
         self.assertIn("if (playerAudio.paused) await playerAudio.play(); else playerAudio.pause();", open_player)
+    def test_mini_player_uses_rendered_page_state_and_direct_same_audio_toggle(self):
+        self.assertIn("function audiobookPageActive()", self.adapter)
+        active_start = self.adapter.index("function audiobookPageActive()")
+        active_end = self.adapter.index("function syncMiniPlayer()", active_start)
+        self.assertNotIn("nav .active", self.adapter[active_start:active_end])
+        self.assertIn("audio.dataset.projectFolder = folder;", self.adapter)
+        self.assertIn("playerAudio.dataset?.projectFolder === selectedAudiobookFolder", self.adapter)
+        self.assertIn("if (current.paused)", self.adapter)
+        self.assertIn("current.play().catch", self.adapter)
+        self.assertIn("current.pause();", self.adapter)
+
 if __name__ == "__main__":
     unittest.main()

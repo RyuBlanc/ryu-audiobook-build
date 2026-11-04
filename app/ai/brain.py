@@ -413,19 +413,40 @@ class AudiobookBrain:
                 # repair-only prompt before falling back to deterministic
                 # analysis. This avoids marking a healthy AI runtime as failed
                 # because of one malformed generation.
-                try:
-                    repair_raw = self.llm.complete(
-                        'Return ONLY one compact valid JSON object with keys characters, dialogue, pronunciation. '
-                        'Do not use markdown. Do not add explanations. Do not guess.',
-                        '/no_think Extract only the factual character, dialogue and pronunciation information from this excerpt. '
-                        'Preserve exact dialogue quotes. Use at most 12 pronunciation entries and keep each reason very short. '
-                        f'Chapter: {chapter.title}\nExcerpt:\n{chunk}',
-                        max_tokens=1500,
-                        temperature=0.0,
-                        response_schema=CORE_SCHEMA,
-                    )
-                    core_data = _json(repair_raw)
-                except (BrainRuntimeError, BrainUnavailableError) as second_error:
+                repair_errors = [first_error]
+                core_data = None
+                repair_prompt = (
+                    'Return exactly one compact valid JSON object. No markdown, comments, or prose. '
+                    'Required keys: characters, dialogue, pronunciation. '
+                    'Use empty arrays when no supported items exist. Keep every value concise. '
+                    'Preserve exact quote text and do not add optional story-summary fields.'
+                )
+                repair_user = (
+                    '/no_think Re-analyze only this excerpt and output valid JSON. '
+                    'Character fields: name, aliases, role, traits, voice_direction, confidence. '
+                    'Dialogue fields: quote, speaker, confidence, evidence. '
+                    'Pronunciation fields: written, spoken, ipa, source_language, script, reason, confidence, alternatives. '
+                    'Use short values and empty arrays where appropriate. Do not invent facts. '
+                    f'Chapter: {chapter.title}\nExcerpt:\n{chunk}'
+                )
+                for repair_attempt in range(2):
+                    try:
+                        repair_raw = self.llm.complete(
+                            repair_prompt,
+                            repair_user + (
+                                '\nPrevious response was invalid JSON. Return a fresh complete object; do not repeat malformed text.'
+                                if repair_attempt else ''
+                            ),
+                            max_tokens=900,
+                            temperature=0.0,
+                            response_schema=CORE_SCHEMA,
+                        )
+                        core_data = _json(repair_raw)
+                        break
+                    except (BrainRuntimeError, BrainUnavailableError) as repair_error:
+                        repair_errors.append(repair_error)
+                if core_data is None:
+                    second_error = repair_errors[-1]
                     core_data = self._fallback_core(chapter)
                     result.setdefault('warnings', []).append(
                         f'AI core pass fallback for chapter {chapter.number}, excerpt {idx}: {second_error}'
