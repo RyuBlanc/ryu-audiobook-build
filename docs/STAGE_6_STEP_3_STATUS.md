@@ -78,6 +78,8 @@ The first implementation changes will be driven by failing regression tests and 
 - `stage6_chapter_playhead_highlight_tracks_boundaries`
 - `stage6_previous_next_chapter_navigation`
 - `stage6_switching_book_clears_previous_chapter_selection`
+- `stage6_mini_player_shares_full_player_audio_session`
+- `stage6_chapter_keyboard_activation_starts_audio`
 
 These are target markers for Step 3. They are not claimed as passed until the frozen Windows application emits them.
 
@@ -97,4 +99,15 @@ Step 3 may close only when:
 3. The exact frozen Windows package passes the planned Step 3 real-audio markers plus the existing Stage 5.5 M4B playback and Stage 6 Step 2 audiobook-library markers.
 4. The package produces its exact-head installer, portable package and SHA-256 manifest, with the existing release integrity and Defender checks passing.
 
-**Current decision:** Step 3 officially started. Baseline audit is complete; implementation and Step 3 acceptance are pending.
+
+## Implementation and CI checkpoint — 4 November 2026
+
+The first Step 3 implementation commit is `ab08b17746a8a722bc3f8c97c8f00900a3e84a21`. It removes the late Play/Pause and timeline handler overrides, adds embedded chapter end intervals, playhead-driven active chapter state, chapter click/keyboard playback, and stale Audio callback guards.
+
+- Run #41815672796: adapter syntax passed; packaged acceptance JavaScript syntax failed because the new block redeclared a top-level identifier. Corrected in `3594816b106f34ff07b4508eb7f0cf3386f61e33`.
+- Run #41816006240: adapter and packaged acceptance JavaScript syntax passed; isolated Qt lifecycle passed; regression suite ran 1,150 tests with one failure caused by an exact-string regression contract requiring the established spacing in the position-save call. That formatting is restored in the next fix.
+- The artifact-checkpoint packaging job did not run because the full regression step failed. Step 3 remains IN PROGRESS.
+
+The next checkpoint adds the valid start/end interval guard for previous/next chapter navigation, explicit no-valid-marker regression coverage, and packaged checks for mini-player shared-audio behavior, keyboard chapter selection, saved rate/volume preferences, elapsed-time display and first/last chapter boundaries. These acceptance markers are required before AB-03/AB-04 can be signed off.
+
+**Current decision:** Step 3 officially started. Baseline audit is complete; implementation is in progress and packaged acceptance is pending.

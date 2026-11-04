@@ -2193,11 +2193,11 @@
     }, 15000);
 
     // Stage 6 Step 3 — verify full-player stage6Controls and embedded chapter playback.
-    const stage6PlayerPage=document.querySelector("#player"), stage6MainPlay=document.querySelector("#stage6MainPlay"),
+    const stage6PlayerPage=document.querySelector("#player"), stage6MainPlay=document.querySelector("#mainPlay"),
       stage6Timeline=document.querySelector("#playerTimeline"), stage6TimeLabels=document.querySelector("#currentTime")?.parentElement?.querySelectorAll("span"),
       stage6Volume=stage6PlayerPage?.querySelector(".player-grid .toolbar input.range"),
       stage6SpeedButtons=Array.from(stage6PlayerPage?.querySelectorAll(".player-grid .toolbar .segmented button")||[]),
-      stage6Controls=Array.from(stage6PlayerPage?.querySelectorAll(".player-stage6Controls button")||[]);
+      stage6Controls=Array.from(stage6PlayerPage?.querySelectorAll(".player-controls button")||[]);
     must(stage6MainPlay&&stage6Timeline&&stage6TimeLabels?.length>=2&&stage6Volume&&stage6SpeedButtons.length>=2&&stage6Controls.length>=5,
       "Stage 6 AB-03 stage6Controls missing from full player.");
     const stage6ActualDuration=Number(finishedM4bAudio.duration);
@@ -2213,13 +2213,39 @@
     await waitFor("Play resumes same audio",()=>!finishedM4bAudio.paused&&stage6MainPlay.textContent.trim()!=="▶",5000);
     must((window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__||[]).length===stage6BeforeAudioCount,"Play/Pause created duplicate audio.");
     record("stage6_player_full_controls_actual_audio",true,"Play/Pause control toggled the actual decoded media element.");
+    const stage6MiniPlay=document.querySelector("#miniPlay");
+    must(stage6MiniPlay,"Persistent mini-player Play/Pause button is missing.");
+    stage6MiniPlay.click();
+    await waitFor("mini-player pauses the selected audio",()=>finishedM4bAudio.paused&&
+      stage6MainPlay.textContent.trim()==="▶"&&stage6MiniPlay.textContent.trim()==="▶",5000);
+    stage6MiniPlay.click();
+    await waitFor("mini-player resumes the same audio",()=>!finishedM4bAudio.paused&&
+      stage6MainPlay.textContent.trim()!=="▶"&&stage6MiniPlay.textContent.trim()!=="▶",5000);
+    must((window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__||[]).length===stage6BeforeAudioCount,
+      "Mini-player Play/Pause created a second Audio element.");
+    record("stage6_mini_player_shares_full_player_audio_session",true,
+      "Mini-player and full-player Play/Pause control the same real Audio object and synchronize their icons.");
+
     stage6Timeline.value="10"; stage6Timeline.dispatchEvent(new Event("input",{bubbles:true}));
     await waitFor("seek slider changes real currentTime",()=>Math.abs(finishedM4bAudio.currentTime-stage6ActualDuration*0.1)<1,5000);
+    await waitFor("elapsed label follows the actual seek position",()=>
+      stage6TimeLabels[0].textContent.trim()===stage6FmtTime(finishedM4bAudio.currentTime),5000);
+    stage6Volume.value="0"; stage6Volume.dispatchEvent(new Event("input",{bubbles:true}));
+    must(Math.abs(finishedM4bAudio.volume)<0.01,"Volume slider does not support 0%.");
+    stage6Volume.value="100"; stage6Volume.dispatchEvent(new Event("input",{bubbles:true}));
+    must(Math.abs(finishedM4bAudio.volume-1)<0.01,"Volume slider does not support 100%.");
     stage6Volume.value="37"; stage6Volume.dispatchEvent(new Event("input",{bubbles:true}));
-    must(Math.abs(finishedM4bAudio.stage6Volume-0.37)<0.02,"Volume control did not update actual media.");
+    stage6Volume.dispatchEvent(new Event("change",{bubbles:true}));
+    must(Math.abs(finishedM4bAudio.volume-0.37)<0.02,"Volume control did not update actual media.");
     const stage6Rate=stage6SpeedButtons.find(b=>Math.abs(Number(b.textContent.replace("×","").trim())-1.25)<0.01);
     must(stage6Rate,"No 1.25× speed option."); stage6Rate.click();
     must(Math.abs(finishedM4bAudio.playbackRate-1.25)<0.01&&stage6Rate.classList.contains("active"),"Rate not applied to real media.");
+    let stage6SavedPreferences=null;
+    await waitFor("player rate and volume preferences persist",async()=>{
+      stage6SavedPreferences=await invoke("player.get_active",{folder:String(config.full_generation_project_folder||"")});
+      return Math.abs(Number(stage6SavedPreferences.playback_rate)-1.25)<0.01&&
+        Math.abs(Number(stage6SavedPreferences.playback_volume)-0.37)<0.02;
+    },8000);
     record("stage6_player_volume_and_rate_affect_audio",true,"Volume and playback stage6Rate modify actual Audio properties.");
     finishedM4bAudio.currentTime=5; stage6Controls[0].click();
     await waitFor("rewind clamps to start",()=>finishedM4bAudio.currentTime<=0.15,5000);
@@ -2243,11 +2269,31 @@
     finishedM4bAudio.pause(); finishedM4bAudio.currentTime=Number(finalM4bChapters[0].start_seconds);
     await waitFor("chapter highlight follows seek",()=>stage6ActiveRow()===stage6ChapterRows[0]&&stage6Heading().includes(String(finalM4bChapters[0].title)),5000);
     record("stage6_chapter_playhead_highlight_tracks_boundaries",true,"Current chapter row and stage6Heading track embedded marker interval.");
+    stage6ChapterRows[1].dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true}));
+    await waitFor("keyboard Enter selects and plays embedded chapter",()=>!finishedM4bAudio.paused&&
+      Math.abs(finishedM4bAudio.currentTime-Number(finalM4bChapters[1].start_seconds))<1&&
+      stage6ActiveRow()===stage6ChapterRows[1],8000);
+    record("stage6_chapter_keyboard_activation_starts_audio",true,
+      "Keyboard Enter starts actual audio at the selected embedded chapter marker.");
+    finishedM4bAudio.pause();
     stage6Controls[3].click();
     await waitFor("Next Chapter",()=>Math.abs(finishedM4bAudio.currentTime-Number(finalM4bChapters[1].start_seconds))<1,5000);
     stage6Controls[1].click();
     await waitFor("Previous Chapter",()=>Math.abs(finishedM4bAudio.currentTime-Number(finalM4bChapters[0].start_seconds))<1,5000);
-    record("stage6_previous_next_chapter_navigation",true,"Previous/Next use actual embedded chapter order.");
+    stage6Controls[1].click();
+    await waitFor("Previous at first chapter remains at the first marker",()=>
+      Math.abs(finishedM4bAudio.currentTime-Number(finalM4bChapters[0].start_seconds))<1,5000);
+    stage6Controls[3].click();
+    await waitFor("Next moves to the last embedded chapter",()=>
+      Math.abs(finishedM4bAudio.currentTime-Number(finalM4bChapters[1].start_seconds))<1,5000);
+    stage6Controls[3].click();
+    await waitFor("Next at last chapter remains within the final marker",()=>
+      finishedM4bAudio.currentTime>=Number(finalM4bChapters[1].start_seconds)-0.15,5000);
+    stage6Controls[1].click();
+    await waitFor("Previous returns to first chapter boundary",()=>
+      Math.abs(finishedM4bAudio.currentTime-Number(finalM4bChapters[0].start_seconds))<1,5000);
+    record("stage6_previous_next_chapter_navigation",true,
+      "Previous/Next navigate actual embedded chapter order and remain within first/last chapter boundaries.");
     const stage6OtherBook=Array.from(document.querySelectorAll("#player [data-open-project-folder]"))
       .find(b=>String(b.dataset.openProjectFolder||"")!==String(config.full_generation_project_folder||""));
     must(stage6OtherBook,"Second completed book unavailable for stale-event test.");

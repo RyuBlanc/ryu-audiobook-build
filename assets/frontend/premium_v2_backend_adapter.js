@@ -7162,7 +7162,11 @@
     const volumeControl = page?.querySelector('.player-grid .toolbar input.range');
     if (volumeControl) volumeControl.value = String(Math.round(playerVolume * 100));
     const playerButtons = [...(page?.querySelectorAll('.player-controls button') || [])];
-    const hasTimedChapters = chapters.some(chapter => Number.isFinite(Number(chapter.start_seconds)));
+    const hasTimedChapters = chapters.some(chapter => {
+      const start = Number(chapter.start_seconds), end = Number(chapter.end_seconds);
+      return Number.isFinite(start) && start >= 0 &&
+        Number.isFinite(end) && end > start;
+    });
     if (playerButtons[1]) {
       playerButtons[1].disabled = !hasTimedChapters;
       playerButtons[1].title = hasTimedChapters ? 'Previous chapter' : 'Chapter navigation is unavailable for this audiobook file';
@@ -7265,7 +7269,11 @@
   function jumpPlayerChapter(direction) {
     if (!playerAudio || !playerAudio.src) return;
     const chapters = activePlayerChapters
-      .filter(chapter => Number.isFinite(Number(chapter.start_seconds)))
+      .filter(chapter => {
+        const start = Number(chapter.start_seconds), end = Number(chapter.end_seconds);
+        return Number.isFinite(start) && start >= 0 &&
+          Number.isFinite(end) && end > start;
+      })
       .slice().sort((a,b) => Number(a.start_seconds) - Number(b.start_seconds));
     if (!chapters.length) {
       message('Chapter navigation is unavailable for this audiobook file.', true);
@@ -7391,7 +7399,7 @@
       if (time) time.textContent = formatTime(current);
       syncActivePlayerChapter(audio);
       setPlaybackButtonState();
-      persistPlayerPosition(false,false,audioFolder,audio);
+      persistPlayerPosition(false, false, audioFolder, audio);
     };
     audio.ontimeupdate = updateAudioPositionUi;
     audio.onseeked = updateAudioPositionUi;

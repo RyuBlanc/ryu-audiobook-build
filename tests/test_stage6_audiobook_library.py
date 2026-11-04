@@ -86,6 +86,8 @@ class Stage6AudiobookLibraryContractTests(unittest.TestCase):
             "stage6_chapter_playhead_highlight_tracks_boundaries",
             "stage6_previous_next_chapter_navigation",
             "stage6_switching_book_clears_previous_chapter_selection",
+            "stage6_mini_player_shares_full_player_audio_session",
+            "stage6_chapter_keyboard_activation_starts_audio",
         ):
             self.assertIn(marker, self.packaged_js)
 
@@ -118,6 +120,20 @@ class Stage6AudiobookLibraryContractTests(unittest.TestCase):
         handlers = self.adapter[start:end]
         self.assertIn("audio !== playerAudio || audioFolder !== selectedAudiobookFolder", handlers)
         self.assertIn("audio.onseeked = updateAudioPositionUi", handlers)
+
+
+    def test_chapter_navigation_requires_valid_embedded_intervals(self):
+        start = self.adapter.index("function jumpPlayerChapter(")
+        end = self.adapter.index("function bindAudiobookPlayerControls(", start)
+        navigation = self.adapter[start:end]
+        self.assertIn("Number.isFinite(start) && start >= 0", navigation)
+        self.assertIn("Number.isFinite(end) && end > start", navigation)
+        render_start = self.adapter.index("function renderSelectedAudiobook(")
+        render_end = self.adapter.index("function syncActivePlayerChapter(", render_start)
+        renderer = self.adapter[render_start:render_end]
+        self.assertIn("const hasTimedChapters = chapters.some", renderer)
+        self.assertIn("Number.isFinite(end) && end > start", renderer)
+        self.assertIn("No chapter metadata available.", renderer)
 
 if __name__ == "__main__":
     unittest.main()
