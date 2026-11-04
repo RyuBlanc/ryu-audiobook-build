@@ -2401,16 +2401,35 @@
     const firstFixture = libraryFixtures[0];
     const firstCard = libraryCards.find(item =>
       String(item.dataset.projectFolder || "") === String(firstFixture.folder || ""));
+    const existingAudioBeforeOpen = latestAcceptanceAudio();
+    const existingAudioFolder = String(existingAudioBeforeOpen?.dataset?.projectFolder || "");
+    const sameBookAlreadyLoaded = Boolean(existingAudioBeforeOpen?.src &&
+      existingAudioFolder === String(firstFixture.folder || ""));
     const audioCountBeforeOpen = (window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__ || []).length;
+    must(firstCard, "First completed audiobook card is unavailable for the Open-action test.");
     firstCard.querySelector("[data-open-project-folder]").click();
     await waitFor("Stage 6 Open loads the selected audiobook without autoplay", function () {
       const audio = latestAcceptanceAudio();
+      const audioCount = (window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__ || []).length;
+      const sameAudioReused = sameBookAlreadyLoaded && audio === existingAudioBeforeOpen;
+      const newAudioLoaded = !sameBookAlreadyLoaded && audio && audio !== existingAudioBeforeOpen && audioCount > audioCountBeforeOpen;
       const title = document.querySelector("#player .player-grid > .card:first-child h2");
-      return Boolean(audio && (window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__ || []).length > audioCountBeforeOpen &&
-        audio.readyState >= 1 && audio.paused &&
+      return Boolean(audio && (sameAudioReused || newAudioLoaded) && audio.readyState >= 1 && audio.paused &&
         title && title.textContent.trim() === firstFixture.title);
-    }, 20000);
+    }, 20000).catch(error => {
+      const audio = latestAcceptanceAudio();
+      const title = document.querySelector("#player .player-grid > .card:first-child h2")?.textContent.trim() || "";
+      const audioCount = (window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__ || []).length;
+      throw new Error("Open-state diagnostics: " + JSON.stringify({
+        expectedFolder:firstFixture.folder, existingAudioFolder, sameBookAlreadyLoaded,
+        audioCountBeforeOpen, audioCount, latestAudioFolder:String(audio?.dataset?.projectFolder || ""),
+        readyState:audio?.readyState ?? null, paused:audio?.paused ?? null,
+        mediaErrorCode:audio?.error?.code ?? null, source:audio?.currentSrc || audio?.src || "", title
+      }) + "; " + (error?.message || String(error)));
+    });
     const firstOpenedAudio = latestAcceptanceAudio();
+    must(String(firstOpenedAudio?.dataset?.projectFolder || "") === String(firstFixture.folder || "") && firstOpenedAudio.paused,
+      "Open did not leave the selected project's own audio session loaded and paused.");
     const firstOpenedData = await invoke("player.get_active", {folder:firstFixture.folder});
     must(normalizeOutputPath(firstOpenedData.output_path) === normalizeOutputPath(firstFixture.output_path) &&
       String(firstOpenedData.title || "") === firstFixture.title &&

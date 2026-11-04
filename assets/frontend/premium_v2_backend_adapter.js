@@ -7413,9 +7413,11 @@
     const folder = String(projectFolder || '').trim();
     if (!folder) throw new Error('Select a finished audiobook from the Audiobooks library before playing.');
     const data = await call('player.get_active', {folder});
-    if (playerAudio && playerAudio.src === data.file_url) {
+    if (playerAudio && playerAudio.src === data.file_url &&
+        String(playerAudio.dataset?.projectFolder || '') === folder) {
       selectedAudiobookFolder = folder;
       miniPlayerDismissed = false;
+      playerAudio.dataset.projectFolder = folder;
       playerRate = Number.isFinite(Number(data.playback_rate)) ? Number(data.playback_rate) : playerRate;
       playerVolume = Number.isFinite(Number(data.playback_volume)) ? Math.max(0,Math.min(1,Number(data.playback_volume))) : playerVolume;
       playerAudio.playbackRate = playerRate;
@@ -7423,6 +7425,9 @@
       renderSelectedAudiobook(data);
       if (autoplay) {
         if (playerAudio.paused) await playerAudio.play(); else playerAudio.pause();
+      } else if (!playerAudio.paused) {
+        // Open is load-only: reopening the already-selected book must not leave it playing.
+        playerAudio.pause();
       }
       syncMiniPlayer();
       setPlaybackButtonState();

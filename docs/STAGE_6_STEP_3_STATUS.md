@@ -279,3 +279,13 @@ Run #2289's Music Library, cue, BGM, and preview checks before the Production me
 - The source run for commit `7b5723c9a7de5da610e87aa9c81351f4287235ec` passed dependency installation, frontend JavaScript syntax validation, isolated native Qt lifecycle verification and the full regression suite.
 - The tested source includes the load-only Open-card guard and `test_open_action_preserves_selected_book_during_metadata_load`.
 - This is the verified source base for the next Windows artifact checkpoint; retain all previously passing Stage 5.3 real-generation and Stage 6 player/mini-player acceptance.
+
+## Correct Open acceptance semantics — same-book reuse versus project switch
+
+- #2318's Stage 5.3 generation/preview checks and player chapter-navigation checks passed; its terminal assertion was the Audiobooks Library Open-paused check.
+- The runtime intentionally reuses the existing Audio object when the same project and same playback source are opened again. The prior packaged test unconditionally required the Audio-object count to increase, even though the earlier stale-audio-event acceptance can already have opened the first fixture. Requiring a second Audio object would contradict the single-audio-session behavior being tested.
+- The Open path now reuses only when both playback URL and project-folder identity match. In that same-book path, `autoplay:false` explicitly pauses the existing session. A different project gets its own Audio object even if a file URL happens to match.
+- The packaged Open check now accepts either (a) reuse of the already-loaded Audio object for the same project or (b) a new Audio object for a different project. In both cases it requires the expected project identity, title, ready metadata, MP3 source, correct M4B/output metadata and paused state. A timeout now emits the source, folder, readyState, paused flag and media error code for diagnosis.
+- The additional regression contract prevents reintroducing a duplicate Audio object solely to satisfy the Open test.
+
+**Next action:** verify the revised acceptance on a fresh frozen Windows build. Stage 5.3 generation implementation remains unchanged; all Stage 5.3-specific packaged checks observed in #2318 passed.

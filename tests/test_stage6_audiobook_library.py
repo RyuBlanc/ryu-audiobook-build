@@ -63,11 +63,23 @@ class Stage6AudiobookLibraryContractTests(unittest.TestCase):
         self.assertIn("audio.preload = 'metadata'", open_player)
         self.assertIn("else audio.load()", open_player)
         self.assertIn("audio.onloadedmetadata =", open_player)
+        self.assertIn("String(playerAudio.dataset?.projectFolder || '') === folder", open_player)
+        self.assertIn("else if (!playerAudio.paused) {", open_player)
+        self.assertIn("playerAudio.pause();", open_player)
         refresh_start = self.adapter.index("async function refreshProjects()")
         refresh_end = self.adapter.index("const voiceLibraryTitles", refresh_start)
         refresh = self.adapter[refresh_start:refresh_end]
         self.assertIn("if (!playerAudio || !playerAudio.src) clearAudiobookPlayerDisplay();", refresh)
 
+    def test_packaged_open_acceptance_allows_same_book_audio_reuse_without_duplicates(self):
+        open_start = self.packaged_js.index('const existingAudioBeforeOpen = latestAcceptanceAudio();')
+        open_end = self.packaged_js.index('const firstOpenedData = await invoke("player.get_active"', open_start)
+        open_check = self.packaged_js[open_start:open_end]
+        self.assertIn("const sameBookAlreadyLoaded = Boolean", open_check)
+        self.assertIn("const sameAudioReused = sameBookAlreadyLoaded && audio === existingAudioBeforeOpen", open_check)
+        self.assertIn("const newAudioLoaded = !sameBookAlreadyLoaded", open_check)
+        self.assertIn("audio.readyState >= 1 && audio.paused", open_check)
+        self.assertIn("Open-state diagnostics:", open_check)
     def test_completed_output_validation_and_m4b_derivative_are_preserved(self):
         summary_start = self.host.index("def _project_summary(")
         player_start = self.host.index("def _player_get_active(")
