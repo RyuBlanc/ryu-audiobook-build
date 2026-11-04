@@ -7271,6 +7271,20 @@
     playerPreferenceSave = playerPreferenceSave.catch(() => {}).then(async () => {
       const saved = await call('settings.save', patch);
       if (saved?.saved === false) throw new Error('Player preferences were not saved.');
+      if (Object.prototype.hasOwnProperty.call(patch, 'player_rate')) {
+        const acknowledgedRate = Number(saved?.player_rate);
+        if (!Number.isFinite(acknowledgedRate) ||
+            Math.abs(acknowledgedRate - Number(patch.player_rate)) > 0.01) {
+          throw new Error('The saved playback speed was not confirmed by Settings read-back.');
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(patch, 'player_volume')) {
+        const acknowledgedVolume = Number(saved?.player_volume);
+        if (!Number.isFinite(acknowledgedVolume) ||
+            Math.abs(acknowledgedVolume - Number(patch.player_volume)) > 0.01) {
+          throw new Error('The saved player volume was not confirmed by Settings read-back.');
+        }
+      }
       return saved;
     });
     return playerPreferenceSave;
