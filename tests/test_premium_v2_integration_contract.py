@@ -908,16 +908,20 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("document.querySelector('#soundSourceFilter [data-source].active')", adapter)
         self.assertIn("box.innerHTML = jobs.map(j =>", adapter)
         self.assertIn("dataset.jobAction", adapter)
-        # Player transport controls intentionally use visible labels. The capture-phase
-        # speed handler must route through the shared persisted preference path.
-        player_start = adapter.index("if (button.closest('#player')) {")
-        player_end = adapter.index("if (button.id === 'backgroundJobsButton')", player_start)
-        player_handler = adapter[player_start:player_end]
-        self.assertIn("await applyPlayerRate(rate, true)", player_handler)
-        self.assertNotIn("playerAudio.playbackRate = Number(audioLabel.replace('×',''))", player_handler)
+        # Player transport controls are bound directly; no capture-phase glyph
+        # handler may confuse the identical main Play and Next Chapter symbols.
+        self.assertNotIn("if (button.closest('#player')) {", adapter)
+        player_start = adapter.index("function bindAudiobookPlayerControls(")
+        player_end = adapter.index("async function openPlayer(", player_start)
+        player_bindings = adapter[player_start:player_end]
+        self.assertIn("buttons[0].onclick = () => seekPlayerBy(-15)", player_bindings)
+        self.assertIn("buttons[1].onclick = () => jumpPlayerChapter('previous')", player_bindings)
+        self.assertIn("buttons[3].onclick = () => jumpPlayerChapter('next')", player_bindings)
+        self.assertIn("buttons[4].onclick = () => seekPlayerBy(15)", player_bindings)
+        self.assertIn("void applyPlayerRate(rate, true);", player_bindings)
         self.assertIn("return savePlayerPreferences({player_rate:rate})", adapter)
-        self.assertIn("playerAudio.currentTime = Math.max(0, playerAudio.currentTime - 15)", adapter)
-        self.assertIn("playerAudio.currentTime = Math.min(playerAudio.duration || Infinity, playerAudio.currentTime + 15)", adapter)
+        self.assertIn("playerAudio.currentTime = Math.max(0, Math.min(playerAudio.duration, playerAudio.currentTime + Number(seconds || 0)))", adapter)
+        self.assertIn("if ($('mainPlay')) $('mainPlay').onclick = playSelectedAudiobook;", adapter)
         self.assertIn("const lengthGroup = [...document.querySelectorAll('#voices .toolbar')]", adapter)
         self.assertIn("const duration = lengthGroup?.querySelector('.seg button.active')?.textContent.match(/\\d+/)?.[0] || '30'", adapter)
         # Chapter context actions and track selection have source-backed host calls.
