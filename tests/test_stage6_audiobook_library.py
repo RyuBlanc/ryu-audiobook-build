@@ -138,6 +138,18 @@ class Stage6AudiobookLibraryContractTests(unittest.TestCase):
         self.assertIn("Number.isFinite(end) && end > start", renderer)
         self.assertIn("No chapter metadata available.", renderer)
 
+    def test_player_chapter_transport_is_not_intercepted_by_global_capture_handler(self):
+        # The five visible transport buttons are bound directly: rewind,
+        # previous chapter, main Play/Pause, next chapter, and forward.
+        self.assertNotIn("if (button.closest('#player'))", self.adapter)
+        player_start = self.adapter.index("function bindAudiobookPlayerControls(")
+        player_end = self.adapter.index("async function openPlayer(", player_start)
+        bindings = self.adapter[player_start:player_end]
+        self.assertIn("buttons[1].onclick = () => jumpPlayerChapter('previous')", bindings)
+        self.assertIn("buttons[3].onclick = () => jumpPlayerChapter('next')", bindings)
+        self.assertIn("if ($('mainPlay')) $('mainPlay').onclick = playSelectedAudiobook;", self.adapter)
+        self.assertIn("if ($('miniPlay')) $('miniPlay').onclick = playSelectedAudiobook;", self.adapter)
+
     def test_stage3_keeps_stage55_project_position_acceptance(self):
         self.assertIn("stage55_audiobooks_real_playback_chapter_seek_and_position", self.packaged_js)
         self.assertNotIn("originating audiobook position remains persisted", self.packaged_js)
