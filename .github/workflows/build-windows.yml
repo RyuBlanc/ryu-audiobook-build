@@ -491,8 +491,8 @@ jobs:
           $privateDependencyProbe = & $privatePython -B -c "import imageio_ffmpeg; from PIL import Image; print('Private release Pillow=' + Image.__version__); print('Private acceptance FFmpeg=' + imageio_ffmpeg.get_ffmpeg_exe())" 2>&1
           $privateDependencyProbeExitCode = $LASTEXITCODE
           $privateDependencyProbe | Write-Host
-          if ($privateDependencyProbeExitCode -ne 0) { throw "Private Python is missing a required packaged-acceptance/release dependency (exit $privateDependencyProbeExitCode): $($privateDependencyProbe -join ' ')" }
           if ($privateDependencyProbeExitCode -ne 0) { throw "Private Python cannot import Pillow or imageio_ffmpeg (exit $privateDependencyProbeExitCode): $($privateDependencyProbe -join ' ')" }
+          if ($privateDependencyProbeExitCode -ne 0) { throw "Private Python cannot import Pillow (exit $privateDependencyProbeExitCode): $($privateDependencyProbe -join ' ')" }
 
       - name: Verify frozen application
         shell: pwsh
