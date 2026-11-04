@@ -172,3 +172,11 @@ Run #2289's Music Library, cue, BGM, and preview checks before the Production me
 **Next action:** one artifact checkpoint on the latest Stage 6 branch head. Verify the new regression test, full source suite, frozen app, complete packaged acceptance, installer, Defender scan, hashes and uploaded installer/portable artifacts. Inspect any new failed step before another checkpoint; do not cancel an active run or supersede completed successful work.
 
 **Current decision:** Stage 6 Step 3 remains IN PROGRESS. The two prior failures are diagnosed; the preference-persistence correction has source-level regression coverage, but matching-head CI and packaged Windows verification are still pending.
+
+## Follow-up validation correction — 4 November 2026
+
+- Intermediate runs #2291–#2296 were push-triggered source-test runs for successive small commits; their failures identified stale source-string assertions in existing UI tests and in the new player save-queue contract. The actual new player save regression passed before the retryable-queue refinement.
+- Existing dashboard persistence assertions now check the shared save helper rather than the removed fire-and-forget calls. The new player regression checks the retryable serialized queue, awaited native save, both player preference keys, and settings sync.
+- Run #2297 is the first artifact checkpoint for the player preference fix but was based on the immediately preceding commit, before these test-contract corrections. Its result must be treated as a validation checkpoint only; the final release checkpoint must run against the corrected branch HEAD.
+
+**Current decision:** Stage 6 Step 3 remains IN PROGRESS. Do not mark complete or publish Version 1.2.0 until corrected-head tests, packaged frozen acceptance, Windows installer/portable artifacts, Defender and SHA-256 checks all pass.
