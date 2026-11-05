@@ -1,0 +1,3 @@
+Stage 6 artifact checkpoint for verified source head f76cab6b2099a8bafa8b6a4fa2a255816250b343.
+
+No application source changes in this checkpoint. This marker requests full Windows frozen-app and packaged acceptance on the verified tablet CSS cascade and regression-runner shutdown fix. Release artifacts remain gated on packaged acceptance and installer/hash/Defender checks.
