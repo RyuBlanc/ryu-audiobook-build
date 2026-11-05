@@ -872,6 +872,7 @@ def _run(args: argparse.Namespace) -> int:
             "stage6_history_real_search_date_status_and_details",
             "stage6_task_manager_real_records_filters_details_and_counts",
             "stage6_task_manager_backend_dom_stays_stable_after_delayed_refresh",
+            "stage6_responsive_shared_shell_bounds_41_resolutions",
             "stage6_responsive_viewport_matrix_41_resolutions",
             "stage6_responsive_window_and_scale_emulation",
         ):

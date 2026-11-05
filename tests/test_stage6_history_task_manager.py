@@ -173,10 +173,24 @@ class Stage6HistoryTaskManagerTests(unittest.TestCase):
         self.assertIn("#player.page{padding:20px 16px 110px!important;min-width:0;overflow-x:hidden}", html)
         self.assertIn("grid-template-columns:minmax(0,1fr)!important", html)
         self.assertIn("max-width:100%", html)
+        self.assertIn("grid-template-columns:var(--side) minmax(0,1fr)", html)
+        self.assertIn("min-width:0;width:100%;max-width:100%;overflow:auto;position:relative", html)
+        self.assertIn("min-width:0;width:100%;max-width:100%;display:flex", html)
         self.assertGreater(html.rfind("Stage 6 tablet overflow guard"), html.index(base_rule))
         self.assertGreater(html.rfind("Stage 6 tablet overflow guard"), html.index(desktop_rule))
         self.assertGreater(html.rfind("Stage 6 tablet overflow guard"), html.index("@media(max-width:1250px)"))
         self.assertIn(1024, (960, 1024, 1100, 1200, 1250, 1280, 1366, 1440))
+
+    def test_packaged_matrix_checks_shared_app_shell_at_all_viewports(self) -> None:
+        packaged = (ROOT / "tests" / "stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
+        runner = (ROOT / "tests" / "packaged_sound_ui_acceptance.py").read_text(encoding="utf-8")
+        for marker in (
+            "stage6_responsive_shared_shell_bounds_41_resolutions",
+            "application-shell",
+            "shared workspace grid item retained its automatic minimum width",
+        ):
+            self.assertIn(marker, packaged)
+        self.assertIn("stage6_responsive_shared_shell_bounds_41_resolutions", runner)
 
     def test_packaged_acceptance_reacquires_live_audiobook_card_after_open(self) -> None:
         packaged = (ROOT / "tests" / "stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")

@@ -526,3 +526,28 @@ Mix preview playback now owns a local Audio instance. Replaced preview promises
 are caught, and stale ended/error callbacks cannot clear the active preview
 reference. Added regression contracts cover cue import side-effect ordering,
 retry settlement, preview drain and preview ownership.
+
+
+## Shared application-shell grid correction — 5 November 2026
+
+Build #2356 reached the final responsive matrix after the Stage 5.4 cue-save/
+preview drain, player restore, mini-player, cross-module ownership, History and
+Task Manager checks all passed. It failed at 1024×768 with the Player grid
+starting at x=292 and ending at x=1221.84 in a 1024px viewport.
+
+The Player-only tablet guard was not the underlying cause. The common desktop
+application grid still used \`grid-template-columns: var(--side) 1fr\`; the
+implicit minimum size of the \`1fr\` workspace track allowed its contents to
+expand the entire shell beyond the iframe viewport. The workspace was also a
+grid item without \`min-width:0\`.
+
+The correction changes the second shell track to \`minmax(0,1fr)\`, the second
+row to \`minmax(0,1fr)\`, gives the application shell a bounded width, and sets
+\`min-width:0\`/100% bounds on the workspace and top bar. This is a shared
+layout correction, not another Player-specific width override.
+
+The packaged 41-resolution matrix now checks the application shell, workspace,
+top bar and Player page bounds at every viewport in addition to the Player,
+Audiobooks cards, mini-player, History, Task Manager and job-details surfaces.
+The runner requires a dedicated shared-shell marker, so it cannot pass without
+these checks. Matching-head frozen-Windows verification is pending.

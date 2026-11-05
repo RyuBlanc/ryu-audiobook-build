@@ -820,6 +820,10 @@
         must(actualWidth === width && actualHeight === height,
           "Responsive emulation did not reach requested viewport " + label +
             ": got " + actualWidth + "x" + actualHeight);
+        const shell = d.querySelector(".app");
+        const workspace = d.querySelector(".workspace");
+        const topbar = d.querySelector(".topbar");
+        const playerPage = d.querySelector("#player.page");
         const playerGrid = d.querySelector("#player .player-grid");
         const historyRow = d.querySelector("#history .history-row");
         const mini = d.querySelector("#miniPlayer");
@@ -828,6 +832,7 @@
         const libraryCard = d.querySelector("#player .audiobook-library-card");
         const detailsPanel = d.querySelector("#jobDetailsModal .modal");
         const rects = [
+          ["application-shell",shell],["workspace",workspace],["topbar",topbar],["player-page",playerPage],
           ["player-grid",playerGrid],["history-row",historyRow],["mini-player",mini],
           ["Task Manager",jobsPanel],["job-row",jobRow],["audiobook-card",libraryCard],
           ["job-details",detailsPanel]
@@ -839,6 +844,10 @@
             name + " exceeds the viewport at " + label + ": " +
               JSON.stringify({left:r.left,right:r.right,width:r.width,viewport:width}));
         }
+        must(getComputedStyle(workspace).minWidth === "0px",
+          "The shared workspace grid item retained its automatic minimum width at " + label + ".");
+        must(getComputedStyle(shell).gridTemplateColumns.split(" ").length === 2,
+          "The shared application shell lost its two-column sidebar/workspace grid at " + label + ".");
         const playerColumns = getComputedStyle(playerGrid).gridTemplateColumns.trim().split(/\s+/).length;
         const historyColumns = getComputedStyle(historyRow).gridTemplateColumns.trim().split(/\s+/).length;
         const jobColumns = getComputedStyle(jobRow).gridTemplateColumns.trim().split(/\s+/).length;
@@ -854,6 +863,8 @@
       for (const viewport of stage6ResponsiveViewports) {
         await stage6CheckResponsiveViewport(viewport[0],viewport[1],viewport[2]);
       }
+      record("stage6_responsive_shared_shell_bounds_41_resolutions",true,
+        "At all 41 viewports, the two-column application shell, top bar and workspace stayed within the viewport, with min-width:0 applied to the workspace.");
       record("stage6_responsive_viewport_matrix_41_resolutions",true,
         "All 41 requested aspect-ratio resolutions were emulated against the actual Premium V2 stylesheet and player, library, mini-player, History, Task Manager and job-details DOM.");
 
