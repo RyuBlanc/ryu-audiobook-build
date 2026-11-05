@@ -105,3 +105,13 @@ Implement the authoritative registry/scanner and integrate the Premium V2 bridge
 ## 9. CI validation branch alias
 
 The repository's default-branch Actions workflow currently has a `stage-6/**` push filter but not a `stage-7/**` filter. To obtain matching-commit CI without changing the default branch or triggering an unrelated main package build, `stage-6/stage-7-step-1-ci-validation` mirrors the Stage 7 working branch for CI events. The canonical Stage 7 branch must be advanced to the exact tested commit SHA after each validation checkpoint. This alias is only a workflow-trigger compatibility measure; Stage 7 scope and acceptance remain unchanged.
+
+
+## 2026-11-05 — CI failure audit update
+
+- Run #2390 failed on one stale Stage 4 provider-health source assertion. Updated the regression to assert the Stage 7 truthful status mapping (Missing, Not configured, Partially installed, Unhealthy, Unsupported, Location unavailable, Installed pending functional verification, Ready) instead of the retired generic Setup required label.
+- The file-inventory pagination failure seen in #2386 was corrected in the subsequent safe-runtime-path implementation; the full #2390 regression run reports only the provider-health assertion as a failure.
+- Successful checks retained: #2387 safe runtime path discovery; #2388 storage accounting and Voice Studio mapping; #2389 Voice Studio registry synchronization and exact runtime paths.
+- CI workflow deliberately skips Windows packaging on ordinary feature-branch commits. A final commit carrying [artifact-checkpoint] is required to run the Windows packaging job after tests pass.
+- Latest source commit before this checkpoint: b4923aec15370066a08d199d191e487778a46759.
+- Stage 7 Step 1 remains OPEN pending matching-head full regression and Windows packaging success.
