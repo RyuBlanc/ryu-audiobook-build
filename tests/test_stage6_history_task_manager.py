@@ -101,7 +101,9 @@ class Stage6HistoryTaskManagerTests(unittest.TestCase):
         self.assertIn("JSON.stringify(renderedIds) === JSON.stringify(expectedIds)", self.adapter)
         self.assertIn("!box.querySelector('.job-row:not([data-backend-job])')", self.adapter)
         self.assertIn("if (box.dataset.backendJobsSignature !== signature || !backendDomMatches)", self.adapter)
-        self.assertIn("Boolean(row.querySelector('[data-job-view]'))", self.adapter)
+        self.assertIn("const rowsHaveViewActions = renderedRows.every(row =>", self.adapter)
+        self.assertIn("rowStructureValid && rowsHaveViewActions", self.adapter)
+        self.assertIn("button.dataset.jobView = id", self.adapter)
 
     def test_packaged_runner_requires_real_two_process_player_restoration(self) -> None:
         runner = (ROOT / "tests" / "packaged_sound_ui_acceptance.py").read_text(encoding="utf-8")

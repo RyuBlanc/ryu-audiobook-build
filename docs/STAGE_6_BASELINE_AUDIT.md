@@ -618,3 +618,17 @@ The packaged acceptance asserts unique native job IDs, exact DOM/native ID
 equality, one correctly bound View action per row, status-filter membership,
 summary counts and delayed-refresh integrity. No requirement is skipped or
 weakened.
+
+
+## #2360 failure — stale renderer-contract assertions corrected (5 November 2026)
+
+Build #2360 ran 1,186 tests and failed three assertions after the new View-action
+integrity repair. The assertions still required the former inline
+\`Boolean(row.querySelector('[data-job-view]'))\` expression. The implementation
+now uses an explicit \`rowsHaveViewActions\` identity check and in-place repair.
+
+No production behaviour failed in this run. The corrected source contracts
+require one View action per backend-owned row, with \`data-job-view\` matching
+\`data-backend-job\`, repaired in place before any full row render. Packaged
+acceptance continues to verify the actual frozen app and fails on missing or
+mismatched View actions.
