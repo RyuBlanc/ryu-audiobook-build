@@ -560,3 +560,23 @@ grid from the intentional single-block mobile shell at widths ≤800px. It still
 requires \`min-width:0\` on the workspace and verifies shell/workspace/topbar
 bounds at every viewport. This prevents the test itself from reporting the
 expected mobile CSS layout as a regression.
+
+
+## Matching-head responsive shell verification checkpoint — 5 November 2026
+
+Commit \`92506e7b23f23b9e5125da74214c6f40eb925f3e\` includes the shared
+application grid correction from \`0b69c486c9f5534edb8df3545b70412364c33acd\`
+and the corrected mobile breakpoint expectation. The exact-head source run
+#2358 passed JavaScript syntax, isolated Qt lifecycle and **1,186 regression
+tests in 63.423 seconds**. The Windows build was skipped because #2358 was a
+test-fix checkpoint.
+
+Build #2357 remains active against the preceding \`0b69c48\` revision. It is
+preserved, but its packaged matrix predates the mobile single-column
+expectation and cannot be used as the final responsive acceptance candidate.
+
+This artifact checkpoint runs frozen-Windows acceptance against the corrected
+\`92506e7\` responsive test contract. It requires the Stage 5.4/5.5 carry-forward,
+Stage 6 Steps 4–7, the full 41-viewport matrix, window/scaling emulation,
+shared application-shell bounds, and the installer/portable/hash/Defender
+workflow steps. Physical manual installation is not claimed by CI.
