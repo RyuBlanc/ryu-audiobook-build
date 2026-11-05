@@ -187,8 +187,9 @@ def normalize_inventory_status(
 
     incomplete_markers = (
         "incomplete", "needs installation", "needs repair",
-        "runtime required", "dependency missing", "needs setup",
-        "not installed", "not ready", "dependency unavailable",
+        "runtime required", "runtime missing", "dependency missing",
+        "needs setup", "not installed", "not ready",
+        "dependency unavailable", "server missing",
     )
     if installed:
         if any(marker in detail for marker in incomplete_markers):
@@ -618,6 +619,103 @@ def enrich_inventory_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     persist_inventory_snapshot(rows)
     return rows
 
+def voice_model_inventory_status(provider_key: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Project the authoritative inventory into the availability contract used by Voice Studio."""
+    key = str(provider_key or "").strip().casefold()
+    by_id = {str(row.get("model_id") or ""): row for row in rows}
+    groups: list[list[str]]
+    optional: list[str] = []
+    if key == "offline":
+        groups = [["piper", "kokoro"]]
+    elif key == "sapi":
+        groups = [["windows-sapi"]]
+    elif key == "customvoice":
+        groups = [["qwen-runtime"], ["custom-0.6b", "custom-1.7b"]]
+    elif key == "voicedesign":
+        groups = [["qwen-runtime"], ["design-1.7b"], ["base-0.6b", "base-1.7b"]]
+    elif key == "qwenclone":
+        groups = [["qwen-runtime"], ["base-0.6b", "base-1.7b"]]
+    elif key == "customref":
+        groups = [["chatterbox-runtime"]]
+        optional = ["chatterbox-model-assets"]
+    elif key == "edge":
+        groups = [["edge-tts"]]
+    elif key == "eleven":
+        groups = [["elevenlabs"]]
+    else:
+        return {
+            "provider": key, "status": "Not assessed", "selectable": False,
+            "message": "No authoritative model-inventory mapping exists for this provider.",
+            "components": [], "available_variants": [],
+        }
+
+    available_statuses = {"Ready", "Installed"}
+    def status_for(model_id: str) -> str:
+        row = by_id.get(model_id)
+        return str(row.get("status") or "Missing") if row else "Missing"
+
+    selected: list[str] = []
+    missing_groups: list[list[str]] = []
+    for group in groups:
+        candidates = [model_id for model_id in group if status_for(model_id) in available_statuses]
+        if candidates:
+            candidates.sort(key=lambda model_id: status_for(model_id) == "Ready", reverse=True)
+            selected.append(candidates[0])
+        else:
+            missing_groups.append(group)
+
+    selectable = not missing_groups
+    required_ids = list(dict.fromkeys(model_id for group in groups for model_id in group))
+    all_ids = list(dict.fromkeys(required_ids + optional))
+    component_rows = [
+        {
+            "model_id": model_id,
+            "name": str(by_id.get(model_id, {}).get("name") or model_id),
+            "status": status_for(model_id),
+            "status_detail": str(by_id.get(model_id, {}).get("status_detail") or "Component not detected"),
+        }
+        for model_id in all_ids
+    ]
+    if selectable:
+        status = "Ready" if selected and all(status_for(model_id) == "Ready" for model_id in selected) else "Installed"
+        message = (
+            "Required model and runtime components are functionally verified."
+            if status == "Ready" else
+            "Required model files and runtime are installed; functional inference verification is still pending."
+        )
+        if key == "customref" and status_for("chatterbox-model-assets") == "Missing":
+            message += " Chatterbox weights may be downloaded on first use."
+    else:
+        failed = []
+        for group in missing_groups:
+            failed.append(" or ".join(group))
+        component_statuses = [status_for(model_id) for group in missing_groups for model_id in group]
+        if "Location unavailable" in component_statuses:
+            status = "Location unavailable"
+        elif "Unhealthy" in component_statuses:
+            status = "Unhealthy"
+        elif "Partially installed" in component_statuses:
+            status = "Partially installed"
+        elif "Not configured" in component_statuses:
+            status = "Not configured"
+        else:
+            status = "Missing"
+        message = "Unavailable components: " + "; ".join(failed) + ". Install or repair them in Models Center."
+
+    available_variants = [
+        model_id for model_id in required_ids
+        if model_id.startswith(("custom-", "design-", "base-")) and status_for(model_id) in available_statuses
+    ]
+    return {
+        "provider": key,
+        "status": status,
+        "selectable": selectable,
+        "message": message,
+        "components": component_rows,
+        "available_variants": available_variants,
+    }
+
+
 def build_inventory() -> list[dict[str, Any]]:
     """Return the live, provider-aware local model and runtime inventory."""
     from app.core.paths import models_root
@@ -657,6 +755,34 @@ def build_inventory() -> list[dict[str, Any]]:
         except OSError:
             return 0
 
+    def unique_byte_size(paths) -> int:
+        """Count each physical file path once even when roots overlap."""
+        seen: set[str] = set()
+        total = 0
+        for raw_path in paths:
+            if not raw_path:
+                continue
+            path = Path(raw_path)
+            try:
+                candidates = [path] if path.is_file() else path.rglob("*") if path.is_dir() else []
+            except OSError:
+                continue
+            for candidate in candidates:
+                try:
+                    if not candidate.is_file():
+                        continue
+                    try:
+                        marker = str(candidate.resolve()).casefold()
+                    except OSError:
+                        marker = str(candidate.absolute()).casefold()
+                    if marker in seen:
+                        continue
+                    seen.add(marker)
+                    total += int(candidate.stat().st_size)
+                except OSError:
+                    continue
+        return total
+
     def row(model_id: str, name: str, provider: str, installed: bool, notes: str, **extra):
         raw_status = str(extra.pop("status", "Installed" if installed else "Not installed"))
         return {
@@ -686,21 +812,39 @@ def build_inventory() -> list[dict[str, Any]]:
                 piper_local.append(voice_path.resolve())
         except OSError:
             continue
-    piper_verified = [
-        voice_path for voice_path in piper_paths
-        if voice_path.is_file()
-        and voice_path.stat().st_size > 1024
-        and voice_path.with_suffix(voice_path.suffix + ".json").is_file()
-    ]
+    def piper_voice_is_valid(voice_path: Path) -> bool:
+        try:
+            return (
+                voice_path.is_file()
+                and voice_path.stat().st_size > 1024
+                and voice_path.with_suffix(voice_path.suffix + ".json").is_file()
+            )
+        except OSError:
+            return False
+
+    piper_verified = [voice_path for voice_path in piper_paths if piper_voice_is_valid(voice_path)]
     piper_installed = bool(piper_verified)
+    piper_runtime_ready = bool(_module_directory("piper"))
+    try:
+        piper_bundled_root = PiperProvider._bundled_root()
+    except Exception:
+        piper_bundled_root = None
+    piper_storage_bytes = unique_byte_size([root / "piper", piper_bundled_root])
+    piper_status = (
+        f"{len(piper_verified)} voice model(s) installed"
+        if piper_installed and piper_runtime_ready else
+        "Voice files installed · Piper runtime missing"
+        if piper_installed else
+        "No verified voice models (not installed or incomplete)"
+    )
     result.append(row(
         "piper", "Piper Offline Neural Voices", "piper", piper_installed,
         "Install individual Piper voice models for offline narration. Installed voice files are listed here; bundled voices are managed by the application installer.",
-        status=(f"{len(piper_verified)} voice model(s) verified" if piper_installed else "No verified voice models (not installed or incomplete)"),
+        status=piper_status,
         installable=True, repairable=bool(piper_local), uninstallable=bool(piper_local),
         removable_voice_count=len(piper_local),
         installed_voice_names=sorted({item.stem for item in piper_local}, key=str.casefold),
-        storage_bytes=sum(byte_size(v) + byte_size(v.with_suffix(v.suffix + ".json")) for v in piper_local),
+        storage_bytes=piper_storage_bytes, runtime_ready=piper_runtime_ready,
         requirements="Local model files; no internet required after download.",
         component_type="model",
     ))
@@ -710,14 +854,26 @@ def build_inventory() -> list[dict[str, Any]]:
     try:
         kokoro_installed = bool(KokoroProvider.assets_available())
         kokoro_voice_count = len(KokoroProvider().voices()) if kokoro_installed else 0
+        kokoro_model = KokoroProvider._find_model()
+        kokoro_voices = KokoroProvider._find_voices()
     except Exception:
         kokoro_installed, kokoro_voice_count = False, 0
+        kokoro_model, kokoro_voices = None, None
+    kokoro_runtime_ready = bool(_module_directory("kokoro_onnx"))
+    kokoro_storage_bytes = unique_byte_size([kokoro_root, kokoro_model, kokoro_voices])
+    kokoro_status = (
+        "Installed locally" if kokoro_local and kokoro_installed and kokoro_runtime_ready else
+        "Bundled with application" if kokoro_installed and kokoro_runtime_ready else
+        "Model assets installed · Kokoro runtime missing" if kokoro_installed else
+        "Model or voice pack missing"
+    )
     result.append(row(
         "kokoro", "Kokoro 82M Natural Narration", "kokoro", kokoro_installed,
         "Offline natural narration. Requires both the ONNX model and voice pack. Bundled assets cannot be removed separately.",
-        status=("Installed locally" if kokoro_local and kokoro_installed else "Bundled with application" if kokoro_installed else "Model or voice pack missing"),
+        status=kokoro_status,
         installable=not kokoro_installed, repairable=bool(kokoro_local or (kokoro_root.exists() and not kokoro_installed)),
-        uninstallable=bool(kokoro_local), storage_bytes=byte_size(kokoro_root),
+        uninstallable=bool(kokoro_local), storage_bytes=kokoro_storage_bytes,
+        runtime_ready=kokoro_runtime_ready,
         voice_count=kokoro_voice_count, requirements="About 354 MB download; internet needed only for install/repair.",
         managed_path=str(kokoro_root), bundled=bool(kokoro_installed and not kokoro_local),
     ))
@@ -727,16 +883,31 @@ def build_inventory() -> list[dict[str, Any]]:
     except Exception:
         chat_installed = False
     chat_present = CHATTERBOX_ROOT.exists()
-    chat_installed = bool(chatterbox_ready())
-    chat_present = CHATTERBOX_ROOT.exists()
+    chat_runtime_bytes = unique_byte_size([CHATTERBOX_ROOT])
     result.append(row(
         "chatterbox-runtime", "Chatterbox Voice Cloning Runtime", "chatterbox", chat_installed,
-        "Shared runtime for English and multilingual reference-based voice cloning. The provider downloads and caches model weights on first use; runtime readiness does not claim those model weights are already present.",
+        "Shared runtime for English and multilingual reference-based voice cloning. Model weights are inventoried separately in the Hugging Face cache.",
         status=("Runtime ready · English and multilingual modes available" if chat_installed else "Runtime incomplete" if chat_present else "Not installed"),
         installable=not chat_installed, repairable=chat_present or chat_installed,
         uninstallable=chat_present, requirements="Python 3.11 isolated runtime; internet for setup and first-use model weights.",
-        storage_bytes=byte_size(CHATTERBOX_ROOT), component_type="runtime",
+        storage_bytes=chat_runtime_bytes, runtime_ready=chat_installed, component_type="runtime",
         managed_path=str(CHATTERBOX_ROOT),
+    ))
+    chatterbox_cache_root = _chatterbox_cache_root(root)
+    chatterbox_model_dirs = [
+        path for path in chatterbox_cache_root.glob("models--*")
+        if path.is_dir() and "chatterbox" in path.name.casefold()
+    ] if chatterbox_cache_root.is_dir() else []
+    chatterbox_assets_bytes = unique_byte_size(chatterbox_model_dirs)
+    chatterbox_assets_installed = bool(chatterbox_model_dirs and chatterbox_assets_bytes > 0)
+    result.append(row(
+        "chatterbox-model-assets", "Chatterbox Model Assets · English & Multilingual", "chatterbox",
+        chatterbox_assets_installed,
+        "Shared Hugging Face model weights used by Chatterbox English and multilingual synthesis. The runtime may download these weights on first use.",
+        status=(f"{len(chatterbox_model_dirs)} cached model snapshot(s) found" if chatterbox_assets_installed else "No downloaded Chatterbox model assets found · first-use download may be required"),
+        installable=False, repairable=False, uninstallable=False,
+        storage_bytes=chatterbox_assets_bytes, managed_path=str(chatterbox_cache_root),
+        component_type="model", shared_cache=True,
     ))
 
     try:
@@ -751,7 +922,8 @@ def build_inventory() -> list[dict[str, Any]]:
         status="Runtime ready" if qwen_ready else "Runtime needs installation or repair",
         installable=not qwen_ready, repairable=qwen_runtime_present or qwen_ready,
         uninstallable=qwen_runtime_present, requirements="Large offline runtime; model weights are managed separately.",
-        storage_bytes=sum(byte_size(path) for path in qwen_runtime_paths), managed_path=str(QWEN_ROOT), component_type="runtime",
+        storage_bytes=unique_byte_size(qwen_runtime_paths), runtime_ready=qwen_ready,
+        managed_path=str(QWEN_ROOT), component_type="runtime",
     ))
     qwen_names = {
         "custom-0.6b": ("Qwen CustomVoice 0.6B", "qwen-customvoice"),
@@ -801,8 +973,8 @@ def build_inventory() -> list[dict[str, Any]]:
             uninstallable=folder_exists,
             install_id=install_id, repair_id=repair_id, verify_id=verify_id,
             feature=qwen_names.get(kind, ("", "qwen"))[1], requirements="Model download can be several GB; requires internet for install/repair.",
-            storage_bytes=byte_size(MODEL_DIRS[kind]), managed_path=str(MODEL_DIRS[kind]),
-            component_type="model",
+            storage_bytes=unique_byte_size([MODEL_DIRS[kind]]), runtime_ready=qwen_ready,
+            version=repo_id, managed_path=str(MODEL_DIRS[kind]), component_type="model",
         ))
 
     # This is a status-card refresh, not an installation operation. Do not
@@ -838,8 +1010,8 @@ def build_inventory() -> list[dict[str, Any]]:
         model_name=ai_model_id, model_filename=ai_filename, download_bytes=int(ai_size),
         requirements=(f"Installed model file: {ai_size / (1024 ** 3):.1f} GB." if ai_size else
                       "Install downloads a hardware-appropriate local model (typically about 1.2–2.5 GB) and runs a real inference self-test."),
-        storage_bytes=byte_size(ai_root, direct_only=True), managed_path=str(ai_root),
-        component_type="model",
+        storage_bytes=unique_byte_size([ai_root]), runtime_ready=ai_server_present,
+        managed_path=str(ai_root), component_type="model",
     ))
 
     # Avoid constructing a COM speech engine synchronously while the
@@ -873,7 +1045,7 @@ def build_inventory() -> list[dict[str, Any]]:
         status=f"{sapi_count} Windows voice(s) detected" if sapi_count else "No Windows SAPI voices detected",
         installable=False, repairable=False, uninstallable=False, voice_count=sapi_count,
         requirements="Windows system component; not a separately managed model.",
-        component_type="provider",
+        component_type="provider", runtime_ready=sapi_count > 0,
     ))
 
     try:
@@ -886,7 +1058,7 @@ def build_inventory() -> list[dict[str, Any]]:
         "Online neural voice service, not a local model download. Voice catalogue and synthesis require network access.",
         status="Client package available · internet required" if edge_ready else "Edge TTS package unavailable",
         installable=False, repairable=False, uninstallable=False, requirements="Internet connection; not an offline model.",
-        component_type="provider",
+        component_type="provider", runtime_ready=edge_ready,
     ))
 
     try:
@@ -900,7 +1072,7 @@ def build_inventory() -> list[dict[str, Any]]:
         status="API key configured" if eleven_key else "API key required",
         installable=False, repairable=False, uninstallable=False, credentials_configured=eleven_key,
         requirements="Internet and your own ElevenLabs API key; no local model to install.",
-        component_type="provider",
+        component_type="provider", runtime_ready=eleven_key,
     ))
     return enrich_inventory_rows(result)
 
