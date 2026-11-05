@@ -422,3 +422,29 @@ packaged acceptance result.
 The next matching-head artifact checkpoint must validate the queued follow-up
 refresh behaviour in the frozen Windows application, then continue the 41
 viewport matrix and release gates.
+
+
+## Root-cause correction — Task Manager prototype timer (5 November 2026)
+
+The packaged failure was traced to a second renderer embedded in
+\`assets/frontend/ryu_audiobook_premium_v2.html\`. It created four hard-coded
+sample jobs and ran a 4-second \`setInterval\` that called \`renderJobs()\` and
+replaced \`#backgroundJobsList.innerHTML\` whenever the modal was open. The
+backend adapter's click-capture guards could stop prototype click handlers,
+but could not stop this independent timer. Depending on timing, it replaced
+native \`data-backend-job\` rows with prototype \`data-job\` rows and removed
+their real View/actions.
+
+The prototype Task Manager renderer, sample job array, fake handlers and timer
+have been removed. The independent Update Log controls remain. The backend
+adapter now owns Task Manager close and History navigation, and the packaged
+test keeps the real Task Manager open beyond the former 4-second timer
+interval before checking exact job identities and actionable View controls.
+
+The viewport harness now sets iframe \`width\`/\`height\` attributes as well as
+CSS dimensions and waits for the actual iframe browsing context to reach the
+requested \`innerWidth\`/\`innerHeight\`. A synthetic resize event cannot
+change a browsing context's viewport.
+
+These are root-cause fixes and regression tests; no acceptance gate was
+weakened.

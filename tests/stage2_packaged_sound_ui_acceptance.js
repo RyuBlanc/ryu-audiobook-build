@@ -691,6 +691,15 @@
       must(document.querySelector("#jobDetailsModal [data-job-detail-field='job-id']").textContent.trim() ===
         String(stage6TaskJob.job_id), "Task Manager View opened a different job's details.");
       document.querySelector("#jobDetailsModal [data-job-detail-close]")?.click();
+      await sleep(4500);
+      await waitFor("Task Manager backend rows remain owned after the former prototype timer window",
+        stage6TaskRowsMatchNativeJobs, 12000);
+      must(Array.from(document.querySelectorAll("#backgroundJobsList [data-backend-job]")).every(row =>
+        Boolean(row.querySelector("[data-job-view]")) &&
+        row.querySelector("[data-job-view]").dataset.jobView === row.dataset.backendJob),
+        "A delayed refresh replaced a live Task Manager row or removed its actionable View button.");
+      record("stage6_task_manager_backend_dom_stays_stable_after_delayed_refresh", true,
+        "After more than the former four-second prototype timer interval, backend job identities and actionable View controls remained intact.");
       jobsModal.classList.remove("show");
       record("stage6_task_manager_real_records_filters_details_and_counts", true,
         "Task Manager All/Active/Completed views, row layout, summary counts and operation details matched native jobs.");
@@ -712,8 +721,13 @@
         "The responsive viewport fixture could not clone all required live Premium V2 surfaces.");
       const stage6ResponsiveFrame = document.createElement("iframe");
       stage6ResponsiveFrame.setAttribute("aria-hidden","true");
+      stage6ResponsiveFrame.width = 1920;
+      stage6ResponsiveFrame.height = 1080;
+      stage6ResponsiveFrame.setAttribute("width","1920");
+      stage6ResponsiveFrame.setAttribute("height","1080");
       Object.assign(stage6ResponsiveFrame.style,{
         position:"fixed",left:"-20000px",top:"-20000px",
+        display:"block",minWidth:"0",minHeight:"0",
         width:"1920px",height:"1080px",border:"0",opacity:"0",
         pointerEvents:"none",zIndex:"-1"
       });
@@ -787,11 +801,19 @@
         ["2160x3840",2160,3840]
       ];
       const stage6CheckResponsiveViewport = async (label,width,height) => {
+        // Change both the iframe browsing-context attributes and its CSS size.
+        // Wait for the real iframe viewport resize; a synthetic resize event
+        // cannot change innerWidth or innerHeight.
+        stage6ResponsiveFrame.width = width;
+        stage6ResponsiveFrame.height = height;
+        stage6ResponsiveFrame.setAttribute("width",String(width));
+        stage6ResponsiveFrame.setAttribute("height",String(height));
         stage6ResponsiveFrame.style.width = width + "px";
         stage6ResponsiveFrame.style.height = height + "px";
         stage6ResponsiveAppRoot.style.minHeight = height + "px";
-        stage6ResponsiveFrame.contentWindow.dispatchEvent(new Event("resize"));
-        await sleep(25);
+        await waitFor("iframe viewport reaches " + label,() =>
+          stage6ResponsiveFrame.contentWindow.innerWidth === width &&
+          stage6ResponsiveFrame.contentWindow.innerHeight === height,5000);
         const d = stage6ResponsiveDoc;
         const actualWidth = stage6ResponsiveFrame.contentWindow.innerWidth;
         const actualHeight = stage6ResponsiveFrame.contentWindow.innerHeight;

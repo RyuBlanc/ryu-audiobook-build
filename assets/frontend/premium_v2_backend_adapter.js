@@ -9846,6 +9846,18 @@
         refreshJobs().catch(err => message(err?.message || String(err), true));
         return;
       }
+      if (button.id === 'closeBackgroundJobs') {
+        stop();
+        $('backgroundJobsModal')?.classList.remove('show');
+        return;
+      }
+      if (button.id === 'openJobHistory') {
+        stop();
+        $('backgroundJobsModal')?.classList.remove('show');
+        if (typeof window.go === 'function') window.go('history');
+        refreshHistory().catch(err => message(err?.message || String(err), true));
+        return;
+      }
       if (button.id === 'openUpdateLog') {
         // The build update log is local static release information, not a live backend action.
         return;

@@ -266,6 +266,32 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         self.assertIn("writeTextIfChanged(errorNode, j.error?.message || '')", refresh)
         self.assertIn("writeStyleIfChanged(progress, 'width', pct + '%')", refresh)
 
+    def test_task_manager_prototype_renderer_and_timer_are_removed_from_reference_html(self):
+        html = (
+            ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html"
+        ).read_text(encoding="utf-8")
+        adapter = (
+            ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("function renderJobs(){let show=jobs.filter", html)
+        self.assertNotIn("setInterval(()=>{const r=jobs.find(j=>j.state==='running')", html)
+        self.assertNotIn("render-17", html)
+        self.assertIn("document.getElementById('openUpdateLog')", html)
+        self.assertIn("button.id === 'closeBackgroundJobs'", adapter)
+        self.assertIn("button.id === 'openJobHistory'", adapter)
+
+    def test_task_manager_backend_rows_survive_the_old_prototype_timer_window(self):
+        packaged = (
+            ROOT / "tests" / "stage2_packaged_sound_ui_acceptance.js"
+        ).read_text(encoding="utf-8")
+        runner = (
+            ROOT / "tests" / "packaged_sound_ui_acceptance.py"
+        ).read_text(encoding="utf-8")
+        marker = "stage6_task_manager_backend_dom_stays_stable_after_delayed_refresh"
+        self.assertIn("await sleep(4500);", packaged)
+        self.assertIn(marker, packaged)
+        self.assertIn(marker, runner)
+
     def test_overlapping_job_refresh_preserves_filter_change_for_follow_up_render(self):
         adapter = (
             ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
