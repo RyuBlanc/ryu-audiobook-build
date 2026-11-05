@@ -7145,8 +7145,22 @@ class PremiumV2Bridge(QObject):
             detail = "ElevenLabs API key is configured; account access is verified on first provider request." if available else "ElevenLabs API key is not configured. Open Voice Studio to connect the account."
         else:
             raise ValueError(f"Unsupported model/provider to verify: {requested}")
+        if requested == "windows-sapi" and available:
+            status = "Ready"
+        elif requested == "elevenlabs" and not available:
+            status = "Not configured"
+        elif available:
+            # File/dependency presence is not a functional inference test.
+            status = "Installed"
+        elif item and (int(item.get("storage_bytes") or 0) > 0 or
+                       (item.get("managed_path") and Path(str(item["managed_path"])).exists())):
+            status = "Partially installed"
+        elif item and item.get("component_type") == "provider":
+            status = "Missing"
+        else:
+            status = "Missing"
         return {"model_id": requested, "available": available, "detail": detail, "path": path,
-                "status": "Ready" if available else "Needs attention", "model": item}
+                "status": status, "model": item}
 
     def _performance_info(self, _payload: dict[str, Any]) -> dict[str, Any]:
         return {"available": False, "reason": "Live CPU, GPU and VRAM telemetry is not connected to Premium V2 yet."}

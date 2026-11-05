@@ -7950,8 +7950,10 @@
     return amount.toFixed(unit >= 3 ? 1 : 0) + ' ' + units[unit];
   }
   function modelNeedsAttention(model) {
-    return /incomplete|missing|not installed|needs installation|needs setup|setup required|api key required|unavailable|runtime required|dependency missing|not configured|not ready|no .* detected|no .* installed/i
-      .test(String(model?.status || ''));
+    const status = String(model?.status || '').trim().toLowerCase();
+    if (['missing','not configured','partially installed','unhealthy','unsupported','location unavailable'].includes(status)) return true;
+    return /incomplete|needs installation|needs setup|setup required|api key required|runtime required|dependency missing|not ready|no .* detected|no .* installed/i
+      .test(status);
   }
   function modelLifecycleActionButtons(model) {
     const actions = [];
@@ -7995,14 +7997,15 @@
   function renderModelInventory() {
     const rows = Array.isArray(window.ryuModelInventoryRows) ? window.ryuModelInventoryRows : [];
     const grid = $('modelGrid');
-    const toolbar = $('modelInventoryToolbar');
     const query = String($('modelInventorySearch')?.value || '').trim().toLowerCase();
     const filter = $('modelInventoryFilter')?.value || 'all';
     const filtered = rows.filter(model => {
-      const searchText = [model.name,model.provider,model.model_id,model.status,model.notes,model.requirements].join(' ').toLowerCase();
+      const searchText = [model.name,model.provider,model.model_id,model.status,model.status_detail,
+        model.capability,model.version,model.notes,model.requirements,
+        ...(Array.isArray(model.dependencies) ? model.dependencies : [])].join(' ').toLowerCase();
       if (query && !searchText.includes(query)) return false;
       if (filter === 'attention' && !modelNeedsAttention(model)) return false;
-      if (filter === 'ready' && (!model.installed || modelNeedsAttention(model))) return false;
+      if (filter === 'ready' && String(model.status || '') !== 'Ready') return false;
       if (filter === 'local' && model.component_type === 'provider') return false;
       return true;
     });
@@ -8018,11 +8021,14 @@
       grid.dataset.modelFilter = query + '|' + filter;
       grid.innerHTML = filtered.map(model => {
         const local = model.component_type !== 'provider';
-        const status = String(model.status || (model.installed ? 'Installed' : 'Needs setup'));
+        const status = String(model.status || (model.installed ? 'Installed' : 'Missing'));
         const problem = modelNeedsAttention({...model,status});
-        const badge = model.installed && !problem ? '' : problem ? 'warn' : 'info';
-        const storage = Number(model.storage_bytes || 0) > 0 ? '<span class="model-meta-item">Local files · ' + esc(formatModelBytes(model.storage_bytes)) + '</span>' : '';
+        const badge = status === 'Ready' ? '' : status === 'Installed' ? 'info' : problem ? 'warn' : 'info';
+        const storage = Number(model.storage_bytes || 0) > 0
+          ? '<span class="model-meta-item">Local files · ' + esc(formatModelBytes(model.storage_bytes)) + '</span>' : '';
         const requirement = model.requirements ? '<p class="model-requirements">' + esc(model.requirements) + '</p>' : '';
+        const statusDetail = model.status_detail && model.status_detail !== status
+          ? '<p class="muted" style="font-size:12px;margin:0">' + esc(model.status_detail) + '</p>' : '';
         const piperVoices = model.model_id === 'piper' && Array.isArray(model.installed_voice_names) && model.installed_voice_names.length
           ? '<div class="model-voice-manager"><label>Installed local voices<select data-piper-voice-select>' +
             model.installed_voice_names.map(name => '<option value="' + esc(name) + '">' + esc(name) + '</option>').join('') +
@@ -8030,35 +8036,58 @@
             '<button type="button" class="btn secondary small" data-model-repair="piper">Repair selected voice</button>' +
             '<button type="button" class="btn danger small" data-model-uninstall="piper">Remove selected voice</button></div></div>'
           : '';
+        const pathRows = [];
+        if (model.model_path) {
+          pathRows.push('<div class="model-path-row" style="display:grid;gap:6px;margin:8px 0">' +
+            '<strong>Model location</strong><code style="overflow-wrap:anywhere;white-space:normal">' + esc(model.model_path) + '</code>' +
+            '<div class="model-actions"><button type="button" class="btn secondary small" data-model-open-folder="' + esc(model.model_id) + '" data-model-location="model">Open folder</button>' +
+            '<button type="button" class="btn secondary small" data-model-copy-path="' + esc(model.model_id) + '" data-model-location="model">Copy path</button></div></div>');
+        }
+        if (model.runtime_path) {
+          pathRows.push('<div class="model-path-row" style="display:grid;gap:6px;margin:8px 0">' +
+            '<strong>Runtime location</strong><code style="overflow-wrap:anywhere;white-space:normal">' + esc(model.runtime_path) + '</code>' +
+            '<div class="model-actions"><button type="button" class="btn secondary small" data-model-open-folder="' + esc(model.model_id) + '" data-model-location="runtime">Open folder</button>' +
+            '<button type="button" class="btn secondary small" data-model-copy-path="' + esc(model.model_id) + '" data-model-location="runtime">Copy path</button></div></div>');
+        }
+        const details = local && (model.file_inventory_available || pathRows.length)
+          ? '<details class="model-install-details" data-model-details="' + esc(model.model_id) + '" style="border-top:1px solid var(--border,rgba(255,255,255,.12));padding-top:8px">' +
+            '<summary style="cursor:pointer;font-weight:600">Installation details · actual paths and files</summary>' +
+            '<div style="display:grid;gap:8px;padding-top:10px">' + pathRows.join('') +
+            '<div data-model-file-list style="display:grid;gap:6px"><span class="muted">Expand to enumerate the actual installed files and their sizes.</span></div></div></details>'
+          : '';
         return '<article class="card model-card" data-model-id="' + esc(model.model_id) + '" style="display:flex;flex-direction:column;gap:12px;min-width:0">' +
           '<div class="model-card-head" style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">' +
             '<div style="min-width:0"><div class="model-eyebrow">' + esc(String(model.provider || 'Local component').replace(/-/g,' ')) + '</div>' +
             '<h3 style="margin:6px 0 0;overflow-wrap:anywhere">' + esc(model.name) + '</h3></div>' +
             '<span class="badge ' + badge + '" title="' + esc(status) + '">' + esc(status) + '</span></div>' +
           '<p class="muted model-description">' + esc(model.notes || 'No additional details were returned by the local backend.') + '</p>' +
-          (storage ? '<div class="model-meta">' + storage + '</div>' : '') + requirement +
-          piperVoices +
+          (storage ? '<div class="model-meta">' + storage + '</div>' : '') + requirement + statusDetail +
+          piperVoices + details +
           '<div class="model-actions">' + modelLifecycleActionButtons(model) + '</div>' +
         '</article>';
       }).join('') || '<p class="muted model-empty">No components match this filter. Refresh the model status or change the filter.</p>';
     }
 
-    const status = $('modelInventorySummary');
-    if (status) {
+    const summary = $('modelInventorySummary');
+    if (summary) {
       const managed = rows.filter(model => model.component_type !== 'provider');
-      const installed = managed.filter(model => model.installed && !modelNeedsAttention(model)).length;
-      const needsSetup = managed.length - installed;
+      const ready = managed.filter(model => model.status === 'Ready').length;
+      const installed = managed.filter(model => model.status === 'Installed').length;
+      const needsAttention = managed.filter(model => modelNeedsAttention(model)).length;
       const providers = rows.filter(model => model.component_type === 'provider');
-      const providersReady = providers.filter(model => model.installed).length;
+      const providersAvailable = providers.filter(model => model.installed).length;
       const free = rows.find(model => model.disk_free_bytes != null)?.disk_free_bytes;
       const storageRoot = rows.find(model => model.storage_root)?.storage_root || 'Local application model folder';
-      status.innerHTML =
+      const managedStorageBytes = rows.reduce((sum, model) => sum + Math.max(0, Number(model.storage_bytes || 0)), 0);
+      summary.innerHTML =
         '<div class="model-summary-metrics">' +
-          '<div><span>Managed components ready</span><strong>' + installed + ' / ' + managed.length + '</strong></div>' +
-          '<div><span>Need setup or attention</span><strong>' + needsSetup + '</strong></div>' +
-          '<div><span>System / online providers ready</span><strong>' + providersReady + ' / ' + providers.length + '</strong></div>' +
-          '<div><span>Drive free at model location</span><strong>' + esc(formatModelBytes(free)) + '</strong></div>' +
-        '</div><p class="model-storage-path">Storage root: <code>' + esc(storageRoot) + '</code></p>';
+          '<div><span>Total components</span><strong>' + managed.length + '</strong></div>' +
+          '<div><span>Ready</span><strong>' + ready + '</strong></div>' +
+          '<div><span>Installed · not yet verified</span><strong>' + installed + '</strong></div>' +
+          '<div><span>Needs attention</span><strong>' + needsAttention + '</strong></div>' +
+          '<div><span>System / online providers available</span><strong>' + providersAvailable + ' / ' + providers.length + '</strong></div>' +
+        '</div><p class="model-storage-path">Storage root: <code>' + esc(storageRoot) + '</code> · Managed files: ' +
+          esc(formatModelBytes(managedStorageBytes)) + ' · Drive free: ' + esc(formatModelBytes(free)) + '</p>';
     }
   }
   async function refreshModels() {
@@ -8212,6 +8241,76 @@
     disable($('runBenchmark'), 'Live hardware telemetry and repeatable benchmark execution are not implemented in this build; performance is intentionally marked Not tested.');
   }
 
+  function wireModelDetails() {
+    if (document.body.dataset.ryuModelDetailsBound === 'true') return;
+    document.body.dataset.ryuModelDetailsBound = 'true';
+
+    const loadFiles = async (details, offset = 0, append = false) => {
+      const modelId = details?.dataset.modelDetails || '';
+      const host = details?.querySelector('[data-model-file-list]');
+      if (!modelId || !host) return;
+      if (!append) host.innerHTML = '<span class="muted">Reading installed files…</span>';
+      try {
+        const result = await call('models.files', {model_id:modelId,offset,limit:100});
+        const rows = Array.isArray(result.files) ? result.files : [];
+        const markup = rows.map(file =>
+          '<div class="model-file-row" style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:start;padding:6px 0;border-bottom:1px solid var(--border,rgba(255,255,255,.08))">' +
+            '<div style="min-width:0"><strong>' + esc(file.name || 'Installed file') + '</strong>' +
+            '<div><code style="font-size:11px;white-space:normal;overflow-wrap:anywhere">' + esc(file.path || '') + '</code></div>' +
+            '<span class="muted" style="font-size:11px">' + esc(file.role || 'file') + '</span></div>' +
+            '<strong style="white-space:nowrap">' + esc(formatModelBytes(file.size_bytes)) + '</strong></div>'
+        ).join('');
+        if (append) {
+          host.querySelector('[data-model-files-more]')?.remove();
+          host.insertAdjacentHTML('beforeend', markup);
+        } else {
+          host.innerHTML = markup || '<span class="muted">No installed files were found for this component.</span>';
+        }
+        const nextOffset = offset + rows.length;
+        if (result.has_more) {
+          host.insertAdjacentHTML('beforeend',
+            '<button type="button" class="btn secondary small" data-model-files-more="' + esc(modelId) +
+            '" data-model-files-offset="' + nextOffset + '">Load more files (' + esc(String(result.total_files - nextOffset)) + ' remaining)</button>');
+        }
+        details.dataset.filesLoaded = 'true';
+      } catch (error) {
+        host.innerHTML = '<span class="muted">Could not read installed files: ' + esc(error?.message || String(error)) + '</span>';
+        details.dataset.filesLoaded = 'false';
+      }
+    };
+
+    document.addEventListener('toggle', event => {
+      const details = event.target;
+      if (!details?.matches?.('details[data-model-details]') || !details.open) return;
+      if (details.dataset.filesLoaded === 'true' || details.dataset.filesLoading === 'true') return;
+      details.dataset.filesLoading = 'true';
+      void loadFiles(details).finally(() => { details.dataset.filesLoading = 'false'; });
+    }, true);
+
+    document.addEventListener('click', event => {
+      const button = event.target?.closest?.('[data-model-open-folder], [data-model-copy-path], [data-model-files-more]');
+      if (!button) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      void (async () => {
+        if (button.hasAttribute('data-model-files-more')) {
+          const details = button.closest('details[data-model-details]');
+          await loadFiles(details, Number(button.dataset.modelFilesOffset || 0), true);
+          return;
+        }
+        const modelId = button.dataset.modelOpenFolder || button.dataset.modelCopyPath || '';
+        const location = button.dataset.modelLocation || 'model';
+        if (button.hasAttribute('data-model-open-folder')) {
+          const result = await call('models.open_folder', {model_id:modelId,location});
+          message('Opened folder: ' + result.path);
+        } else {
+          const result = await call('models.copy_path', {model_id:modelId,location});
+          message('Copied path: ' + result.path);
+        }
+      })().catch(error => message(error?.message || String(error), true));
+    });
+  }
+
   async function wire() {
     // The native splash is still visible while controls are bound and the first
     // local backend calls are verified. Keep it animated instead of showing a
@@ -8221,6 +8320,7 @@
       progress:null
     });
     installUiTextScaleRuntime();
+    wireModelDetails();
     installCharacterStudioHandlers();
     // Remove the prototype's same-element click handlers synchronously, before
     // any asynchronous backend initialization or real handler registration.
@@ -10460,7 +10560,7 @@
           } else if (action === 'verify') {
             const result = await call('models.verify', {model_id:operationId});
             await refreshModels();
-            message((result.available ? 'Verification passed. ' : 'Verification needs attention. ') + result.detail, !result.available);
+            message((result.status === 'Ready' ? 'Ready. ' : result.status === 'Installed' ? 'Files and dependencies are present; functional readiness is not yet confirmed. ' : 'Verification needs attention. ') + result.detail, !['Ready','Installed'].includes(result.status));
             return;
           } else {
             const displayName = String(model.name || operationId);
