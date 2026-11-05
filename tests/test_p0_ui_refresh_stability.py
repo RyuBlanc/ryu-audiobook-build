@@ -313,7 +313,9 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("stage6TaskRowsMatchNativeJobs", packaged)
         self.assertIn("renders every native job with its View action", packaged)
-        self.assertIn("row.querySelector('[data-job-view]')?.dataset.jobView === row.dataset.backendJob", packaged)
+        self.assertIn("button && button.dataset.jobView === id", packaged)
+        self.assertIn("stage6TaskRowsMatchNativeJobs", packaged)
+        self.assertIn("const rowsHaveViewActions = renderedRows.every(row =>", packaged)
 
 
 if __name__ == "__main__":
