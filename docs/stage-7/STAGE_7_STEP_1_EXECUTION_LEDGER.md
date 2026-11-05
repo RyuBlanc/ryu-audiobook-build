@@ -100,3 +100,8 @@ No Step 1 source code changes or Step 1 test runs are recorded in this ledger. D
 ## 8. Next action
 
 Implement the authoritative registry/scanner and integrate the Premium V2 bridge and Voice Studio selectors. Add focused tests first, then run the focused model lifecycle/inventory tests, the full regression suite, and a matching-head Windows build/package checkpoint. Investigate and fix root causes of any failures before proceeding to Step 2.
+
+
+## 9. CI validation branch alias
+
+The repository's default-branch Actions workflow currently has a `stage-6/**` push filter but not a `stage-7/**` filter. To obtain matching-commit CI without changing the default branch or triggering an unrelated main package build, `stage-6/stage-7-step-1-ci-validation` mirrors the Stage 7 working branch for CI events. The canonical Stage 7 branch must be advanced to the exact tested commit SHA after each validation checkpoint. This alias is only a workflow-trigger compatibility measure; Stage 7 scope and acceptance remain unchanged.
