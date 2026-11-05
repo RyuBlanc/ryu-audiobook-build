@@ -448,3 +448,19 @@ change a browsing context's viewport.
 
 These are root-cause fixes and regression tests; no acceptance gate was
 weakened.
+
+
+## #2347 — Task Manager prototype timer root fix source gate passed (5 November 2026)
+
+Commit \`cbb49c00d910a50a70b539ac7c8e518b2a3e9f5f\` passed all source checks.
+JavaScript syntax, isolated native Qt lifecycle regression and the full suite
+passed: **1,182 tests in 49.775 seconds**. The two new root-cause regression
+tests passed, proving the reference HTML no longer includes the sample
+Task Manager renderer/timer and packaged acceptance requires native job rows
+to remain stable beyond the former four-second timer interval.
+
+The Windows packaging job was skipped because the commit was tagged
+\`[root-fix]\`, not \`[artifact-checkpoint]\`. The next run is a documentation-
+only checkpoint on the same application source head and will execute frozen
+Windows package/restart acceptance, including the 41-view responsive matrix.
+No application source is changed by this checkpoint.
