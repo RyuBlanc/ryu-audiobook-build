@@ -251,12 +251,16 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         end = adapter.index("async function monitorJob(", start)
         refresh = adapter[start:end]
         signature_start = refresh.index("const signature = jobs.map")
-        signature_end = refresh.index("if (box.dataset.backendJobsSignature !== signature)", signature_start)
-        signature = refresh[signature_start:signature_end]
+        integrity_start = refresh.index("const renderedRows =", signature_start)
+        signature = refresh[signature_start:integrity_start]
 
         self.assertIn("j.job_id, j.state, j.type, j.title, Boolean(j.recoverable)", signature)
         self.assertNotIn("Boolean(j.message)", signature)
         self.assertNotIn("Boolean(j.error?.message)", signature)
+        self.assertIn("const backendDomMatches =", refresh)
+        self.assertIn("if (box.dataset.backendJobsSignature !== signature || !backendDomMatches)", refresh)
+        self.assertIn("Boolean(row.querySelector('[data-job-view]'))", refresh)
+        self.assertIn("!box.querySelector('.job-row:not([data-backend-job])')", refresh)
         self.assertIn("if (box && panelVisible)", refresh)
         self.assertIn("writeTextIfChanged(messageNode, j.message || '')", refresh)
         self.assertIn("writeTextIfChanged(errorNode, j.error?.message || '')", refresh)
