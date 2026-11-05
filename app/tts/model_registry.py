@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 import hashlib
+import importlib.metadata
 import importlib.util
 import json
 import os
@@ -127,6 +128,7 @@ COMPONENT_METADATA: dict[str, dict[str, Any]] = {
     "piper": {"capability": "Offline Neural TTS", "dependencies": ["Piper runtime", "ONNX Runtime", "ONNX voice file", "voice JSON configuration"]},
     "kokoro": {"capability": "Natural offline narration", "dependencies": ["Kokoro ONNX runtime", "Kokoro ONNX model", "voice pack"]},
     "chatterbox-runtime": {"capability": "Voice cloning runtime", "dependencies": ["Isolated Python 3.11", "PyTorch", "Chatterbox", "Perth"]},
+    "chatterbox-model-assets": {"capability": "Chatterbox English and multilingual voice cloning weights", "dependencies": ["Chatterbox model snapshot in the Hugging Face cache", "Chatterbox runtime"]},
     "qwen-runtime": {"capability": "Shared Qwen3-TTS runtime", "dependencies": ["Private Python 3.12", "PyTorch", "torchaudio", "qwen-tts"]},
     "custom-0.6b": {"capability": "Qwen CustomVoice synthesis", "dependencies": ["Qwen3-TTS runtime", "CustomVoice 0.6B weights"]},
     "custom-1.7b": {"capability": "Qwen CustomVoice synthesis", "dependencies": ["Qwen3-TTS runtime", "CustomVoice 1.7B weights"]},
@@ -146,12 +148,13 @@ def _storage_location_available(path: Path) -> bool:
         candidate = Path(path)
         if os.name == "nt":
             drive = candidate.drive
-            if drive and not Path(drive + "\\").exists():
-                return False
+            if drive:
+                anchor = Path(drive) if drive.startswith("\\\\") else Path(drive + "\\")
+                if not anchor.exists():
+                    return False
         return True
     except (OSError, ValueError):
         return False
-
 
 def normalize_inventory_status(
     model_id: str,
@@ -164,7 +167,7 @@ def normalize_inventory_status(
     verification: dict[str, Any] | None = None,
     current_fingerprint: str = "",
 ) -> str:
-    """Normalize legacy labels without ever promoting mere file presence to Ready."""
+    """Normalize legacy labels; only a matching functional check can produce Ready."""
     detail = str(status_detail or "").casefold()
     if component_type == "provider":
         if model_id == "elevenlabs" and not installed:
@@ -176,16 +179,16 @@ def normalize_inventory_status(
     if not location_available:
         return "Location unavailable"
 
-    if verification and current_fingerprint and verification.get("fingerprint") == current_fingerprint:
+    if installed and verification and current_fingerprint and verification.get("fingerprint") == current_fingerprint:
         if verification.get("success") is True:
-            return "Ready"
+            return "Ready" if str(verification.get("level") or "functional") == "functional" else "Installed"
         if verification.get("success") is False:
             return "Unhealthy"
 
     incomplete_markers = (
         "incomplete", "needs installation", "needs repair",
         "runtime required", "dependency missing", "needs setup",
-        "not installed", "not ready",
+        "not installed", "not ready", "dependency unavailable",
     )
     if installed:
         if any(marker in detail for marker in incomplete_markers):
@@ -193,7 +196,6 @@ def normalize_inventory_status(
         return "Installed"
 
     return "Partially installed" if has_partial_files else "Missing"
-
 
 def _inventory_snapshot_path() -> Path:
     return settings_root() / "model_inventory.json"
@@ -228,9 +230,17 @@ def persist_inventory_snapshot(rows: list[dict[str, Any]]) -> None:
             "component_type": str(row.get("component_type") or "model"),
             "model_path": row.get("model_path"),
             "runtime_path": row.get("runtime_path"),
+            "python_path": row.get("python_path"),
+            "runtime_executable": row.get("runtime_executable"),
+            "version": row.get("version"),
+            "runtime_version": row.get("runtime_version"),
+            "capability": row.get("capability"),
+            "dependencies": list(row.get("dependencies") or []),
             "storage_bytes": int(row.get("storage_bytes") or 0),
             "status": str(row.get("status") or ""),
             "status_detail": str(row.get("status_detail") or ""),
+            "health": row.get("health"),
+            "hardware_compatibility": row.get("hardware_compatibility"),
             "last_verified": old.get("last_verified"),
             "verification": old.get("verification"),
         }
@@ -250,83 +260,92 @@ def persist_inventory_snapshot(rows: list[dict[str, Any]]) -> None:
             return
 
 
-def _module_directory(module_name: str) -> str | None:
-    try:
-        spec = importlib.util.find_spec(module_name)
-        if spec is None:
-            return None
-        if spec.origin:
-            return str(Path(spec.origin).resolve().parent)
-        locations = list(spec.submodule_search_locations or ())
-        return str(Path(locations[0]).resolve()) if locations else None
-    except (ImportError, OSError, ValueError, AttributeError):
-        return None
-
+def _chatterbox_cache_root(root: Path) -> Path:
+    cache = os.environ.get("HF_HUB_CACHE") or os.environ.get("HUGGINGFACE_HUB_CACHE")
+    if cache:
+        return Path(cache).expanduser()
+    hf_home = os.environ.get("HF_HOME")
+    if hf_home:
+        return Path(hf_home).expanduser() / "hub"
+    return root / "huggingface" / "hub"
 
 def component_paths(model_id: str) -> dict[str, Any]:
-    """Resolve actual model/runtime locations and the exact paths owned by a component."""
+    """Resolve actual model/runtime/Python locations and exact component-owned paths."""
     root = models_root()
     model_path: str | None = None
     runtime_path: str | None = None
+    python_path: str | None = None
+    runtime_executable: str | None = None
+    path_error: str | None = None
     owned_paths: list[Path] = []
     key = str(model_id or "").casefold()
 
-    if key == "piper":
-        from app.tts.providers.piper import PiperProvider
-        model_path = str((root / "piper").resolve())
-        runtime_path = _module_directory("piper")
-        local = root / "piper"
-        if local.exists():
-            owned_paths.append(local)
-        bundled = PiperProvider._bundled_root()
-        if bundled and bundled.exists():
-            owned_paths.append(bundled)
-    elif key == "kokoro":
-        from app.tts.providers.kokoro import KokoroProvider
-        model = KokoroProvider._find_model()
-        voices = KokoroProvider._find_voices()
-        model_path = str(model.resolve()) if model else str((root / "kokoro").resolve())
-        runtime_path = _module_directory("kokoro_onnx")
-        for path in (root / "kokoro", model, voices):
-            if path and path.exists() and path not in owned_paths:
-                owned_paths.append(path)
-    elif key == "chatterbox-runtime":
-        from app.tts.chatterbox_runtime import RUNTIME_DIR
-        runtime_path = str(RUNTIME_DIR.resolve())
-        owned_paths.append(RUNTIME_DIR)
-        cache = Path(os.environ.get("HF_HUB_CACHE") or os.environ.get("HUGGINGFACE_HUB_CACHE") or
-                     (Path.home() / ".cache" / "huggingface" / "hub"))
-        if cache.is_dir():
-            matches = [p for p in cache.glob("models--*") if "chatterbox" in p.name.casefold()]
-            if matches:
-                model_path = str(matches[0].resolve())
-                owned_paths.extend(matches)
-    elif key == "qwen-runtime":
-        from app.tts.qwen_character_runtime import (
-            VENV_ROOT, PYTHON_ROOT, MARKER, INSTALLER_PATH, INSTALLER_LOG,
-        )
-        runtime_path = str(VENV_ROOT.resolve())
-        owned_paths.extend([VENV_ROOT, PYTHON_ROOT, MARKER, INSTALLER_PATH, INSTALLER_LOG])
-    elif key in {"custom-0.6b", "custom-1.7b", "design-1.7b", "base-0.6b", "base-1.7b"}:
-        from app.tts.qwen_character_runtime import MODEL_DIRS, VENV_ROOT
-        model_path = str(MODEL_DIRS[key].resolve())
-        runtime_path = str(VENV_ROOT.resolve())
-        owned_paths.append(MODEL_DIRS[key])
-    elif key == "audiobook-ai":
-        ai_root = root / "audiobook-ai"
-        candidates = (
-            ai_root / "Qwen3-4B-Q4_K_M.gguf",
-            ai_root / "Qwen3-1.7B-Q5_K_M.gguf",
-        )
-        model = next((p for p in candidates if p.is_file()), None)
-        server = ai_root / "llama-server.exe"
-        model_path = str(model.resolve()) if model else str(ai_root.resolve())
-        runtime_path = str(server.resolve()) if server.exists() else str(ai_root.resolve())
-        owned_paths.append(ai_root)
-    elif key == "edge-tts":
-        runtime_path = _module_directory("edge_tts")
-    elif key == "elevenlabs":
-        runtime_path = _module_directory("elevenlabs")
+    try:
+        if key == "piper":
+            from app.tts.providers.piper import PiperProvider
+            local = root / "piper"
+            bundled = PiperProvider._bundled_root()
+            local_has_models = local.is_dir() and any(local.rglob("*.onnx"))
+            selected = local if local_has_models else (bundled if bundled and bundled.exists() else local)
+            model_path = str(selected.resolve())
+            runtime_path = _module_directory("piper")
+            if local.exists():
+                owned_paths.append(local)
+            if bundled and bundled.exists():
+                owned_paths.append(bundled)
+        elif key == "kokoro":
+            from app.tts.providers.kokoro import KokoroProvider
+            model = KokoroProvider._find_model()
+            voices = KokoroProvider._find_voices()
+            model_path = str(model.resolve()) if model else str((root / "kokoro").resolve())
+            runtime_path = _module_directory("kokoro_onnx")
+            for path in (root / "kokoro", model, voices):
+                if path and path.exists() and path not in owned_paths:
+                    owned_paths.append(path)
+        elif key == "chatterbox-runtime":
+            from app.tts.chatterbox_runtime import RUNTIME_DIR, runtime_python
+            runtime_path = str(RUNTIME_DIR.resolve())
+            python_path = str(runtime_python().resolve())
+            owned_paths.append(RUNTIME_DIR)
+        elif key == "chatterbox-model-assets":
+            cache = _chatterbox_cache_root(root)
+            matches = [
+                path for path in cache.glob("models--*")
+                if path.is_dir() and "chatterbox" in path.name.casefold()
+            ] if cache.is_dir() else []
+            model_path = str(matches[0].resolve()) if matches else str(cache.resolve())
+            owned_paths.extend(matches)
+        elif key == "qwen-runtime":
+            from app.tts.qwen_character_runtime import (
+                VENV_ROOT, PYTHON_ROOT, PYTHON, MARKER, INSTALLER_PATH, INSTALLER_LOG,
+            )
+            runtime_path = str(VENV_ROOT.resolve())
+            python_path = str(PYTHON.resolve())
+            owned_paths.extend([VENV_ROOT, PYTHON_ROOT, MARKER, INSTALLER_PATH, INSTALLER_LOG])
+        elif key in {"custom-0.6b", "custom-1.7b", "design-1.7b", "base-0.6b", "base-1.7b"}:
+            from app.tts.qwen_character_runtime import MODEL_DIRS, VENV_ROOT, PYTHON
+            model_path = str(MODEL_DIRS[key].resolve())
+            runtime_path = str(VENV_ROOT.resolve())
+            python_path = str(PYTHON.resolve())
+            owned_paths.append(MODEL_DIRS[key])
+        elif key == "audiobook-ai":
+            ai_root = root / "audiobook-ai"
+            candidates = (
+                ai_root / "Qwen3-4B-Q4_K_M.gguf",
+                ai_root / "Qwen3-1.7B-Q5_K_M.gguf",
+            )
+            model = next((path for path in candidates if path.is_file()), None)
+            server = ai_root / "llama-server.exe"
+            model_path = str(model.resolve()) if model else str(ai_root.resolve())
+            runtime_path = str(ai_root.resolve())
+            runtime_executable = str(server.resolve()) if server.is_file() else None
+            owned_paths.append(ai_root)
+        elif key == "edge-tts":
+            runtime_path = _module_directory("edge_tts")
+        elif key == "elevenlabs":
+            runtime_path = _module_directory("elevenlabs")
+    except Exception as exc:
+        path_error = f"{type(exc).__name__}: {exc}"
 
     unique: list[Path] = []
     seen: set[str] = set()
@@ -338,8 +357,14 @@ def component_paths(model_id: str) -> dict[str, Any]:
         if marker not in seen:
             unique.append(path)
             seen.add(marker)
-    return {"model_path": model_path, "runtime_path": runtime_path, "owned_paths": unique}
-
+    return {
+        "model_path": model_path,
+        "runtime_path": runtime_path,
+        "python_path": python_path,
+        "runtime_executable": runtime_executable,
+        "owned_paths": unique,
+        "path_error": path_error,
+    }
 
 def _component_file_records(paths: list[Path], model_id: str) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
@@ -409,11 +434,18 @@ def component_file_inventory(model_id: str, offset: int = 0, limit: int = INVENT
         raise ValueError("Invalid model-file page request.")
     paths = component_paths(key)
     records = _component_file_records(paths["owned_paths"], key)
-    accessible = _storage_location_available(models_root())
+    owned_paths = paths["owned_paths"]
+    accessible = (
+        all(_storage_location_available(path) for path in owned_paths)
+        if owned_paths else _storage_location_available(models_root())
+    )
     return {
         "model_id": key,
         "model_path": paths["model_path"],
         "runtime_path": paths["runtime_path"],
+        "python_path": paths["python_path"],
+        "runtime_executable": paths["runtime_executable"],
+        "path_error": paths["path_error"],
         "accessible": accessible,
         "status": "Accessible" if accessible else "Location unavailable",
         "total_files": len(records),
@@ -424,20 +456,30 @@ def component_file_inventory(model_id: str, offset: int = 0, limit: int = INVENT
         "files": records[offset:offset + limit],
     }
 
-
 def _component_fingerprint(row: dict[str, Any]) -> str:
     payload = {
         "model_id": row.get("model_id"),
+        "installed": bool(row.get("installed")),
+        "status_detail": str(row.get("status_detail") or row.get("status") or ""),
+        "storage_bytes": int(row.get("storage_bytes") or 0),
         "model_path": row.get("model_path"),
         "runtime_path": row.get("runtime_path"),
-        "storage_bytes": int(row.get("storage_bytes") or 0),
+        "python_path": row.get("python_path"),
+        "runtime_executable": row.get("runtime_executable"),
         "version": row.get("version"),
-        "status_detail": row.get("status_detail"),
+        "runtime_version": row.get("runtime_version"),
     }
-    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+    encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
-
-def record_component_verification(model_id: str, success: bool, detail: str, fingerprint: str) -> None:
+def record_component_verification(
+    model_id: str,
+    success: bool,
+    detail: str,
+    fingerprint: str,
+    level: str = "functional",
+) -> None:
+    """Persist a verification result; file-only checks never promote a model to Ready."""
     path = _inventory_snapshot_path()
     with _INVENTORY_LOCK:
         snapshot = load_inventory_snapshot()
@@ -448,6 +490,7 @@ def record_component_verification(model_id: str, success: bool, detail: str, fin
             "success": bool(success),
             "detail": str(detail or ""),
             "fingerprint": str(fingerprint or ""),
+            "level": "functional" if str(level).casefold() == "functional" else "files",
         }
         snapshot["schema_version"] = INVENTORY_SCHEMA_VERSION
         snapshot["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -459,6 +502,31 @@ def record_component_verification(model_id: str, success: bool, detail: str, fin
         except OSError:
             return
 
+def _distribution_version(distribution: str | None) -> str | None:
+    if not distribution:
+        return None
+    try:
+        return importlib.metadata.version(distribution)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+    except Exception:
+        return None
+
+
+def _runtime_version(model_id: str) -> str | None:
+    try:
+        if model_id == "qwen-runtime" or model_id.startswith(("custom-", "design-", "base-")):
+            from app.tts.qwen_character_runtime import (
+                QWEN_TTS_VERSION, TORCH_VERSION, TORCHAUDIO_VERSION, PYTHON_VERSION,
+            )
+            return f"Qwen TTS {QWEN_TTS_VERSION} · PyTorch {TORCH_VERSION} · torchaudio {TORCHAUDIO_VERSION} · Python {PYTHON_VERSION}"
+        if model_id.startswith("chatterbox-"):
+            from app.tts.chatterbox_runtime import CHATTERBOX_SOURCE_REVISION, PERTH_SOURCE_REVISION
+            return f"Chatterbox {str(CHATTERBOX_SOURCE_REVISION)[:12]} · Perth {str(PERTH_SOURCE_REVISION)[:12]}"
+    except Exception:
+        return None
+    return None
+
 
 def enrich_inventory_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     snapshot = load_inventory_snapshot()
@@ -467,16 +535,31 @@ def enrich_inventory_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         previous = {}
     root = models_root()
     location_available = _storage_location_available(root)
+    package_versions = {
+        "piper": "piper-tts",
+        "kokoro": "kokoro-onnx",
+        "chatterbox-runtime": "chatterbox-tts",
+        "edge-tts": "edge-tts",
+        "elevenlabs": "elevenlabs",
+    }
     for row in rows:
         model_id = str(row.get("model_id") or "")
         metadata = COMPONENT_METADATA.get(model_id, {})
         paths = component_paths(model_id)
         row["model_path"] = paths["model_path"]
         row["runtime_path"] = paths["runtime_path"]
+        row["python_path"] = paths["python_path"]
+        row["runtime_executable"] = paths["runtime_executable"]
+        row["path_error"] = paths["path_error"]
         row["capability"] = metadata.get("capability", row.get("capability") or "")
         row["dependencies"] = list(metadata.get("dependencies", []))
-        row["version"] = row.get("version") or None
+        row["version"] = (
+            row.get("version") or row.get("repo_id") or
+            _distribution_version(package_versions.get(model_id))
+        )
+        row["runtime_version"] = row.get("runtime_version") or _runtime_version(model_id)
         row["supported_devices"] = list(row.get("supported_devices") or [])
+        row["hardware_compatibility"] = row.get("hardware_compatibility") or "Not assessed"
         prior = previous.get(model_id, {})
         if isinstance(prior, dict):
             row["last_verified"] = prior.get("last_verified")
@@ -492,25 +575,35 @@ def enrich_inventory_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             str(row.get("component_type") or "model"),
             str(row.get("status_detail") or row.get("status") or ""),
             location_available=bool(row.get("location_available", location_available)),
-            has_partial_files=bool(any(p.exists() for p in paths["owned_paths"])),
+            has_partial_files=bool(any(path.exists() for path in paths["owned_paths"])),
             verification=verification if isinstance(verification, dict) else None,
             current_fingerprint=fingerprint,
         )
+        row["runtime_status"] = (
+            "Ready" if row.get("runtime_ready") is True else
+            "Not ready" if row.get("runtime_ready") is False else
+            "Available" if row.get("component_type") == "provider" and row.get("installed") else
+            "Not configured" if row.get("component_type") == "provider" else
+            "Installed" if paths["runtime_path"] and Path(paths["runtime_path"]).exists() else
+            "Not detected" if paths["runtime_path"] else
+            "Not applicable"
+        )
         if row["status"] == "Ready":
-            row["health"] = "Verified"
+            row["health"] = "Functionally verified"
         elif row["status"] == "Unhealthy":
             row["health"] = "Verification failed"
         elif row["status"] == "Partially installed":
             row["health"] = "Incomplete"
         elif row["status"] == "Location unavailable":
             row["health"] = "Location unavailable"
+        elif isinstance(verification, dict) and verification.get("success") is True and verification.get("fingerprint") == fingerprint:
+            row["health"] = "Files verified · functional check pending"
         else:
             row["health"] = "Not verified" if row.get("installed") else "Missing"
         row["file_inventory_available"] = bool(paths["owned_paths"])
         row["files_endpoint"] = "models.files" if paths["owned_paths"] else None
     persist_inventory_snapshot(rows)
     return rows
-
 
 def build_inventory() -> list[dict[str, Any]]:
     """Return the live, provider-aware local model and runtime inventory."""
