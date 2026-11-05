@@ -315,6 +315,9 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         self.assertIn("renders every native job with its View action", packaged)
         self.assertIn("button && button.dataset.jobView === id", packaged)
         self.assertIn("stage6TaskRowsMatchNativeJobs", packaged)
+        adapter = (
+            ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
         self.assertIn("button && button.dataset.jobView === id", packaged)
         self.assertIn("stage6TaskRowsMatchNativeJobs", packaged)
         self.assertIn("const rowsHaveViewActions = renderedRows.every(row =>", adapter)
