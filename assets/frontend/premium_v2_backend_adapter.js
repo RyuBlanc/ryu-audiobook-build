@@ -1384,7 +1384,11 @@
     const title = voiceLibraryTitles[providerKey] || providerKey;
     const health = panel.querySelector('.health');
     const healthTitle = health?.querySelector('b');
-    if (healthTitle) healthTitle.textContent = title + (result.ready ? ' · Ready' : ' · Setup required');
+    const inventoryStatus = String(result.model_inventory?.status || '');
+    const providerStatus = !result.ready
+      ? (['Missing','Not configured','Partially installed','Unhealthy','Unsupported','Location unavailable','Unavailable','Not assessed'].includes(inventoryStatus) ? inventoryStatus : 'Provider unavailable')
+      : inventoryStatus === 'Installed' ? 'Installed · functional verification pending' : inventoryStatus || 'Ready';
+    if (healthTitle) healthTitle.textContent = title + ' · ' + providerStatus;
     let healthDetail = health?.querySelector('small,.muted');
     if (!healthDetail && healthTitle?.parentElement) {
       healthDetail = document.createElement('small');
@@ -1392,9 +1396,9 @@
       healthDetail.style.cssText = 'display:block;margin-top:4px;line-height:1.45';
       healthTitle.parentElement.appendChild(healthDetail);
     }
-    if (healthDetail) healthDetail.textContent = result.message || (result.count + ' live catalogue entries');
+    if (healthDetail) healthDetail.textContent = [result.model_inventory?.message, result.message || (result.count + ' live catalogue entries')].filter(Boolean).join(' · ');
     updateVoiceHealthIndicator(providerKey,result);
-    if (providerKey === 'eleven' && $('apiState')) $('apiState').textContent = result.ready ? 'API key connected · Voice catalogue ready' : (result.message || 'API key not configured');
+    if (providerKey === 'eleven' && $('apiState')) $('apiState').textContent = result.ready ? 'API key connected · ' + providerStatus : (result.message || 'API key not configured');
     if (providerKey === 'eleven') {
       const createPanel = panel.querySelector('[data-epanel="create"]');
       if (createPanel) {
@@ -1624,8 +1628,11 @@
     const profile=selectedVoice?voices.find(item=>item.saved===true&&item.name.toLowerCase()===selectedVoice.toLowerCase()):null;
     const selectedKey=profile?providerPanelForProfile(profile):(document.querySelector('#voices .provider.active')?.dataset.provider||providerKey||'');
     if(!providerKey||!selectedKey||providerKey!==selectedKey)return;
-    const label=!result?'Checking…':result.ready?'Ready':'Setup required';
-    const color=!result?'var(--muted)':result.ready?'var(--green)':'var(--amber)';
+    const inventoryStatus=String(result?.model_inventory?.status||'');
+    const blockedStatuses=['Missing','Not configured','Partially installed','Unhealthy','Unsupported','Location unavailable','Unavailable','Not assessed'];
+    const label=!result?'Checking…':!result.ready?(blockedStatuses.includes(inventoryStatus)?inventoryStatus:'Provider unavailable'):
+      inventoryStatus==='Installed'?'Installed · functional verification pending':inventoryStatus||'Ready';
+    const color=!result?'var(--muted)':!result.ready?'var(--amber)':inventoryStatus==='Ready'?'var(--green)':'var(--muted)';
     for(const id of ['profileHealth','sumProviderHealth']){
       const node=$(id);if(node){node.textContent=label;node.style.color=color;}
     }
@@ -7978,7 +7985,7 @@
         ' title="Remove only this app-managed component">Uninstall</button>');
     }
     const verifyId = model.verify_id || model.model_id;
-    actions.push('<button type="button" class="btn secondary small" data-model-verify="' + esc(verifyId) + '" title="Check the actual installed files and all required dependencies">Verify</button>');
+    actions.push('<button type="button" class="btn secondary small" data-model-verify="' + esc(verifyId) + '" title="Check actual installed files and required dependencies; this does not claim functional inference readiness">Verify files</button>');
     const providerTarget = ({
       piper:'offline', kokoro:'offline', 'custom-0.6b':'customvoice', 'custom-1.7b':'customvoice',
       'design-1.7b':'voicedesign', 'base-0.6b':'qwenclone', 'base-1.7b':'qwenclone',
@@ -8037,22 +8044,42 @@
             '<button type="button" class="btn danger small" data-model-uninstall="piper">Remove selected voice</button></div></div>'
           : '';
         const pathRows = [];
-        if (model.model_path) {
+        const addPathRow = (label, location, path) => {
+          if (!path) return;
           pathRows.push('<div class="model-path-row" style="display:grid;gap:6px;margin:8px 0">' +
-            '<strong>Model location</strong><code style="overflow-wrap:anywhere;white-space:normal">' + esc(model.model_path) + '</code>' +
-            '<div class="model-actions"><button type="button" class="btn secondary small" data-model-open-folder="' + esc(model.model_id) + '" data-model-location="model">Open folder</button>' +
-            '<button type="button" class="btn secondary small" data-model-copy-path="' + esc(model.model_id) + '" data-model-location="model">Copy path</button></div></div>');
-        }
-        if (model.runtime_path) {
-          pathRows.push('<div class="model-path-row" style="display:grid;gap:6px;margin:8px 0">' +
-            '<strong>Runtime location</strong><code style="overflow-wrap:anywhere;white-space:normal">' + esc(model.runtime_path) + '</code>' +
-            '<div class="model-actions"><button type="button" class="btn secondary small" data-model-open-folder="' + esc(model.model_id) + '" data-model-location="runtime">Open folder</button>' +
-            '<button type="button" class="btn secondary small" data-model-copy-path="' + esc(model.model_id) + '" data-model-location="runtime">Copy path</button></div></div>');
-        }
+            '<strong>' + esc(label) + '</strong><code style="overflow-wrap:anywhere;white-space:normal">' + esc(path) + '</code>' +
+            '<div class="model-actions"><button type="button" class="btn secondary small" data-model-open-folder="' + esc(model.model_id) + '" data-model-location="' + esc(location) + '">Open folder</button>' +
+            '<button type="button" class="btn secondary small" data-model-copy-path="' + esc(model.model_id) + '" data-model-location="' + esc(location) + '">Copy path</button></div></div>');
+        };
+        addPathRow('Model location', 'model', model.model_path);
+        addPathRow('Runtime location', 'runtime', model.runtime_path);
+        addPathRow('Python environment', 'python', model.python_path);
+        addPathRow('Runtime executable', 'runtime_executable', model.runtime_executable);
+        const verifiedAt = model.last_verified ? new Date(model.last_verified) : null;
+        const verifiedLabel = verifiedAt && !Number.isNaN(verifiedAt.getTime()) ? verifiedAt.toLocaleString() : 'Not verified';
+        const dependencyList = Array.isArray(model.dependencies) ? model.dependencies.join(', ') : String(model.dependencies || '');
+        const deviceList = Array.isArray(model.supported_devices) && model.supported_devices.length
+          ? model.supported_devices.join(', ') : 'Not yet assessed';
+        const infoRows = [
+          ['Capability', model.capability],
+          ['Detected version', model.version || 'Not reported'],
+          ['Runtime version', model.runtime_version || 'Not reported'],
+          ['Runtime status', model.runtime_status || 'Not assessed'],
+          ['Health', model.health || 'Not verified'],
+          ['Last verified', verifiedLabel],
+          ['Dependencies', dependencyList || 'Not reported'],
+          ['Hardware compatibility', model.hardware_compatibility || 'Not assessed'],
+          ['Supported compute devices', deviceList]
+        ];
+        const infoMarkup = '<div class="model-install-info" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:8px">' +
+          infoRows.map(([label,value]) => '<div style="min-width:0;padding:8px;border:1px solid var(--border,rgba(255,255,255,.1));border-radius:8px">' +
+            '<span class="muted" style="display:block;font-size:11px">' + esc(label) + '</span>' +
+            '<strong style="display:block;overflow-wrap:anywhere;font-size:12px">' + esc(value) + '</strong></div>').join('') +
+          '</div>';
         const details = local && (model.file_inventory_available || pathRows.length)
           ? '<details class="model-install-details" data-model-details="' + esc(model.model_id) + '" style="border-top:1px solid var(--border,rgba(255,255,255,.12));padding-top:8px">' +
-            '<summary style="cursor:pointer;font-weight:600">Installation details · actual paths and files</summary>' +
-            '<div style="display:grid;gap:8px;padding-top:10px">' + pathRows.join('') +
+            '<summary style="cursor:pointer;font-weight:600">Installation details · actual paths, runtime and files</summary>' +
+            '<div style="display:grid;gap:10px;padding-top:10px">' + infoMarkup + pathRows.join('') +
             '<div data-model-file-list style="display:grid;gap:6px"><span class="muted">Expand to enumerate the actual installed files and their sizes.</span></div></div></details>'
           : '';
         return '<article class="card model-card" data-model-id="' + esc(model.model_id) + '" style="display:flex;flex-direction:column;gap:12px;min-width:0">' +
@@ -8071,9 +8098,9 @@
     const summary = $('modelInventorySummary');
     if (summary) {
       const managed = rows.filter(model => model.component_type !== 'provider');
-      const ready = managed.filter(model => model.status === 'Ready').length;
-      const installed = managed.filter(model => model.status === 'Installed').length;
-      const needsAttention = managed.filter(model => modelNeedsAttention(model)).length;
+      const ready = rows.filter(model => model.status === 'Ready').length;
+      const installed = rows.filter(model => model.status === 'Installed').length;
+      const needsAttention = rows.filter(model => modelNeedsAttention(model)).length;
       const providers = rows.filter(model => model.component_type === 'provider');
       const providersAvailable = providers.filter(model => model.installed).length;
       const free = rows.find(model => model.disk_free_bytes != null)?.disk_free_bytes;
@@ -8081,7 +8108,7 @@
       const managedStorageBytes = rows.reduce((sum, model) => sum + Math.max(0, Number(model.storage_bytes || 0)), 0);
       summary.innerHTML =
         '<div class="model-summary-metrics">' +
-          '<div><span>Total components</span><strong>' + managed.length + '</strong></div>' +
+          '<div><span>Total components</span><strong>' + rows.length + '</strong></div>' +
           '<div><span>Ready</span><strong>' + ready + '</strong></div>' +
           '<div><span>Installed · not yet verified</span><strong>' + installed + '</strong></div>' +
           '<div><span>Needs attention</span><strong>' + needsAttention + '</strong></div>' +
@@ -8157,9 +8184,9 @@
     }
     const heading = root.querySelector('.model-runtime h2');
     const managed = rows.filter(model => model.component_type !== 'provider');
-    const ready = managed.filter(model => model.installed && !modelNeedsAttention(model)).length;
+    const ready = managed.filter(model => model.status === 'Ready').length;
     const missing = managed.length - ready;
-    if (heading) heading.textContent = ready + ' managed component(s) ready · ' + missing + ' need setup or attention';
+    if (heading) heading.textContent = ready + ' managed component(s) functionally ready · ' + missing + ' need setup or further verification';
     // Replace the HTML prototype's fixed storage number with a total derived
     // from live per-component file sizes. Its old capacity bar had no measured
     // denominator, so hide it instead of presenting a fake percentage.
@@ -8253,6 +8280,9 @@
       try {
         const result = await call('models.files', {model_id:modelId,offset,limit:100});
         const rows = Array.isArray(result.files) ? result.files : [];
+        const fileSummary = '<div class="muted" style="font-size:11px;margin:4px 0 8px">' +
+          esc(String(result.total_files || 0)) + ' actual file(s) · ' + esc(formatModelBytes(result.total_bytes || 0)) +
+          ' · ' + esc(result.accessible ? 'Storage location accessible' : 'Storage location unavailable') + '</div>';
         const markup = rows.map(file =>
           '<div class="model-file-row" style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:start;padding:6px 0;border-bottom:1px solid var(--border,rgba(255,255,255,.08))">' +
             '<div style="min-width:0"><strong>' + esc(file.name || 'Installed file') + '</strong>' +
@@ -8264,7 +8294,7 @@
           host.querySelector('[data-model-files-more]')?.remove();
           host.insertAdjacentHTML('beforeend', markup);
         } else {
-          host.innerHTML = markup || '<span class="muted">No installed files were found for this component.</span>';
+          host.innerHTML = fileSummary + (markup || '<span class="muted">No installed files were found for this component.</span>');
         }
         const nextOffset = offset + rows.length;
         if (result.has_more) {
