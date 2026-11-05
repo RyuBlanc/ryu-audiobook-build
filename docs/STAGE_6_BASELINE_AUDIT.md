@@ -376,3 +376,35 @@ the Audiobooks Player narrator metadata.
 
 These checks are additive and preserve the earlier Stage 5.4/5.5 preview,
 M4B and recovery flows.
+
+
+## Stage 6 Task Manager refresh-race correction — 5 November 2026
+
+### Failed-run audit
+- **#2339:** packaged acceptance reached Task Manager but timed out waiting for
+  the All filter to render all native jobs. Audiobooks Play and cross-module
+  checks were reached after the #2338 live-card reacquisition test fix.
+- **#2340:** the All list rendered, but a backend row lacked its View action.
+  The responsive player-grid override was not reached in this run.
+- **#2341:** 1,177 tests ran and one source regression errored because its
+  source-slicing assertion still searched for the former direct-render branch.
+  #2342 updated that contract to the DOM integrity guard; its source suite passed.
+- **#2342:** source-test checkpoint passed; it validated the stable job-refresh
+  DOM repair contract but did not itself prove packaged acceptance.
+- **#2343:** packaged acceptance passed player restart/mini-player, Stage 5.4
+  recovery, Music Library/BGM/cue persistence, cross-module output ownership
+  and History search/details. It failed at the final Task Manager View check.
+
+### Root cause and fix
+The refresh wrapper shared one in-flight promise but did not remember calls made
+while that promise was resolving. If the user changed Active/Completed/All while
+a job.list call was underway, the new filter refresh could be absorbed by the
+old promise. This left a prior DOM snapshot visible until a later heartbeat.
+The wrapper now sets a pending flag and performs one serialized follow-up render
+before resolving callers. It still prevents overlapping bridge calls and
+collapses concurrent requests into the latest requested state.
+
+The packaged Task Manager acceptance now waits for the complete native row
+identity set, three-column structure and row-specific View action before
+clicking it. This validates the completed DOM contract rather than accepting a
+matching row count during an in-flight render.

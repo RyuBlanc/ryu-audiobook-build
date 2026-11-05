@@ -622,19 +622,32 @@
       const stage6TaskCompleted = jobsModal.querySelector('[data-job-filter="completed"]');
       must(stage6TaskAll && stage6TaskActive && stage6TaskCompleted,
         "Task Manager is missing All, Active or Completed filters.");
+      const stage6TaskRowsMatchNativeJobs = () => {
+        const rows = Array.from(document.querySelectorAll("#backgroundJobsList [data-backend-job]"));
+        const renderedIds = rows.map(row => String(row.dataset.backendJob || "")).sort();
+        const sourceIds = stage6TaskSource.map(row => String(row.job_id || "")).sort();
+        return rows.length === stage6TaskSource.length &&
+          JSON.stringify(renderedIds) === JSON.stringify(sourceIds) &&
+          rows.every(row => row.children.length === 3 &&
+            row.children[0].classList.contains("job-type-icon") &&
+            row.children[1].classList.contains("job-main") &&
+            row.children[2].classList.contains("job-actions") &&
+            row.querySelector('[data-job-view]')?.dataset.jobView === row.dataset.backendJob) &&
+          !document.querySelector("#backgroundJobsList .job-row:not([data-backend-job])");
+      };
       stage6TaskAll.click();
-      await waitFor("Task Manager All filter displays native jobs", () =>
-        document.querySelectorAll("#backgroundJobsList [data-backend-job]").length === stage6TaskSource.length, 10000);
+      await waitFor("Task Manager All filter renders every native job with its View action",
+        stage6TaskRowsMatchNativeJobs, 12000);
       const stage6AllRows = Array.from(document.querySelectorAll("#backgroundJobsList [data-backend-job]"));
-      const stage6RenderedIds = stage6AllRows.map(row => String(row.dataset.backendJob || "")).sort();
-      const stage6SourceIds = stage6TaskSource.map(row => String(row.job_id || "")).sort();
-      must(JSON.stringify(stage6RenderedIds) === JSON.stringify(stage6SourceIds),
+      must(stage6AllRows.length === stage6TaskSource.length,
         "Task Manager All filter does not match native job.list identities.");
-      must(stage6AllRows.every(row => row.children.length === 3 &&
+      must(stage6AllRows.every(row =>
+        row.children.length === 3 &&
         row.children[0].classList.contains("job-type-icon") &&
         row.children[1].classList.contains("job-main") &&
-        row.children[2].classList.contains("job-actions")),
-        "Task Manager rows do not use the responsive icon/details/actions layout.");
+        row.children[2].classList.contains("job-actions") &&
+        row.querySelector("[data-job-view]")),
+        "Task Manager rows do not use the complete responsive actions layout.");
       const expectedRunningCount = stage6TaskSource.filter(row =>
         ["running","pause_requested","cancel_requested","retrying"].includes(row.state)).length;
       const expectedQueuedCount = stage6TaskSource.filter(row => row.state === "queued").length;
@@ -661,11 +674,17 @@
         });
       }, 8000);
       stage6TaskAll.click();
-      const stage6TaskRow = document.querySelector("#backgroundJobsList [data-backend-job]");
+      let stage6TaskRow = null;
+      await waitFor("Task Manager All filter restores current rows and actionable View controls", () => {
+        if (!stage6TaskRowsMatchNativeJobs()) return false;
+        stage6TaskRow = Array.from(document.querySelectorAll("#backgroundJobsList [data-backend-job]"))
+          .find(row => Boolean(row.querySelector("[data-job-view]"))) || null;
+        return Boolean(stage6TaskRow);
+      }, 12000);
       const stage6TaskJob = stage6TaskSource.find(item =>
         String(item.job_id) === String(stage6TaskRow?.dataset.backendJob));
       must(stage6TaskJob && stage6TaskRow.querySelector("[data-job-view]"),
-        "A Task Manager job row is missing its View action.");
+        "A Task Manager job row is missing its View action after the live All-filter refresh completed.");
       stage6TaskRow.querySelector("[data-job-view]").click();
       await waitFor("Task Manager View opens actual job details", () =>
         Boolean(document.querySelector("#jobDetailsModal.show [data-job-detail-field='job-id']")), 8000);

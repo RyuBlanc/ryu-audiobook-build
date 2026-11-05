@@ -266,6 +266,27 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         self.assertIn("writeTextIfChanged(errorNode, j.error?.message || '')", refresh)
         self.assertIn("writeStyleIfChanged(progress, 'width', pct + '%')", refresh)
 
+    def test_overlapping_job_refresh_preserves_filter_change_for_follow_up_render(self):
+        adapter = (
+            ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        start = adapter.index("async function refreshJobs()")
+        end = adapter.index("async function refreshJobsImpl()", start)
+        refresh = adapter[start:end]
+        self.assertIn("jobsRefreshRequested = true;", refresh)
+        self.assertIn("if (jobsRefreshPromise) return jobsRefreshPromise;", refresh)
+        self.assertIn("while (jobsRefreshRequested)", refresh)
+        self.assertIn("jobsRefreshRequested = false;", refresh)
+        self.assertIn("latestJobs = await refreshJobsImpl();", refresh)
+
+    def test_task_manager_acceptance_waits_for_complete_actionable_dom(self):
+        packaged = (
+            ROOT / "tests" / "stage2_packaged_sound_ui_acceptance.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn("stage6TaskRowsMatchNativeJobs", packaged)
+        self.assertIn("renders every native job with its View action", packaged)
+        self.assertIn("row.querySelector('[data-job-view]')?.dataset.jobView === row.dataset.backendJob", packaged)
+
 
 if __name__ == "__main__":
     unittest.main()
