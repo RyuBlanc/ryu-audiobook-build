@@ -464,3 +464,26 @@ The Windows packaging job was skipped because the commit was tagged
 only checkpoint on the same application source head and will execute frozen
 Windows package/restart acceptance, including the 41-view responsive matrix.
 No application source is changed by this checkpoint.
+
+
+## #2348 — tablet-width player grid root cause and fix (5 November 2026)
+
+The packaged run passed source regression, frozen executable build, bundled
+assets, Stage 5.4 full generation/retry/recovery, player restart/position,
+Mini-Player, cross-module ownership, History and Task Manager. It failed only
+at the first tablet responsive viewport (1024x768): the base three-column
+player grid remained active and measured 909.84 CSS pixels wide inside a
+1024-pixel viewport after side navigation was accounted for.
+
+The root cause was CSS cascade coverage: the base 330px / minmax(400px, 1fr) /
+330px grid was overridden only for 1251–1450px, while the <=1250px generic
+media rule did not override the player grid in the frozen-app CSS cascade. A
+tablet-width override is now inserted immediately after the base grid rule for
+801–1250px. It forces a single minmax(0,1fr) player column and sets child cards
+to min-width:0 and width/max-width:100%, preventing intrinsic card width from
+reintroducing horizontal overflow. Existing <=800px mobile and >1250px desktop
+rules are not modified.
+
+A source regression contract now requires this exact tablet rule and cascade
+position. The strict 41-resolution packaged matrix and overflow assertion are
+unchanged.

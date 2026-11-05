@@ -169,8 +169,16 @@ class Stage6HistoryTaskManagerTests(unittest.TestCase):
         )
         self.assertIn(base_rule, html)
         self.assertIn(responsive_rule, html)
-        # The media rule must follow the base rule so it wins the CSS cascade.
+        tablet_rule = (
+            "@media(min-width:801px) and (max-width:1250px){.player-grid{"
+            "grid-template-columns:minmax(0,1fr);min-width:0}.player-grid>.card{"
+            "min-width:0;width:100%;max-width:100%}.player-grid .player-library,"
+            ".player-grid .player-chapters{max-width:none}}"
+        )
+        self.assertIn(tablet_rule, html)
+        # Keep responsive overrides after the base declaration.
         self.assertGreater(html.index(responsive_rule), html.index(base_rule))
+        self.assertGreater(html.index(tablet_rule), html.index(responsive_rule))
 
     def test_packaged_acceptance_reacquires_live_audiobook_card_after_open(self) -> None:
         packaged = (ROOT / "tests" / "stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
