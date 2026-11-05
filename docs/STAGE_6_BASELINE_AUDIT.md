@@ -336,3 +336,14 @@ The next matching-head artifact checkpoint must exercise the packaged restart,
 Step 7 cross-module ownership, Step 5/6 History and Task Manager, and Step 8
 41-resolution plus window/scaling emulation gates before these steps are marked
 packaged-pass.
+
+
+## Step 8 CSS cascade correction — 5 November 2026
+
+The 1280–1450px Audiobooks grid override was present but ordered before the
+base \`.player-grid\` rule. Because both selectors had equal specificity, the
+later base declaration overrode the narrower three-column layout. The
+stylesheet now declares the base grid first and the 1251–1450px override
+second. The regression test asserts both declarations and their cascade
+order, rather than only checking that the media-query text exists. The
+package matrix remains the required runtime check for all 41 sizes.
