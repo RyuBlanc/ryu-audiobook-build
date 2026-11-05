@@ -272,7 +272,7 @@ def component_paths(model_id: str) -> dict[str, Any]:
     key = str(model_id or "").casefold()
 
     if key == "piper":
-        from app.tts.providers.piper import PiperProvider
+    from app.tts.providers.piper import PiperProvider
         model_path = str((root / "piper").resolve())
         runtime_path = _module_directory("piper")
         local = root / "piper"
