@@ -1470,7 +1470,12 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("previewStatus.id = 'productionPreviewStatus';", selector)
         self.assertIn("previewStatus.setAttribute('aria-live', 'polite');", selector)
         self.assertIn("productionPreviewSelectedChapter = chapterNumber;", selector)
-        self.assertIn("productionPreviewSelectedChapterId = String(chapter.chapter_id || chapter.id || '');", selector)
+        self.assertIn("const chapterId = String(chapter.chapter_id || chapter.id || '');", selector)
+        self.assertIn("productionPreviewSelectedChapterId = chapterId;", selector)
+        self.assertIn("const selectionChanged =", selector)
+        self.assertIn("chapterId !== productionPreviewSelectedChapterId", selector)
+        self.assertIn("chapterSignature !== productionPreviewSelectedChapterSignature", selector)
+        self.assertIn("if (!voicePreviewValid && $('productionPreviewStatus'))", selector)
         self.assertIn("const selectedNumber=Number(productionPreviewSelectedChapter||0);", preview_controls)
         self.assertIn("'Chapter '+selectedNumber+' selected. Generate a new preview for this chapter.'", preview_controls)
 
