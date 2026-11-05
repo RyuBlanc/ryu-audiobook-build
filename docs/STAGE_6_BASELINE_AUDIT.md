@@ -632,3 +632,17 @@ require one View action per backend-owned row, with \`data-job-view\` matching
 \`data-backend-job\`, repaired in place before any full row render. Packaged
 acceptance continues to verify the actual frozen app and fails on missing or
 mismatched View actions.
+
+
+## #2363 failure — packaged contract checked the wrong source file (5 November 2026)
+
+Build #2363 passed frontend JavaScript syntax and isolated native Qt lifecycle
+checks, then ran 1,186 tests with one failure. The remaining assertion searched
+for \`rowsHaveViewActions\` inside the packaged acceptance script. That helper
+belongs to the production backend adapter; the packaged driver independently
+checks its visible rows through \`stage6TaskRowsMatchNativeJobs\`.
+
+The source test now separates these responsibilities: adapter assertions verify
+the in-place View-action invariant and identity binding, while packaged-script
+assertions verify the actual native job IDs and View-button IDs. No runtime code
+or acceptance coverage was relaxed.
