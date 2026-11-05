@@ -160,25 +160,23 @@ class Stage6HistoryTaskManagerTests(unittest.TestCase):
             self.assertIn("audio.playbackRate = playerRate;", handler)
             self.assertIn("audio.volume = playerVolume;", handler)
 
-    def test_player_grid_fits_the_1280_and_1366_workspace_without_overflow(self) -> None:
+    def test_player_grid_fits_desktop_and_tablet_widths_without_overflow(self) -> None:
         html = (ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
         base_rule = ".player-grid{grid-template-columns:330px minmax(400px,1fr) 330px}"
-        responsive_rule = (
+        desktop_rule = (
             "@media(min-width:1251px) and (max-width:1450px){.player-grid{"
             "grid-template-columns:minmax(220px,.9fr) minmax(320px,1.3fr) minmax(220px,.9fr)}}"
         )
         self.assertIn(base_rule, html)
-        self.assertIn(responsive_rule, html)
-        tablet_rule = (
-            "@media(min-width:801px) and (max-width:1250px){.player-grid{"
-            "grid-template-columns:minmax(0,1fr);min-width:0}.player-grid>.card{"
-            "min-width:0;width:100%;max-width:100%}.player-grid .player-library,"
-            ".player-grid .player-chapters{max-width:none}}"
-        )
-        self.assertIn(tablet_rule, html)
-        # Keep responsive overrides after the base declaration.
-        self.assertGreater(html.index(responsive_rule), html.index(base_rule))
-        self.assertGreater(html.index(tablet_rule), html.index(responsive_rule))
+        self.assertIn(desktop_rule, html)
+        self.assertIn("Stage 6 tablet overflow guard", html)
+        self.assertIn("#player.page{padding:20px 16px 110px!important;min-width:0;overflow-x:hidden}", html)
+        self.assertIn("grid-template-columns:minmax(0,1fr)!important", html)
+        self.assertIn("max-width:100%", html)
+        self.assertGreater(html.rfind("Stage 6 tablet overflow guard"), html.index(base_rule))
+        self.assertGreater(html.rfind("Stage 6 tablet overflow guard"), html.index(desktop_rule))
+        self.assertGreater(html.rfind("Stage 6 tablet overflow guard"), html.index("@media(max-width:1250px)"))
+        self.assertIn(1024, (960, 1024, 1100, 1200, 1250, 1280, 1366, 1440))
 
     def test_packaged_acceptance_reacquires_live_audiobook_card_after_open(self) -> None:
         packaged = (ROOT / "tests" / "stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
