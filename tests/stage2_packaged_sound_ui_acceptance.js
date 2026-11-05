@@ -710,7 +710,9 @@
       must(stage6OriginalView && stage6OriginalView.dataset.jobView === stage6TaskRepairId,
         "Task Manager repair fixture did not start with an identity-matched View action.");
       stage6OriginalView.remove();
-      stage6TaskAll.click();
+      // Let the normal live 1.5-second backend poll repair the row. Clicking a
+      // filter is deliberately avoided because filter changes invalidate the
+      // row signature and request a full-list render.
       await waitFor("Task Manager repairs a missing View action in place", () => {
         const repaired = stage6TaskRepairRow.querySelector("[data-job-view]");
         return Boolean(stage6TaskRepairRow.isConnected && repaired &&
@@ -724,7 +726,7 @@
 
       const stage6RepairedView = stage6TaskRepairRow.querySelector("[data-job-view]");
       stage6RepairedView.dataset.jobView = "stale-" + stage6TaskRepairId;
-      stage6TaskAll.click();
+      // Keep the same native filter and allow the next ordinary poll to repair.
       await waitFor("Task Manager repairs a mismatched View action in place", () => {
         const repaired = stage6TaskRepairRow.querySelector("[data-job-view]");
         return Boolean(stage6TaskRepairRow.isConnected && repaired &&

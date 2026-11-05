@@ -695,3 +695,10 @@ is not presented as physical monitor evidence.
 while the #2366 executable reported Version 1.1.1. The version decision and
 matching installer/portable artifact must be reconciled before release
 sign-off; this commit does not silently change the product version.
+
+
+The in-place repair acceptance uses the adapter's normal live polling path;
+it does not click a filter to force a refresh, because changing filters is
+allowed to invalidate the row signature and rebuild the list. This ensures the
+acceptance distinguishes a genuine in-place repair from a legitimate filter
+render.
