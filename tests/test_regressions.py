@@ -1227,28 +1227,61 @@ class RegressionTests(unittest.TestCase):
             voice_page._QWEN_PREVIEW_PROFILE_KEY = original_key
 
     def test_voice_preview_is_invalidated_when_target_settings_change(self):
+        from types import SimpleNamespace
+        from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QPushButton
         from app.ui.voice_page import VoicePage
 
-        page = VoicePage()
-        try:
-            page.last_preview = Path(tempfile.gettempdir()) / "old-preview.wav"
-            page.last_preview_elapsed_seconds = 12.0
-            page.play_button.setEnabled(True)
-            page.save_preview_button.setEnabled(True)
+        # Exercise the real invalidation method and setting-change signal without
+        # constructing VoicePage's unrelated QMediaPlayer/QAudioOutput stack.
+        app = QApplication.instance() or QApplication([])
+        duration = QComboBox()
+        duration.addItems(["30 seconds", "60 seconds"])
+        preview_button = QPushButton("Generate preview")
+        play_button = QPushButton("Play")
+        save_button = QPushButton("Save")
+        engine_status = QLabel("Ready")
+        status = QLabel("Preview ready")
 
-            current = page.preview_duration.currentIndex()
-            page.preview_duration.setCurrentIndex(
-                (current + 1) % page.preview_duration.count()
+        with tempfile.TemporaryDirectory() as temporary:
+            old_preview = Path(temporary) / "old-preview.wav"
+            old_preview.write_bytes(b"temporary-preview")
+            page = SimpleNamespace(
+                _invalidating_preview=False,
+                _preview_request_id=7,
+                _preview_requested_signature=("old-target",),
+                _preview_profile_signature=("old-profile",),
+                preview_worker=None,
+                player=None,
+                last_preview=old_preview,
+                last_preview_elapsed_seconds=12.0,
+                preview_button=preview_button,
+                play_button=play_button,
+                save_preview_button=save_button,
+                preview_engine_status=engine_status,
+                status=status,
+                preview_percent_bar=None,
+                preview_activity_bar=None,
+                _is_live_qt_object=VoicePage._is_live_qt_object,
+                _discard_preview_output=VoicePage._discard_preview_output,
+                _refresh_assignment_actions=lambda: None,
             )
+            duration.currentIndexChanged.connect(
+                lambda *_args: VoicePage._invalidate_preview(page)
+            )
+            play_button.setEnabled(True)
+            save_button.setEnabled(True)
+            duration.setCurrentIndex(1)
 
             self.assertIsNone(page.last_preview)
             self.assertIsNone(page.last_preview_elapsed_seconds)
-            self.assertFalse(page.play_button.isEnabled())
-            self.assertFalse(page.save_preview_button.isEnabled())
-            self.assertIn("Preview invalidated", page.preview_engine_status.text())
-        finally:
-            page.close()
-            page.deleteLater()
+            self.assertFalse(play_button.isEnabled())
+            self.assertFalse(save_button.isEnabled())
+            self.assertTrue(preview_button.isEnabled())
+            self.assertFalse(old_preview.exists())
+            self.assertEqual(page._preview_request_id, 8)
+            self.assertIsNone(page._preview_requested_signature)
+            self.assertIsNone(page._preview_profile_signature)
+            self.assertIn("Preview invalidated", engine_status.text())
 
     def test_voice_preview_invalidation_ignores_deleted_qt_status_widget(self):
         import shiboken6
