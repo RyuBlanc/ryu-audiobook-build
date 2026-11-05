@@ -582,6 +582,29 @@ shared application-shell bounds, and the installer/portable/hash/Defender
 workflow steps. Physical manual installation is not claimed by CI.
 
 
+
+
+## Latest Stage 6 checkpoint — Build #2359 (5 November 2026)
+
+Build #2359 completed successfully on commit
+\`af574d29774f19a3ce7ea8ed8ba5b93cc2174ee7\`. Its source and Windows
+packaging jobs passed. This is the matching-head responsive shell checkpoint
+and supersedes the earlier #2357 matrix failure. #2357's package acceptance
+had already passed Stage 5.4 recovery, Step 4 player restoration, Step 7
+cross-module ownership, History, Task Manager and prior viewport cases; its
+remaining error was the shared application shell at 800x600. #2359 passed
+after the responsive harness correctly expected the intentional one-column
+mobile shell at widths <=800px.
+
+The current branch has advanced beyond #2359 with the Task Manager View-action
+root repair. Build #2360 is the matching-head verification candidate for that
+repair. Its tests job has started; packaged acceptance has not yet run.
+
+**Disposition:** Step 8's automated 41-resolution CSS viewport matrix and
+responsive shell checkpoint passed in #2359. Physical minimize/restore,
+extended/mixed-monitor topology and OS DPI remain manual Windows-display checks
+and are not claimed as completed by viewport emulation.
+
 ## Task Manager View-action integrity repair — 5 November 2026
 
 A packaged Windows run showed backend job identities and most row structure
