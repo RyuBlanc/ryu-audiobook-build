@@ -536,13 +536,23 @@
       const stage7Audio = latestAcceptanceAudio();
       must(audioUsesPath(stage7Audio, stage7Player.playback_output_path || stage7Player.file_url),
         "Full Player loaded media from a different project/output.");
+      // Opening a card re-renders the library because selection identity changes.
+      // Never click the detached pre-refresh card: reacquire the live row by project.
+      stage7Card = Array.from(document.querySelectorAll("#backendAudiobookLibrary .audiobook-library-card"))
+        .find(card => String(card.dataset.projectFolder || "") === stage7Folder) || null;
+      must(stage7Card && stage7Card.isConnected,
+        "The recovered audiobook card was not present in the live library after Open.");
       const stage7Rows = Array.from(document.querySelectorAll("#player [data-audiobook-chapter-start]"));
       const stage7Chapters = Array.isArray(stage7Player.chapters) ? stage7Player.chapters : [];
       must(stage7Rows.length === stage7Chapters.length && stage7Rows.every((row,index) =>
         Math.abs(Number(row.dataset.audiobookChapterStart)-Number(stage7Chapters[index].start_seconds)) < 0.05 &&
         Math.abs(Number(row.dataset.audiobookChapterEnd)-Number(stage7Chapters[index].end_seconds)) < 0.05),
         "Full Player chapters differ from the recovered M4B embedded chapter intervals.");
-      stage7Card.querySelector("[data-play-project-folder]").click();
+      const stage7LivePlay = stage7Card.querySelector("[data-play-project-folder]");
+      must(stage7LivePlay && stage7LivePlay.isConnected &&
+        String(stage7LivePlay.dataset.playProjectFolder || "") === stage7Folder,
+        "The live recovered audiobook Play control is missing or belongs to another project.");
+      stage7LivePlay.click();
       await waitFor("Audiobooks Play starts the recovered M4B", () =>
         !stage7Audio.paused && stage7Audio.readyState >= 2 && stage7Audio.currentTime > 0.05, 12000);
       must(latestAcceptanceAudio() === stage7Audio &&
