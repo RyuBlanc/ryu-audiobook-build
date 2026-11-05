@@ -260,6 +260,18 @@ def persist_inventory_snapshot(rows: list[dict[str, Any]]) -> None:
             return
 
 
+def _module_directory(module_name: str) -> str | None:
+    try:
+        spec = importlib.util.find_spec(module_name)
+        if spec and spec.origin:
+            return str(Path(spec.origin).resolve().parent)
+        if spec and spec.submodule_search_locations:
+            return str(Path(next(iter(spec.submodule_search_locations))).resolve())
+    except (ImportError, ValueError, OSError, AttributeError):
+        return None
+    return None
+
+
 def _chatterbox_cache_root(root: Path) -> Path:
     cache = os.environ.get("HF_HUB_CACHE") or os.environ.get("HUGGINGFACE_HUB_CACHE")
     if cache:
@@ -288,25 +300,26 @@ def component_paths(model_id: str) -> dict[str, Any]:
             local_has_models = local.is_dir() and any(local.rglob("*.onnx"))
             selected = local if local_has_models else (bundled if bundled and bundled.exists() else local)
             model_path = str(selected.resolve())
-            runtime_path = _module_directory("piper")
             if local.exists():
                 owned_paths.append(local)
             if bundled and bundled.exists():
                 owned_paths.append(bundled)
+            runtime_path = _module_directory("piper")
         elif key == "kokoro":
             from app.tts.providers.kokoro import KokoroProvider
             model = KokoroProvider._find_model()
             voices = KokoroProvider._find_voices()
             model_path = str(model.resolve()) if model else str((root / "kokoro").resolve())
-            runtime_path = _module_directory("kokoro_onnx")
             for path in (root / "kokoro", model, voices):
                 if path and path.exists() and path not in owned_paths:
                     owned_paths.append(path)
+            runtime_path = _module_directory("kokoro_onnx")
         elif key == "chatterbox-runtime":
             from app.tts.chatterbox_runtime import RUNTIME_DIR, runtime_python
             runtime_path = str(RUNTIME_DIR.resolve())
-            python_path = str(runtime_python().resolve())
             owned_paths.append(RUNTIME_DIR)
+            python_executable = runtime_python()
+            python_path = str(python_executable.resolve()) if python_executable else str((RUNTIME_DIR / "Scripts" / "python.exe").resolve())
         elif key == "chatterbox-model-assets":
             cache = _chatterbox_cache_root(root)
             matches = [
