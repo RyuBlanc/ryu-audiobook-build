@@ -197,6 +197,35 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
             self.assertTrue((preserve / "config.json").is_file())
             self.assertIn("other model folders", message)
 
+    def test_model_uninstall_removes_only_paths_owned_by_selected_component(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "Models"
+            selected = root / "qwen3-tts" / "custom-0.6b"
+            sibling = root / "qwen3-tts" / "base-0.6b"
+            (selected / "weights").mkdir(parents=True)
+            (selected / "weights" / "model.safetensors").write_bytes(b"weights")
+            sibling.mkdir(parents=True)
+            (sibling / "config.json").write_text("{}", encoding="utf-8")
+
+            PremiumV2Bridge._models_remove_path(selected, root / "qwen3-tts")
+
+            self.assertFalse(selected.exists())
+            self.assertTrue((sibling / "config.json").is_file())
+
+    def test_model_uninstall_refuses_component_paths_outside_owned_root(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            owned_root = base / "Models" / "qwen3-tts"
+            protected = base / "Projects" / "important.json"
+            owned_root.mkdir(parents=True)
+            protected.parent.mkdir(parents=True)
+            protected.write_text("keep", encoding="utf-8")
+
+            with self.assertRaisesRegex(RuntimeError, "outside the selected component root"):
+                PremiumV2Bridge._models_remove_path(protected, owned_root)
+
+            self.assertEqual(protected.read_text(encoding="utf-8"), "keep")
+
     def test_models_center_file_readiness_rejects_partial_assets_without_loading_them(self):
         from tempfile import TemporaryDirectory
         from app.ui.models_page import _file_ready
