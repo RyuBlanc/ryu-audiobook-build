@@ -308,20 +308,30 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         self.assertIn("latestJobs = await refreshJobsImpl();", refresh)
 
     def test_task_manager_acceptance_waits_for_complete_actionable_dom(self):
-        packaged = (
-            ROOT / "tests" / "stage2_packaged_sound_ui_acceptance.js"
-        ).read_text(encoding="utf-8")
-        self.assertIn("stage6TaskRowsMatchNativeJobs", packaged)
-        self.assertIn("renders every native job with its View action", packaged)
-        self.assertIn("button && button.dataset.jobView === id", packaged)
-        self.assertIn("stage6TaskRowsMatchNativeJobs", packaged)
-        adapter = (
-            ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
-        ).read_text(encoding="utf-8")
-        self.assertIn("button && button.dataset.jobView === id", packaged)
-        self.assertIn("stage6TaskRowsMatchNativeJobs", packaged)
-        self.assertIn("const rowsHaveViewActions = renderedRows.every(row =>", adapter)
-        self.assertIn("rowStructureValid && rowsHaveViewActions", adapter)
+        packaged_path = ROOT / "tests" / "stage2_packaged_sound_ui_acceptance.js"
+        runner_path = ROOT / "tests" / "packaged_sound_ui_acceptance.py"
+        adapter_path = ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        for fixture in (packaged_path, runner_path, adapter_path):
+            self.assertTrue(fixture.is_file(), f"Required Task Manager acceptance fixture is missing: {fixture}")
+
+        packaged = packaged_path.read_text(encoding="utf-8")
+        runner = runner_path.read_text(encoding="utf-8")
+
+        # The frozen-app acceptance owns behavioural verification: it compares
+        # native job IDs to rendered rows, opens the selected job's real details,
+        # and deliberately removes/stales View actions to prove in-place repair.
+        required_runtime_contracts = (
+            "const stage6TaskRowsMatchNativeJobs = () =>",
+            "renders every native job with its View action",
+            "stage6_task_manager_repairs_missing_view_action_in_place",
+            "stage6_task_manager_repairs_mismatched_view_action_in_place",
+        )
+        for contract in required_runtime_contracts:
+            with self.subTest(contract=contract):
+                self.assertIn(contract, packaged)
+        for contract in required_runtime_contracts[2:]:
+            with self.subTest(required_runner_check=contract):
+                self.assertIn(contract, runner)
 
 
 if __name__ == "__main__":

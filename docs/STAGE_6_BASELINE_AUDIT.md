@@ -662,3 +662,36 @@ repair together with the previously accepted Stage 5.4/5.5 and Stage 6 Steps
 4–8, including the responsive matrix. Physical user installation, physical
 minimize/restore, mixed/extended monitors and OS-level DPI are not claimed as
 CI-verified.
+
+
+## Permanent Stage 6 regression-gate hardening — 5 November 2026
+
+The final closeout candidate adds a real packaged regression for the Task
+Manager's missing/mismatched View-action repair. The test deliberately removes
+a View action and then corrupts its job ID in the visible frozen-app row. The
+next real backend refresh must restore the correct action while preserving the
+same row element; rebuilding the row cannot satisfy this acceptance.
+
+The packaged Python runner requires both new acceptance markers in the
+restarted-process result. The source-level fixture test checks that the
+acceptance script and runner exist and that both runtime contracts are present;
+it no longer duplicates implementation-specific adapter-expression checks.
+
+The Windows test job now runs the focused Stage 6 History/Task Manager test
+modules before the full regression suite. This is an early failure gate for
+fixture/import mistakes such as an undefined adapter variable. It supplements
+rather than replaces the complete regression suite and the frozen-app gate.
+
+**Protected baseline:** #2366 at
+`fa51387b6087317d7c929a540a00c83ccf1c19e7`.
+
+**Acceptance still required outside CI:** physical installed-app verification
+on the user's Windows machine, including minimize/restore, extended and
+mixed-resolution monitors, and OS-level 100/125/150/200% display scaling.
+The 41-viewport CSS/DOM emulation remains a separate successful CI result and
+is not presented as physical monitor evidence.
+
+**Release alignment:** the Stage 6 plan names Version 1.2.0 as its target,
+while the #2366 executable reported Version 1.1.1. The version decision and
+matching installer/portable artifact must be reconciled before release
+sign-off; this commit does not silently change the product version.

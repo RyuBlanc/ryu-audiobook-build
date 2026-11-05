@@ -698,6 +698,44 @@
       must(document.querySelector("#jobDetailsModal [data-job-detail-field='job-id']").textContent.trim() ===
         String(stage6TaskJob.job_id), "Task Manager View opened a different job's details.");
       document.querySelector("#jobDetailsModal [data-job-detail-close]")?.click();
+
+      // Exercise the adapter's in-place integrity repair against the real
+      // frozen-app DOM. Keep the original row reference so a full-list rebuild
+      // cannot satisfy this contract accidentally.
+      const stage6TaskRepairRow = stage6TaskRow;
+      const stage6TaskRepairId = String(stage6TaskRepairRow?.dataset.backendJob || "");
+      must(stage6TaskRepairRow && stage6TaskRepairId,
+        "Task Manager repair acceptance could not identify its native job row.");
+      const stage6OriginalView = stage6TaskRepairRow.querySelector("[data-job-view]");
+      must(stage6OriginalView && stage6OriginalView.dataset.jobView === stage6TaskRepairId,
+        "Task Manager repair fixture did not start with an identity-matched View action.");
+      stage6OriginalView.remove();
+      stage6TaskAll.click();
+      await waitFor("Task Manager repairs a missing View action in place", () => {
+        const repaired = stage6TaskRepairRow.querySelector("[data-job-view]");
+        return Boolean(stage6TaskRepairRow.isConnected && repaired &&
+          repaired.dataset.jobView === stage6TaskRepairId);
+      }, 10000);
+      must(Array.from(document.querySelectorAll("#backgroundJobsList [data-backend-job]"))
+        .find(row => String(row.dataset.backendJob || "") === stage6TaskRepairId) === stage6TaskRepairRow,
+        "Task Manager replaced the native row instead of repairing its missing View action in place.");
+      record("stage6_task_manager_repairs_missing_view_action_in_place", true,
+        "Removing a live row's View button caused the next real backend refresh to restore the identity-matched action without replacing the row.");
+
+      const stage6RepairedView = stage6TaskRepairRow.querySelector("[data-job-view]");
+      stage6RepairedView.dataset.jobView = "stale-" + stage6TaskRepairId;
+      stage6TaskAll.click();
+      await waitFor("Task Manager repairs a mismatched View action in place", () => {
+        const repaired = stage6TaskRepairRow.querySelector("[data-job-view]");
+        return Boolean(stage6TaskRepairRow.isConnected && repaired &&
+          repaired.dataset.jobView === stage6TaskRepairId);
+      }, 10000);
+      must(Array.from(document.querySelectorAll("#backgroundJobsList [data-backend-job]"))
+        .find(row => String(row.dataset.backendJob || "") === stage6TaskRepairId) === stage6TaskRepairRow,
+        "Task Manager replaced the native row instead of repairing its mismatched View action in place.");
+      record("stage6_task_manager_repairs_mismatched_view_action_in_place", true,
+        "A stale View-button job ID was corrected to the owning backend job ID without replacing the native row.");
+
       await sleep(4500);
       await waitFor("Task Manager backend rows remain owned after the former prototype timer window",
         stage6TaskRowsMatchNativeJobs, 12000);

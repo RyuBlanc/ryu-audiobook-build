@@ -96,6 +96,17 @@ jobs:
           & $pythonExe -B -m unittest test_regressions.RegressionTests.test_voice_preview_invalidation_ignores_deleted_qt_status_widget -v
           if ($LASTEXITCODE -ne 0) { throw "Isolated Qt lifecycle regression failed with exit code $LASTEXITCODE." }
 
+      - name: Run focused Stage 6 History and Task Manager preflight
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          $repoRoot = (Get-Location).Path
+          $env:PYTHONPATH = "$repoRoot"
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -B -m unittest -v tests.test_p0_ui_refresh_stability tests.test_stage6_history_task_manager
+          if ($LASTEXITCODE -ne 0) { throw "Focused Stage 6 History/Task Manager preflight failed with exit code $LASTEXITCODE." }
+
       - name: Run full regression suite (remaining tests)
         shell: pwsh
         run: |
