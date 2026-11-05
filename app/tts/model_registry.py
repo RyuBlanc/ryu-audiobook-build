@@ -515,7 +515,7 @@ def enrich_inventory_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def build_inventory() -> list[dict[str, Any]]:
     """Return the live, provider-aware local model and runtime inventory."""
     from app.core.paths import models_root
-        from app.tts.providers.piper import PiperProvider
+    from app.tts.providers.piper import PiperProvider
     from app.tts.providers.kokoro import KokoroProvider
     from app.tts.chatterbox_runtime import RUNTIME_DIR as CHATTERBOX_ROOT, runtime_ready as chatterbox_ready
     from app.tts.qwen_character_runtime import (
