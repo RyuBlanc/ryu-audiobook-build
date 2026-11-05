@@ -927,6 +927,20 @@ class VoicePreviewContractTests(unittest.TestCase):
             "_production_preview": True,
         })
 
+    def test_production_chapter_selector_reconciles_same_number_with_stale_identity(self):
+        adapter = Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        source = adapter.read_text(encoding="utf-8")
+        start = source.index("select.addEventListener('change', () => {", source.index("function ensureProductionPreviewMonitorUi"))
+        end = source.index("\n      });", start)
+        handler = source[start:end]
+        self.assertIn("const selectionChanged =", handler)
+        self.assertIn("chapterId !== productionPreviewSelectedChapterId", handler)
+        self.assertIn("chapterSignature !== productionPreviewSelectedChapterSignature", handler)
+        self.assertIn("productionPreviewSelectedChapter = chapterNumber;", handler)
+        self.assertIn("if (!voicePreviewValid && $('productionPreviewStatus'))", handler)
+        self.assertNotIn("if (chapterNumber === Number(productionPreviewSelectedChapter)) return;", handler)
+        self.assertIn("syncProductionPreviewControls();", handler)
+
     def test_production_preview_uses_production_owned_chapter_selector_and_preserves_download_identity(self):
         adapter = Path("assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("const chapterNumber=Number(productionPreviewSelectedChapter||$('productionPreviewChapterSelect')?.value||0)", adapter)

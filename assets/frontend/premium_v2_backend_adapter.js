@@ -5205,19 +5205,29 @@
           syncProductionPreviewChapterSelector();
           return;
         }
-        if (chapterNumber === Number(productionPreviewSelectedChapter)) return;
-        productionPreviewSelectedChapter = chapterNumber;
-        productionPreviewSelectedChapterId = String(chapter.chapter_id || chapter.id || '');
-        productionPreviewSelectedChapterSignature = JSON.stringify([
-          chapterNumber, productionPreviewSelectedChapterId,
-          String(chapter.title || ''), String(chapter.text || '')
+        const chapterId = String(chapter.chapter_id || chapter.id || '');
+        const chapterSignature = JSON.stringify([
+          chapterNumber, chapterId, String(chapter.title || ''), String(chapter.text || '')
         ]);
-        invalidateVoicePreview();
-        if ($('productionPreviewStatus')) {
+        const selectionChanged =
+          chapterNumber !== Number(productionPreviewSelectedChapter) ||
+          chapterId !== productionPreviewSelectedChapterId ||
+          chapterSignature !== productionPreviewSelectedChapterSignature;
+        // Reconcile the selected identity even when the number is unchanged.
+        // The selector can be restored from a project refresh while its internal
+        // chapter identity is stale; returning early here leaves the visible
+        // selection and Production status out of sync.
+        productionPreviewSelectedChapter = chapterNumber;
+        productionPreviewSelectedChapterId = chapterId;
+        productionPreviewSelectedChapterSignature = chapterSignature;
+        if (selectionChanged) {
+          invalidateVoicePreview();
+          if ($('productionPreviewTiming')) $('productionPreviewTiming').textContent = 'No preview generated for this chapter yet.';
+        }
+        if (!voicePreviewValid && $('productionPreviewStatus')) {
           $('productionPreviewStatus').textContent =
             'Chapter ' + chapterNumber + ' selected. Generate a new preview for this chapter.';
         }
-        if ($('productionPreviewTiming')) $('productionPreviewTiming').textContent = 'No preview generated for this chapter yet.';
         syncProductionPreviewControls();
       });
       picker.append(caption, select);
