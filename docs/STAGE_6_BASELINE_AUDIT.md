@@ -347,3 +347,17 @@ stylesheet now declares the base grid first and the 1251–1450px override
 second. The regression test asserts both declarations and their cascade
 order, rather than only checking that the media-query text exists. The
 package matrix remains the required runtime check for all 41 sizes.
+
+
+## Task Manager legacy renderer conflict — 5 November 2026
+
+Packaged #2339 reached Task Manager and timed out because the static reference
+HTML's target-level tab handlers repainted the shared list with prototype rows.
+#2340 then found a visible row without the native View action. The adapter's
+render signature could remain unchanged after an external repaint.
+
+The correction intercepts Task Manager filter clicks in capture phase before
+the legacy handlers and invalidates the previous signature. The backend
+renderer also validates rendered job IDs, the three-column row structure,
+each View action, and absence of non-backend prototype rows before it skips a
+rebuild. Focused regression tests cover both protections.

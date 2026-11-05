@@ -5878,6 +5878,27 @@
     group.appendChild(button);
   }
 
+  // Intercept Task Manager filters before the reference HTML's demo onclick
+  // handlers can repaint the live job list with prototype rows.
+  if (!window.__ryuBackendJobFilterCaptureBound) {
+    window.__ryuBackendJobFilterCaptureBound = true;
+    document.addEventListener('click', event => {
+      const filter = event.target?.closest?.('#backgroundJobsModal [data-job-filter]');
+      if (!filter) return;
+      const requested = String(filter.dataset.jobFilter || 'active');
+      if (!['active','completed','all','failed'].includes(requested)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      backendJobFilter = requested;
+      filter.parentElement?.querySelectorAll('[data-job-filter]').forEach(button => {
+        button.classList.toggle('active', button === filter);
+      });
+      const list = $('backgroundJobsList');
+      if (list) list.dataset.backendJobsSignature = '';
+      refreshJobs().catch(error => message(error?.message || String(error), true));
+    }, true);
+  }
+
   async function refreshJobs() {
     // Multiple callers share one in-flight refresh so the 1.5s heartbeat, job
     // monitor and manual refresh cannot issue overlapping DOM updates.
@@ -5910,7 +5931,20 @@
       const signature = jobs.map(j => [
         j.job_id, j.state, j.type, j.title, Boolean(j.recoverable), j.project_title, String(j.error?.code || '')
       ].join('\u001f')).join('\u001e');
-      if (box.dataset.backendJobsSignature !== signature) {
+      const renderedRows = Array.from(box.querySelectorAll('[data-backend-job]'));
+      const renderedIds = renderedRows.map(row => String(row.dataset.backendJob || '')).sort();
+      const expectedIds = jobs.map(job => String(job.job_id || '')).sort();
+      const rowStructureValid = renderedRows.length === jobs.length &&
+        renderedRows.every(row =>
+          row.children.length === 3 &&
+          row.children[0].classList.contains('job-type-icon') &&
+          row.children[1].classList.contains('job-main') &&
+          row.children[2].classList.contains('job-actions') &&
+          Boolean(row.querySelector('[data-job-view]'))
+        ) &&
+        !box.querySelector('.job-row:not([data-backend-job])');
+      const backendDomMatches = JSON.stringify(renderedIds) === JSON.stringify(expectedIds) && rowStructureValid;
+      if (box.dataset.backendJobsSignature !== signature || !backendDomMatches) {
         box.innerHTML = jobs.map(j => {
           const id = esc(j.job_id || ''), state = String(j.state || 'unknown');
           const action = (name,label,cls) => '<button class="btn small ' + cls + '" data-job-action="' + name + '" data-job-id="' + id + '">' + label + '</button>';

@@ -86,6 +86,20 @@ class Stage6HistoryTaskManagerTests(unittest.TestCase):
         self.assertIn("writeTextIfChanged(meta, jobMetaSummary(j))", self.adapter)
         self.assertIn("data-job-view", self.adapter)
 
+    def test_task_manager_capture_handler_prevents_legacy_demo_rows_from_replacing_live_jobs(self) -> None:
+        self.assertIn("window.__ryuBackendJobFilterCaptureBound", self.adapter)
+        self.assertIn("document.addEventListener('click', event =>", self.adapter)
+        self.assertIn("#backgroundJobsModal [data-job-filter]", self.adapter)
+        self.assertIn("event.stopImmediatePropagation()", self.adapter)
+        self.assertIn("backendJobFilter = requested", self.adapter)
+
+    def test_task_manager_repairs_stale_rows_even_when_backend_signature_is_unchanged(self) -> None:
+        self.assertIn("const backendDomMatches =", self.adapter)
+        self.assertIn("JSON.stringify(renderedIds) === JSON.stringify(expectedIds)", self.adapter)
+        self.assertIn("!box.querySelector('.job-row:not([data-backend-job])')", self.adapter)
+        self.assertIn("if (box.dataset.backendJobsSignature !== signature || !backendDomMatches)", self.adapter)
+        self.assertIn("Boolean(row.querySelector('[data-job-view]'))", self.adapter)
+
     def test_packaged_runner_requires_real_two_process_player_restoration(self) -> None:
         runner = (ROOT / "tests" / "packaged_sound_ui_acceptance.py").read_text(encoding="utf-8")
         for marker in (
