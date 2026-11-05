@@ -115,3 +115,14 @@ The repository's default-branch Actions workflow currently has a `stage-6/**` pu
 - CI workflow deliberately skips Windows packaging on ordinary feature-branch commits. A final commit carrying [artifact-checkpoint] is required to run the Windows packaging job after tests pass.
 - Latest source commit before this checkpoint: b4923aec15370066a08d199d191e487778a46759.
 - Stage 7 Step 1 remains OPEN pending matching-head full regression and Windows packaging success.
+
+
+## 2026-11-05 — Production preview selector regression
+
+- Packaged checkpoint #2393 built and verified the frozen executable and bundled assets, but its packaged SD/Music acceptance timed out waiting for Production-owned Chapter 2 selection.
+- The older packaged checkpoint #2392 subsequently passed the same packaged SD/Music acceptance, confirming the timeout was not deterministic.
+- Hardened the Production preview chapter selector to reconcile the visible chapter number with the stable chapter ID and content signature even when the number is unchanged. A valid preview is invalidated only when the actual chapter identity changes.
+- Added dedicated selector identity reconciliation coverage and updated the existing integration contract to assert the new behavior.
+- Latest regression checkpoint #2395: 1,196 tests passed; isolated Qt lifecycle regression passed; Stage 6 preflight passed (37 tests); frontend JavaScript syntax passed.
+- New matching-head packaged acceptance and Windows installer verification are still required before Step 1 closure.
+- Current source commit before package checkpoint: 089a2613dab94686b1f32395a794f7ee748e5217.
