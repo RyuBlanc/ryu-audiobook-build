@@ -43,6 +43,12 @@ def main() -> int:
     ]
     suite = unittest.TestSuite(remaining)
     result = unittest.TextTestRunner(verbosity=2).run(suite)
+    # Ensure Python finalizers execute while Qt and multimedia DLLs are still
+    # loaded. On Windows the interpreter otherwise tears down PySide6 objects
+    # after the Qt runtime has begun unloading, which can terminate the process
+    # after unittest has correctly reported OK.
+    import gc
+    gc.collect()
     return 0 if result.wasSuccessful() else 1
 
 
