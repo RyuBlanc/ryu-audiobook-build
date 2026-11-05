@@ -97,6 +97,18 @@ jobs:
           & $pythonExe -B -m unittest test_regressions.RegressionTests.test_voice_preview_invalidation_ignores_deleted_qt_status_widget -v
           if ($LASTEXITCODE -ne 0) { throw "Isolated Qt lifecycle regression failed with exit code $LASTEXITCODE." }
 
+      - name: Run isolated voice preview invalidation regression
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          $repoRoot = (Get-Location).Path
+          $testsRoot = Join-Path $repoRoot 'tests'
+          $env:PYTHONPATH = "$repoRoot;$testsRoot"
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -B -m unittest test_regressions.RegressionTests.test_voice_preview_is_invalidated_when_target_settings_change -v
+          if ($LASTEXITCODE -ne 0) { throw "Isolated voice preview invalidation regression failed with exit code $LASTEXITCODE." }
+
       - name: Run focused Stage 6 History and Task Manager preflight
         shell: pwsh
         run: |
