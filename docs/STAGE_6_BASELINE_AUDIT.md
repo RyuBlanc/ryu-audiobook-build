@@ -487,3 +487,21 @@ rules are not modified.
 A source regression contract now requires this exact tablet rule and cascade
 position. The strict 41-resolution packaged matrix and overflow assertion are
 unchanged.
+
+
+## Tablet CSS root correction — 5 November 2026
+
+Build #2353 completed all packaged acceptance checks through Stage 6 Steps 4–7,
+History and Task Manager, then correctly caught a Player grid overflow at
+1024×768 (right edge 1211.84 px in a 1024 px viewport).
+
+Commit \`7967b1df67b9d5ddd910e091e97fc75e2a9b3fb9\` adds a final tablet-width
+CSS guard for 801–1250 px. It reduces Player page horizontal padding, forces
+the Player grid and its direct cards to a single bounded column, applies
+\`min-width:0\` and \`max-width:100%\`, and lets control toolbars wrap. The
+existing desktop and mobile breakpoints are retained.
+
+The source gate passed in #2354 (1,182 tests), but the build job was skipped
+because its commit message did not include \`[artifact-checkpoint]\`. This
+documentation-only checkpoint is intended to run the frozen Windows build and
+the same packaged 41-resolution acceptance on the CSS-fix commit.
