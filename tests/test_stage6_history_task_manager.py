@@ -144,5 +144,14 @@ class Stage6HistoryTaskManagerTests(unittest.TestCase):
             html,
         )
 
+    def test_packaged_acceptance_reacquires_live_audiobook_card_after_open(self) -> None:
+        packaged = (ROOT / "tests" / "stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
+        open_step = packaged.index('stage7Card.querySelector("[data-open-project-folder]").click();')
+        play_step = packaged.index('const stage7LivePlay = stage7Card.querySelector("[data-play-project-folder]");', open_step)
+        self.assertIn("stage7Card.isConnected", packaged[open_step:play_step])
+        self.assertIn("stage7LivePlay.isConnected", packaged[play_step:play_step + 700])
+        self.assertIn("String(stage7LivePlay.dataset.playProjectFolder || \"\") === stage7Folder", packaged[play_step:play_step + 700])
+
+
 if __name__ == "__main__":
     unittest.main()

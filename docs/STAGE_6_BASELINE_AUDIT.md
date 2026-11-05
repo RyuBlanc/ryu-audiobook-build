@@ -308,3 +308,31 @@ preference. The adapter now reapplies the current selected player rate and
 volume in both \`loadedmetadata\` and \`play\` handlers after the browser has
 loaded the resource. A regression test checks both event handlers, while the
 packaged acceptance continues to require the actual rate to be 1.25.
+
+
+## Matching-head audit update — 5 November 2026
+
+- #2332 and #2333 passed source tests and built/verified the frozen executable,
+  then both failed at restart restoration because Qt WebEngine media metadata
+  load reset the media element's playback speed to 1.0× although Settings and
+  the player response correctly stored 1.25×. #2337 corrected this in
+  \`audio.onloadedmetadata\`, applying the persisted rate and volume after media
+  metadata becomes available. Its later restart acceptance passed position,
+  mini-player and Stage 5.4 recovery checks.
+- #2337 then exposed a Step 7 packaged-test issue: the test kept a reference to
+  the Audiobooks card from before Open. The Open handler correctly refreshes
+  the library after selecting a book, detaching the old card. The test now
+  reacquires the card by the recovered project folder, confirms the live Play
+  control is connected and still targets the same project, then clicks it.
+- #2338 passed the complete source regression suite, frontend syntax checks and
+  isolated Qt lifecycle test after that correction. Its build was skipped
+  because the commit was a source-only test fix without the workflow's
+  \`[artifact-checkpoint]\` trigger.
+- #2336 likewise passed source regression after the 1280/1366 player-grid CSS
+  adjustment, but its Windows packaging job was skipped for the same reason.
+  It is not counted as frozen-app responsive acceptance.
+
+The next matching-head artifact checkpoint must exercise the packaged restart,
+Step 7 cross-module ownership, Step 5/6 History and Task Manager, and Step 8
+41-resolution plus window/scaling emulation gates before these steps are marked
+packaged-pass.
