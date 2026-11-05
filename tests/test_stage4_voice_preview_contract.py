@@ -462,7 +462,9 @@ class VoicePreviewContractTests(unittest.TestCase):
         source = adapter.read_text(encoding="utf-8")
         self.assertIn("profileHealthRow", source)
         self.assertIn("sideHealthRow", source)
-        self.assertIn("const label=!result?'Checking…':result.ready?'Ready':'Setup required';", source)
+        self.assertIn("const blockedStatuses=['Missing','Not configured','Partially installed','Unhealthy','Unsupported','Location unavailable','Unavailable','Not assessed'];", source)
+        self.assertIn("inventoryStatus==='Installed'?'Installed · functional verification pending'", source)
+        self.assertIn("inventoryStatus==='Ready'?'var(--green)'", source)
         self.assertIn("updateVoiceHealthIndicator(providerKey,result);", source)
 
 
