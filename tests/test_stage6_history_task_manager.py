@@ -188,6 +188,7 @@ class Stage6HistoryTaskManagerTests(unittest.TestCase):
             "stage6_responsive_shared_shell_bounds_41_resolutions",
             "application-shell",
             "shared workspace grid item retained its automatic minimum width",
+            "mobile application shell did not switch to its single-column layout",
         ):
             self.assertIn(marker, packaged)
         self.assertIn("stage6_responsive_shared_shell_bounds_41_resolutions", runner)

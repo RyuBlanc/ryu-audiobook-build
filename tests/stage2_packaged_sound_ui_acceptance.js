@@ -846,8 +846,14 @@
         }
         must(getComputedStyle(workspace).minWidth === "0px",
           "The shared workspace grid item retained its automatic minimum width at " + label + ".");
-        must(getComputedStyle(shell).gridTemplateColumns.split(" ").length === 2,
-          "The shared application shell lost its two-column sidebar/workspace grid at " + label + ".");
+        const shellStyle = getComputedStyle(shell);
+        if (width <= 800) {
+          must(shellStyle.display === "block",
+            "The mobile application shell did not switch to its single-column layout at " + label + ".");
+        } else {
+          must(shellStyle.gridTemplateColumns.split(" ").length === 2,
+            "The desktop/tablet application shell lost its bounded sidebar/workspace grid at " + label + ".");
+        }
         const playerColumns = getComputedStyle(playerGrid).gridTemplateColumns.trim().split(/\s+/).length;
         const historyColumns = getComputedStyle(historyRow).gridTemplateColumns.trim().split(/\s+/).length;
         const jobColumns = getComputedStyle(jobRow).gridTemplateColumns.trim().split(/\s+/).length;

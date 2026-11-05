@@ -551,3 +551,12 @@ top bar and Player page bounds at every viewport in addition to the Player,
 Audiobooks cards, mini-player, History, Task Manager and job-details surfaces.
 The runner requires a dedicated shared-shell marker, so it cannot pass without
 these checks. Matching-head frozen-Windows verification is pending.
+
+
+### Responsive shell test breakpoint guard — 5 November 2026
+
+The shared-shell matrix explicitly distinguishes the desktop/tablet two-column
+grid from the intentional single-block mobile shell at widths ≤800px. It still
+requires \`min-width:0\` on the workspace and verifies shell/workspace/topbar
+bounds at every viewport. This prevents the test itself from reporting the
+expected mobile CSS layout as a regression.
