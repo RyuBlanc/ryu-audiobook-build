@@ -646,3 +646,19 @@ The source test now separates these responsibilities: adapter assertions verify
 the in-place View-action invariant and identity binding, while packaged-script
 assertions verify the actual native job IDs and View-button IDs. No runtime code
 or acceptance coverage was relaxed.
+
+
+## Exact-head frozen Windows artifact checkpoint — 5 November 2026
+
+This documentation-only checkpoint triggers the frozen Windows application and
+combined packaged acceptance on the exact application source commit
+\`37021e8cb5a07934112ef059a6c8797edf118fb9\`. That source commit passed all
+1,186 regression tests, frontend syntax validation and isolated native Qt
+lifecycle regression in #2365. No application source is changed by this
+checkpoint.
+
+The packaged gate must verify the corrected Task Manager View-action integrity
+repair together with the previously accepted Stage 5.4/5.5 and Stage 6 Steps
+4–8, including the responsive matrix. Physical user installation, physical
+minimize/restore, mixed/extended monitors and OS-level DPI are not claimed as
+CI-verified.
