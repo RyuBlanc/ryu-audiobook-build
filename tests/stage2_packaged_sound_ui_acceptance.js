@@ -1657,8 +1657,15 @@
     await waitFor("successful cue-save retry status", function () {
       return document.querySelector("#cueSaveState")?.textContent.includes("All cue changes saved");
     }, 8000);
+    await waitFor("cue save debounce and in-flight persistence settle", function () {
+      return document.querySelector("#saveCueChanges")?.disabled === true &&
+        document.querySelector("#cueSaveState")?.textContent.includes("All cue changes saved");
+    }, 12000);
+    const cueStateAfterRetry = await invoke("sound.cues.get", {});
+    must(String(cueStateAfterRetry.opening?.path || "") === String(cueBeta.path),
+      "The explicit cue retry did not persist the new Opening slot.");
     record("cue_save_failure_retains_retryable_changes", true,
-      "An injected auto-save failure kept the old backend assignment, retained the visible draft and retry button through a catalogue refresh, then an explicit retry succeeded.");
+      "An injected auto-save failure retained the old assignment and retryable draft through catalogue refresh, then persisted the new slot on explicit retry.");
 
     document.querySelector("#clearAllCues").click();
     await waitFor("Clear All staged state", function () {
@@ -1680,6 +1687,11 @@
     await waitForCuePath("closing", cueAlpha.path);
     record("cue_clear_all_explicit_and_persisted", true,
       "Clear All remained staged until explicit save, cleared all three slots, and the required final assignments were restored.");
+    const cueStateBeforeMix = await invoke("sound.cues.get", {});
+    must(String(cueStateBeforeMix.opening?.path || "") === String(cueBeta.path) &&
+      String(cueStateBeforeMix.chapter?.path || "") === String(cueBeta.path) &&
+      String(cueStateBeforeMix.closing?.path || "") === String(cueAlpha.path),
+      "The mixer started before all three cue assignments had reached durable project state.");
 
     const mixTab = document.querySelector('#sound .sound-tabs [data-sound-tab="mix"]');
     must(mixTab, "Mix & Production Sync tab is missing.");
@@ -2028,6 +2040,18 @@
     }, 15000);
     record("production_mode_toggles_share_sound_manifest", true,
       "Production Studio Voice Only and Use BGM controls persisted through the same Sound Design state.");
+    await waitFor("all Sound Design preview jobs have reached terminal state before Stage 5.4", async function () {
+      const jobs = await invoke("job.list", {include_hidden:true});
+      return Array.isArray(jobs) && jobs.every(job =>
+        job.type !== "sound-design-preview" ||
+        !["queued","running","pause_requested","paused","cancel_requested","retrying"].includes(String(job.state || "")));
+    }, 30000);
+    const durableMixStateBeforeStage54 = await invoke("sound.chapter_bgm.get", {});
+    must(durableMixStateBeforeStage54.bgm_enabled === true &&
+      durableMixStateBeforeStage54.background_audio_mode === "manual" &&
+      String(durableMixStateBeforeStage54.overrides?.["1"]?.path || "") === String(alpha.path) &&
+      String(durableMixStateBeforeStage54.overrides?.["2"]?.path || "") === String(beta.path),
+      "The Sound Design project did not return to its durable Chapter-Based state before Stage 5.4 job-control acceptance.");
 
     const productionPronunciationToggle = document.querySelector("#productionPronunciationToggle");
     must(productionPronunciationToggle,

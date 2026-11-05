@@ -187,5 +187,31 @@ class Stage6HistoryTaskManagerTests(unittest.TestCase):
         self.assertIn("String(stage7LivePlay.dataset.playProjectFolder || \"\") === stage7Folder", packaged[play_step:play_step + 700])
 
 
+
+    def test_cue_import_rejection_is_checked_before_copy_or_metadata_write(self) -> None:
+        host_source = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        handler = host_source[host_source.index("def _sound_import("):]
+        handler = handler[:handler.index("def _sound_assign(")]
+        guard = 'if target_kind != "music" and duration_seconds > 5.0:'
+        self.assertIn(guard, handler)
+        self.assertLess(handler.index(guard), handler.index("destination = target_root / source.name"))
+        self.assertLess(handler.index(guard), handler.index("metadata_path.write_text"))
+
+    def test_packaged_cue_retry_and_preview_jobs_are_drained_before_stage54(self) -> None:
+        packaged = (ROOT / "tests" / "stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
+        retry = "cue save debounce and in-flight persistence settle"
+        drain = "all Sound Design preview jobs have reached terminal state before Stage 5.4"
+        stage54 = "Stage 5.4 job-control metadata gate"
+        self.assertIn(retry, packaged)
+        self.assertIn(drain, packaged)
+        self.assertLess(packaged.index(retry), packaged.index("same_and_chapter_based_real_full_book_preview"))
+        self.assertLess(packaged.index(drain), packaged.index(stage54))
+
+    def test_sound_preview_replacement_catches_stale_play_promise(self) -> None:
+        adapter_source = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("const previewAudio = new Audio(fileUrl)", adapter_source)
+        self.assertIn("await previewAudio.play().catch(error =>", adapter_source)
+        self.assertIn("if (soundPreviewAudio !== previewAudio || previewAudio.paused) return;", adapter_source)
+
 if __name__ == "__main__":
     unittest.main()

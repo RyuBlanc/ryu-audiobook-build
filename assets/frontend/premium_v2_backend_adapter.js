@@ -9616,10 +9616,24 @@
               if (job.state === 'completed') {
                 const fileUrl = job.result?.file_url || (job.output_path ? 'file:///' + String(job.output_path).replace(/\\/g, '/') : '');
                 if (!fileUrl) throw new Error('The Sound Design preview finished without an audio file.');
-                soundPreviewAudio = new Audio(fileUrl);
-                soundPreviewAudio.onended = () => { soundPreviewAudio = null; };
-                soundPreviewAudio.onerror = () => { soundPreviewAudio = null; message('The Sound Design mix preview could not be played.', true); };
-                await soundPreviewAudio.play();
+                // A replaced preview no longer owns the global playback reference.
+                // Catch pause/replacement rejections so rapid preview changes cannot
+                // leak unhandled play() promises or clear a newer preview's state.
+                stopSoundPreview();
+                const previewAudio = new Audio(fileUrl);
+                soundPreviewAudio = previewAudio;
+                previewAudio.onended = () => {
+                  if (soundPreviewAudio === previewAudio) soundPreviewAudio = null;
+                };
+                previewAudio.onerror = () => {
+                  if (soundPreviewAudio === previewAudio) soundPreviewAudio = null;
+                  message('The Sound Design mix preview could not be played.', true);
+                };
+                await previewAudio.play().catch(error => {
+                  if (previewAudio !== soundPreviewAudio || previewAudio.paused) return;
+                  throw error;
+                });
+                if (soundPreviewAudio !== previewAudio || previewAudio.paused) return;
                 message('Playing the generated Sound Design mix preview.');
                 finished = true;
                 break;

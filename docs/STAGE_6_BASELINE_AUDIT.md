@@ -505,3 +505,24 @@ The source gate passed in #2354 (1,182 tests), but the build job was skipped
 because its commit message did not include \`[artifact-checkpoint]\`. This
 documentation-only checkpoint is intended to run the frozen Windows build and
 the same packaged 41-resolution acceptance on the CSS-fix commit.
+
+
+## #2355 root-cause analysis and preventive fix — 5 November 2026
+
+The frozen executable, frozen verification and bundled assets passed. Packaged
+acceptance failed later at the Stage 5.4 job-control metadata wait. Its six-second
+cue-import rejection was the intended production validation (fixed cue clips
+must not exceed five seconds). The run then emitted mix-preview media
+load/play-pause interruption messages before timing out at the later gate.
+
+The acceptance sequence did not establish a durable-state barrier after the
+injected cue-save failure and before starting full-book previews and Stage 5.4.
+The correction keeps production cue validation intact and adds explicit waits
+for cue save debounce/in-flight persistence, native cue-state readback, and
+completion of all Sound Design preview jobs before switching into Stage 5.4.
+The restored Chapter-Based BGM state is verified before the job-control flow.
+
+Mix preview playback now owns a local Audio instance. Replaced preview promises
+are caught, and stale ended/error callbacks cannot clear the active preview
+reference. Added regression contracts cover cue import side-effect ordering,
+retry settlement, preview drain and preview ownership.
