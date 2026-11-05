@@ -512,8 +512,9 @@
         String(recoveredHistoryRow.project_folder || "") === stage7Folder &&
         stage7Path(recoveredHistoryRow.output_path) === stage7Path(stage7Output),
         "Production, Background Jobs and History do not share the recovered project's job/output identity.");
-      must(String(stage7Player.title || "") === String(recoveredProject.title || ""),
-        "Audiobooks title differs from the recovered Production project.");
+      must(String(stage7Player.title || "") === String(recoveredProject.title || "") &&
+        String(stage7Player.narrator || "") === String(recoveredProject.narrator || ""),
+        "Audiobooks title or narrator differs from the recovered Production project.");
       window.go("player");
       await waitFor("Audiobooks page opens for recovered project", () =>
         Boolean(document.querySelector("#player")?.classList.contains("active") &&
@@ -2239,6 +2240,21 @@
     const productionPlaybackUrl = String(productionPreviewResult.file_url || "").toLowerCase();
     const productionPlaybackPath = String(productionPreviewResult.playback_output_path || "");
     const initialPreviewSeconds = Number(productionPreviewResult.actual_duration_seconds || 0);
+    const previewOwnerFolder = String(productionPreviewJob.project_folder || "");
+    const previewOwnerChapterId = String(productionPreviewJob.current_chapter_id || "");
+    must(previewOwnerFolder === String((await invoke("project.get_active", {})).folder || "") &&
+      (!chosenPreviewChapterId || previewOwnerChapterId === String(chosenPreviewChapterId)) &&
+      String(completedProductionPreview.project_folder || "") === previewOwnerFolder &&
+      String(completedProductionPreview.current_chapter_id || "") === previewOwnerChapterId &&
+      Boolean(productionPreviewPath),
+      "Completed Production Preview changed project/chapter ownership or lost its registered output: " +
+        JSON.stringify({
+          started:productionPreviewJob,
+          completed:completedProductionPreview,
+          expectedChapterId:chosenPreviewChapterId
+        }));
+    record("stage6_chapter_preview_owner_project_and_stable_chapter_identity", true,
+      "The real completed Production Preview retained its originating project folder, stable Chapter Studio identity and registered preview output.");
     must(Number(productionPreviewResult.requested_duration_seconds || 0) === 10 &&
       initialPreviewSeconds >= 5 && initialPreviewSeconds <= 15 &&
       productionPreviewPath.toLowerCase().endsWith(".m4a") &&

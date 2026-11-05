@@ -142,6 +142,15 @@ class Stage6HistoryTaskManagerTests(unittest.TestCase):
         self.assertIn(marker, runner)
         self.assertIn("job.list", packaged)
         self.assertIn("player.get_active", packaged)
+        self.assertIn("stage7Player.narrator", packaged)
+
+    def test_packaged_acceptance_requires_chapter_preview_project_and_chapter_ownership(self) -> None:
+        packaged = (ROOT / "tests" / "stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
+        runner = (ROOT / "tests" / "packaged_sound_ui_acceptance.py").read_text(encoding="utf-8")
+        marker = "stage6_chapter_preview_owner_project_and_stable_chapter_identity"
+        self.assertIn(marker, packaged)
+        self.assertIn(marker, runner)
+        self.assertIn("completedProductionPreview.current_chapter_id", packaged)
 
 
     def test_player_preferences_are_reapplied_after_media_metadata_load(self) -> None:

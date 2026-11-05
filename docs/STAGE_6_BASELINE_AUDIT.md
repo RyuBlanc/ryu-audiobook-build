@@ -361,3 +361,18 @@ the legacy handlers and invalidates the previous signature. The backend
 renderer also validates rendered job IDs, the three-column row structure,
 each View action, and absence of non-backend prototype rows before it skips a
 rebuild. Focused regression tests cover both protections.
+
+
+## Step 7 carry-forward ownership checks — 5 November 2026
+
+The packaged acceptance already generates and plays a real Chapter 2 Production
+Preview, validates the M4A and PCM WAV paths, exercises duration variants,
+Save As and cancellation, and checks the preview job's originating project and
+stable chapter ID at job start. This checkpoint extends the ownership assertion
+through job completion: the completed record must retain the same project
+folder and chapter ID and must have a registered output. The restarted
+cross-module acceptance also compares the recovered project's narrator with
+the Audiobooks Player narrator metadata.
+
+These checks are additive and preserve the earlier Stage 5.4/5.5 preview,
+M4B and recovery flows.

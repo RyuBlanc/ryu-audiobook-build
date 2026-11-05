@@ -779,6 +779,7 @@ def _run(args: argparse.Namespace) -> int:
             raise AssertionError("The packaged UI did not report completion of the Production Preview Save As action.")
         first_checks = first_result.get("checks") or {}
         for required_check in (
+            "stage6_chapter_preview_owner_project_and_stable_chapter_identity",
             "stage6_playback_position_persisted_before_process_restart",
             "stage6_player_volume_rate_persisted_before_restart",
             "stage6_mini_player_close_preserves_active_session",
