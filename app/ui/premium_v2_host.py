@@ -2520,7 +2520,7 @@ class PremiumV2Bridge(QObject):
                 detail += " Some reference rollback operations also failed: " + "; ".join(rollback_errors)
             raise RuntimeError("Voice-profile references could not be migrated." + detail) from exc
 
-    def _voice_catalog(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def _voice_catalog_base(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Return the real provider catalogue for a Voice Studio library card."""
         from app.tts.voice_profile import load_profiles, load_saved_profiles
 
@@ -2752,6 +2752,38 @@ class PremiumV2Bridge(QObject):
                 rows.append(row)
 
         return {"provider": key, "ready": ready, "message": message_text, "source": source, "voices": rows, "count": len(rows)}
+
+    def _current_model_inventory(self, force: bool = False) -> list[dict[str, Any]]:
+        """Reuse the latest Models Center scan so Voice Studio sees the same registry state."""
+        cached = getattr(self, "_model_inventory_cache", None)
+        scanned_at = float(getattr(self, "_model_inventory_cache_at", 0.0) or 0.0)
+        if not force and isinstance(cached, list) and time.monotonic() - scanned_at < 5.0:
+            return cached
+        return self._models_list({})
+
+    def _voice_catalog(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Gate Voice Studio provider choices using the authoritative Models Center inventory."""
+        result = self._voice_catalog_base(payload)
+        if not isinstance(result, dict):
+            return result
+        provider = str(payload.get("provider") or result.get("provider") or "").strip().casefold()
+        try:
+            from app.tts.model_registry import voice_model_inventory_status
+            inventory = voice_model_inventory_status(provider, self._current_model_inventory())
+        except Exception as exc:
+            inventory = {
+                "provider": provider,
+                "status": "Unavailable",
+                "selectable": False,
+                "message": f"Model inventory could not be verified: {exc}",
+                "components": [],
+                "available_variants": [],
+            }
+        result["model_inventory"] = inventory
+        result["ready"] = bool(result.get("ready")) and bool(inventory.get("selectable"))
+        if not inventory.get("selectable"):
+            result["message"] = str(inventory.get("message") or result.get("message") or "Required model components are unavailable.")
+        return result
 
     def _voice_elevenlabs_design(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Generate temporary ElevenLabs Voice Design candidates without saving them."""
@@ -6541,10 +6573,13 @@ class PremiumV2Bridge(QObject):
             )
 
     def _models_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
-        """Return the authoritative persisted model/runtime inventory."""
+        """Return and cache the authoritative model/runtime inventory."""
         from app.tts.model_registry import build_inventory
 
-        return build_inventory()
+        rows = build_inventory()
+        self._model_inventory_cache = rows
+        self._model_inventory_cache_at = time.monotonic()
+        return rows
 
     def _models_files(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Return paginated actual file metadata for one inventory component."""
@@ -6563,11 +6598,20 @@ class PremiumV2Bridge(QObject):
         model_id = str(payload.get("model_id") or "").strip()
         location = str(payload.get("location") or "model").strip().casefold()
         paths = component_paths(model_id)
-        raw = paths.get("runtime_path") if location == "runtime" else paths.get("model_path")
-        if not raw:
+        path_keys = {
+            "model": "model_path",
+            "runtime": "runtime_path",
+            "python": "python_path",
+            "runtime_executable": "runtime_executable",
+        }
+        path_key = path_keys.get(location)
+        if not path_key:
+            raise ValueError(f"Unsupported model location: {location}")
+        raw = paths.get(path_key)
+        if not raw and location in {"model", "runtime"}:
             raw = paths.get("model_path") or paths.get("runtime_path")
         if not raw:
-            raise FileNotFoundError(f"No local {location} folder is registered for {model_id}.")
+            raise FileNotFoundError(f"No local {location} path is registered for {model_id}.")
         path = Path(str(raw)).expanduser()
         folder = path if path.is_dir() else path.parent
         if not folder.is_dir():
@@ -6584,11 +6628,20 @@ class PremiumV2Bridge(QObject):
         model_id = str(payload.get("model_id") or "").strip()
         location = str(payload.get("location") or "model").strip().casefold()
         paths = component_paths(model_id)
-        raw = paths.get("runtime_path") if location == "runtime" else paths.get("model_path")
-        if not raw:
+        path_keys = {
+            "model": "model_path",
+            "runtime": "runtime_path",
+            "python": "python_path",
+            "runtime_executable": "runtime_executable",
+        }
+        path_key = path_keys.get(location)
+        if not path_key:
+            raise ValueError(f"Unsupported model location: {location}")
+        raw = paths.get(path_key)
+        if not raw and location in {"model", "runtime"}:
             raw = paths.get("model_path") or paths.get("runtime_path")
         if not raw:
-            raise FileNotFoundError(f"No local path is registered for {model_id}.")
+            raise FileNotFoundError(f"No local path is registered for {model_id} ({location}).")
         value = str(Path(str(raw)).expanduser())
         QApplication.clipboard().setText(value)
         return {"copied": True, "model_id": model_id, "location": location, "path": value}
@@ -7065,6 +7118,13 @@ class PremiumV2Bridge(QObject):
             raise ValueError("Choose a model or provider to verify.")
         models = self._models_list({})
         item = next((model for model in models if model["model_id"].casefold() == requested), None)
+        if item and item.get("status") == "Location unavailable":
+            return {
+                "model_id": requested, "available": False,
+                "detail": "The configured model storage location is unavailable. Reconnect the drive and refresh status.",
+                "path": item.get("model_path") or item.get("runtime_path") or "",
+                "status": "Location unavailable", "model": item,
+            }
         detail = ""
         available = False
         path = ""
@@ -7121,10 +7181,21 @@ class PremiumV2Bridge(QObject):
             from app.tts.providers.kokoro import KokoroProvider
             available = bool(KokoroProvider.assets_available())
             detail = "Kokoro model and voice pack are available." if available else "Kokoro model or voice pack is missing/incomplete."
+        elif requested == "chatterbox-model-assets":
+            from app.tts.model_registry import component_file_inventory
+            inventory_files = component_file_inventory(requested)
+            available = bool(inventory_files.get("accessible") and inventory_files.get("total_files"))
+            path = str(inventory_files.get("model_path") or "")
+            detail = (
+                f"{inventory_files.get('total_files', 0)} Chatterbox model asset file(s) found in the shared cache."
+                if available else
+                "No downloaded Chatterbox model assets were found; the runtime may download them on first use."
+            )
         elif requested in {"chatterbox", "chatterbox-multilingual", "chatterbox-runtime"}:
-            from app.tts.chatterbox_runtime import runtime_ready
+            from app.tts.chatterbox_runtime import runtime_ready, RUNTIME_DIR
             available = bool(runtime_ready())
-            detail = "Chatterbox runtime ready; model weights may still be fetched on first use." if available else "Chatterbox runtime is missing or incomplete."
+            path = str(RUNTIME_DIR)
+            detail = "Chatterbox runtime ready; English and multilingual model weights are inventoried separately." if available else "Chatterbox runtime is missing or incomplete."
         elif requested == "audiobook-ai":
             from app.core.paths import models_root
             ai_root = models_root() / "audiobook-ai"
@@ -7162,6 +7233,16 @@ class PremiumV2Bridge(QObject):
             status = "Missing"
         else:
             status = "Missing"
+
+        if item and item.get("component_type") != "provider" and item.get("inventory_fingerprint"):
+            try:
+                from app.tts.model_registry import record_component_verification
+                if available:
+                    record_component_verification(
+                        requested, True, detail, str(item["inventory_fingerprint"]), level="files"
+                    )
+            except Exception:
+                log.exception("Could not persist model file verification for %s", requested)
         return {"model_id": requested, "available": available, "detail": detail, "path": path,
                 "status": status, "model": item}
 
