@@ -5948,11 +5948,33 @@
           row.children.length === 3 &&
           row.children[0].classList.contains('job-type-icon') &&
           row.children[1].classList.contains('job-main') &&
-          row.children[2].classList.contains('job-actions') &&
-          Boolean(row.querySelector('[data-job-view]'))
+          row.children[2].classList.contains('job-actions')
         ) &&
         !box.querySelector('.job-row:not([data-backend-job])');
-      const backendDomMatches = JSON.stringify(renderedIds) === JSON.stringify(expectedIds) && rowStructureValid;
+      // Every backend-owned operation must keep one identity-matched View action,
+      // including imports/previews which intentionally expose no generation controls.
+      // Repair a missing/mismatched action in-place before any whole-list rebuild.
+      renderedRows.forEach(row => {
+        const id = String(row.dataset.backendJob || '');
+        const actions = row.querySelector('.job-actions');
+        const view = actions?.querySelector('[data-job-view]');
+        if (id && actions && (!view || String(view.dataset.jobView || '') !== id)) {
+          if (view) view.remove();
+          const button = document.createElement('button');
+          button.className = 'btn small secondary';
+          button.type = 'button';
+          button.dataset.jobView = id;
+          button.textContent = 'View';
+          actions.prepend(button);
+        }
+      });
+      const rowsHaveViewActions = renderedRows.every(row => {
+        const id = String(row.dataset.backendJob || '');
+        const view = row.querySelector('[data-job-view]');
+        return Boolean(id && view && String(view.dataset.jobView || '') === id);
+      });
+      const backendDomMatches = JSON.stringify(renderedIds) === JSON.stringify(expectedIds) &&
+        rowStructureValid && rowsHaveViewActions;
       if (box.dataset.backendJobsSignature !== signature || !backendDomMatches) {
         box.innerHTML = jobs.map(j => {
           const id = esc(j.job_id || ''), state = String(j.state || 'unknown');

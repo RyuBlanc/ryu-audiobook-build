@@ -580,3 +580,18 @@ This artifact checkpoint runs frozen-Windows acceptance against the corrected
 Stage 6 Steps 4–7, the full 41-viewport matrix, window/scaling emulation,
 shared application-shell bounds, and the installer/portable/hash/Defender
 workflow steps. Physical manual installation is not claimed by CI.
+
+
+## Task Manager View-action integrity repair — 5 November 2026
+
+A packaged Windows run showed backend job identities and most row structure
+were present, but a row could temporarily lose its View button during queued
+refreshes. The adapter now treats one View action per backend-owned row, bound
+to that row's stable job ID, as an invariant. It repairs a missing or mismatched
+button in place before resorting to a complete row rebuild. The existing
+delegated click handler and detail lookup remain the action path.
+
+The packaged acceptance asserts unique native job IDs, exact DOM/native ID
+equality, one correctly bound View action per row, status-filter membership,
+summary counts and delayed-refresh integrity. No requirement is skipped or
+weakened.

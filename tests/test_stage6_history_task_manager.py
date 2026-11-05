@@ -85,6 +85,9 @@ class Stage6HistoryTaskManagerTests(unittest.TestCase):
         self.assertIn("data-job-meta", self.adapter)
         self.assertIn("writeTextIfChanged(meta, jobMetaSummary(j))", self.adapter)
         self.assertIn("data-job-view", self.adapter)
+        self.assertIn("renderedRows.forEach(row =>", self.adapter)
+        self.assertIn("rowsHaveViewActions", self.adapter)
+        self.assertIn("button.dataset.jobView = id", self.adapter)
 
     def test_task_manager_capture_handler_prevents_legacy_demo_rows_from_replacing_live_jobs(self) -> None:
         self.assertIn("window.__ryuBackendJobFilterCaptureBound", self.adapter)

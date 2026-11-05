@@ -617,6 +617,9 @@
       const stage6TaskSource = await invoke("job.list", {include_hidden:false});
       must(Array.isArray(stage6TaskSource) && stage6TaskSource.length > 0,
         "Task Manager acceptance has no real job.list records.");
+      const stage6TaskSourceIds = stage6TaskSource.map(row => String(row.job_id || "")).sort();
+      must(stage6TaskSourceIds.every(Boolean) && new Set(stage6TaskSourceIds).size === stage6TaskSourceIds.length,
+        "Task Manager native job.list returned a blank or duplicate job identity.");
       const stage6TaskAll = jobsModal.querySelector('[data-job-filter="all"]');
       const stage6TaskActive = jobsModal.querySelector('[data-job-filter="active"]');
       const stage6TaskCompleted = jobsModal.querySelector('[data-job-filter="completed"]');
@@ -628,11 +631,15 @@
         const sourceIds = stage6TaskSource.map(row => String(row.job_id || "")).sort();
         return rows.length === stage6TaskSource.length &&
           JSON.stringify(renderedIds) === JSON.stringify(sourceIds) &&
-          rows.every(row => row.children.length === 3 &&
-            row.children[0].classList.contains("job-type-icon") &&
-            row.children[1].classList.contains("job-main") &&
-            row.children[2].classList.contains("job-actions") &&
-            row.querySelector('[data-job-view]')?.dataset.jobView === row.dataset.backendJob) &&
+          rows.every(row => {
+            const id = String(row.dataset.backendJob || "");
+            const button = row.querySelector("[data-job-view]");
+            return row.children.length === 3 &&
+              row.children[0].classList.contains("job-type-icon") &&
+              row.children[1].classList.contains("job-main") &&
+              row.children[2].classList.contains("job-actions") &&
+              Boolean(button && button.dataset.jobView === id);
+          }) &&
           !document.querySelector("#backgroundJobsList .job-row:not([data-backend-job])");
       };
       stage6TaskAll.click();
