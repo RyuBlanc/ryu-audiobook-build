@@ -408,3 +408,17 @@ The packaged Task Manager acceptance now waits for the complete native row
 identity set, three-column structure and row-specific View action before
 clicking it. This validates the completed DOM contract rather than accepting a
 matching row count during an in-flight render.
+
+
+## #2345 — refresh concurrency source gate passed (5 November 2026)
+
+Commit `bdd4f4864b5c234aff6e40dacece306f77ba4921` passed the full source
+regression suite: **1,180 tests passed** in 53.4 seconds. Frontend JavaScript
+syntax validation and the isolated native Qt lifecycle regression also passed.
+The Windows build job was skipped because this was a source-only test-contract
+correction without the workflow artifact-checkpoint trigger. This is not a
+packaged acceptance result.
+
+The next matching-head artifact checkpoint must validate the queued follow-up
+refresh behaviour in the frozen Windows application, then continue the 41
+viewport matrix and release gates.
