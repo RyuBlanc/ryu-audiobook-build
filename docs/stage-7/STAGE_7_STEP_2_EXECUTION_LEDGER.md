@@ -244,3 +244,14 @@ The migration-engine source commit #2421 passed the test job. The following comm
 - The Windows SUBST acceptance test verifies unavailable/reconnected drive-letter behaviour, but it is a simulated drive mapping rather than a physical USB/removable drive unplug. Actual hardware disconnect/reconnect still requires the installed application and a real removable drive.
 
 **Step 2 status:** automated implementation, regression, packaged acceptance, release hashing, Defender scanning and artifact upload are COMPLETE on #2524. Do not claim physical removable-drive acceptance complete until the real installed-app test is performed. This is the only explicitly identified manual hardware acceptance item remaining for Step 2. All other previously listed automated Step 2 gates are green.
+
+### Formal Step 2 disposition for Stage 7 progression — 2026-11-06
+
+**Decision:** Step 2 is ACCEPTED / CLOSED FOR STAGE PROGRESSION based on the user's explicit instruction to continue completing Stage 7 without further pauses for manual sign-off.
+
+- Automated implementation and regression: PASSED.
+- Matching-head Windows frozen-app/package acceptance: PASSED on #2524 / `8f6db45191`.
+- Installer, portable package, SHA-256 manifest, Defender scans and artifact uploads: PASSED.
+- The physical USB/removable-drive unplug/replug check is **WAIVED for progression, NOT RUN and NOT CLAIMED AS PASSED**. The Windows SUBST disconnect/reconnect simulation is the automated substitute and passed. If a physical drive issue appears during installed-app use, fix it as a regression without discarding the completed CI/package evidence.
+
+**Final status: STEP 2 CLOSED FOR PROGRESSION. Proceed to Stage 7 Step 3 — Complete Model Lifecycle and Safe Uninstallation.**
