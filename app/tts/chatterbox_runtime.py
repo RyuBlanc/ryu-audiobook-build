@@ -16,9 +16,9 @@ try:
 except ImportError:
     certifi = None
 
-from app.core.paths import models_root
+from app.core.paths import model_cache_root, runtimes_root
 
-RUNTIME_DIR = models_root() / "chatterbox-runtime"
+RUNTIME_DIR = runtimes_root() / "chatterbox-runtime"
 MARKER = RUNTIME_DIR / "runtime.json"
 PYTHON_311_URL = "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe"
 CHATTERBOX_SOURCE_REVISION = "5de7a54aa4e5e2baadb0182dde554908b48b85c2"
@@ -315,7 +315,7 @@ def remove_runtime() -> None:
 
 def runtime_environment() -> dict[str, str]:
     env = os.environ.copy()
-    hf_home = models_root() / "huggingface"
+    hf_home = model_cache_root()
     hf_home.mkdir(parents=True, exist_ok=True)
     env["HF_HOME"] = str(hf_home)
     env.setdefault("TRANSFORMERS_ATTN_IMPLEMENTATION", "eager")
