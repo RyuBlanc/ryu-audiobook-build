@@ -83,3 +83,12 @@
 **Final packaged acceptance remains required on the exact combined source head.** The previous #2540 package checkpoint passed before these final legacy-worker corrections; it is not being reused as evidence for the newer code.
 
 - Final matching-head artifact checkpoint requested after the combined 1,235-test candidate: installer/portable build, frozen-app verification, bundled assets, packaged feature acceptance, SHA-256 manifest, Defender scans and artifact uploads. Step 3 remains open until this run succeeds.
+
+### Packaged Stage 5.3 failure and responsive Task Manager correction — 2026-11-06
+
+- Run #2547 failed only in the packaged Sound Design/Music Library acceptance after earlier live Audiobook AI and Qwen worker checks passed. Exact failure: Task Manager exceeded the 600x800 CSS viewport with rect left=20, right=800, width=780. The responsive fixture was checking the actual cloned `.modal-back` and `.jobs-modal` DOM.
+- Root cause: `.jobs-modal` used a 780px preferred width but the modal overlay/panel had no explicit box-sizing/min-width/overflow bounds when the overlay was cloned and shown at mobile widths; its 20px overlay padding caused a 780px-wide panel to overflow the 600px viewport.
+- Fixed the actual Premium V2 source styles: modal overlay bounded to viewport width and horizontal overflow hidden; Task Manager panel uses `box-sizing:border-box`, `min-width:0`, `max-width:100%`, `width:min(780px,calc(100vw - 40px))`, and viewport-constrained height. At widths <=800px, overlay padding and panel width/max-width/height shrink to a 10px inset, content rows/actions reflow into narrow columns, text can wrap, and summary/tabs/footer stay within the panel.
+- Added `test_task_manager_dialog_is_bounded_and_reflows_at_small_viewports` in `tests/test_stage6_history_task_manager.py` to guard the base and mobile CSS rules and responsive row/action behaviour.
+- Corrected UI change commit: `c16420452c41e5bb196e332a982258149bc6aa12`. Regression test commit: `0958b1afb5ed0285143c6899442d7bda2ee41ca6`.
+- Runs #2548 and #2549 are the isolated and combined regression workflows for this fix. Do not close the responsive gate until both finish successfully and the full matching-head artifact checkpoint reruns.
