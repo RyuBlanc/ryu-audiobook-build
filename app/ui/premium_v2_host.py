@@ -7110,16 +7110,21 @@ class PremiumV2Bridge(QObject):
             runtime_root = Path(RUNTIME_ROOT).resolve()
             targets = [Path(item).resolve() for item in (VENV_ROOT, PYTHON_ROOT, MARKER, INSTALLER_PATH, INSTALLER_LOG)
                        if Path(item).exists() or Path(item).is_symlink()]
-            dependencies = [
+            installed_qwen_weights = [
                 str(row.get("name") or row.get("model_id"))
                 for row in inventory
-                if row.get("component_type") != "provider"
-                and row.get("model_id") != "qwen-runtime"
+                if str(row.get("model_id") or "").casefold() in MODEL_DIRS
                 and row.get("installed")
-                and str(row.get("runtime_path") or "")
-                and Path(str(row["runtime_path"])).expanduser().resolve() == Path(VENV_ROOT).resolve()
             ]
+            # Qwen's runtime can be removed independently. Its model weights are
+            # deliberately preserved and become usable again after reinstalling
+            # the shared runtime; they are not a destructive dependency.
             preservation.append("Qwen model weights and Hugging Face cache are retained.")
+            if installed_qwen_weights:
+                preservation.append(
+                    "These Qwen model weights will remain on disk but cannot synthesize until the Qwen runtime is reinstalled: "
+                    + ", ".join(installed_qwen_weights)
+                )
         elif requested == "audiobook-ai":
             targets = [(models_root() / "audiobook-ai").resolve()]
             preservation.append("Only local Audiobook AI runtime/model files are targeted.")
