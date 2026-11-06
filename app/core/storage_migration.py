@@ -225,6 +225,37 @@ def migrate_storage_root(
             shutil.rmtree(plan.destination, ignore_errors=True)
         raise StorageMigrationError(str(exc)) from exc
 
+
+def inventory_storage_root(root: Path, *, include_hashes: bool = False) -> dict:
+    """Return the exact selected path, availability, per-file sizes and optional SHA-256."""
+    selected = Path(root).expanduser()
+    if not selected.is_dir():
+        return {
+            "path": str(selected), "available": False, "file_count": 0,
+            "total_bytes": 0, "files": [], "error": "Location unavailable",
+        }
+    try:
+        resolved = selected.resolve(strict=True)
+        rows = _walk_files(resolved)
+        files = []
+        for path, relative, size in rows:
+            entry = {"relative_path": relative, "size_bytes": size}
+            if include_hashes:
+                entry["sha256"] = _sha256(path)
+            files.append(entry)
+        return {
+            "path": str(resolved), "available": True,
+            "file_count": len(files), "total_bytes": sum(item["size_bytes"] for item in files),
+            "files": files,
+        }
+    except (OSError, StorageMigrationError) as exc:
+        return {
+            "path": str(selected), "available": False, "file_count": 0,
+            "total_bytes": 0, "files": [], "error": str(exc),
+        }
+
+
+
 def read_migration_journal(path: Path) -> dict:
     """Read a persisted migration journal for UI recovery decisions."""
     try:
