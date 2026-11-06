@@ -1,5 +1,4 @@
 from pathlib import Path
-import tempfile
 
 
 _SETTINGS_ORGANIZATION = "RyuBlanc"
@@ -176,6 +175,13 @@ def _recover_interrupted_storage_migrations() -> None:
             continue
 
 
+def configure_temporary_root() -> None:
+    """Route tempfile users to the selected app staging root at application startup."""
+    import tempfile
+    # Do not fall back to the system temp directory when a selected drive is absent.
+    tempfile.tempdir = str(temporary_root())
+
+
 def ensure_roots() -> None:
     _recover_interrupted_storage_migrations()
     # Keep support folders on the normal user profile. The original roots remain
@@ -213,7 +219,3 @@ def ensure_roots() -> None:
         except OSError:
             pass
 
-    # Route app-owned temporary/staging writes to the selected root. If a
-    # removable drive is configured but disconnected, keep that exact target
-    # rather than silently falling back to the system temp directory.
-    tempfile.tempdir = str(temporary_root())
