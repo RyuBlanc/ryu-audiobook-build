@@ -582,8 +582,6 @@ class ModelsPage(QWidget):
             message += " All models required by this selection are installed."
         self.qwen_model_preference_status.setText(message)
 
-    @stable_view_refresh
-
     def refresh_storage_summary(self) -> None:
         roots = (
             ("Model weights", models_root()),
@@ -653,8 +651,10 @@ class ModelsPage(QWidget):
         QMessageBox.information(self, "Temporary Cleanup Complete", f"Removed {len(result['removed'])} eligible entries.")
         self.refresh_storage_summary()
 
+    @stable_view_refresh
     def refresh(self) -> None:
-        self.refresh_storage_summary()\n        selected = self.list.currentItem()
+        self.refresh_storage_summary()
+        selected = self.list.currentItem()
         selected_label = selected.text() if selected else None
         selected_id = selected.data(Qt.ItemDataRole.UserRole) if selected else None
         scroll = self.list.verticalScrollBar()
