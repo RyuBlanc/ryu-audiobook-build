@@ -613,6 +613,8 @@ class PremiumV2Bridge(QObject):
             "storage.choose_root": True,
             "storage.open_root": True,
             "storage.copy_root": True,
+            "storage.cleanup_source": True,
+            "storage.cleanup_temp": True,
             "models.list": True,
             "models.files": True,
             "models.open_folder": True,
@@ -8315,11 +8317,11 @@ class PremiumV2Bridge(QObject):
         gib = 1024 ** 3
         answer = QMessageBox.question(
             None, "Confirm retained source cleanup",
-            "Delete the retained source copy only after rechecking every file against the active destination?\\n\\n"
-            + "Source: " + source + "\\nVerified destination: " + destination
-            + "\\nFiles: " + str(journal.get("file_count", 0))
+            "Delete the retained source copy only after rechecking every file against the active destination?\n\n"
+            + "Source: " + source + "\nVerified destination: " + destination
+            + "\nFiles: " + str(journal.get("file_count", 0))
             + f" · {int(journal.get('total_bytes') or 0) / gib:.2f} GB"
-            + "\\n\\nIf any path, size or SHA-256 check fails, the source will be preserved.",
+            + "\n\nIf any path, size or SHA-256 check fails, the source will be preserved.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -8351,13 +8353,13 @@ class PremiumV2Bridge(QObject):
             return {"cleaned": False, "candidate_count": 0, "candidate_bytes": 0,
                     "candidates": [], "removed": []}
         gib = 1024 ** 3
-        target_lines = "\\n".join(str(path) for path in preview["candidates"])
+        target_lines = "\n".join(str(path) for path in preview["candidates"])
         answer = QMessageBox.question(
             None, "Review safe cache and temporary cleanup",
             "Dry-run estimate: " + str(preview["candidate_count"]) + " eligible app-owned entries · "
             + f"{int(preview['candidate_bytes']) / gib:.2f} GB"
-            + "\\n\\nExact targets:\\n" + target_lines
-            + "\\n\\nOnly immediate staging/downloads/temporary/tmp entries under the configured cache and temporary roots are eligible. "
+            + "\n\nExact targets:\n" + target_lines
+            + "\n\nOnly immediate staging/downloads/temporary/tmp entries under the configured cache and temporary roots are eligible. "
             "Model weights, provider runtimes, projects, source books, exports and voice data are not cleanup targets. Continue?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
