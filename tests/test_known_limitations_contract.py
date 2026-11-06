@@ -32,7 +32,8 @@ class KnownLimitationsContractTests(unittest.TestCase):
 
     def test_documented_capability_gaps_match_source(self):
         self.assertIn('"project.create": False', self.host)
-        self.assertIn('"performance.info": False', self.host)
+        self.assertIn('"performance.info": self._performance_info', self.host)
+        self.assertIn('"performance.info": True', self.host)
         self.assertIn('"diagnostics.export_logs": self._diagnostics_export_logs', self.host)
         self.assertIn('"diagnostics.export_logs": True', self.host)
         self.assertIn("call('diagnostics.export_logs')", self.adapter)
