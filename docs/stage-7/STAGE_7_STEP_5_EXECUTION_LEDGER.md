@@ -45,3 +45,10 @@ Evidence: [#2624](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/4
 
 **Disposition:** EXACT-HEAD REGRESSION AND PACKAGED WINDOWS ACCEPTANCE PASS on #2641. Step 7 software/package gate is current through #2641; physical accelerator acceptance remains separate and open.
 
+## Matching-head acceptance update — 6 November 2026
+
+- Final responsive acceptance correction is included in candidate `b1da6a8d4aee39e83ca9f781e22b92d26bb4859f`.
+- Build Windows App #2641 passed both jobs: 1,258 regression tests, focused Stage 6 responsive preflight, Qt lifecycle regression, frozen app verification, packaged Sound Design/Music Library acceptance, installer and portable package creation, SHA-256 manifest, Microsoft Defender scan and artifact upload.
+- Exact run: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42248725120
+- Manual installed-Windows acceptance remains user-waived/not run.
+- Real GPU acceptance remains pending: NVIDIA run #1 and AMD/Intel run #9 have not started because their self-hosted jobs are queued. No GPU target or under-60-second Qwen performance result is claimed.
