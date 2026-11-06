@@ -8191,7 +8191,6 @@ class PremiumV2Bridge(QObject):
             # Legacy installs intentionally share the Models base directory
             # for weights and provider runtime; their actual components live
             # in separate named subdirectories beneath that base.
-            legacy_shared_base = {kind, other} == {"models", "runtime"} and same_root
             try:
                 configured_models = Path(roots["models"][1]).expanduser().resolve()
                 configured_runtime = Path(roots["runtime"][1]).expanduser().resolve()
@@ -8202,6 +8201,11 @@ class PremiumV2Bridge(QObject):
                 configured_runtime = Path(roots["runtime"][1]).expanduser().absolute()
                 selected_path = destination.expanduser().absolute()
                 other_resolved = other_path.absolute()
+            legacy_shared_base = (
+                {kind, other} == {"models", "runtime"}
+                and same_root
+                and configured_models == configured_runtime
+            )
             legacy_shared_cache = (
                 configured_models == configured_runtime
                 and (
