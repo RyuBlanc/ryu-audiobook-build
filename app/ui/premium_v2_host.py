@@ -8186,6 +8186,26 @@ class PremiumV2Bridge(QObject):
         finally:
             probe.unlink(missing_ok=True)
         source = Path(current).expanduser()
+        def overlaps(left: Path, right: Path) -> bool:
+            try:
+                a = left.resolve()
+                b = right.resolve()
+            except OSError:
+                a = left.absolute()
+                b = right.absolute()
+            return a == b or a in b.parents or b in a.parents
+        if kind == "temporary":
+            protected_kinds = {"library", "audio_assets", "models", "runtime", "model_cache"}
+            conflicts = [other for other in protected_kinds
+                         if overlaps(destination, Path(roots[other][1]))]
+            if conflicts:
+                raise ValueError("Temporary storage must be separate from project, export, model, runtime and model-cache roots. Conflicting roots: " + ", ".join(sorted(conflicts)))
+        if kind in {"library", "audio_assets"}:
+            protected_kinds = {"models", "runtime", "model_cache", "temporary"}
+            conflicts = [other for other in protected_kinds
+                         if overlaps(destination, Path(roots[other][1]))]
+            if conflicts:
+                raise ValueError("Project and export storage must remain separate from model, runtime, cache and temporary roots. Conflicting roots: " + ", ".join(sorted(conflicts)))
         if not source.is_dir():
             raise RuntimeError("The current storage location is unavailable. Reconnect its drive before changing the configured path; existing inventory must not be silently orphaned.")
         try:
