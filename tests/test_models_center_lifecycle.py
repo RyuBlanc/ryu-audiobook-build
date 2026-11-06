@@ -176,7 +176,7 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
     def test_individual_qwen_model_uninstall_preserves_other_model_folders(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "Models"
-            runtime_root = root / "qwen-runtime"
+            runtime_root = root / "qwen3-tts"
             remove = runtime_root / "custom-0.6b"
             preserve = runtime_root / "base-0.6b"
             (remove / "weights").mkdir(parents=True)
@@ -560,7 +560,7 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
 
             with (
                 patch("app.core.paths.models_root", return_value=root),
-                patch("app.core.paths.runtimes_root", return_value=provider_root),
+                patch("app.ui.premium_v2_host.runtimes_root", return_value=provider_root),
                 patch("app.tts.chatterbox_runtime.RUNTIME_DIR", runtime_root),
                 patch("app.tts.model_registry.mark_installed"),
             ):
@@ -590,7 +590,7 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
             bridge = self.make_bridge()
 
             with (
-                patch("app.core.paths.models_root", return_value=models),
+                patch("app.ui.premium_v2_host.models_root", return_value=models),
                 patch("app.tts.qwen_character_runtime.MODEL_DIRS", {
                     "custom-0.6b": selected,
                     "base-0.6b": sibling,
