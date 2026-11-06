@@ -7105,7 +7105,9 @@ class PremiumV2Bridge(QObject):
             targets = [(models_root() / "kokoro").resolve()]
             preservation.append("Bundled Kokoro assets outside the user Models folder are not removed.")
         elif requested in {"chatterbox", "chatterbox-multilingual", "chatterbox-runtime"}:
-            runtime = Path(RUNTIME_DIR).resolve()
+            runtime = Path(RUNTIME_DIR)
+            if runtime.is_symlink():
+                raise RuntimeError("Uninstall preview refuses a symbolic-link Chatterbox runtime.")
             targets = [runtime]
             dependencies = [
                 str(row.get("name") or row.get("model_id"))
@@ -7121,12 +7123,12 @@ class PremiumV2Bridge(QObject):
             kind = str(payload.get("model_kind") or requested).strip().casefold()
             if kind not in MODEL_DIRS:
                 raise ValueError("Choose an exact Qwen model variant.")
-            target = Path(MODEL_DIRS[kind]).resolve()
+            target = Path(MODEL_DIRS[kind])
             targets = [target]
             preservation.append("The shared Qwen Python runtime and all other Qwen model variants remain installed.")
         elif requested == "qwen-runtime":
             runtime_root = Path(RUNTIME_ROOT).resolve()
-            targets = [Path(item).resolve() for item in (VENV_ROOT, PYTHON_ROOT, MARKER, INSTALLER_PATH, INSTALLER_LOG)
+            targets = [Path(item) for item in (VENV_ROOT, PYTHON_ROOT, MARKER, INSTALLER_PATH, INSTALLER_LOG)
                        if Path(item).exists() or Path(item).is_symlink()]
             installed_qwen_weights = [
                 str(row.get("name") or row.get("model_id"))
@@ -7144,7 +7146,7 @@ class PremiumV2Bridge(QObject):
                     + ", ".join(installed_qwen_weights)
                 )
         elif requested == "audiobook-ai":
-            targets = [(models_root() / "audiobook-ai").resolve()]
+            targets = [models_root() / "audiobook-ai"]
             preservation.append("Only local Audiobook AI runtime/model files are targeted.")
         else:
             raise ValueError(f"Uninstall preview is not supported for component: {requested}")
@@ -7156,8 +7158,11 @@ class PremiumV2Bridge(QObject):
             if not target.exists():
                 continue
             candidates = [target] if target.is_file() else (
-                path for path in target.rglob("*") if path.is_file() and not path.is_symlink()
+                path for path in target.rglob("*") if path.is_file() or path.is_symlink()
             )
+            for candidate in candidates:
+                if candidate.is_symlink():
+                    raise RuntimeError("Uninstall preview refuses a symbolic link inside a component: " + str(candidate))
             for candidate in candidates:
                 try:
                     stat = candidate.stat()
@@ -7271,7 +7276,7 @@ class PremiumV2Bridge(QObject):
                 self._models_remove_path(runtime_root, allowed_root)
             mark_installed("chatterbox", False)
             mark_installed("chatterbox-multilingual", False)
-            return "Removed the Chatterbox provider runtime. Cached model assets, saved voice profiles, assignments and projects were kept."
+            return "Removed the shared Chatterbox runtime. Saved profiles and books were kept; cached model assets, assignments and projects were preserved."
 
         if requested == "qwen-model" or requested in {
             "custom-0.6b", "custom-1.7b", "design-1.7b", "base-0.6b", "base-1.7b"
