@@ -727,7 +727,7 @@ class ModelsPage(QWidget):
             self, "Confirm Temporary Cleanup",
             f"Eligible app-owned temporary entries: {preview['candidate_count']}\n"
             f"Estimated reclaimable size: {preview['candidate_bytes'] / gib:.2f} GB\n\n"
-            "Only the explicit staging/downloads/temporary/tmp/cache allowlist is eligible. "
+            "Only the explicit staging/downloads/temporary/tmp allowlist is eligible. "
             "Model weights, provider runtimes, model cache, projects, source books, exports and voice data are protected. Continue?"
         )
         if answer != QMessageBox.StandardButton.Yes:
