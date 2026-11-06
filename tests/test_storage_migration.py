@@ -118,19 +118,19 @@ class StorageMigrationTests(unittest.TestCase):
     def test_safe_cleanup_dry_run_and_protected_path(self):
         with TemporaryDirectory() as temp:
             base = Path(temp)
-            cache = base / "cache"
-            cache.mkdir()
-            old = cache / "old-cache"
+            temp_root = base / "temporary"
+            temp_root.mkdir()
+            old = temp_root / "staging"
             old.mkdir()
             (old / "blob.bin").write_bytes(b"x" * 128)
-            protected = cache / "voice-reference"
+            protected = temp_root / "cache"
             protected.mkdir()
             (protected / "keep.wav").write_bytes(b"voice")
-            preview = safe_cleanup(cache_roots=(cache,), dry_run=True, protected_paths=(protected,))
+            preview = safe_cleanup(temporary_roots=(temp_root,), dry_run=True, protected_paths=(protected,))
             self.assertEqual(preview["candidate_count"], 1)
             self.assertTrue(old.exists())
             self.assertTrue(protected.exists())
-            result = safe_cleanup(cache_roots=(cache,), dry_run=False, protected_paths=(protected,))
+            result = safe_cleanup(temporary_roots=(temp_root,), dry_run=False, protected_paths=(protected,))
             self.assertFalse(old.exists())
             self.assertTrue(protected.joinpath("keep.wav").is_file())
             self.assertEqual(len(result["removed"]), 1)
