@@ -66,3 +66,10 @@ PASS = automated regression/package evidence passed. OPEN = evidence outstanding
 - #2624 PC benchmark comparison/import: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42231216994
 
 **Disposition:** Software and package gates green through #2628. Hardware performance and final documentation-head acceptance remain open. Physical installation is waived, not passed.
+
+
+## Final documentation-head checkpoint request — 6 November 2026
+
+All seven execution ledgers and this master register are now present on the canonical Stage 7 branch. The final documentation candidate must be validated on its exact commit with the full regression and Windows package workflow. This checkpoint is deliberately marked as an artifact checkpoint so the build job is not skipped.
+
+Physical installed-app acceptance remains user-waived/not run. Real NVIDIA/AMD/Intel inference remains dependent on the queued self-hosted jobs and cannot be converted into a pass by this documentation checkpoint.
