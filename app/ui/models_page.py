@@ -656,7 +656,7 @@ class ModelsPage(QWidget):
         destination = Path(str(journal.get("destination", "")))
         answer = QMessageBox.question(
             self, "Confirm Old Source Cleanup",
-            f"Delete the retained source copy?\\n\\nSource: {source}\\nVerified destination: {destination}\\n\\n"
+            f"Delete the retained source copy?\n\nSource: {source}\nVerified destination: {destination}\n\n"
             "Before deletion, Ryu will recheck file count, sizes, relative paths and every SHA-256 hash. "
             "If any check fails, the source will be preserved.",
         )
@@ -670,7 +670,7 @@ class ModelsPage(QWidget):
             return
         QMessageBox.information(
             self, "Old Source Copy Removed",
-            f"Verified {result['verified_files']} files against the active destination.\\n"
+            f"Verified {result['verified_files']} files against the active destination.\n"
             f"Removed: {result['source']}",
         )
         self.refresh_storage_summary()
