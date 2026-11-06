@@ -427,7 +427,7 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn("_apply_narration_speed(", generator)
         self.assertIn("if len(completed) % 4 == 0", generator)
 
-    def test_qwen_long_form_runtime_uses_lighter_base_and_larger_units(self):
+    def test_qwen_long_form_runtime_preserves_selected_model_on_gpu_memory_fallback(self):
         provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
         runtime = Path("app/tts/qwen_character_runtime.py").read_text(encoding="utf-8")
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
@@ -437,7 +437,8 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("recommended_preview_chunk_sentences = 4", provider)
         self.assertIn("best_long_form_clone_kind", provider)
         self.assertIn("base-0.6b", runtime)
-        self.assertIn("Base 1.7B exceeded available GPU memory", worker)
+        self.assertIn("retrying the same selected model on CPU without changing voice identity", worker)
+        self.assertNotIn('fallback_kind = "base-0.6b"', worker)
         self.assertIn('"longform": self.qwen_mode != "design-preview"', provider)
         self.assertIn("def _recommended_max_new_tokens", worker)
         self.assertIn("recommended_batch_size", provider)

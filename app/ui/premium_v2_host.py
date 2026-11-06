@@ -5790,7 +5790,8 @@ class PremiumV2Bridge(QObject):
                 if str(row.get("project_folder") or "")
                 and Path(str(row.get("project_folder"))).expanduser().resolve() == project.folder.resolve()
             ]
-            concurrency_limit = self._generation_concurrency_limit()
+            limit_resolver = getattr(self, "_generation_concurrency_limit", None)
+            concurrency_limit = limit_resolver() if callable(limit_resolver) else 1
             if len(active_generations) >= concurrency_limit:
                 raise ValueError(
                     f"The configured heavy-generation limit is {concurrency_limit}. "
@@ -5909,7 +5910,9 @@ class PremiumV2Bridge(QObject):
                 if str(row.get("project_folder") or "")
                 and Path(str(row.get("project_folder"))).expanduser().resolve() == project.folder.resolve()
             ]
-            if len(active_generations) >= self._generation_concurrency_limit():
+            limit_resolver = getattr(self, "_generation_concurrency_limit", None)
+            concurrency_limit = limit_resolver() if callable(limit_resolver) else 1
+            if len(active_generations) >= concurrency_limit:
                 raise ValueError(
                     "The heavy-generation concurrency limit was reached before this job could start. "
                     "No project state was changed."
