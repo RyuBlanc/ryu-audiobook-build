@@ -173,7 +173,8 @@ def _recover_interrupted_storage_migrations() -> None:
 
 
 def ensure_roots() -> None:
-    _recover_interrupted_storage_migrations()\n    # Keep support folders on the normal user profile. The original roots remain
+    _recover_interrupted_storage_migrations()
+    # Keep support folders on the normal user profile. The original roots remain
     # available even after the user selects an external drive for new content.
     for path in (
         voices_root(),
