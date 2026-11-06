@@ -7182,6 +7182,12 @@ class PremiumV2Bridge(QObject):
         }
 
     def _models_uninstall_component(self, model_id: str, payload: dict[str, Any], progress) -> str:
+        # Preflight and execution use one shared impact contract. Recompute on the
+        # worker immediately before deletion so a stale UI preview can never
+        # authorize a newly unsafe operation.
+        impact = self._models_uninstall_preflight({**dict(payload or {}), "model_id": model_id})
+        if impact.get("blocked"):
+            raise RuntimeError(str(impact.get("block_reason") or "Uninstall is blocked by installed dependents."))
         from app.core.paths import models_root
         from app.tts.model_registry import mark_installed
         root = models_root().resolve()
