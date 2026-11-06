@@ -58,8 +58,29 @@ def voices_root() -> Path:
     return app_root() / "Voices"
 
 
-def models_root() -> Path:
+def default_models_root() -> Path:
+    """Original model location, retained as the default for existing installs."""
     return app_root() / "Models"
+
+
+def models_root() -> Path:
+    """Configured root for model weights; defaults to the legacy Models folder."""
+    return _configured_root("storage/models_root", default_models_root())
+
+
+def runtimes_root() -> Path:
+    """Configured provider-runtime root; follows Models unless explicitly separated."""
+    return _configured_root("storage/runtime_root", models_root())
+
+
+def model_cache_root() -> Path:
+    """Configured model/provider download cache; defaults to the legacy HF cache."""
+    return _configured_root("storage/model_cache_root", models_root() / "huggingface")
+
+
+def temporary_root() -> Path:
+    """Configured app-owned temporary/staging root."""
+    return _configured_root("storage/temporary_root", app_root() / "Temp")
 
 
 def default_audiobooks_root() -> Path:
@@ -90,21 +111,32 @@ def ensure_roots() -> None:
     # available even after the user selects an external drive for new content.
     for path in (
         voices_root(),
-        models_root(),
+        default_models_root(),
         settings_root(),
         soundtracks_root(),
         audio_library_root(),
         default_library_root(),
         default_audiobooks_root(),
+        app_root() / "Temp",
     ):
         path.mkdir(parents=True, exist_ok=True)
 
     # A disconnected external drive must not prevent the app from launching.
-    # Import/export operations surface a clear write error; Settings shows its
-    # real availability and free-space state so the user can choose another root.
-    for path in (library_root(), audiobooks_root()):
-        if path in (default_library_root(), default_audiobooks_root()):
+    # Keep the configured path intact; callers surface Location unavailable and
+    # must not silently redirect an existing installation to an empty default.
+    selected_roots = (
+        library_root(), audiobooks_root(), models_root(), runtimes_root(),
+        model_cache_root(), temporary_root(),
+    )
+    seen: set[str] = set()
+    for path in selected_roots:
+        try:
+            marker = str(path.resolve()).casefold()
+        except OSError:
+            marker = str(path.absolute()).casefold()
+        if marker in seen:
             continue
+        seen.add(marker)
         try:
             path.mkdir(parents=True, exist_ok=True)
         except OSError:
