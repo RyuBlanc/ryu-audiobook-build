@@ -8201,7 +8201,7 @@ class PremiumV2Bridge(QObject):
             if conflicts:
                 raise ValueError("Temporary storage must be separate from project, export, model, runtime and model-cache roots. Conflicting roots: " + ", ".join(sorted(conflicts)))
         if kind in {"library", "audio_assets"}:
-            protected_kinds = {"models", "runtime", "model_cache", "temporary"}
+            protected_kinds = {"models", "runtime", "model_cache", "temporary"} | ({"audio_assets"} if kind == "library" else {"library"})
             conflicts = [other for other in protected_kinds
                          if overlaps(destination, Path(roots[other][1]))]
             if conflicts:
