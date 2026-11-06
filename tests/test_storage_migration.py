@@ -26,7 +26,7 @@ class StorageMigrationTests(unittest.TestCase):
                 validate_root=lambda path: (path / "nested" / "weights.bin").is_file(),
                 reserve_bytes=0,
             )
-            self.assertEqual(persisted, [destination])
+            self.assertEqual([Path(value).resolve() for value in persisted], [destination.resolve()])
             self.assertEqual((destination / "nested" / "weights.bin").read_bytes(),
                              (source / "nested" / "weights.bin").read_bytes())
             self.assertTrue(source.exists(), "Source must remain until explicit user cleanup.")
@@ -74,7 +74,7 @@ class StorageMigrationTests(unittest.TestCase):
                     validate_root=lambda _path: False,
                     reserve_bytes=0,
                 )
-            self.assertEqual(persisted, [destination, source])
+            self.assertEqual([Path(value).resolve() for value in persisted], [destination.resolve(), source.resolve()])
             self.assertTrue(source.joinpath("model.bin").is_file())
 
     def test_symlinked_source_content_is_rejected(self):
