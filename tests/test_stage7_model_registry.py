@@ -101,6 +101,42 @@ class ModelRegistryInventoryTests(unittest.TestCase):
                 model.stat().st_size + config.stat().st_size,
             )
 
+    def test_chatterbox_cache_inventory_exposes_safe_uninstall_when_owned_assets_exist(self):
+        from app.tts.model_registry import build_inventory
+
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            models = base / "Models"
+            cache_root = base / "Model Cache" / "hub"
+            cached = cache_root / "models--resemble-ai--chatterbox"
+            cached.mkdir(parents=True)
+            (cached / "weights.safetensors").write_bytes(b"chatterbox weights")
+            qwen_models = {key: models / "qwen3-tts" / key for key in (
+                "custom-0.6b", "custom-1.7b", "design-1.7b", "base-0.6b", "base-1.7b"
+            )}
+            with (
+                patch("app.core.paths.models_root", return_value=models),
+                patch("app.tts.model_registry.models_root", return_value=models),
+                patch("app.tts.model_registry.settings_root", return_value=base / "Settings"),
+                patch("app.tts.model_registry._chatterbox_cache_root", return_value=cache_root),
+                patch("app.tts.providers.piper.PiperProvider.model_paths", return_value=[]),
+                patch("app.tts.providers.piper.PiperProvider._bundled_root", return_value=None),
+                patch("app.tts.providers.kokoro.KokoroProvider.assets_available", return_value=False),
+                patch("app.tts.providers.kokoro.KokoroProvider._find_model", return_value=None),
+                patch("app.tts.providers.kokoro.KokoroProvider._find_voices", return_value=None),
+                patch("app.tts.chatterbox_runtime.RUNTIME_DIR", base / "Provider Runtime" / "chatterbox-runtime"),
+                patch("app.tts.chatterbox_runtime.runtime_ready", return_value=False),
+                patch("app.tts.qwen_character_runtime.MODEL_DIRS", qwen_models),
+                patch("app.tts.qwen_character_runtime.model_installed", return_value=False),
+                patch("app.tts.qwen_character_runtime.runtime_ready", return_value=False),
+            ):
+                rows = build_inventory()
+
+            row = next(item for item in rows if item["model_id"] == "chatterbox-model-assets")
+            self.assertTrue(row["installed"])
+            self.assertTrue(row["uninstallable"])
+            self.assertEqual(row["storage_bytes"], len(b"chatterbox weights"))
+
     def test_inventory_snapshot_persists_metadata_and_verification_state(self):
         with tempfile.TemporaryDirectory() as temporary:
             snapshot = Path(temporary) / "Settings" / "model_inventory.json"
