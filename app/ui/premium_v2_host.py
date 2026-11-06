@@ -7047,6 +7047,112 @@ class PremiumV2Bridge(QObject):
 
         raise ValueError(f"No installer is registered for component: {model_id}")
 
+    def _models_uninstall_preflight(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Explain exact targets and shared dependencies before the UI asks to uninstall."""
+        from app.tts.model_registry import build_inventory, component_file_inventory
+        from app.tts.qwen_character_runtime import MODEL_DIRS, VENV_ROOT
+        from app.tts.chatterbox_runtime import RUNTIME_DIR
+        requested = str(payload.get("model_id") or "").strip().casefold()
+        if not requested:
+            raise ValueError("Choose a component to inspect before uninstalling.")
+        inventory = build_inventory()
+        selected = next((row for row in inventory if str(row.get("model_id") or "").casefold() == requested), None)
+        if selected is None:
+            raise ValueError("The selected component is not present in the current model inventory.")
+        targets: list[Path] = []
+        dependencies: list[str] = []
+        preservation: list[str] = [
+            "Projects, source books, generated audiobooks, voice profiles, character assignments and user settings are preserved."
+        ]
+        if requested == "piper":
+            from app.tts.providers.piper import PiperProvider
+            voice_name = str(payload.get("voice_name") or "").strip()
+            if not voice_name:
+                raise ValueError("Select an exact installed Piper voice before uninstalling.")
+            voice_root = (models_root() / "piper").resolve()
+            voice = next((Path(item).resolve() for item in PiperProvider.model_paths()
+                          if Path(item).stem.casefold() == voice_name.casefold()
+                          and voice_root in Path(item).resolve().parents
+                          and Path(item).suffix.casefold() == ".onnx"), None)
+            if voice is None:
+                raise ValueError("The selected Piper voice is not an installed user-managed voice.")
+            targets = [voice, voice.with_suffix(voice.suffix + ".json")]
+            preservation.append("Other Piper voices and the bundled Piper voices remain installed.")
+        elif requested == "kokoro":
+            targets = [(models_root() / "kokoro").resolve()]
+            preservation.append("Bundled Kokoro assets outside the user Models folder are not removed.")
+        elif requested in {"chatterbox", "chatterbox-multilingual", "chatterbox-runtime"}:
+            runtime = Path(RUNTIME_DIR).resolve()
+            targets = [runtime]
+            dependencies = [
+                str(row.get("name") or row.get("model_id"))
+                for row in inventory
+                if row.get("component_type") != "provider"
+                and row.get("model_id") != "chatterbox-runtime"
+                and row.get("installed")
+                and str(row.get("runtime_path") or "")
+                and Path(str(row["runtime_path"])).expanduser().resolve() == runtime
+            ]
+            preservation.append("Chatterbox Hugging Face model cache and voice profiles remain installed.")
+        elif requested in {"qwen-model", "custom-0.6b", "custom-1.7b", "design-1.7b", "base-0.6b", "base-1.7b"}:
+            kind = str(payload.get("model_kind") or requested).strip().casefold()
+            if kind not in MODEL_DIRS:
+                raise ValueError("Choose an exact Qwen model variant.")
+            target = Path(MODEL_DIRS[kind]).resolve()
+            targets = [target]
+            preservation.append("The shared Qwen Python runtime and all other Qwen model variants remain installed.")
+        elif requested == "qwen-runtime":
+            runtime_root = Path(RUNTIME_ROOT).resolve()
+            targets = [Path(item).resolve() for item in (VENV_ROOT, PYTHON_ROOT, MARKER, INSTALLER_PATH, INSTALLER_LOG)
+                       if Path(item).exists() or Path(item).is_symlink()]
+            dependencies = [
+                str(row.get("name") or row.get("model_id"))
+                for row in inventory
+                if row.get("component_type") != "provider"
+                and row.get("model_id") != "qwen-runtime"
+                and row.get("installed")
+                and str(row.get("runtime_path") or "")
+                and Path(str(row["runtime_path"])).expanduser().resolve() == Path(VENV_ROOT).resolve()
+            ]
+            preservation.append("Qwen model weights and Hugging Face cache are retained.")
+        elif requested == "audiobook-ai":
+            targets = [(models_root() / "audiobook-ai").resolve()]
+            preservation.append("Only local Audiobook AI runtime/model files are targeted.")
+        else:
+            raise ValueError(f"Uninstall preview is not supported for component: {requested}")
+        total_bytes = 0
+        files: list[dict[str, Any]] = []
+        for target in targets:
+            if target.is_symlink():
+                raise RuntimeError("Uninstall preview refuses a symbolic-link target: " + str(target))
+            if not target.exists():
+                continue
+            candidates = [target] if target.is_file() else (
+                path for path in target.rglob("*") if path.is_file() and not path.is_symlink()
+            )
+            for candidate in candidates:
+                try:
+                    stat = candidate.stat()
+                    total_bytes += int(stat.st_size)
+                    files.append({"path": str(candidate.resolve()), "size_bytes": int(stat.st_size)})
+                except OSError as exc:
+                    raise RuntimeError("Could not safely inventory uninstall target: " + str(candidate)) from exc
+        return {
+            "model_id": requested,
+            "name": str(selected.get("name") or requested),
+            "targets": [str(path) for path in targets],
+            "file_count": len(files),
+            "total_bytes": total_bytes,
+            "files": files,
+            "dependencies": dependencies,
+            "preserved": preservation,
+            "blocked": bool(dependencies),
+            "block_reason": (
+                "Remove or relocate dependent components before removing this shared runtime: " + ", ".join(dependencies)
+                if dependencies else ""
+            ),
+        }
+
     def _models_uninstall_component(self, model_id: str, payload: dict[str, Any], progress) -> str:
         from app.core.paths import models_root
         from app.tts.model_registry import mark_installed
