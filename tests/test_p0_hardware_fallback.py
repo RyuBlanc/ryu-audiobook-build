@@ -60,6 +60,9 @@ class AudiobookAIRuntimeFallbackTests(unittest.TestCase):
             models_root = Path(temporary)
             ai_root = models_root / "audiobook-ai"
             ai_root.mkdir()
+            runtime_root = models_root / "Provider Runtime"
+            runtime_ai_root = runtime_root / "audiobook-ai"
+            runtime_ai_root.mkdir(parents=True)
             model = ai_root / "Qwen3-4B-Q4_K_M.gguf"
             model.write_bytes(b"existing local model")
             download_urls = []
@@ -95,6 +98,9 @@ class AudiobookAIRuntimeFallbackTests(unittest.TestCase):
             models_root = Path(temporary)
             ai_root = models_root / "audiobook-ai"
             ai_root.mkdir()
+            runtime_root = models_root / "Provider Runtime"
+            runtime_ai_root = runtime_root / "audiobook-ai"
+            runtime_ai_root.mkdir(parents=True)
             (ai_root / "Qwen3-1.7B-Q5_K_M.gguf").write_bytes(b"existing local model")
             download_urls = []
 
