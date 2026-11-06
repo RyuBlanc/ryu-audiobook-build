@@ -6735,7 +6735,7 @@ class PremiumV2Bridge(QObject):
                 "all": "qwen-all",
             }
             model_id = legacy.get(selection, "")
-        allowed = {"piper", "kokoro", "chatterbox", "chatterbox-multilingual", "chatterbox-runtime", "chatterbox-model-assets",
+        allowed = {"piper", "kokoro", "chatterbox", "chatterbox-multilingual", "chatterbox-runtime",
                    "qwen-runtime", "qwen-customvoice", "qwen-voicedesign", "qwen-clone", "qwen-all",
                    "custom-0.6b", "custom-1.7b", "design-1.7b", "base-0.6b", "base-1.7b", "audiobook-ai"}
         if model_id not in allowed:
@@ -6753,7 +6753,7 @@ class PremiumV2Bridge(QObject):
 
     def _models_uninstall(self, payload: dict[str, Any]) -> dict[str, Any]:
         model_id = str(payload.get("model_id") or "").strip().casefold()
-        allowed = {"piper", "kokoro", "chatterbox", "chatterbox-multilingual", "chatterbox-runtime",
+        allowed = {"piper", "kokoro", "chatterbox", "chatterbox-multilingual", "chatterbox-runtime", "chatterbox-model-assets",
                    "qwen-runtime", "qwen-model", "audiobook-ai",
                    "custom-0.6b", "custom-1.7b", "design-1.7b", "base-0.6b", "base-1.7b"}
         if model_id not in allowed:
