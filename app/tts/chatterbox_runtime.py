@@ -16,7 +16,7 @@ try:
 except ImportError:
     certifi = None
 
-from app.core.paths import model_cache_root, runtimes_root
+from app.core.paths import model_cache_root, runtimes_root, temporary_root
 
 RUNTIME_DIR = runtimes_root() / "chatterbox-runtime"
 MARKER = RUNTIME_DIR / "runtime.json"
@@ -110,7 +110,7 @@ def _system_python() -> list[str] | None:
         if _python_311([str(candidate)]):
             return [str(candidate)]
 
-    installer = local_app_data / "Temp" / "ryu-python-3.11.9-amd64.exe"
+    installer = temporary_root() / "ryu-python-3.11.9-amd64.exe"
     try:
         installer.parent.mkdir(parents=True, exist_ok=True)
         if not installer.exists() or installer.stat().st_size < 5_000_000:
