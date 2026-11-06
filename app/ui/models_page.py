@@ -600,6 +600,21 @@ class ModelsPage(QWidget):
             else:
                 gib = 1024 ** 3
                 lines.append(f"{label}: {info['file_count']:,} files · {info['total_bytes'] / gib:.2f} GB\n{info['path']}")
+        journal_root = app_root() / "Settings" / "Storage Migrations"
+        if journal_root.is_dir():
+            for journal_path in sorted(journal_root.glob("ryu-storage-migration-*.json")):
+                try:
+                    journal = read_migration_journal(journal_path)
+                except Exception:
+                    lines.append(f"Migration journal needs inspection: {journal_path}")
+                    continue
+                state = str(journal.get("state", ""))
+                if state == "recovery_required":
+                    lines.append(f"Storage recovery required: {journal.get('source')} → {journal.get('destination')}")
+                elif state == "rollback_required":
+                    lines.append(f"Storage rollback needs attention: {journal.get('error', 'settings restore failed')}")
+                elif state == "recovered_source_restored":
+                    lines.append(f"Interrupted migration safely recovered to: {journal.get('source')}")
         self.storage_summary.setText("\n\n".join(lines))
 
     def inspect_storage_inventory(self) -> None:
