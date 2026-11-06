@@ -6,11 +6,27 @@ from unittest.mock import patch
 
 from app.core.storage_migration import (
     StorageMigrationError, migrate_storage_root, prepare_migration,
-    read_migration_journal, recover_migration_journal, safe_cleanup, cleanup_migrated_source,
+    read_migration_journal, recover_migration_journal, safe_cleanup, cleanup_migrated_source, inventory_storage_root,
 )
 
 
 class StorageMigrationTests(unittest.TestCase):
+    def test_inventory_reports_exact_sizes_hashes_and_unavailable_roots(self):
+        with TemporaryDirectory() as temp:
+            root = Path(temp) / "models"
+            root.mkdir()
+            (root / "a.bin").write_bytes(b"abc")
+            (root / "nested").mkdir()
+            (root / "nested" / "b.bin").write_bytes(b"12345")
+            result = inventory_storage_root(root, include_hashes=True)
+            self.assertTrue(result["available"])
+            self.assertEqual(result["file_count"], 2)
+            self.assertEqual(result["total_bytes"], 8)
+            self.assertTrue(all(len(item["sha256"]) == 64 for item in result["files"]))
+            missing = inventory_storage_root(root / "disconnected-drive")
+            self.assertFalse(missing["available"])
+            self.assertEqual(missing["error"], "Location unavailable")
+
     def test_success_copies_verifies_switches_and_retains_source(self):
         with TemporaryDirectory() as temp:
             base = Path(temp)
