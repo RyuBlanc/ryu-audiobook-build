@@ -131,12 +131,12 @@ def _recover_interrupted_storage_migrations() -> None:
     except Exception:
         return
     settings = QSettings(_SETTINGS_ORGANIZATION, _SETTINGS_APPLICATION)
-    keys = (
-        "storage/models_root",
-        "storage/runtime_root",
-        "storage/model_cache_root",
-        "storage/temporary_root",
-    )
+    defaults = {
+        "storage/models_root": default_models_root,
+        "storage/runtime_root": default_runtimes_root,
+        "storage/model_cache_root": default_model_cache_root,
+        "storage/temporary_root": default_temporary_root,
+    }
     for journal_path in sorted(journal_root.glob("ryu-storage-migration-*.json")):
         try:
             journal = read_migration_journal(journal_path)
@@ -147,10 +147,8 @@ def _recover_interrupted_storage_migrations() -> None:
             if not source.is_absolute() or not destination.is_absolute() or not source.is_dir():
                 continue
             matching_key = None
-            for key in keys:
-                configured = str(settings.value(key, "") or "").strip()
-                if not configured:
-                    continue
+            for key, default_for_key in defaults.items():
+                configured = str(settings.value(key, "") or default_for_key()).strip()
                 try:
                     if Path(configured).expanduser().resolve() in (source.resolve(), destination.resolve()):
                         matching_key = key
