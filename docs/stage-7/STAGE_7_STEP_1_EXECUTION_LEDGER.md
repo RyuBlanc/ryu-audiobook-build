@@ -250,3 +250,26 @@ The following two formal gates are now satisfied:
 - Confirm saved voice profiles, character assignments and project data remain intact.
 
 **Status: AUTOMATED CI AND PACKAGE ACCEPTANCE PASSED; STEP 1 REMAINS OPEN ONLY FOR INSTALLED-APP MODEL INVENTORY/LIFECYCLE ACCEPTANCE. Do not proceed to Step 2 until this final gate is accepted.**
+
+
+## 12. 2026-11-06 — Step 1 formal closure and manual-acceptance waiver
+
+**Decision:** Step 1 is formally ACCEPTED for progression to Stage 7 Step 2, at the user's explicit direction, with the installed-app manual acceptance gate waived for this stage.
+
+### Accepted evidence
+
+- Matching-head Run #2400 (89ce5762a1194d8860e72d1cf4fb3b3b586d1ccc) passed both required CI jobs.
+- Full regression suite: 1,199 tests passed; frontend JavaScript syntax, isolated native Qt lifecycle regression, and Stage 6 History/Task Manager preflight passed.
+- Frozen Windows application verification, bundled asset/critical module checks, packaged Sound Design/Music Library acceptance, installer build, functional HTML installer, Defender scan, release hash generation, and installer/portable/manifest uploads passed.
+- All three artifacts were attached to the exact tested HEAD and were unexpired at the recorded audit.
+- The three new controlled lifecycle regressions for Qwen shared-runtime preservation, Chatterbox cache preservation, and inventory refresh after individual model removal were included in the 1,199-test run.
+
+### Explicitly waived / not claimed as passed
+
+The user has chosen to proceed without the separate installed-Windows-app manual acceptance. Therefore, actual on-device confirmation of model/runtime/Python paths, file inventory and sizes, individual model uninstall, shared-runtime uninstall with model weights/cache retained, post-removal refresh, and preservation of saved profiles/assignments/projects is **WAIVED for Step 1 progression**. These behaviours are covered by source inspection and automated regression evidence to the extent recorded above, but are not represented as manually verified on the user's machine. Any issues discovered during later use remain actionable and must be fixed without reopening already-passed CI gates unless a regression or source change requires it.
+
+### Final disposition
+
+**STEP 1: ACCEPTED / CLOSED FOR STAGE PROGRESSION.** Automated regression and matching-head package gates: PASSED. Installed-app manual gate: USER-WAIVED, NOT RUN.
+
+**Stage 7 Step 2 is authorized to begin on the canonical Stage 7 working line.** Preserve the Step 1 implementation and do not rerun its completed gates absent a relevant regression or code change.
