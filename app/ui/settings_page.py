@@ -598,7 +598,7 @@ class SettingsPage(QWidget):
             running = []
             for widget in app.allWidgets():
                 # Many page workers are stored as attributes without QObject parents.
-                for value in vars(widget).values():
+                for value in getattr(widget, "__dict__", {}).values():
                     if isinstance(value, QThread) and value.isRunning() and value is not self._migration_worker:
                         running.append(value)
                 for thread in widget.findChildren(QThread):
