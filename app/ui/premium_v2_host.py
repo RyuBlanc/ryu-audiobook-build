@@ -473,6 +473,7 @@ class PremiumV2Bridge(QObject):
                 "models.uninstall": self._models_uninstall,
                 "models.verify": self._models_verify,
                 "performance.info": self._performance_info,
+                "performance.benchmark": self._performance_benchmark,
                 "diagnostics.check": self._diagnostics_check,
                 "diagnostics.export_logs": self._diagnostics_export_logs,
                 "system.open_output": self._system_open_output,
@@ -624,6 +625,7 @@ class PremiumV2Bridge(QObject):
             "models.uninstall": True,
             "models.verify": True,
             "performance.info": True,
+            "performance.benchmark": True,
             "diagnostics.check": True,
             "diagnostics.export_logs": True,
             "system.open_output": True,
@@ -7308,6 +7310,91 @@ class PremiumV2Bridge(QObject):
         except (OSError, subprocess.SubprocessError):
             return ""
 
+    def _performance_benchmark(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Queue a real local Piper synthesis benchmark; never block the Qt event thread."""
+        from app.tts.providers.piper import PiperProvider
+
+        payload = payload or {}
+        voices = [path for path in PiperProvider.model_paths() if path.is_file() and path.suffix.casefold() == ".onnx"]
+        requested_voice = str(payload.get("voice") or "").strip()
+        voice = next((path for path in voices if path.stem.casefold() == requested_voice.casefold()), None) if requested_voice else None
+        if requested_voice and voice is None:
+            raise ValueError(f"The selected Piper voice is not installed: {requested_voice}")
+        if voice is None and voices:
+            voice = voices[0]
+        if voice is None:
+            raise ValueError("Install a local Piper voice in Models before running a real TTS benchmark.")
+
+        with self._jobs_lock:
+            active = [row for row in self._jobs.values()
+                      if str(row.get("state") or "").casefold() in {"queued", "running"}]
+        if active:
+            raise RuntimeError("The TTS benchmark is blocked while another application job is active. Wait for the active job to finish, then retry.")
+
+        job_id = self._new_job(
+            "tts-benchmark",
+            "Local TTS performance benchmark",
+            f"Piper synthesis using {voice.stem}; measures real elapsed time and generated WAV duration.",
+        )
+        threading.Thread(
+            target=self._performance_benchmark_worker,
+            args=(job_id, voice.stem),
+            daemon=True,
+            name="RyuPerformanceBenchmark",
+        ).start()
+        return {"job_id": job_id, "voice": voice.stem, "queued": True}
+
+    def _performance_benchmark_worker(self, job_id: str, voice: str) -> None:
+        """Run one real synthesis benchmark in a background worker and persist its result."""
+        from app.tts.benchmark import benchmark_provider
+        from app.tts.providers.piper import PiperProvider
+
+        self._job_update(
+            job_id,
+            state="running",
+            stage="Preparing local voice",
+            message=f"Preparing Piper voice {voice} for a real synthesis benchmark.",
+            started_at=self._now(),
+            progress=5,
+        )
+        try:
+            result = benchmark_provider(
+                PiperProvider(backend="automatic"),
+                voice=voice,
+                backend="automatic",
+            )
+            result_data = {
+                "provider": result.provider, "backend": result.backend, "voice": voice,
+                "seconds": float(result.seconds), "audio_seconds": float(result.audio_seconds),
+                "realtime_factor": float(result.realtime_factor), "success": bool(result.success),
+                "error": str(result.error or ""),
+            }
+            if not result.success:
+                detail = result_data["error"] or "The local TTS benchmark did not produce valid audio."
+                self._job_update(
+                    job_id, state="failed", stage="Benchmark failed", message=detail,
+                    error={"code": "benchmark_failed", "message": detail},
+                    result=result_data, progress=100, recoverable=True,
+                )
+                return
+            verdict = "faster than realtime" if result.realtime_factor < 1.0 else "slower than realtime"
+            detail = (
+                f"{voice}: {result.seconds:.2f}s synthesis for {result.audio_seconds:.2f}s audio; "
+                f"RTF {result.realtime_factor:.2f} ({verdict})."
+            )
+            self._job_update(
+                job_id, state="completed", stage="Benchmark complete", message=detail,
+                result=result_data, progress=100, recoverable=False,
+            )
+        except Exception as exc:
+            log.exception("Local TTS performance benchmark failed")
+            detail = str(exc) or type(exc).__name__
+            self._job_update(
+                job_id, state="failed", stage="Benchmark failed", message=detail,
+                error={"code": "benchmark_failed", "message": detail},
+                progress=100, recoverable=True,
+            )
+
     def _performance_info(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Return live host telemetry and Qwen backend discovery without inventing measurements."""
         import platform
@@ -7407,6 +7494,21 @@ class PremiumV2Bridge(QObject):
             recommendation = backend.replace("-unsupported","").upper() + " detected — unsupported runtime"
         else:
             recommendation = "Unavailable"
+        latest_benchmark: dict[str, Any] = {}
+        with self._jobs_lock:
+            successful_benchmarks = [
+                row for row in self._jobs.values()
+                if str(row.get("type") or "").casefold() == "tts-benchmark"
+                and str(row.get("state") or "").casefold() == "completed"
+                and isinstance(row.get("result"), dict)
+                and row["result"].get("success") is True
+            ]
+            if successful_benchmarks:
+                latest_row = max(successful_benchmarks,
+                    key=lambda row: str(row.get("completed_at") or row.get("updated_at") or ""))
+                latest_benchmark = dict(latest_row.get("result") or {})
+                latest_benchmark["measured_at"] = latest_row.get("completed_at") or latest_row.get("updated_at")
+        generation_seconds = latest_benchmark.get("seconds")
         return {
             "available": cpu_percent is not None or memory_total is not None or bool(devices),
             "cpu_percent": cpu_percent, "memory_total_bytes": memory_total,
@@ -7417,7 +7519,13 @@ class PremiumV2Bridge(QObject):
             "recommended_backend": recommendation, "backend_active": backend_active,
             "backend": backend, "reason": reason,
             "platform": platform.platform(), "processor": platform.processor() or "Not reported",
-            "generation_seconds": None, "measured_at": datetime.now(timezone.utc).isoformat(),
+            "generation_seconds": generation_seconds,
+            "benchmark_audio_seconds": latest_benchmark.get("audio_seconds"),
+            "benchmark_realtime_factor": latest_benchmark.get("realtime_factor"),
+            "benchmark_voice": latest_benchmark.get("voice"),
+            "benchmark_provider": latest_benchmark.get("provider"),
+            "benchmark_measured_at": latest_benchmark.get("measured_at"),
+            "measured_at": datetime.now(timezone.utc).isoformat(),
         }
 
 

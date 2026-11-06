@@ -457,6 +457,18 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("chapter_bgm_strategy=self.chapter_bgm_strategy", manager)
         self.assertNotIn("scene_transition_cue_path=self.scene_transition_cue_path", manager)
 
+    def test_performance_center_exposes_a_real_tts_benchmark_separately_from_hardware_scan(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn("function wireTtsBenchmarkButton()", adapter)
+        self.assertIn("button.id = 'runTtsBenchmark'", adapter)
+        self.assertIn("call('performance.benchmark'", adapter)
+        self.assertIn("No real synthesis benchmark yet", adapter)
+        self.assertIn('"performance.benchmark": self._performance_benchmark', host)
+        self.assertIn('"performance.benchmark": True', host)
+        self.assertIn("benchmark_provider(", host)
+        self.assertIn('state="completed"', host)
+
     def test_performance_screen_never_displays_unmeasured_hardware_as_fact(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("async function refreshPerformance()", adapter)

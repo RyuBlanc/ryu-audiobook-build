@@ -39,6 +39,61 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
         ):
             return PremiumV2Bridge()
 
+    def test_performance_benchmark_requires_an_installed_local_piper_voice(self):
+        bridge = self.make_bridge()
+        with patch("app.tts.providers.piper.PiperProvider.model_paths", return_value=[]):
+            with self.assertRaisesRegex(ValueError, "Install a local Piper voice"):
+                bridge._performance_benchmark({})
+
+    def test_performance_benchmark_runs_in_background_and_reports_real_measurement(self):
+        from app.tts.benchmark import BenchmarkResult
+
+        bridge = self.make_bridge()
+        voice = Path("Models/piper/en_US-test-medium.onnx")
+        result = BenchmarkResult(
+            provider="PiperProvider", backend="automatic", seconds=1.25,
+            audio_seconds=2.5, realtime_factor=0.5, success=True,
+        )
+
+        class ImmediateThread:
+            def __init__(self, target, args=(), **_kwargs):
+                self.target, self.args = target, args
+            def start(self):
+                self.target(*self.args)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            with (
+                patch.object(bridge, "_jobs_path", return_value=base / "jobs.json"),
+                patch.object(bridge, "_history_path", return_value=base / "history.json"),
+                patch("app.tts.providers.piper.PiperProvider.model_paths", return_value=[voice]),
+                patch("app.tts.benchmark.benchmark_provider", return_value=result),
+                patch("threading.Thread", ImmediateThread),
+            ):
+                queued = bridge._performance_benchmark({})
+                row = bridge._jobs[queued["job_id"]]
+                self.assertEqual(row["state"], "completed")
+                self.assertTrue(row["result"]["success"])
+                self.assertEqual(row["result"]["voice"], voice.stem)
+
+                device = type("Device", (), {
+                    "backend":"cpu", "device":"cpu", "name":"CPU",
+                    "memory_gb":0.0, "supported":True, "reason":"CPU fallback"
+                })()
+                with (
+                    patch("psutil.cpu_percent", return_value=12.0),
+                    patch("psutil.virtual_memory", return_value=type("VM", (), {
+                        "total":8*1024**3, "available":4*1024**3, "percent":50.0
+                    })()),
+                    patch("app.tts.qwen_accelerator.detect_accelerators", return_value=(device,)),
+                    patch("app.tts.qwen_accelerator.best_accelerator", return_value=device),
+                ):
+                    info = bridge._performance_info({})
+                self.assertEqual(info["generation_seconds"], 1.25)
+                self.assertEqual(info["benchmark_audio_seconds"], 2.5)
+                self.assertEqual(info["benchmark_realtime_factor"], 0.5)
+                self.assertEqual(info["benchmark_voice"], voice.stem)
+
     def test_performance_info_reports_real_cpu_memory_and_gpu_device_inventory(self):
         bridge = self.make_bridge()
         device = type("Device", (), {

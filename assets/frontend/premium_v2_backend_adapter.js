@@ -7897,7 +7897,10 @@
       [cpu===null?'Unavailable':cpu.toFixed(1)+'%','CPU usage'],
       [gpu===null?'Detected':gpu.toFixed(1)+'%',result.gpu_name?
         result.gpu_name+' · '+(vram===null?'VRAM telemetry unavailable':Math.round(vram)+' / '+Math.round(totalVram||0)+' MB VRAM'):'GPU telemetry'],
-      [duration===null?'Not tested':duration.toFixed(1)+' s','Measured generation time'],
+      [duration===null?'Not tested':duration.toFixed(2)+' s',
+        duration===null?'No real synthesis benchmark yet':
+          (result.benchmark_voice||'Piper')+' · '+(fmt(result.benchmark_audio_seconds)===null?'audio duration unavailable':fmt(result.benchmark_audio_seconds).toFixed(2)+' s audio')+
+          (fmt(result.benchmark_realtime_factor)===null?'':' · RTF '+fmt(result.benchmark_realtime_factor).toFixed(2))],
       [String(result.recommended_backend||'Unavailable'),result.backend_active?'Runtime active':'Detected / runtime status']
     ];
     metrics?.forEach((metric,index)=>{
@@ -8435,6 +8438,44 @@
       if (button) { button.disabled = false; button.textContent = prior || 'Run benchmark'; }
     }
   }
+  function wireTtsBenchmarkButton() {
+    const scanButton = $('runBenchmark');
+    if (!scanButton || $('runTtsBenchmark')) return;
+    const button = document.createElement('button');
+    button.id = 'runTtsBenchmark';
+    button.type = 'button';
+    button.className = scanButton.className;
+    button.textContent = 'Run TTS Benchmark';
+    button.title = 'Synthesize a real local Piper sample in the background and measure elapsed time, audio duration and realtime factor.';
+    scanButton.insertAdjacentElement('afterend', button);
+    button.addEventListener('click', act(async () => {
+      const prior = button.textContent;
+      button.disabled = true;
+      button.textContent = 'Benchmarking…';
+      try {
+        const queued = await call('performance.benchmark', {});
+        await refreshJobs();
+        message('A real local Piper synthesis benchmark is running in Background Jobs.');
+        await monitorJob(queued.job_id, null, async job => {
+          await refreshPerformance();
+          await refreshJobs();
+          const result = job?.result || {};
+          if (job?.state === 'completed' && result.success) {
+            message('TTS benchmark complete: ' + (result.voice || 'Piper') + ' · ' +
+              Number(result.seconds).toFixed(2) + 's for ' +
+              Number(result.audio_seconds).toFixed(2) + 's audio · RTF ' +
+              Number(result.realtime_factor).toFixed(2));
+          } else {
+            message(job?.error?.message || job?.message || 'The TTS benchmark failed.', true);
+          }
+        });
+      } finally {
+        button.disabled = false;
+        button.textContent = prior;
+      }
+    }));
+  }
+
   function wireModelDetails() {
     if (document.body.dataset.ryuModelDetailsBound === 'true') return;
     document.body.dataset.ryuModelDetailsBound = 'true';
@@ -8767,6 +8808,7 @@
     if ($('clearModelQueue')) $('clearModelQueue').onclick=act(async()=>{await call('job.clear_completed');await refreshJobs();await refreshHistory();message('Completed background jobs cleared from the active queue.');});
     if ($('runIntegrityCheck')) $('runIntegrityCheck').onclick=act(runDiagnostics);
     if ($('runBenchmark')) $('runBenchmark').onclick=act(runHardwareBenchmark);
+    wireTtsBenchmarkButton();
     if ($('chapterSearch')) $('chapterSearch').oninput=()=>{
       const q=$('chapterSearch').value.trim().toLowerCase();
       $('chapterList')?.querySelectorAll('[data-chapter-number]').forEach(el=>el.hidden=!el.textContent.toLowerCase().includes(q));
