@@ -626,6 +626,22 @@ class ModelsPage(QWidget):
         )
 
     def review_migrated_source_cleanup(self) -> None:
+        if self._active_operation is not None:
+            QMessageBox.warning(self, "Storage In Use", "Wait for the active Models Center operation to finish before cleaning an old source copy.")
+            return
+        app = QApplication.instance()
+        if app is not None:
+            running = [
+                value for widget in app.allWidgets()
+                for value in vars(widget).values()
+                if isinstance(value, QThread) and value.isRunning()
+            ]
+            if running:
+                QMessageBox.warning(
+                    self, "Storage In Use",
+                    "Old source cleanup is blocked while downloads, inference, previews, repairs or generation are active."
+                )
+                return
         journal_root = app_root() / "Settings" / "Storage Migrations"
         candidates = []
         if journal_root.is_dir():
