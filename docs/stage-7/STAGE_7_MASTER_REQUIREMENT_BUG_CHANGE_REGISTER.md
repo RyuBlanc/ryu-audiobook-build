@@ -65,7 +65,7 @@ PASS = automated regression/package evidence passed. OPEN = evidence outstanding
 - #2625 Performance Center package: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42231677314
 - #2624 PC benchmark comparison/import: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42231216994
 
-**Disposition:** Full regression passed on #2640 (1,258 tests); package acceptance still needs a dedicated exact-head artifact checkpoint. Hardware performance remains open pending real runner evidence. Physical installation is waived, not passed.
+**Disposition:** Matching-head full regression and Windows packaged acceptance PASSED on #2641 / `b1da6a8d4aee39e83ca9f781e22b92d26bb4859f`. Installer, portable, SHA-256, Defender and Piper benchmark artifacts uploaded. Hardware performance remains open pending real self-hosted runner evidence. Physical installation is waived, not passed.
 
 
 ## Final documentation-head checkpoint request — 6 November 2026
@@ -100,3 +100,12 @@ Physical installed-app acceptance remains user-waived/not run. Real NVIDIA/AMD/I
 
 **Disposition:** EXACT-HEAD REGRESSION AND PACKAGED WINDOWS ACCEPTANCE PASS on #2641. Step 7 software/package gate is current through #2641; physical accelerator acceptance remains separate and open.
 
+## Exact-head package evidence — #2641
+
+- Run: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42248725120
+- Commit: `b1da6a8d4aee39e83ca9f781e22b92d26bb4859f`.
+- Tests: 1,258 passed; focused Stage 6 preflight and Qt lifecycle passed.
+- Frozen app and responsive packaged Sound Design/Music Library acceptance passed.
+- Installer, portable, SHA-256 and Defender gates passed; all four expected artifacts were uploaded.
+- The 30-second Qwen hardware workflows are still queued, not passed.
+- Installed-app manual checks are user-waived/not run.
