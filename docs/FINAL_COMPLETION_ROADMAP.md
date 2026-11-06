@@ -41,6 +41,7 @@ Use the supplied Voice Studio HTML as the canonical visual language for every sc
 - [ ] Models Center: actual install/repair status, progress, cancel, integrity and local storage information.
 - [ ] Performance Center: actual hardware detection, backend availability, safe model recommendation and benchmark results.
 - [ ] Settings: local paths, privacy/offline behavior, theme, default bitrate and cleanup/uninstall-related options where supported.
+- [ ] Help & Guide: update task-based, user-friendly instructions to match the latest accepted requirements and actual Version 1.2.0 behavior, including workflows, settings/storage, voice/model setup, sound design, generation controls/recovery, playback, and troubleshooting. Verify every instruction against the current app; clearly label unsupported or deferred features and keep screenshots/links current.
 - [ ] Responsive/full-screen: no clipped controls, inaccessible menus, overlapping panels, or navigation that requires restarting the app.
 - [ ] Every visible control is connected to real behavior; no prototype-only success states or placeholder actions.
 
