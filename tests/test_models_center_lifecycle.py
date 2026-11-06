@@ -39,6 +39,25 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
         ):
             return PremiumV2Bridge()
 
+    def test_premium_v2_uninstall_ui_previews_exact_impact_and_refreshes_voice_state(self):
+        source = (Path(__file__).resolve().parents[1] / "assets" / "frontend" /
+                  "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        handler = source.split("if (button.matches('[data-model-install]", 1)[1].split(
+            "if (button.matches('[data-assign-character]'))", 1
+        )[0]
+        self.assertIn("models.uninstall_preflight", handler)
+        self.assertIn("impact.total_bytes", handler)
+        self.assertIn("impact.file_count", handler)
+        self.assertIn("impact.targets", handler)
+        self.assertIn("impact.dependencies", handler)
+        self.assertIn("impact.preserved", handler)
+        self.assertIn("Confirm exact uninstall", handler)
+        self.assertIn("models.uninstall", handler)
+        self.assertIn("refreshModels()", handler)
+        self.assertIn("refreshVoices()", handler)
+        self.assertIn("refreshProviderCatalog", handler)
+        self.assertIn("Background Jobs", handler)
+
     def test_models_bridge_exposes_install_repair_uninstall_and_verify(self):
         source = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         for command, handler in (
@@ -656,19 +675,21 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
 
     def test_qwen_shared_runtime_uninstall_preserves_all_model_weights_and_project_data(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary) / "Models"
-            runtime_root = root / "qwen3-tts"
+            base = Path(temporary)
+            root = base / "Models"
+            runtime_root = base / "ProviderRuntime" / "qwen3-tts"
+            model_root = root / "qwen3-tts"
             venv_root = runtime_root / "runtime"
             python_root = runtime_root / "python312"
             marker = runtime_root / "runtime.json"
             installer = runtime_root / "python-installer.exe"
             installer_log = runtime_root / "python-install.log"
             model_dirs = {
-                "custom-0.6b": runtime_root / "custom-0.6b",
-                "custom-1.7b": runtime_root / "custom-1.7b",
-                "design-1.7b": runtime_root / "design-1.7b",
-                "base-0.6b": runtime_root / "base-0.6b",
-                "base-1.7b": runtime_root / "base-1.7b",
+                "custom-0.6b": model_root / "custom-0.6b",
+                "custom-1.7b": model_root / "custom-1.7b",
+                "design-1.7b": model_root / "design-1.7b",
+                "base-0.6b": model_root / "base-0.6b",
+                "base-1.7b": model_root / "base-1.7b",
             }
             for directory in (venv_root, python_root, *model_dirs.values()):
                 directory.mkdir(parents=True, exist_ok=True)
@@ -684,6 +705,7 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
             with (
                 patch("app.core.paths.models_root", return_value=root),
                 patch("app.tts.qwen_character_runtime.RUNTIME_ROOT", runtime_root),
+                patch("app.tts.qwen_character_runtime.MODEL_DIRS", model_dirs),
                 patch("app.tts.qwen_character_runtime.VENV_ROOT", venv_root),
                 patch("app.tts.qwen_character_runtime.PYTHON_ROOT", python_root),
                 patch("app.tts.qwen_character_runtime.MARKER", marker),
@@ -705,8 +727,9 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
 
     def test_chatterbox_shared_runtime_uninstall_preserves_cached_model_assets(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary) / "Models"
-            runtime_root = root / "chatterbox-runtime"
+            base = Path(temporary)
+            root = base / "Models"
+            runtime_root = base / "ProviderRuntime" / "chatterbox"
             runtime_file = runtime_root / "Lib" / "site-packages" / "chatterbox.py"
             runtime_file.parent.mkdir(parents=True)
             runtime_file.write_text("runtime", encoding="utf-8")
@@ -714,6 +737,15 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
             cache_file = cache_root / "snapshots" / "abc" / "model.safetensors"
             cache_file.parent.mkdir(parents=True)
             cache_file.write_bytes(b"model weights")
+            settings_root = base / "Settings"
+            settings_root.mkdir(parents=True)
+            profile_file = settings_root / "voice_profiles.json"
+            profile_file.write_text('{"profiles":[{"name":"Narrator"}]}', encoding="utf-8")
+            assignment_file = settings_root / "character_assignments.json"
+            assignment_file.write_text('{"chapter-1":{"Mira":"Voice Mira"}}', encoding="utf-8")
+            project_file = base / "Projects" / "project.json"
+            project_file.parent.mkdir(parents=True)
+            project_file.write_text('{"project":"keep"}', encoding="utf-8")
             bridge = self.make_bridge()
 
             with (
@@ -728,6 +760,9 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
             self.assertFalse(runtime_root.exists())
             self.assertTrue(cache_file.is_file())
             self.assertEqual(cache_file.read_bytes(), b"model weights")
+            self.assertEqual(profile_file.read_text(encoding="utf-8"), '{"profiles":[{"name":"Narrator"}]}')
+            self.assertEqual(assignment_file.read_text(encoding="utf-8"), '{"chapter-1":{"Mira":"Voice Mira"}}')
+            self.assertEqual(project_file.read_text(encoding="utf-8"), '{"project":"keep"}')
             self.assertIn("Saved profiles and books were kept", message)
 
     def test_individual_qwen_uninstall_refresh_reports_removed_model_as_missing(self):
