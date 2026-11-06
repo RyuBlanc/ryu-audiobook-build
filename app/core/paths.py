@@ -180,10 +180,18 @@ def _recover_interrupted_storage_migrations() -> None:
 
 
 def configure_temporary_root() -> None:
-    """Route tempfile users to the selected app staging root at application startup."""
+    """Route Python and child-process temporary files to the selected staging root."""
+    import os
     import tempfile
-    # Do not fall back to the system temp directory when a selected drive is absent.
-    tempfile.tempdir = str(temporary_root())
+
+    selected = str(temporary_root())
+    # Keep Python tempfile and spawned provider/pip processes on the same root.
+    # If an external drive is disconnected, this intentionally remains an
+    # unavailable path instead of silently falling back to the system drive.
+    tempfile.tempdir = selected
+    os.environ["TEMP"] = selected
+    os.environ["TMP"] = selected
+    os.environ["TMPDIR"] = selected
 
 
 def ensure_roots() -> None:
