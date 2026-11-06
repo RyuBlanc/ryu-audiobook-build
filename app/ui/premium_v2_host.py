@@ -8181,10 +8181,19 @@ class PremiumV2Bridge(QObject):
             "runtime": {"library", "audio_assets", "models", "model_cache", "temporary"},
             "model_cache": {"library", "audio_assets", "runtime", "temporary"},
         }
-        conflicts = [
-            other for other in protected_by_kind.get(kind, set())
-            if overlaps(destination, Path(roots[other][1]))
-        ]
+        conflicts = []
+        for other in protected_by_kind.get(kind, set()):
+            other_path = Path(roots[other][1]).expanduser()
+            try:
+                same_root = destination.expanduser().resolve() == other_path.resolve()
+            except OSError:
+                same_root = destination.expanduser().absolute() == other_path.absolute()
+            # Legacy installs intentionally share the Models base directory
+            # for weights and provider runtime; their actual components live
+            # in separate named subdirectories beneath that base.
+            legacy_shared_base = {kind, other} == {"models", "runtime"} and same_root
+            if not legacy_shared_base and overlaps(destination, other_path):
+                conflicts.append(other)
         if conflicts:
             raise ValueError(
                 "Storage roots must remain separate; conflicting roots: "
