@@ -7159,9 +7159,9 @@ class PremiumV2Bridge(QObject):
                 raise RuntimeError("Uninstall preview refuses a symbolic-link target: " + str(target))
             if not target.exists():
                 continue
-            candidates = [target] if target.is_file() else (
+            candidates = [target] if target.is_file() else [
                 path for path in target.rglob("*") if path.is_file() or path.is_symlink()
-            )
+            ]
             for candidate in candidates:
                 if candidate.is_symlink():
                     raise RuntimeError("Uninstall preview refuses a symbolic link inside a component: " + str(candidate))
@@ -7183,7 +7183,7 @@ class PremiumV2Bridge(QObject):
             "preserved": preservation,
             "blocked": bool(dependencies),
             "block_reason": (
-                "Remove or relocate dependent components before removing this shared runtime: " + ", ".join(dependencies)
+                "Chatterbox runtime is shared by installed components: " + ", ".join(dependencies) + ". Remove or relocate those dependents first."
                 if dependencies else ""
             ),
         }
@@ -7303,7 +7303,7 @@ class PremiumV2Bridge(QObject):
                 raise ValueError(f"Qwen model {kind} contains no installed model files.")
             report(f"Removing Qwen model {kind}…")
             self._models_remove_path(target, expected_parent)
-            return f"Removed Qwen model {kind}. The shared runtime, other Qwen models, saved voice profiles and projects were kept."
+            return f"Removed Qwen model {kind}. The shared runtime and other model folders, saved voice profiles and projects were kept."
 
         if requested == "qwen-runtime":
             from app.tts.qwen_character_runtime import (
