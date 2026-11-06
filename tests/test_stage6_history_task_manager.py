@@ -144,6 +144,8 @@ class Stage6HistoryTaskManagerTests(unittest.TestCase):
         for marker in (
             "stage6_responsive_viewport_matrix_41_resolutions",
             "stage6_responsive_window_and_scale_emulation",
+            'matchMedia("(max-width: 800px)")',
+            'matchMedia("(max-width: 1250px)")',
         ):
             self.assertIn(marker, packaged)
             self.assertIn(marker, runner)
