@@ -8254,9 +8254,64 @@
     if (status) status.textContent = result?.restart_required
       ? 'Storage status refreshed from the local filesystem. Root changes require an application restart.'
       : 'Storage status refreshed.';
+    const cleanupHost = $('storageMigrationCleanup');
+    if (cleanupHost) {
+      const pending = Array.isArray(result?.pending_cleanup) ? result.pending_cleanup : [];
+      cleanupHost.innerHTML = pending.length
+        ? '<h3>Verified migrations · retained source copies</h3>' + pending.map(item =>
+            '<div class="setting-row" style="align-items:flex-start;flex-wrap:wrap"><div style="min-width:210px;flex:1"><b>Retained source copy</b><p class="muted">' +
+            esc(item.file_count || 0) + ' files · ' + esc(formatModelBytes(item.total_bytes || 0)) +
+            '</p><code style="display:block;overflow-wrap:anywhere">' + esc(item.source || '') +
+            '</code><p class="muted">Verified destination: ' + esc(item.destination || '') +
+            '</p></div><button class="btn secondary" data-storage-cleanup-source="' + esc(item.journal_name || '') +
+            '">Verify &amp; remove old copy</button></div>'
+          ).join('')
+        : '<p class="muted">No verified migration source copies are awaiting cleanup.</p>';
+      cleanupHost.querySelectorAll('[data-storage-cleanup-source]').forEach(button => {
+        if (button.dataset.ryuCleanupBound === 'true') return;
+        button.dataset.ryuCleanupBound = 'true';
+        button.addEventListener('click', async event => {
+          event.preventDefault(); event.stopPropagation();
+          button.disabled = true;
+          const prior = button.textContent;
+          button.textContent = 'Verifying…';
+          try {
+            const cleanup = await call('storage.cleanup_source', {journal_name:button.dataset.storageCleanupSource});
+            if (cleanup?.cancelled) return;
+            await refreshStorageRoots();
+            message('Retained source copy removed only after file-by-file verification against the active destination.');
+          } catch (error) {
+            message(error?.message || String(error), true);
+          } finally {
+            button.disabled = false; button.textContent = prior;
+          }
+        });
+      });
+    }
     return result;
   }
   function wireStorageControls() {
+    const cleanupButton = $('storageCleanupTemp');
+    if (cleanupButton && cleanupButton.dataset.ryuCleanupBound !== 'true') {
+      cleanupButton.dataset.ryuCleanupBound = 'true';
+      cleanupButton.addEventListener('click', async event => {
+        event.preventDefault(); event.stopPropagation();
+        const prior = cleanupButton.textContent;
+        cleanupButton.disabled = true; cleanupButton.textContent = 'Reviewing…';
+        try {
+          const result = await call('storage.cleanup_temp');
+          if (result?.cancelled) return;
+          await refreshStorageRoots();
+          message(result?.cleaned
+            ? 'Safe cleanup completed. Removed ' + (result.removed || []).length + ' eligible entries.'
+            : 'No eligible app-owned temporary/download entries were found.');
+        } catch (error) {
+          message(error?.message || String(error), true);
+        } finally {
+          cleanupButton.disabled = false; cleanupButton.textContent = prior;
+        }
+      });
+    }
     const storageTab = document.querySelector('[data-settings-tab="storage"]');
     if (storageTab && storageTab.dataset.ryuStorageRefreshBound !== 'true') {
       storageTab.dataset.ryuStorageRefreshBound = 'true';
