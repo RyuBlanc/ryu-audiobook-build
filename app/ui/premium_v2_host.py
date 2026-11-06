@@ -8215,7 +8215,7 @@ class PremiumV2Bridge(QObject):
         if kind == "model_cache":
             model_root = Path(roots["models"][1]).resolve()
             selected_cache = destination.resolve()
-            if selected_cache == model_root or model_root in selected_cache.parents is False and selected_cache in model_root.parents:
+            if selected_cache == model_root or selected_cache in model_root.parents:
                 raise ValueError("Model Cache may be located inside Models, but cannot replace or contain the Models root.")
         if not source.is_dir():
             raise RuntimeError("The current storage location is unavailable. Reconnect its drive before changing the configured path; existing inventory must not be silently orphaned.")
