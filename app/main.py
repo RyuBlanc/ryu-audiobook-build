@@ -8,7 +8,7 @@ from PySide6.QtCore import Qt, QSettings
 from PySide6.QtGui import QCursor, QIcon, QPixmap
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from app.core.paths import ensure_roots
+from app.core.paths import ensure_roots, configure_temporary_root
 from app.version import APP_NAME, full_version
 from app.ui.workflow import ProjectWorkflow
 
@@ -738,6 +738,7 @@ QPushButton:disabled, QToolButton:disabled {
 
 def main() -> int:
     ensure_roots()
+    configure_temporary_root()
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setProperty("_ryuDarkStylesheet", APP_STYLE)
