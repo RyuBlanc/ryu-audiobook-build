@@ -195,6 +195,21 @@ def _is_cuda_oom(exc: BaseException) -> bool:
     )
 
 
+def _actual_backend(device: str) -> str:
+    selected = str(device or "").casefold()
+    if selected.startswith("xpu"):
+        return "xpu"
+    if selected.startswith("cuda"):
+        try:
+            import torch
+            return "rocm" if getattr(torch.version, "hip", None) else "cuda"
+        except Exception:
+            return "cuda"
+    if selected == "cpu":
+        return "cpu"
+    return "other"
+
+
 def _voice_design_instruct(request: dict, style: str | None = None) -> str:
     base = str(request.get("instruct") or "").strip()
     selected = style or classify_expression(str(request.get("text") or ""))
@@ -811,7 +826,7 @@ def server(args) -> int:
                         {
                             "ok": True,
                             "outputs": [str(Path(str(path)).resolve()) for path in batch_outputs],
-                            "device": device,
+                            "device": device, "backend": _actual_backend(device),
                             "kind": active_kind,
                             "task": active_task,
                             "voice_lock": bool(locked_clone_prompts is not None),
@@ -852,7 +867,7 @@ def server(args) -> int:
                     {
                         "ok": True,
                         "output": str(output),
-                        "device": device,
+                        "device": device, "backend": _actual_backend(device),
                         "kind": active_kind,
                         "task": active_task,
                         "anchor": (str(locked_anchors.get("neutral")) if locked_anchors else None),
@@ -876,7 +891,7 @@ def server(args) -> int:
                     "ok": False,
                     "batch_oom": True,
                     "error": str(exc),
-                    "device": device,
+                    "device": device, "backend": _actual_backend(device),
                     "kind": active_kind,
                     "task": active_task,
                 }), flush=True)
@@ -912,7 +927,7 @@ def server(args) -> int:
                     print(json.dumps({
                         "ok": True,
                         "output": str(request.get("output")),
-                        "device": device,
+                        "device": device, "backend": _actual_backend(device),
                         "kind": active_kind,
                         "task": active_task,
                     }), flush=True)
@@ -923,7 +938,7 @@ def server(args) -> int:
             print(json.dumps({
                 "ok": False,
                 "error": str(exc),
-                "device": device,
+                "device": device, "backend": _actual_backend(device),
                 "kind": active_kind,
                 "task": active_task,
             }), flush=True)

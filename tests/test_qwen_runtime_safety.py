@@ -200,11 +200,12 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             with patch.object(qwen_character, "settings_root", return_value=Path(temporary)):
                 provider._record_execution_context({
-                    "device": "cuda:0", "kind": "custom-1.7b", "task": "custom"
+                    "device": "cuda:0", "backend": "rocm",
+                    "kind": "custom-1.7b", "task": "custom"
                 })
             record = json.loads((Path(temporary) / "qwen_last_inference.json").read_text(encoding="utf-8"))
         self.assertTrue(record["verified_inference"])
-        self.assertEqual(record["backend"], "cuda")
+        self.assertEqual(record["backend"], "rocm")
         self.assertEqual(record["device"], "cuda:0")
         self.assertEqual(record["model_kind"], "custom-1.7b")
 

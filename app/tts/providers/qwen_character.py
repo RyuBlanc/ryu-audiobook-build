@@ -220,8 +220,10 @@ class QwenCharacterProvider(TTSProvider):
         kind = str(response.get("kind") or self.model_kind).strip()
         if not device or device.casefold() in {"pending", "unknown"}:
             return
+        reported_backend = str(response.get("backend") or "").strip().casefold()
         backend = (
-            "cuda" if device.casefold().startswith("cuda")
+            reported_backend if reported_backend in {"cuda", "rocm", "xpu", "cpu"}
+            else "cuda" if device.casefold().startswith("cuda")
             else "xpu" if device.casefold().startswith("xpu")
             else "cpu" if device.casefold() == "cpu"
             else "other"
@@ -240,7 +242,7 @@ class QwenCharacterProvider(TTSProvider):
             path = settings_root() / "qwen_last_inference.json"
             path.parent.mkdir(parents=True, exist_ok=True)
             temporary = path.with_name(path.name + ".tmp")
-            temporary.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\\n", encoding="utf-8")
+            temporary.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             temporary.replace(path)
         except Exception as exc:
             self._status(f"Could not persist last Qwen inference telemetry: {exc}")
