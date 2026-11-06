@@ -9,6 +9,19 @@ from app.tts.qwen_character_runtime import _run
 
 
 class QwenRuntimeSafetyTests(unittest.TestCase):
+    def test_qwen_huggingface_cache_uses_configured_model_cache_root(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from app.tts import qwen_character_runtime as runtime
+
+        with TemporaryDirectory() as temporary:
+            selected_cache = Path(temporary) / "selected-cache"
+            with patch.object(runtime, "model_cache_root", return_value=selected_cache):
+                environment = runtime.runtime_environment()
+            self.assertEqual(Path(environment["HF_HOME"]), selected_cache)
+            self.assertTrue(selected_cache.is_dir())
+
     def test_command_runner_enforces_timeout_when_child_stalls_without_stdout(self):
         started = time.monotonic()
         with self.assertRaisesRegex(RuntimeError, "timed out after 0.3 seconds"):
