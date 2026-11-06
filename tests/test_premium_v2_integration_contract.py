@@ -463,7 +463,9 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertNotIn("await refreshPerformance().catch(()=>{});", adapter)
         self.assertIn("CPU telemetry unavailable", adapter)
         self.assertIn("GPU / VRAM telemetry unavailable", adapter)
-        self.assertIn("const result=await refreshPerformance();", adapter)
+        self.assertIn("runHardwareBenchmark", adapter)
+        self.assertIn("call('performance.info',{refresh:true})", adapter)
+        self.assertIn("await refreshPerformance()", adapter)
         self.assertIn('"performance.info": True', (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8"))
 
     def test_cue_feedback_matches_current_three_slot_assignment_contract(self):
@@ -601,7 +603,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("result.gpu_percent", performance)
         self.assertIn("result.vram_used_mb", performance)
         self.assertIn("result.generation_seconds", performance)
-        self.assertIn("duration === null ? 'Not tested'", performance)
+        self.assertIn("duration===null?'Not tested'", performance)
         self.assertNotIn("Math.random", performance)
         self.assertNotIn("setInterval", performance)
         self.assertIn("Hardware scan complete.", adapter)
