@@ -714,7 +714,7 @@ class ModelsPage(QWidget):
         if app is not None:
             running = [
                 value for widget in app.allWidgets()
-                for value in vars(widget).values()
+                for value in getattr(widget, "__dict__", {}).values()
                 if isinstance(value, QThread) and value.isRunning()
             ]
             running.extend(
