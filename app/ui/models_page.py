@@ -626,6 +626,20 @@ class ModelsPage(QWidget):
         if self._active_operation is not None:
             QMessageBox.warning(self, "Storage In Use", f"Cannot clean temporary data while {self._active_operation} is running.")
             return
+        app = QApplication.instance()
+        if app is not None:
+            running = [
+                thread for widget in app.allWidgets()
+                for thread in widget.findChildren(QThread)
+                if thread.isRunning()
+            ]
+            if running:
+                QMessageBox.warning(
+                    self, "Storage In Use",
+                    "Temporary cleanup is blocked while a background task is active. "
+                    "Wait for downloads, inference, previews, repairs or generation to finish."
+                )
+                return
         temp_root = temporary_root()
         preview = safe_cleanup(
             temporary_roots=(temp_root,), dry_run=True,
