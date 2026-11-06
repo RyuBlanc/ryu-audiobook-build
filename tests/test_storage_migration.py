@@ -126,6 +126,8 @@ class StorageMigrationTests(unittest.TestCase):
             self.assertFalse(source.exists())
             self.assertTrue(destination.joinpath("weights.bin").is_file())
             self.assertEqual(read_migration_journal(plan.journal)["state"], "source_cleanup_confirmed")
+            recovered = recover_migration_journal(plan.journal, persist_root=lambda _path: self.fail("terminal journal must not rewrite settings"))
+            self.assertEqual(recovered["state"], "source_cleanup_confirmed")
 
     def test_source_cleanup_refuses_protected_active_root(self):
         with TemporaryDirectory() as temp:
