@@ -63,6 +63,7 @@ class AudiobookBrainTests(unittest.TestCase):
         with (
             patch.object(model_runtime, "models_root", return_value=Path("X:/Models")),
             patch.object(model_runtime, "runtimes_root", return_value=Path("X:/Runtime")),
+            patch.object(model_runtime, "Path.mkdir"),
         ):
             self.assertEqual(model_runtime.brain_root(), Path("X:/Models/audiobook-ai"))
             self.assertEqual(model_runtime.brain_runtime_root(), Path("X:/Runtime/audiobook-ai"))
