@@ -5,7 +5,7 @@ import re
 import shutil
 import tempfile
 
-from PySide6.QtCore import QSettings, Qt, QUrl
+from PySide6.QtCore import QSettings, Qt, QUrl, QThread, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
@@ -30,6 +30,57 @@ from app.core.paths import (
     default_temporary_root, runtimes_root, model_cache_root, temporary_root,
 )
 from app.version import full_version
+
+from app.core.storage_migration import migrate_storage_root, StorageMigrationError
+
+
+class StorageMigrationWorker(QThread):
+    progress = Signal(str)
+    succeeded = Signal(str, str)
+    failed = Signal(str)
+
+    def __init__(self, source: Path, destination: Path, settings_key: str, parent=None):
+        super().__init__(parent)
+        self.source = Path(source)
+        self.destination = Path(destination)
+        self.settings_key = settings_key
+
+    def run(self) -> None:
+        try:
+            settings = QSettings("RyuBlanc", "Ryu's Audiobook")
+
+            def persist(path: Path) -> None:
+                settings.setValue(self.settings_key, str(path))
+                settings.sync()
+                if settings.status() != QSettings.Status.NoError:
+                    raise StorageMigrationError("Windows did not confirm the storage setting write.")
+
+            def validate(path: Path) -> bool:
+                if not path.is_dir():
+                    return False
+                import os
+                for folder, _dirs, files in os.walk(path, followlinks=False):
+                    for name in files:
+                        item = Path(folder) / name
+                        if item.is_symlink() or not item.is_file():
+                            return False
+                        with item.open("rb") as stream:
+                            stream.read(1)
+                return True
+
+            plan = migrate_storage_root(
+                self.source, self.destination, persist_root=persist,
+                validate_root=validate, reserve_bytes=512 * 1024 * 1024,
+                journal_dir=app_root() / "Settings" / "Storage Migrations",
+                progress=lambda stage, done, total: self.progress.emit(
+                    f"Storage migration {stage}: {done}/{total} files"
+                ),
+            )
+            self.succeeded.emit(str(plan.destination), self.settings_key)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
 
 
 def _storage_space_summary(folder: Path) -> str:
@@ -503,9 +554,9 @@ class SettingsPage(QWidget):
         }[kind]
         if kind in {"models", "runtime", "model_cache", "temporary"}:
             change_error = _storage_root_change_error(active, candidate)
-            if change_error:
-                QMessageBox.warning(self, "Storage Migration Required", f"{active} → {candidate}\n\n{change_error}")
-                self.status.setText("Storage location was not changed; the existing data remains at its original path.")
+            if change_error and "verified copy" not in change_error:
+                QMessageBox.warning(self, "Storage Location Unavailable", f"{active} → {candidate}\n\n{change_error}")
+                self.status.setText("Storage location was not changed; the original path is preserved.")
                 return
         self._set_root_for_kind(kind, candidate)
         self._refresh_storage_root_labels()
@@ -536,6 +587,61 @@ class SettingsPage(QWidget):
         self.window_size.setCurrentIndex(max(0, self.window_size.findData(str(self.settings.value("ui/window_size", "auto")))))
         self.default_bitrate.setCurrentIndex(max(0, self.default_bitrate.findData(int(self.settings.value("audio/default_bitrate", 256) or 256))))
 
+
+    def _start_storage_migration(self, source: Path, destination: Path, settings_key: str) -> None:
+        if self._migration_worker is not None and self._migration_worker.isRunning():
+            self.status.setText("A storage migration is already running.")
+            return
+        app = QApplication.instance()
+        if app is not None:
+            running = []
+            for widget in app.allWidgets():
+                for thread in widget.findChildren(QThread):
+                    if thread.isRunning() and thread is not self._migration_worker:
+                        running.append(thread)
+            if running:
+                message = "Storage migration is blocked while another background task is running. Wait for downloads, inference, previews or repairs to finish."
+                self.status.setText(message)
+                QMessageBox.warning(self, "Storage In Use", message)
+                return
+        self.save_button.setEnabled(False)
+        self.status.setText("Preparing verified storage migration…")
+        self._migration_window = self.window()
+        if self._migration_window is not None:
+            self._migration_window.setEnabled(False)
+        self._migration_worker = StorageMigrationWorker(source, destination, settings_key, self)
+        self._migration_worker.progress.connect(self.status.setText)
+        self._migration_worker.succeeded.connect(self._storage_migration_succeeded)
+        self._migration_worker.failed.connect(self._storage_migration_failed)
+        self._migration_worker.finished.connect(self._storage_migration_finished)
+        self._migration_worker.start()
+
+    def _storage_migration_succeeded(self, destination: str, settings_key: str) -> None:
+        mapping = {
+            "storage/models_root": "models",
+            "storage/runtime_root": "runtime",
+            "storage/model_cache_root": "model_cache",
+            "storage/temporary_root": "temporary",
+        }
+        self._set_root_for_kind(mapping[settings_key], Path(destination))
+        self.status.setText("Storage copy and integrity verification passed. Original files were retained at the previous location.")
+
+    def _storage_migration_failed(self, message: str) -> None:
+        self.status.setText(f"Storage migration failed safely: {message}")
+        QMessageBox.warning(self, "Storage Migration Failed", message)
+
+    def _storage_migration_finished(self) -> None:
+        if self._migration_window is not None:
+            self._migration_window.setEnabled(True)
+            self._migration_window = None
+        self.save_button.setEnabled(True)
+        worker = self._migration_worker
+        self._migration_worker = None
+        if worker is not None:
+            worker.deleteLater()
+        if "integrity verification passed" in self.status.text():
+            self.save_settings()
+
     def save_settings(self) -> None:
         selected_roots = (
             ("Project Library", self._selected_library_root),
@@ -557,6 +663,15 @@ class SettingsPage(QWidget):
             if label in {"Models", "Provider Runtime", "Model Cache / Downloads", "Temporary / Staging"}:
                 change_error = _storage_root_change_error(active_roots[label], folder)
                 if change_error:
+                    if "verified copy" in change_error:
+                        key = {
+                            "Models": "storage/models_root",
+                            "Provider Runtime": "storage/runtime_root",
+                            "Model Cache / Downloads": "storage/model_cache_root",
+                            "Temporary / Staging": "storage/temporary_root",
+                        }[label]
+                        self._start_storage_migration(active_roots[label], folder, key)
+                        return
                     message = f"{label} cannot be changed from {active_roots[label]} to {folder}.\n\n{change_error}"
                     self.status.setText(message)
                     QMessageBox.warning(self, "Storage Migration Required", message)
