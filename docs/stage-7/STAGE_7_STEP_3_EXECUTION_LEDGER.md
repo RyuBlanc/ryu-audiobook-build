@@ -65,3 +65,19 @@
 **Final candidate:** Step 3 implementation and UI/test integration are committed on this branch. The next commit is the matching-head Windows artifact checkpoint; closure depends on its full regression and packaged acceptance gates.
 
 **Status: IN PROGRESS — code and targeted lifecycle/UI regressions implemented; matching-head full regression and packaged acceptance pending.**
+
+## Additional root-separation and AI lifecycle acceptance — 6 November 2026
+
+- A follow-up audit found the legacy desktop `ModelsPage` uninstall worker still validated Qwen model weights against the Provider Runtime root. Corrected it to validate against `Models/qwen3-tts`, matching the configured Step 2 ownership boundary.
+- The same audit found the legacy desktop worker still validated Chatterbox runtime deletion against Models. Corrected it to use the configured Provider Runtime root.
+- Added isolated Qt worker regressions with separate Models, Provider Runtime and Model Cache directories. They prove Qwen model uninstall preserves sibling weights and the Qwen Python runtime, and Chatterbox runtime uninstall preserves cached model assets.
+- Added Qwen individual-model install routing coverage, verifying the selected model is installed through the Qwen model installer while keeping weights under Models and the runtime under Provider Runtime.
+- Added Audiobook AI install coverage verifying the installer is invoked and a real inference self-test is required before reporting success. Existing Audiobook AI uninstall coverage confirms its app-managed folder is removed without touching projects or other model families.
+- Run #2541 (implementation correction) passed full regression: **1,232 tests**.
+- Run #2542 (Qwen split-root worker regression) passed full regression: **1,232 tests**.
+- Run #2543 (Qwen + Audiobook AI install lifecycle tests) passed full regression: **1,234 tests**.
+- Run #2544 (Chatterbox Provider Runtime root correction) passed full regression: **1,234 tests**.
+- Run #2545 (Chatterbox split-root worker regression) passed full regression: **1,235 tests**.
+- These test runs include the existing safe path-boundary, shared-runtime preservation, active-job blocking, operation serialization, inventory refresh and partial-asset checks.
+
+**Final packaged acceptance remains required on the exact combined source head.** The previous #2540 package checkpoint passed before these final legacy-worker corrections; it is not being reused as evidence for the newer code.
