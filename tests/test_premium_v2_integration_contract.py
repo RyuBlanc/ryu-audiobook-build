@@ -463,9 +463,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertNotIn("await refreshPerformance().catch(()=>{});", adapter)
         self.assertIn("CPU telemetry unavailable", adapter)
         self.assertIn("GPU / VRAM telemetry unavailable", adapter)
-        self.assertIn("section?.querySelectorAll('.ready-list .ready b').forEach(node => { node.textContent = 'Not measured'; });", adapter)
         self.assertIn("const result=await refreshPerformance();", adapter)
-        self.assertIn('"performance.info": False', (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8"))
+        self.assertIn('"performance.info": True', (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8"))
 
     def test_cue_feedback_matches_current_three_slot_assignment_contract(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
@@ -606,7 +605,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("duration === null ? 'Not tested'", performance)
         self.assertNotIn("Math.random", performance)
         self.assertNotIn("setInterval", performance)
-        self.assertIn("Live hardware telemetry and repeatable benchmark execution are not implemented", adapter)
+        self.assertIn("Hardware scan complete.", adapter)
 
     def test_stage829_pronunciation_matrix_and_model_registry_never_fake_success(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
@@ -789,8 +788,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         )
         self.assertEqual(
             capabilities.get("performance.info"),
-            "False",
-            "Unmeasured hardware telemetry must remain truthfully unavailable.",
+            "True",
+            "Live host telemetry is connected and must remain advertised.",
         )
 
 
@@ -1343,7 +1342,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("async function skipCurrentDialogueSuggestion()", adapter)
         self.assertIn("character.dialogue.suggestion.skip", host)
         self.assertIn("Changing the application storage root is not implemented", guard)
-        self.assertIn("performance is intentionally marked Not tested", guard)
+        self.assertNotIn("performance is intentionally marked Not tested", guard)
+        self.assertIn("benchmarkButton.disabled = false", guard)
         self.assertNotIn("[data-model-repair]", guard)
         self.assertNotIn("[data-model-uninstall]", guard)
         self.assertIn("models.repair", host)
