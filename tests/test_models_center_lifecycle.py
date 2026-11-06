@@ -257,6 +257,40 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
             self.assertTrue((sibling / "config.json").is_file())
             self.assertTrue((runtime_root / "runtime.json").is_file())
 
+    def test_models_page_uninstalls_chatterbox_runtime_from_provider_runtime_root(self):
+        from app.ui.models_page import UninstallComponentWorker
+
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            models = base / "Models"
+            provider_runtime = base / "Provider Runtime"
+            runtime = provider_runtime / "chatterbox-runtime"
+            runtime_file = runtime / "Lib" / "site-packages" / "chatterbox.py"
+            runtime_file.parent.mkdir(parents=True)
+            runtime_file.write_text("runtime", encoding="utf-8")
+            weights = base / "Model Cache" / "hub" / "models--resemble-ai--chatterbox" / "model.safetensors"
+            weights.parent.mkdir(parents=True)
+            weights.write_bytes(b"cached model")
+            models.mkdir()
+
+            worker = UninstallComponentWorker("chatterbox-runtime")
+            completed = []
+            failed = []
+            worker.finished_ok.connect(completed.append)
+            worker.failed.connect(failed.append)
+            with (
+                patch("app.ui.models_page.models_root", return_value=models),
+                patch("app.ui.models_page.runtimes_root", return_value=provider_runtime),
+                patch("app.ui.models_page.CHATTERBOX_RUNTIME_DIR", runtime),
+                patch("app.ui.models_page.mark_installed"),
+            ):
+                worker.run()
+
+            self.assertEqual(completed, ["chatterbox-runtime"])
+            self.assertEqual(failed, [])
+            self.assertFalse(runtime.exists())
+            self.assertTrue(weights.is_file())
+
     def test_individual_qwen_model_uninstall_preserves_other_model_folders(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "Models"
