@@ -68,19 +68,33 @@ def models_root() -> Path:
     return _configured_root("storage/models_root", default_models_root())
 
 
+def default_runtimes_root() -> Path:
+    """Legacy runtime root, preserving existing Qwen and Chatterbox installations."""
+    return default_models_root()
+
+
 def runtimes_root() -> Path:
-    """Configured provider-runtime root; follows Models unless explicitly separated."""
-    return _configured_root("storage/runtime_root", models_root())
+    """Configured provider-runtime root; defaults to the legacy Models folder."""
+    return _configured_root("storage/runtime_root", default_runtimes_root())
+
+
+def default_model_cache_root() -> Path:
+    """Legacy Hugging Face cache location."""
+    return default_models_root() / "huggingface"
 
 
 def model_cache_root() -> Path:
     """Configured model/provider download cache; defaults to the legacy HF cache."""
-    return _configured_root("storage/model_cache_root", models_root() / "huggingface")
+    return _configured_root("storage/model_cache_root", default_model_cache_root())
+
+
+def default_temporary_root() -> Path:
+    return app_root() / "Temp"
 
 
 def temporary_root() -> Path:
     """Configured app-owned temporary/staging root."""
-    return _configured_root("storage/temporary_root", app_root() / "Temp")
+    return _configured_root("storage/temporary_root", default_temporary_root())
 
 
 def default_audiobooks_root() -> Path:
@@ -117,7 +131,7 @@ def ensure_roots() -> None:
         audio_library_root(),
         default_library_root(),
         default_audiobooks_root(),
-        app_root() / "Temp",
+        default_temporary_root(),
     ):
         path.mkdir(parents=True, exist_ok=True)
 
