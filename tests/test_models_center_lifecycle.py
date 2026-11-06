@@ -344,6 +344,34 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
 
             self.assertEqual(protected.read_text(encoding="utf-8"), "keep")
 
+    def test_uninstall_blocks_every_active_application_job_not_only_known_job_names(self):
+        bridge = self.make_bridge()
+        bridge._jobs["active-import-unknown-label"] = {
+            "state": "running", "type": "file-transfer", "title": "Importing book assets"
+        }
+        with self.assertRaisesRegex(RuntimeError, "application work is active"):
+            bridge._models_uninstall_component("kokoro", {}, lambda _message: None)
+
+    def test_uninstall_ignores_only_its_own_lifecycle_job(self):
+        bridge = self.make_bridge()
+        bridge._jobs["this-uninstall"] = {
+            "state": "running", "type": "model-uninstall", "title": "Uninstall Kokoro"
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "Models"
+            kokoro = root / "kokoro"
+            kokoro.mkdir(parents=True)
+            (kokoro / "model.onnx").write_bytes(b"model")
+            with (
+                patch("app.core.paths.models_root", return_value=root),
+                patch("app.tts.model_registry.mark_installed"),
+            ):
+                result = bridge._models_uninstall_component(
+                    "kokoro", {"_operation_job_id": "this-uninstall"}, lambda _message: None
+                )
+            self.assertIn("Removed the user-installed Kokoro", result)
+            self.assertFalse(kokoro.exists())
+
     def test_models_center_file_readiness_rejects_partial_assets_without_loading_them(self):
         from tempfile import TemporaryDirectory
         from app.ui.models_page import _file_ready
