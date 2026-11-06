@@ -159,6 +159,33 @@ class StorageRootSelectionTests(unittest.TestCase):
                 if mapped:
                     subprocess.run(["subst", drive, "/D"], check=False, capture_output=True, text=True)
 
+    def test_configured_temporary_root_is_inherited_by_provider_child_processes(self):
+        import tempfile
+        from app.core import paths
+
+        with TemporaryDirectory() as temporary:
+            selected = Path(temporary) / "SelectedTemp"
+            with (
+                patch("app.core.paths.temporary_root", return_value=selected),
+                patch.dict(os.environ, {"TEMP": "old-temp", "TMP": "old-tmp", "TMPDIR": "old-tmpdir"}),
+            ):
+                previous = tempfile.tempdir
+                try:
+                    paths.configure_temporary_root()
+                    self.assertEqual(tempfile.tempdir, str(selected))
+                    self.assertEqual(os.environ["TEMP"], str(selected))
+                    self.assertEqual(os.environ["TMP"], str(selected))
+                    self.assertEqual(os.environ["TMPDIR"], str(selected))
+                    from app.tts.qwen_character_runtime import runtime_environment as qwen_environment
+                    from app.tts.chatterbox_runtime import runtime_environment as chatterbox_environment
+                    with patch("app.tts.qwen_character_runtime.model_cache_root", return_value=Path(temporary) / "cache"), patch("app.tts.chatterbox_runtime.model_cache_root", return_value=Path(temporary) / "cache"):
+                        for environment in (qwen_environment(), chatterbox_environment()):
+                            self.assertEqual(environment["TEMP"], str(selected))
+                            self.assertEqual(environment["TMP"], str(selected))
+                            self.assertEqual(environment["TMPDIR"], str(selected))
+                finally:
+                    tempfile.tempdir = previous
+
     def test_chatterbox_bootstrap_installer_uses_configured_temporary_root(self):
         source = (Path(__file__).resolve().parents[1] / "app" / "tts" / "chatterbox_runtime.py").read_text(encoding="utf-8")
         self.assertIn("temporary_root", source)
