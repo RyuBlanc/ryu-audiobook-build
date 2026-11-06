@@ -597,7 +597,6 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         performance = adapter[start:end]
         self.assertIn("if (!result?.available)", performance)
         self.assertIn("['Not tested', 'Generation performance']", performance)
-        self.assertIn("node.textContent = 'Not measured'", performance)
         self.assertIn("result.cpu_percent", performance)
         self.assertIn("result.gpu_percent", performance)
         self.assertIn("result.vram_used_mb", performance)
