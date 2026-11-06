@@ -280,7 +280,7 @@ def recover_migration_journal(path: Path, *, persist_root: Callable[[Path], None
     """
     payload = read_migration_journal(path)
     state = str(payload.get("state", ""))
-    if state == "complete_source_retained":
+    if state in {"complete_source_retained", "source_cleanup_confirmed", "recovered_source_restored"}:
         return payload
     source = Path(str(payload.get("source", ""))).expanduser()
     staging = Path(str(payload.get("staging", ""))).expanduser()
