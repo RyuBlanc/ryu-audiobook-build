@@ -314,6 +314,7 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
             roots["runtime"] = ("runtime", models, models)
             bridge._validate_storage_root_separation("models", models, roots)
             bridge._validate_storage_root_separation("runtime", models, roots)
+            bridge._validate_storage_root_separation("model_cache", cache, roots)
             with self.assertRaisesRegex(ValueError, "contain the Models root"):
                 bridge._validate_storage_root_separation("model_cache", base / "data", roots)
 
