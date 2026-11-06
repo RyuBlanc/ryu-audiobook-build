@@ -273,3 +273,12 @@ The user has chosen to proceed without the separate installed-Windows-app manual
 **STEP 1: ACCEPTED / CLOSED FOR STAGE PROGRESSION.** Automated regression and matching-head package gates: PASSED. Installed-app manual gate: USER-WAIVED, NOT RUN.
 
 **Stage 7 Step 2 is authorized to begin on the canonical Stage 7 working line.** Preserve the Step 1 implementation and do not rerun its completed gates absent a relevant regression or code change.
+
+## 2026-11-06 — latest combined-head confirmation
+
+- The latest combined Stage 7 candidate is commit `0fc9d8189311419414746ffb23d89df9c65d116c`.
+- Matching-head Windows Actions #2628 passed the full 1,258-test regression suite and the Windows build/package job.
+- Frozen-app verification, packaged Sound Design/Music Library acceptance, installer/portable generation, SHA-256 manifest, Defender checks and artifact uploads passed on that exact commit.
+- This later checkpoint includes the accumulated Step 1 inventory and Step 3 lifecycle source and regression coverage. It does not replace the explicit user waiver below.
+
+**Current disposition:** STEP 1 ACCEPTED / CLOSED FOR STAGE PROGRESSION. Automated regression and packaged acceptance are current through #2628. Actual installed-app inventory and destructive lifecycle checks remain USER-WAIVED / NOT RUN, not manually passed.
