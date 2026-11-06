@@ -400,5 +400,147 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
             self.assertFalse(target.with_suffix(".exe.part").exists())
 
 
+    def test_qwen_shared_runtime_uninstall_preserves_all_model_weights_and_project_data(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "Models"
+            runtime_root = root / "qwen3-tts"
+            venv_root = runtime_root / "runtime"
+            python_root = runtime_root / "python312"
+            marker = runtime_root / "runtime.json"
+            installer = runtime_root / "python-installer.exe"
+            installer_log = runtime_root / "python-install.log"
+            model_dirs = {
+                "custom-0.6b": runtime_root / "custom-0.6b",
+                "custom-1.7b": runtime_root / "custom-1.7b",
+                "design-1.7b": runtime_root / "design-1.7b",
+                "base-0.6b": runtime_root / "base-0.6b",
+                "base-1.7b": runtime_root / "base-1.7b",
+            }
+            for directory in (venv_root, python_root, *model_dirs.values()):
+                directory.mkdir(parents=True, exist_ok=True)
+            for index, directory in enumerate(model_dirs.values(), start=1):
+                (directory / "model.safetensors").write_bytes(bytes([index]) * index)
+            for file_path in (marker, installer, installer_log):
+                file_path.write_text("runtime metadata", encoding="utf-8")
+            project_file = Path(temporary) / "Projects" / "project.json"
+            project_file.parent.mkdir(parents=True)
+            project_file.write_text('{"project":"preserve"}', encoding="utf-8")
+
+            bridge = self.make_bridge()
+            with (
+                patch("app.core.paths.models_root", return_value=root),
+                patch("app.tts.qwen_character_runtime.RUNTIME_ROOT", runtime_root),
+                patch("app.tts.qwen_character_runtime.VENV_ROOT", venv_root),
+                patch("app.tts.qwen_character_runtime.PYTHON_ROOT", python_root),
+                patch("app.tts.qwen_character_runtime.MARKER", marker),
+                patch("app.tts.qwen_character_runtime.INSTALLER_PATH", installer),
+                patch("app.tts.qwen_character_runtime.INSTALLER_LOG", installer_log),
+            ):
+                message = bridge._models_uninstall_component("qwen-runtime", {}, lambda _message: None)
+
+            self.assertFalse(venv_root.exists())
+            self.assertFalse(python_root.exists())
+            self.assertFalse(marker.exists())
+            self.assertFalse(installer.exists())
+            self.assertFalse(installer_log.exists())
+            for directory in model_dirs.values():
+                self.assertTrue(directory.is_dir())
+                self.assertTrue(any(directory.iterdir()))
+            self.assertEqual(project_file.read_text(encoding="utf-8"), '{"project":"preserve"}')
+            self.assertIn("model weights", message)
+
+    def test_chatterbox_shared_runtime_uninstall_preserves_cached_model_assets(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "Models"
+            runtime_root = root / "chatterbox-runtime"
+            runtime_file = runtime_root / "Lib" / "site-packages" / "chatterbox.py"
+            runtime_file.parent.mkdir(parents=True)
+            runtime_file.write_text("runtime", encoding="utf-8")
+            cache_root = root / "huggingface" / "hub" / "models--resemble-ai--chatterbox"
+            cache_file = cache_root / "snapshots" / "abc" / "model.safetensors"
+            cache_file.parent.mkdir(parents=True)
+            cache_file.write_bytes(b"model weights")
+            bridge = self.make_bridge()
+
+            with (
+                patch("app.core.paths.models_root", return_value=root),
+                patch("app.tts.chatterbox_runtime.RUNTIME_DIR", runtime_root),
+            ):
+                message = bridge._models_uninstall_component(
+                    "chatterbox-runtime", {}, lambda _message: None
+                )
+
+            self.assertFalse(runtime_root.exists())
+            self.assertTrue(cache_file.is_file())
+            self.assertEqual(cache_file.read_bytes(), b"model weights")
+            self.assertIn("Saved profiles and books were kept", message)
+
+    def test_individual_qwen_uninstall_refresh_reports_removed_model_as_missing(self):
+        from app.tts.model_registry import build_inventory
+
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            root = base / "Models"
+            qwen_root = root / "qwen3-tts"
+            venv_root = qwen_root / "runtime"
+            python_root = qwen_root / "python312"
+            marker = qwen_root / "runtime.json"
+            installer = qwen_root / "python-installer.exe"
+            installer_log = qwen_root / "python-install.log"
+            model_kinds = {
+                "custom-0.6b": "example/custom",
+                "custom-1.7b": "example/custom-large",
+                "design-1.7b": "example/design",
+                "base-0.6b": "example/base",
+                "base-1.7b": "example/base-large",
+            }
+            model_dirs = {kind: qwen_root / kind for kind in model_kinds}
+            selected = model_dirs["custom-0.6b"]
+            sibling = model_dirs["base-0.6b"]
+            selected.mkdir(parents=True)
+            sibling.mkdir(parents=True)
+            (selected / "weights.safetensors").write_bytes(b"selected")
+            (sibling / "weights.safetensors").write_bytes(b"sibling")
+            venv_root.mkdir(parents=True)
+            python_root.mkdir(parents=True)
+            (venv_root / "Scripts").mkdir(parents=True)
+            python_executable = venv_root / "Scripts" / "python.exe"
+            python_executable.write_bytes(b"python")
+            bridge = self.make_bridge()
+
+            def model_is_installed(kind):
+                directory = model_dirs[kind]
+                return directory.is_dir() and any(item.is_file() for item in directory.rglob("*"))
+
+            with (
+                patch("app.core.paths.models_root", return_value=root),
+                patch("app.tts.model_registry.models_root", return_value=root),
+                patch("app.tts.model_registry.settings_root", return_value=base / "Settings"),
+                patch("app.tts.providers.piper.PiperProvider.model_paths", return_value=[]),
+                patch("app.tts.providers.kokoro.KokoroProvider.assets_available", return_value=False),
+                patch("app.tts.chatterbox_runtime.RUNTIME_DIR", root / "chatterbox-runtime"),
+                patch("app.tts.chatterbox_runtime.runtime_ready", return_value=False),
+                patch("app.tts.qwen_character_runtime.RUNTIME_ROOT", qwen_root),
+                patch("app.tts.qwen_character_runtime.VENV_ROOT", venv_root),
+                patch("app.tts.qwen_character_runtime.PYTHON_ROOT", python_root),
+                patch("app.tts.qwen_character_runtime.PYTHON", python_executable),
+                patch("app.tts.qwen_character_runtime.MARKER", marker),
+                patch("app.tts.qwen_character_runtime.INSTALLER_PATH", installer),
+                patch("app.tts.qwen_character_runtime.INSTALLER_LOG", installer_log),
+                patch("app.tts.qwen_character_runtime.MODEL_IDS", model_kinds),
+                patch("app.tts.qwen_character_runtime.MODEL_DIRS", model_dirs),
+                patch("app.tts.qwen_character_runtime.model_installed", side_effect=model_is_installed),
+                patch("app.tts.qwen_character_runtime.runtime_ready", return_value=True),
+            ):
+                bridge._models_uninstall_component("custom-0.6b", {}, lambda _message: None)
+                refreshed = bridge._models_list({})
+
+            by_id = {row["model_id"]: row for row in refreshed}
+            self.assertFalse(by_id["custom-0.6b"]["installed"])
+            self.assertEqual(by_id["custom-0.6b"]["status"], "Missing")
+            self.assertTrue(by_id["base-0.6b"]["installed"])
+            self.assertTrue((sibling / "weights.safetensors").is_file())
+
+
 if __name__ == "__main__":
     unittest.main()
