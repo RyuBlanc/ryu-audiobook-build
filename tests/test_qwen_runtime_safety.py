@@ -41,7 +41,7 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
             )
         self.assertIn("download stage", progress)
 
-    def test_gpu_cuda_install_failure_does_not_silently_install_cpu_torch(self):
+    def test_gpu_cuda_install_failure_uses_transparent_cpu_compatibility_fallback(self):
         from pathlib import Path
         from unittest.mock import patch
         from app.tts import qwen_character_runtime as runtime
@@ -50,15 +50,18 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
             (0, "pip bootstrap ready"),
             (1, "CUDA 12.8 wheel unavailable"),
             (1, "CUDA 12.6 wheel unavailable"),
+            (0, "CPU PyTorch installed"),
+            (0, "Qwen package installed"),
+            (0, "torch=2.9.1+cpu\\ntorchaudio=2.9.1+cpu\\ncuda=False\\nxpu=False"),
         ]
         candidate = type("Candidate", (), {"backend": "cuda-candidate", "name": "NVIDIA GPU"})()
+        messages = []
         with (
             patch.object(runtime, "_has_nvidia_gpu", return_value=True),
             patch.object(runtime, "best_accelerator", return_value=candidate),
             patch.object(runtime, "_run_capture", side_effect=results) as runner,
         ):
-            with self.assertRaisesRegex(RuntimeError, "CPU fallback was not installed automatically"):
-                runtime._install_runtime_packages(Path("python.exe"))
+            result = runtime._install_runtime_packages(Path("python.exe"), messages.append)
 
         commands = [entry.args[0] for entry in runner.call_args_list]
         index_urls = [
@@ -71,9 +74,12 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
             [
                 "https://download.pytorch.org/whl/cu128",
                 "https://download.pytorch.org/whl/cu126",
+                "https://download.pytorch.org/whl/cpu",
             ],
         )
-        self.assertEqual(runner.call_count, 3)
+        self.assertEqual(result[0], "cpu")
+        self.assertTrue(any("CPU compatibility mode" in message for message in messages))
+        self.assertEqual(runner.call_count, 6)
 
     def test_stdout_drain_uses_captured_queue_after_close_clears_provider_state(self):
         import queue
@@ -507,25 +513,26 @@ xpu=False""",
         self.assertIn("torch-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl", joined)
         self.assertEqual(result, ("rocm", "2.9.1+rocm7.2.1", "2.9.1+rocm7.2.1"))
 
-    def test_amd_windows_candidate_outside_official_matrix_fails_without_cpu_downgrade(self):
-        from pathlib import Path
-        from unittest.mock import patch
-        from app.tts import qwen_character_runtime as runtime
+    def test_amd_windows_candidate_outside_official_matrix_uses_cpu_compatibility_mode(self):
         from app.tts.qwen_accelerator import Accelerator
 
         adapter = Accelerator("rocm-candidate", "cpu", "AMD Radeon RX 9050", 16.0, False, "candidate")
-        with (
-            patch.object(runtime, "detect_accelerators", return_value=(adapter,)),
-            patch.object(runtime, "best_accelerator", return_value=adapter),
-            patch.object(runtime, "_has_nvidia_gpu", return_value=False),
-            patch.object(runtime, "windows_host_identity", return_value=(
-                "Microsoft Windows 11 Pro", "24H2", "AMD Ryzen 9 9950X"
-            )),
-            patch.object(runtime, "_run_capture", return_value=(0, "pip bootstrap ok")),
-            patch.object(runtime.os, "name", "nt"),
-        ):
-            with self.assertRaisesRegex(RuntimeError, "not listed for this Windows release"):
-                runtime._install_runtime_packages(Path("qwen-python.exe"))
+        commands, messages, result = self._run_install(
+            adapter,
+            "nt",
+            [(0, "CPU PyTorch installed")],
+            """torch=2.9.1+cpu
+torchaudio=2.9.1+cpu
+hip=None
+cuda=False
+xpu=False""",
+            "24H2",
+        )
+        joined = " ".join(str(value) for command in commands for value in command)
+        self.assertIn("https://download.pytorch.org/whl/cpu", joined)
+        self.assertNotIn("rocm-rel-", joined)
+        self.assertEqual(result[0], "cpu")
+        self.assertTrue(any("CPU compatibility mode" in message for message in messages))
 
     def test_intel_xpu_windows_uses_official_pytorch_xpu_index(self):
         from app.tts.qwen_accelerator import Accelerator
@@ -546,37 +553,43 @@ xpu=True""",
         self.assertEqual(result[0], "xpu")
         self.assertTrue(any("Intel XPU" in message for message in messages))
 
-    def test_amd_rocm_install_rejects_wheels_without_active_hip_runtime(self):
+    def test_amd_rocm_runtime_that_does_not_activate_uses_cpu_compatibility_mode(self):
         from app.tts.qwen_accelerator import Accelerator
 
         adapter = Accelerator("rocm-candidate", "cpu", "AMD Radeon RX 9070 GRE", 16.0, False, "candidate")
-        with self.assertRaisesRegex(RuntimeError, "AMD ROCm packages installed but PyTorch did not activate HIP"):
-            self._run_install(
-                adapter,
-                "nt",
-                [(0, "ROCm packages installed")],
-                """torch=2.14.0+rocm10.1.0
+        commands, messages, result = self._run_install(
+            adapter,
+            "nt",
+            [(0, "ROCm packages installed"), (0, "CPU fallback installed")],
+            """torch=2.14.0+rocm10.1.0
 torchaudio=2.11.0.3+rocm10.1.0
 hip=None
 cuda=False
 xpu=False""",
-            )
+        )
+        joined = " ".join(str(value) for command in commands for value in command)
+        self.assertIn("https://download.pytorch.org/whl/cpu", joined)
+        self.assertEqual(result[0], "cpu")
+        self.assertTrue(any("CPU compatibility mode" in message for message in messages))
 
-    def test_intel_xpu_install_rejects_if_xpu_is_not_available(self):
+    def test_intel_xpu_runtime_that_does_not_activate_uses_cpu_compatibility_mode(self):
         from app.tts.qwen_accelerator import Accelerator
 
         adapter = Accelerator("xpu-candidate", "cpu", "Intel Arc Graphics", 8.0, False, "candidate")
-        with self.assertRaisesRegex(RuntimeError, "Intel XPU packages installed but torch.xpu.is_available"):
-            self._run_install(
-                adapter,
-                "nt",
-                [(0, "XPU wheels installed")],
-                """torch=2.9.1
+        commands, messages, result = self._run_install(
+            adapter,
+            "nt",
+            [(0, "XPU wheels installed"), (0, "CPU fallback installed")],
+            """torch=2.9.1
 torchaudio=2.9.1
 hip=None
 cuda=False
 xpu=False""",
-            )
+        )
+        joined = " ".join(str(value) for command in commands for value in command)
+        self.assertIn("https://download.pytorch.org/whl/cpu", joined)
+        self.assertEqual(result[0], "cpu")
+        self.assertTrue(any("CPU compatibility mode" in message for message in messages))
 
 
 if __name__ == "__main__":

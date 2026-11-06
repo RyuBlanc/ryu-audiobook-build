@@ -239,6 +239,7 @@ def _install_runtime_packages(python: Path, progress=None) -> tuple[str, str, st
         "cpu",
     )
     install_plan: list[tuple[str, list[str], str]] = []
+    gpu_fallback_reason = ""
 
     if _has_nvidia_gpu() or active.backend == "cuda":
         install_plan.extend([
@@ -265,11 +266,11 @@ def _install_runtime_packages(python: Path, progress=None) -> tuple[str, str, st
             amd_candidate.name, cpu_name, os_caption, display_version
         )
         if spec is None:
-            raise RuntimeError(
-                f"AMD adapter {amd_candidate.name} is not listed for this Windows release. "
-                "Qwen will not install an unverified ROCm runtime or downgrade this GPU "
-                "to a misleading accelerated state."
+            gpu_fallback_reason = (
+                f"AMD adapter {amd_candidate.name} is not listed in the official "
+                "Windows ROCm/PyTorch matrix; using CPU compatibility mode."
             )
+            install_plan.append(cpu_plan)
         if spec["rocm"] == "10.1.0":
             label = f"AMD ROCm 10.1.0 ({spec['arch']}, Windows 11 25H2)"
             package_args = [
@@ -319,6 +320,12 @@ def _install_runtime_packages(python: Path, progress=None) -> tuple[str, str, st
     else:
         install_plan.append(cpu_plan)
 
+    # Auto mode always retains a validated CPU route after trying a detected
+    # GPU runtime. This is an explicit compatibility fallback, never reported
+    # as GPU acceleration.
+    if install_plan and install_plan[-1][2] != "cpu":
+        install_plan.append(cpu_plan)
+
     install_error = ""
     selected_backend = ""
     selected_label = ""
@@ -336,21 +343,19 @@ def _install_runtime_packages(python: Path, progress=None) -> tuple[str, str, st
             selected_backend, selected_label = expected_backend, label
             break
         install_error = detail
+        if expected_backend != "cpu":
+            gpu_fallback_reason = detail or f"{label} installation failed"
 
-    # Never silently replace a detected GPU runtime with CPU PyTorch. A
-    # user may explicitly select CPU, but Auto must either activate the
-    # compatible GPU backend or report why it could not.
     if not selected_backend:
-        hardware = (
-            f"{amd_candidate.name} (AMD ROCm)" if amd_candidate is not None
-            else f"{intel_candidate.name} (Intel XPU)" if intel_candidate is not None
-            else f"{active.name} ({active.backend})"
-        )
         raise RuntimeError(
-            f"Could not activate the selected Qwen GPU runtime for {hardware}. "
-            "CPU fallback was not installed automatically because it would hide "
-            "a GPU performance failure. Check driver/runtime compatibility and "
-            f"use explicit CPU selection only when intended. Last error: {install_error[-3000:]}"
+            "Could not install a validated Qwen runtime. GPU installation attempts "
+            "and the CPU compatibility fallback both failed. "
+            f"Last error: {install_error[-3000:]}"
+        )
+    if selected_backend == "cpu" and gpu_fallback_reason and progress:
+        progress(
+            "GPU acceleration could not be validated; using CPU compatibility mode. "
+            + gpu_fallback_reason[-700:]
         )
 
     if progress:
@@ -389,14 +394,45 @@ def _install_runtime_packages(python: Path, progress=None) -> tuple[str, str, st
         or (selected_backend == "rocm" and "cuda=True" in normalized and "hip=None" not in normalized)
         or (selected_backend == "xpu" and "xpu=True" in normalized)
     )
-    if not backend_ok:
+    if not backend_ok and selected_backend != "cpu":
         if selected_backend == "rocm":
             reason = "AMD ROCm packages installed but PyTorch did not activate HIP"
         elif selected_backend == "xpu":
             reason = "Intel XPU packages installed but torch.xpu.is_available() is false"
         else:
             reason = f"PyTorch did not activate the selected {selected_backend} backend"
-        raise RuntimeError(f"{reason}. Qwen runtime is not marked ready. {detail[-2500:]}")
+        if progress:
+            progress(
+                f"{reason}. Switching to CPU compatibility mode without changing "
+                "the selected Qwen model or its saved voice identity…"
+            )
+        cpu_code, cpu_detail = _run_capture(
+            [
+                str(python), "-m", "pip", "install", "--upgrade",
+                "--no-cache-dir", *cpu_plan[1],
+            ],
+            timeout=3600,
+        )
+        if cpu_code != 0:
+            raise RuntimeError(
+                f"{reason}. CPU compatibility fallback installation failed: "
+                f"{cpu_detail[-3000:]}"
+            )
+        selected_backend = "cpu"
+        selected_label = "CPU compatibility fallback"
+        code, detail = _run_capture([str(python), "-c", check], timeout=240)
+        if code != 0:
+            raise RuntimeError(
+                "CPU compatibility fallback was installed but its runtime self-test "
+                f"failed: {detail[-3000:]}"
+            )
+        normalized = detail.replace(" ", "")
+        backend_ok = "torch=" in normalized and "torchaudio=" in normalized
+    if not backend_ok:
+        raise RuntimeError(
+            f"Qwen runtime did not validate for backend {selected_backend}. "
+            f"{detail[-2500:]}"
+        )
 
     def output_value(key: str) -> str:
         prefix = key + "="
