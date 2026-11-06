@@ -10749,6 +10749,27 @@
             payload.voice_name = String(voiceSelect?.value || '').trim();
           }
           const disableLabel = button.textContent;
+          if (action === 'uninstall') {
+            const componentLabel = String(model.name || operationId);
+            const exactTarget = operationId === 'piper'
+              ? 'the selected Piper voice and its matching .onnx.json file'
+              : operationId === 'qwen-model'
+                ? 'only the selected Qwen weight folder'
+                : operationId === 'qwen-runtime'
+                  ? 'the isolated Qwen Python and virtual environment files; downloaded Qwen weights and saved voice profiles are preserved'
+                  : operationId === 'chatterbox' || operationId === 'chatterbox-runtime' || operationId === 'chatterbox-multilingual'
+                    ? 'the shared Chatterbox provider runtime; downloaded Chatterbox model cache, saved voice profiles and books are preserved'
+                    : operationId === 'chatterbox-model-assets'
+                      ? 'only Chatterbox-owned Hugging Face cache folders; other provider caches and the Chatterbox runtime are preserved'
+                      : operationId === 'audiobook-ai'
+                        ? 'the local Audiobook AI runtime and model files'
+                        : 'the selected app-managed component files';
+            const accepted = window.confirm(
+              'Uninstall ' + componentLabel + '?\\n\\nThis removes ' + exactTarget +
+              '.\\n\\nProjects, source books, generated audiobooks and saved voice profiles are not uninstall targets.\\n\\nThe action will be blocked while any other application job is active. Continue?'
+            );
+            if (!accepted) return;
+          }
           button.disabled = true;
           button.textContent = action === 'uninstall' ? 'Removing…' : action === 'repair' ? 'Repairing…' : 'Starting…';
           const modelLifecycleCommands = {install:'models.install',repair:'models.repair',uninstall:'models.uninstall'};
