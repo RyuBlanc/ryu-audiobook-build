@@ -157,7 +157,7 @@ class StorageMigrationTests(unittest.TestCase):
             old = temp_root / "staging"
             old.mkdir()
             (old / "blob.bin").write_bytes(b"x" * 128)
-            protected = temp_root / "cache"
+            protected = temp_root / "tmp"
             protected.mkdir()
             (protected / "keep.wav").write_bytes(b"voice")
             preview = safe_cleanup(temporary_roots=(temp_root,), dry_run=True, protected_paths=(protected,))
