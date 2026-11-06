@@ -595,11 +595,11 @@ class ModelsPage(QWidget):
         for label, root in roots:
             info = inventory_storage_root(root, include_hashes=False)
             if not info["available"]:
-                lines.append(f"{label}: Location unavailable — {info.get('error', 'drive disconnected')}\\n{root}")
+                lines.append(f"{label}: Location unavailable — {info.get('error', 'drive disconnected')}\n{root}")
             else:
                 gib = 1024 ** 3
-                lines.append(f"{label}: {info['file_count']:,} files · {info['total_bytes'] / gib:.2f} GB\\n{info['path']}")
-        self.storage_summary.setText("\\n\\n".join(lines))
+                lines.append(f"{label}: {info['file_count']:,} files · {info['total_bytes'] / gib:.2f} GB\n{info['path']}")
+        self.storage_summary.setText("\n\n".join(lines))
 
     def inspect_storage_inventory(self) -> None:
         roots = (
@@ -611,9 +611,9 @@ class ModelsPage(QWidget):
         lines = []
         for label, root in roots:
             info = inventory_storage_root(root, include_hashes=True)
-            lines.append(f"[{label}]\\nPath: {info['path']}")
+            lines.append(f"[{label}]\nPath: {info['path']}")
             if not info["available"]:
-                lines.append(f"Status: {info.get('error', 'Location unavailable')}\\n")
+                lines.append(f"Status: {info.get('error', 'Location unavailable')}\n")
                 continue
             lines.append(f"Files: {info['file_count']} · Total: {info['total_bytes']:,} bytes")
             for item in info["files"]:
@@ -621,7 +621,7 @@ class ModelsPage(QWidget):
             lines.append("")
         QInputDialog.getMultiLineText(
             self, "Storage inventory and SHA-256 checksums",
-            "Read-only inventory. No files are changed.", "\\n".join(lines)
+            "Read-only inventory. No files are changed.", "\n".join(lines)
         )
 
     def preview_temporary_cleanup(self) -> None:
@@ -639,8 +639,8 @@ class ModelsPage(QWidget):
         gib = 1024 ** 3
         answer = QMessageBox.question(
             self, "Confirm Temporary Cleanup",
-            f"Eligible app-owned temporary entries: {preview['candidate_count']}\\n"
-            f"Estimated reclaimable size: {preview['candidate_bytes'] / gib:.2f} GB\\n\\n"
+            f"Eligible app-owned temporary entries: {preview['candidate_count']}\n"
+            f"Estimated reclaimable size: {preview['candidate_bytes'] / gib:.2f} GB\n\n"
             "Only the explicit staging/downloads/temporary/tmp/cache allowlist is eligible. "
             "Model weights, provider runtimes, model cache, projects, source books, exports and voice data are protected. Continue?"
         )
