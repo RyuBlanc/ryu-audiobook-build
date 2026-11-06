@@ -271,25 +271,26 @@ def _install_runtime_packages(python: Path, progress=None) -> tuple[str, str, st
                 "Windows ROCm/PyTorch matrix; using CPU compatibility mode."
             )
             install_plan.append(cpu_plan)
-        if spec["rocm"] == "10.1.0":
-            label = f"AMD ROCm 10.1.0 ({spec['arch']}, Windows 11 25H2)"
-            package_args = [
-                "--index-url", "https://stable.repo.amd.com/rocm/whl-next/",
-                f"torch[device-{spec['arch']}]=={spec['torch']}",
-                f"torchaudio=={spec['torchaudio']}",
-            ]
         else:
-            rocm_root = "https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1"
-            package_args = [
-                f"{rocm_root}/rocm_sdk_core-7.2.1-py3-none-win_amd64.whl",
-                f"{rocm_root}/rocm_sdk_devel-7.2.1-py3-none-win_amd64.whl",
-                f"{rocm_root}/rocm_sdk_libraries_custom-7.2.1-py3-none-win_amd64.whl",
-                f"{rocm_root}/rocm-7.2.1.tar.gz",
-                f"{rocm_root}/torch-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl",
-                f"{rocm_root}/torchaudio-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl",
-            ]
-            label = "AMD ROCm 7.2.1 (legacy Windows 11 support)"
-        install_plan.append((label, package_args, "rocm"))
+            if spec["rocm"] == "10.1.0":
+                label = f"AMD ROCm 10.1.0 ({spec['arch']}, Windows 11 25H2)"
+                package_args = [
+                    "--index-url", "https://stable.repo.amd.com/rocm/whl-next/",
+                    f"torch[device-{spec['arch']}]=={spec['torch']}",
+                    f"torchaudio=={spec['torchaudio']}",
+                ]
+            else:
+                rocm_root = "https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1"
+                package_args = [
+                    f"{rocm_root}/rocm_sdk_core-7.2.1-py3-none-win_amd64.whl",
+                    f"{rocm_root}/rocm_sdk_devel-7.2.1-py3-none-win_amd64.whl",
+                    f"{rocm_root}/rocm_sdk_libraries_custom-7.2.1-py3-none-win_amd64.whl",
+                    f"{rocm_root}/rocm-7.2.1.tar.gz",
+                    f"{rocm_root}/torch-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl",
+                    f"{rocm_root}/torchaudio-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl",
+                ]
+                label = "AMD ROCm 7.2.1 (legacy Windows 11 support)"
+            install_plan.append((label, package_args, "rocm"))
     elif intel_candidate is not None and os.name == "nt":
         install_plan.append((
             "Intel XPU (Windows)",

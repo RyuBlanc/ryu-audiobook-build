@@ -52,7 +52,7 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
             (1, "CUDA 12.6 wheel unavailable"),
             (0, "CPU PyTorch installed"),
             (0, "Qwen package installed"),
-            (0, "torch=2.9.1+cpu\\ntorchaudio=2.9.1+cpu\\ncuda=False\\nxpu=False"),
+            (0, "torch=2.9.1+cpu\ntorchaudio=2.9.1+cpu\ncuda=False\nxpu=False"),
         ]
         candidate = type("Candidate", (), {"backend": "cuda-candidate", "name": "NVIDIA GPU"})()
         messages = []
