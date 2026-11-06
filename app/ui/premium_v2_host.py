@@ -6764,13 +6764,31 @@ class PremiumV2Bridge(QObject):
 
     @staticmethod
     def _models_remove_path(target: Path, allowed_root: Path) -> None:
-        root = Path(allowed_root).resolve()
-        candidate = Path(target).resolve()
+        raw_root = Path(allowed_root).expanduser()
+        raw_target = Path(target).expanduser()
+        if raw_root.is_symlink():
+            raise RuntimeError(f"Refusing to uninstall through a symbolic-link component root: {allowed_root}")
+        if raw_target.is_symlink():
+            raise RuntimeError(f"Refusing to remove a symbolic-link target: {target}")
+        try:
+            root = raw_root.resolve(strict=True)
+            candidate = raw_target.resolve(strict=True)
+        except OSError as exc:
+            raise RuntimeError(f"Cannot safely resolve uninstall path: {target}") from exc
         if candidate == root or root not in candidate.parents:
             raise RuntimeError(f"Refusing to remove a path outside the selected component root: {target}")
+        # Resolve-and-check the path one segment at a time. Path.resolve alone
+        # follows links; an in-root junction/symlink must not redirect deletion
+        # to another component, another drive, or user-owned data.
+        relative = candidate.relative_to(root)
+        current = root
+        for part in relative.parts:
+            current = current / part
+            if current.is_symlink():
+                raise RuntimeError(f"Refusing to uninstall through a symbolic link: {current}")
         if candidate.is_dir():
             shutil.rmtree(candidate)
-        elif candidate.exists():
+        elif candidate.is_file():
             candidate.unlink()
 
     def _models_install_component(self, model_id: str, payload: dict[str, Any], progress, force_repair: bool = False) -> str:
