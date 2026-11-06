@@ -153,6 +153,14 @@ class StorageRootSelectionTests(unittest.TestCase):
                 self.assertEqual(paths.model_cache_root(), app_data / "Models" / "huggingface")
                 self.assertEqual(paths.temporary_root(), app_data / "Temp")
 
+    def test_capacity_summary_reports_used_free_and_total(self):
+        from app.ui.settings_page import _storage_capacity_summary
+        with TemporaryDirectory() as temp:
+            usage = SimpleNamespace(free=50 * 1024**3, total=100 * 1024**3)
+            with patch("app.ui.settings_page.shutil.disk_usage", return_value=usage):
+                self.assertEqual(_storage_capacity_summary(Path(temp)), "50.0 GB used · 50.0 GB free · 100.0 GB total")
+            self.assertIn("Unavailable", _storage_capacity_summary(Path(temp) / "missing"))
+
 
 if __name__ == "__main__":
     unittest.main()
