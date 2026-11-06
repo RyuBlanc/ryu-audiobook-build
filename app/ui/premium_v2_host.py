@@ -462,6 +462,8 @@ class PremiumV2Bridge(QObject):
                 "storage.choose_root": self._storage_choose_root,
                 "storage.open_root": self._storage_open_root,
                 "storage.copy_root": self._storage_copy_root,
+                "storage.cleanup_source": self._storage_cleanup_source,
+                "storage.cleanup_temp": self._storage_cleanup_temp,
                 "models.list": self._models_list,
                 "models.files": self._models_files,
                 "models.open_folder": self._models_open_folder,
@@ -8136,7 +8138,24 @@ class PremiumV2Bridge(QObject):
                          "default_path": str(default), "available": bool(info.get("available")),
                          "file_count": int(info.get("file_count", 0)),
                          "component_bytes": int(info.get("total_bytes", 0)), **capacity})
-        return {"roots": rows, "restart_required": True}
+        pending_cleanup = []
+        journal_root = app_root() / "Settings" / "Storage Migrations"
+        if journal_root.is_dir():
+            from app.core.storage_migration import read_migration_journal
+            for journal_path in sorted(journal_root.glob("ryu-storage-migration-*.json")):
+                try:
+                    journal = read_migration_journal(journal_path)
+                except Exception:
+                    continue
+                if str(journal.get("state") or "") == "complete_source_retained":
+                    pending_cleanup.append({
+                        "journal_name": journal_path.name,
+                        "source": str(journal.get("source") or ""),
+                        "destination": str(journal.get("destination") or ""),
+                        "file_count": int(journal.get("file_count") or 0),
+                        "total_bytes": int(journal.get("total_bytes") or 0),
+                    })
+        return {"roots": rows, "pending_cleanup": pending_cleanup, "restart_required": True}
 
     def _storage_choose_root(self, payload: dict[str, Any]) -> dict[str, Any]:
         from app.core.storage_migration import migrate_storage_root, inventory_storage_root
@@ -8271,6 +8290,85 @@ class PremiumV2Bridge(QObject):
             raise RuntimeError("The desktop clipboard is unavailable.")
         app.clipboard().setText(path)
         return {"copied": True, "path": path}
+
+    def _storage_cleanup_source(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from app.core.paths import app_root
+        from app.core.storage_migration import read_migration_journal, cleanup_migrated_source
+        from PySide6.QtWidgets import QMessageBox
+        journal_root = (app_root() / "Settings" / "Storage Migrations").resolve()
+        name = Path(str(payload.get("journal_name") or "")).name
+        if not name or not name.startswith("ryu-storage-migration-") or not name.endswith(".json"):
+            raise ValueError("Choose a valid retained migration journal.")
+        journal_path = journal_root / name
+        if journal_path.is_symlink() or not journal_path.is_file() or journal_path.resolve().parent != journal_root:
+            raise FileNotFoundError("The selected migration journal is unavailable.")
+        with self._jobs_lock:
+            active = [job for job in self._jobs.values()
+                      if str(job.get("state") or "").casefold() in {"queued", "running"}]
+        if active:
+            raise RuntimeError("Retained-source cleanup is blocked while application jobs are active.")
+        journal = read_migration_journal(journal_path)
+        if str(journal.get("state") or "") != "complete_source_retained":
+            raise RuntimeError("This migration is not in a verified source-retained state and cannot be cleaned up.")
+        source = str(journal.get("source") or "")
+        destination = str(journal.get("destination") or "")
+        gib = 1024 ** 3
+        answer = QMessageBox.question(
+            None, "Confirm retained source cleanup",
+            "Delete the retained source copy only after rechecking every file against the active destination?\\n\\n"
+            + "Source: " + source + "\\nVerified destination: " + destination
+            + "\\nFiles: " + str(journal.get("file_count", 0))
+            + f" · {int(journal.get('total_bytes') or 0) / gib:.2f} GB"
+            + "\\n\\nIf any path, size or SHA-256 check fails, the source will be preserved.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return {"cancelled": True}
+        protected = tuple(Path(item[1]).expanduser() for item in self._storage_root_map().values())
+        result = cleanup_migrated_source(journal_path, protected_roots=protected)
+        return {"deleted": True, **result}
+
+    def _storage_cleanup_temp(self, _payload: dict[str, Any]) -> dict[str, Any]:
+        from app.core.storage_migration import safe_cleanup
+        from app.core.paths import (
+            model_cache_root, temporary_root, runtimes_root, library_root, audiobooks_root,
+        )
+        from PySide6.QtWidgets import QMessageBox
+        with self._jobs_lock:
+            active = [job for job in self._jobs.values()
+                      if str(job.get("state") or "").casefold() in {"queued", "running"}]
+        if active:
+            raise RuntimeError("Temporary/cache cleanup is blocked while application jobs are active.")
+        cache = model_cache_root()
+        temporary = temporary_root()
+        protected = (runtimes_root(), library_root(), audiobooks_root())
+        preview = safe_cleanup(
+            cache_roots=(cache,), temporary_roots=(temporary,),
+            dry_run=True, protected_paths=protected,
+        )
+        if not preview["candidate_count"]:
+            return {"cleaned": False, "candidate_count": 0, "candidate_bytes": 0,
+                    "candidates": [], "removed": []}
+        gib = 1024 ** 3
+        target_lines = "\\n".join(str(path) for path in preview["candidates"])
+        answer = QMessageBox.question(
+            None, "Review safe cache and temporary cleanup",
+            "Dry-run estimate: " + str(preview["candidate_count"]) + " eligible app-owned entries · "
+            + f"{int(preview['candidate_bytes']) / gib:.2f} GB"
+            + "\\n\\nExact targets:\\n" + target_lines
+            + "\\n\\nOnly immediate staging/downloads/temporary/tmp entries under the configured cache and temporary roots are eligible. "
+            "Model weights, provider runtimes, projects, source books, exports and voice data are not cleanup targets. Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return {"cancelled": True, **preview}
+        result = safe_cleanup(
+            cache_roots=(cache,), temporary_roots=(temporary,),
+            dry_run=False, protected_paths=protected,
+        )
+        return {"cleaned": True, **result}
 
     def _settings_get(self, _payload: dict[str, Any]) -> dict[str, Any]:
         self.settings.sync()
