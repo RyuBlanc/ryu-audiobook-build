@@ -160,3 +160,15 @@ The migration-engine source commit #2421 passed the test job. The following comm
 - Corrected the two assertions to compare canonical resolved paths in `tests/test_storage_migration.py`.
 - The correction is committed as `8e83fdc049308baf5dbcfd3b27df62cba181870d`; its matching CI run is pending.
 - Prior failed runs remain failed historical records; they are not relabeled as passing. The corrected head must pass the complete suite before the migration test gate is considered green.
+
+
+### Migration UI, recovery, inventory and cleanup implementation — 2026-11-06
+
+- Settings now launches the verified migration engine in a background QThread for a populated managed root. The main window is disabled during the operation, and migration is refused when another child QThread is already running. The selected setting is persisted only through the migration callback after the staged copy and integrity checks; the original root is retained.
+- Migration journals now record the exact QSettings key so startup recovery can restore the correct root, including the case where the setting previously relied on a default path.
+- `ensure_roots()` invokes conservative recovery before providers initialize. It only recovers a journal when the configured/effective root matches that journal's source or destination; otherwise it leaves the journal for inspection.
+- Models Center now exposes exact storage paths, file counts and byte totals, on-demand per-file SHA-256 inventory, and a confirmation-based temporary cleanup preview/action.
+- Cleanup only considers immediate children named `staging`, `downloads`, `temporary`, `tmp` or `cache` under the supplied app-owned temporary root. Unknown names, symlinked roots, protected paths, model weights, runtimes and model cache are excluded.
+- Added tests for interrupted migration recovery, cleanup dry-run/protected paths and unknown-entry exclusion, plus rollback preservation if the settings backend cannot restore the source.
+- Failed historical CI runs #2422–#2425 and #2429–#2445 are retained as failures. Identified causes include Windows path normalization in assertions, missing test imports, a test setup comparing canonical paths incorrectly, a startup-call newline syntax defect, and accidentally moving the stable Models Center refresh decorator. Fixes are present in later commits; the current matching-head run must prove them.
+- Current UI/recovery/cleanup implementation is still awaiting full regression. Build/packaged acceptance, external-drive unplug/replug, provider-by-provider download routing, no-duplicate-download behavior, and cleanup under active generation remain open.
