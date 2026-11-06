@@ -124,6 +124,12 @@ class StorageRootSelectionTests(unittest.TestCase):
                 self.assertEqual(paths.model_cache_root(), Path(selected["storage/model_cache_root"]))
                 self.assertEqual(paths.temporary_root(), Path(selected["storage/temporary_root"]))
 
+    def test_chatterbox_bootstrap_installer_uses_configured_temporary_root(self):
+        source = (Path(__file__).resolve().parents[1] / "app" / "tts" / "chatterbox_runtime.py").read_text(encoding="utf-8")
+        self.assertIn("temporary_root", source)
+        self.assertIn('installer = temporary_root() / "ryu-python-3.11.9-amd64.exe"', source)
+        self.assertNotIn('installer = local_app_data / "Temp" / "ryu-python-3.11.9-amd64.exe"', source)
+
     def test_model_related_defaults_preserve_existing_installation_layout(self):
         with TemporaryDirectory() as temp:
             app_data = Path(temp) / "Ryu's Audiobook"
