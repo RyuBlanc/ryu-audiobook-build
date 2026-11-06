@@ -1,55 +1,66 @@
 # Stage 7 — Packaged Acceptance Closeout Candidate
 
 **Audit date:** 6 November 2026  
-**Baseline:** `d4b4c20cad02852480dcf4072841df07abe1f747`  
-**Baseline branch:** `stage-7/step-2-storage-management`  
-**Candidate branch:** `stage-7/packaged-acceptance-closeout-2608`
+**Working branch:** `stage-7/step-6-safe-auto-fallback`  
+**Candidate source head before this checkpoint record:** `7fba1b24718cbfaa775619b629cf584adc1bed0e`  
+**Latest packaged feature checkpoint:** #2625, commit `544f0153d276d78c8f12d815e2ccbcf69c6ee049`
 
 ## Purpose
 
-Run the Windows packaged acceptance gate against the latest source-test-green Stage 7 candidate. This checkpoint is specifically required because the latest ordinary push (#2608) skipped the Windows build/package job. No Stage 7 completion claim is made by this ledger entry.
+Record the exact latest Stage 7 candidate, its new Qwen hardware workflow wiring, and the remaining matching-head package and physical-device gates. This document does not claim Stage 7 completion.
 
-## Failure audit
+## Previous packaged checkpoint
 
-### #2605 — packaged Production Chapter 2 selection timeout
+Run #2625 passed on commit `544f0153d276d78c8f12d815e2ccbcf69c6ee049`:
 
-- Workflow run: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42218590672
-- Failing job: `build` (job ID `127895699388`); regression job passed.
-- The packaged UI acceptance completed the Sound Design/Music Library checks and then timed out in `selectProductionPreviewChapter(2)`, specifically `waitForSelection`.
-- The picker assertion required the status label to contain the exact phrase `Chapter 2 selected.`. When a valid preview already existed for the selected chapter, the UI could render a Preview ready state instead. The test therefore coupled chapter selection to one presentation string and rejected a valid ready state.
-- The fix is present in baseline commit `d4b4c20`: the Production Preview status now reports `Preview ready · Chapter N` only when the valid preview's recorded chapter number matches the currently selected chapter; the packaged selector assertion accepts either the selected state or the chapter-qualified Preview ready state.
-- This addresses the observed status-contract mismatch, not by extending the timeout. Matching-head packaged acceptance is still required to prove the frozen application passes.
+- Windows regression job passed.
+- Windows application build/package job passed.
+- Frozen-app and packaged Sound Design/Music Library acceptance passed, including Production Preview chapter selection.
+- Installer, portable package, SHA-256 manifest, and Defender evidence were uploaded.
+- Bundled Piper benchmark artifact reported 12.852 seconds of generated audio in 3.813 seconds, RTF 0.297x, using ONNX CPUExecutionProvider on the hosted Windows runner. This is a CPU benchmark, not GPU proof.
 
-### #2606 — background TTS benchmark fixture failure
+Run: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42231677314
 
-- Workflow run: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42219666871
-- The full suite failed because `test_performance_benchmark_runs_in_background_and_reports_real_measurement` invoked the real installed-voice precondition without creating an isolated Piper model fixture.
-- The failure was a test-fixture defect: `_performance_benchmark` correctly refuses to enqueue a real benchmark when no local Piper ONNX voice is installed.
-- Correction is present in #2607 commit `643a52fa1bbcf418a7ef460cd9da3732c25710d3`: the test now creates a temporary `Models/piper/en_US-test-medium.onnx` fixture and isolates its paths.
-- #2607 passed the full 1,246-test suite. #2608 then passed the updated 1,247-test suite.
+## Qwen accelerator workflow correction
 
-## Existing CI evidence
+The Stage 7 audit found both accelerator acceptance workflows were not correctly integrated with the active Stage 7 branch:
 
-| Run | Commit | Result | Evidence |
-|---|---|---|---|
-| #2605 | `e7065e933195dcb4141052ee690833fb73c3bd34` | Failed | Source tests passed; packaged acceptance timed out in Production Chapter 2 selection |
-| #2606 | `9207ab8ceafb291c3299f55704f38cc4e3c49856` | Failed | Benchmark test lacked an isolated installed Piper fixture |
-| #2607 | `643a52fa1bbcf418a7ef460cd9da3732c25710d3` | Passed | Isolated Piper fixture correction; 1,246 tests passed |
-| #2608 | `d4b4c20cad02852480dcf4072841df07abe1f747` | Passed | Chapter-qualified preview readiness correction; 1,247 tests passed; Windows build skipped on ordinary push |
+- AMD/Intel workflow was still scoped to the Stage 3 branch.
+- NVIDIA workflow was manual-only.
 
-## Required checkpoint acceptance
+Both workflows have been corrected to run on relevant Qwen path changes under `stage-7/**`, while retaining manual dispatch.
 
-This candidate must run both jobs on the exact same HEAD:
+- AMD/Intel workflow commit: `12a1e37db4583d2c241b85d2c93517707a078b9f`; test CI #2626 passed.
+  - CI: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42236126629
+  - Real AMD/Intel hardware run #9 remains queued: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42236126768
+- NVIDIA workflow commit: `7fba1b24718cbfaa775619b629cf584adc1bed0e`; test CI #2627 passed.
+  - CI: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42236144051
+  - Real NVIDIA hardware run #1 remains queued: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42236144535
 
-1. Full regression suite, including the isolated Piper benchmark fixture.
-2. Frozen Windows application verification and packaged Sound Design/Music Library acceptance, including Production Chapter 2 selection.
-3. Windows installer payload and portable application build.
-4. Release SHA-256 manifest generation and artifact upload.
+Both #2626 and #2627 ran the full regression suite: **1,258 tests passed** on each. Their Windows build jobs were skipped because these were ordinary workflow-wiring commits, not artifact-checkpoint commits. The real hardware jobs are queued; no accelerator timing or hardware pass is claimed until those jobs execute and upload evidence.
 
-The packaged gate must explicitly pass the Production Chapter 2 selection and chapter-qualified preview-ready state in the frozen application. A green source-test job alone is not sufficient.
+## Required matching-head checkpoint
 
-## Remaining Stage 7 work
+This record is committed with an `[artifact-checkpoint]` message so the Windows build workflow runs both jobs against the same new HEAD:
 
-This checkpoint does not close Steps 4–7. After packaged acceptance, continue hardware/runtime truthfulness and compatibility, Performance Center measurement/history, automatic hardware optimization and Qwen performance, cross-module integration, UI gap coverage, and final packaged release acceptance. Preserve the approved Premium V2 design and all previously accepted Stage 1–6 behavior.
+1. Full Windows regression suite.
+2. Frozen Windows application verification and packaged feature acceptance.
+3. Installer and portable application packaging.
+4. SHA-256 manifest, Defender scan, and artifact upload.
 
-**Status: checkpoint queued by commit; acceptance pending GitHub Actions result.**
+Do not reuse #2625 package artifacts as matching-head acceptance for the later workflow commits.
+
+## Remaining Stage 7 acceptance
+
+1. **Steps 1–3 — Model inventory, storage and lifecycle:** retain existing implementation and passing regression evidence; complete matching-head packaged acceptance and actual installed-Windows checks for individual Piper/Kokoro/Qwen removal, shared Chatterbox/Qwen runtime removal, preserved model weights, voice profiles, projects and user assets.
+2. **Step 2 — Storage:** verify configurable roots, file inventory, migration, interrupted recovery, disconnected-drive handling and safe cleanup in the installed application. CI-only evidence is not a manual installed-app pass.
+3. **Step 4 — Hardware detection:** automated runtime-policy regression is green. Physical NVIDIA, AMD discrete/APU/iGPU and Intel Arc/Core Ultra validation remains device-dependent and must be recorded only for devices actually tested.
+4. **Step 5 — Performance Center:** verify persistent benchmark history, repeat/export, resource snapshots, PC-to-PC comparison/import, and truthful active backend/device reporting in the packaged app. Hardware scan must not be presented as a synthesis benchmark.
+5. **Step 6 — Optimization/Qwen:** run real warmed 30-second Qwen 1.7B VoiceDesign acceptance on supported NVIDIA, AMD ROCm and Intel XPU hardware. Require actual successful inference, correct backend telemetry, audio artifact and measured time. Target is under 60 seconds without reducing voice quality. CPU fallback must be labelled CPU and must not count as GPU acceptance.
+6. **Step 7 — Integration/release:** verify cross-module integration, Premium V2 UI behavior and no regressions to accepted Stage 1–6 workflows; update all execution records and the master register; run final installer/portable acceptance on the exact release commit.
+
+## Acceptance rule
+
+A green source regression run, a hosted CPU benchmark, a queued self-hosted job, or an earlier packaged checkpoint is not a substitute for the exact evidence required above.
+
+**Status: IN PROGRESS — 1,258-test regression is green; Qwen hardware runs are queued; matching-head Windows packaging and installed-device acceptance remain open.**
