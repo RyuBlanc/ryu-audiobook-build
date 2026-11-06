@@ -1,0 +1,68 @@
+# Stage 7 Master Requirement, Bug and Change Register
+
+**Target:** Version 1.2.0  
+**Canonical branch:** `stage-7/step-6-safe-auto-fallback`  
+**Evidence baseline:** #2628, `0fc9d8189311419414746ffb23d89df9c65d116c`  
+**Audit date:** 6 November 2026
+
+## Status conventions
+
+PASS = automated regression/package evidence passed. OPEN = evidence outstanding. QUEUED = job has not started, not a pass. WAIVED / NOT RUN = user-excluded physical installation, not represented as success. Historical failures remain recorded.
+
+## Master requirement register
+
+| ID | Requirement | Evidence | Status |
+|---|---|---|---|
+| MOD-01 | Unified model registry and actual inventory | Step 1 ledger; #2628 | PASS — installed-app check waived |
+| MOD-02 | Configurable storage roots and accurate accounting | Step 2 ledger; #2628 | PASS — installed-app check waived |
+| MOD-03 | Safe migration, verification, rollback and recovery | `tests/test_storage_migration.py`; #2628 | PASS — physical drive check waived |
+| MOD-04 | Unavailable-drive preservation and safe cleanup | Step 2 ledger; #2628 | PASS — physical drive check waived |
+| LIF-01 | Individual Piper/Kokoro/Qwen/Audiobook AI removal | `tests/test_models_center_lifecycle.py`; #2628 | PASS — installed-app check waived |
+| LIF-02 | Shared Chatterbox/Qwen runtime removal independent of weights/cache | Step 3 ledger; #2628 | PASS — installed-app check waived |
+| LIF-03 | Ownership boundaries, symlink protection, active-job blocking and inventory refresh | Step 3 tests; #2628 | PASS |
+| HW-01 | Truthful CPU/GPU detection and runtime compatibility | `tests/test_qwen_runtime_safety.py`; #2628 | PASS — physical matrix open |
+| HW-02 | NVIDIA real Qwen 1.7B preview under 60 seconds | NVIDIA run #1 | QUEUED |
+| HW-03 | AMD ROCm real Qwen 1.7B preview under 60 seconds | AMD/Intel run #9 | QUEUED |
+| HW-04 | Intel XPU real Qwen 1.7B preview under 60 seconds | AMD/Intel run #9 | QUEUED |
+| PERF-01 | Real benchmark records and verified backend reporting | Benchmark/runtime tests; #2628 | PASS |
+| PERF-02 | Persistent history, repeat/export and resource snapshots | Performance Center regression; #2625/#2628 | PASS — installed-app interaction waived |
+| PERF-03 | PC benchmark import and comparison | #2624/#2625 | PASS |
+| QWEN-01 | Model preference, runtime selection and safe fallback | Qwen policy/runtime tests; #2626/#2627/#2628 | PASS |
+| QWEN-02 | 30-second preview under 60 seconds without quality loss | Real GPU artifacts pending | OPEN |
+| INT-01 | Cross-module regression and packaged acceptance | #2628, 1,258 tests | PASS |
+| REL-01 | Installer, portable, SHA-256 and Defender evidence | #2628 exact HEAD artifacts | PASS |
+| REL-02 | Seven ledgers and master register on final candidate | Documentation closeout | OPEN until matching-head CI/package |
+| REL-03 | Actual installed Windows acceptance | Explicitly excluded by user | WAIVED / NOT RUN |
+
+## Defect and change register
+
+| Record | Root cause / correction | Evidence | Disposition |
+|---|---|---|---|
+| BUG-STEP3-ROOTS | Legacy Qwen/Chatterbox uninstall workers validated against wrong root after storage-root split | #2541–#2545; #2628 | Corrected |
+| BUG-STEP3-FIXTURE | Lifecycle fixtures assumed shared Models/Runtime roots or patched wrong imported references | #2527–#2530 corrected by later tests | Corrected; failures retained |
+| BUG-PACKAGED-2605 | Production Preview chapter selection assertion rejected valid chapter-qualified preview-ready state | Later package checkpoints #2622/#2625/#2628 | Corrected |
+| BUG-BENCH-2606 | Benchmark test lacked isolated installed Piper fixture | #2607/#2608 and #2628 | Corrected |
+| BUG-TASKMANAGER-2547 | Task Manager exceeded 600x800 viewport due to fixed width and overlay padding | #2548/#2549 and #2628 | Corrected |
+| BUG-PC-COMPARE-2623 | PC comparison/import change initially failed CI | #2624/#2625/#2628 | Corrected |
+| CI-QWEN-AMDI-BRANCH | AMD/Intel workflow targeted Stage 3 instead of Stage 7 | #2626 | Corrected; hardware run queued |
+| CI-QWEN-NVIDIA-TRIGGER | NVIDIA workflow was dispatch-only | #2627 | Corrected; hardware run queued |
+| CI-PACKAGED-2628 | Matching-head package checkpoint | #2628 | PASS |
+
+## Current blockers
+
+1. NVIDIA #1 and AMD/Intel #9 are queued on self-hosted runner labels; verify runner availability or record the unavailable hardware limitation.
+2. Qwen target requires real 27–33 second audio, warmed synthesis under 60 seconds, verified active backend and quality evidence.
+3. Final documentation commit must pass matching-head regression and package checkpoint.
+4. Physical installation is user-waived / not run.
+
+## Evidence links
+
+- #2628: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42236851623
+- #2627 NVIDIA workflow trigger CI: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42236144051
+- NVIDIA hardware run #1: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42236144535
+- #2626 AMD/Intel workflow trigger CI: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42236126629
+- AMD/Intel hardware run #9: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42236126768
+- #2625 Performance Center package: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42231677314
+- #2624 PC benchmark comparison/import: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42231216994
+
+**Disposition:** Software and package gates green through #2628. Hardware performance and final documentation-head acceptance remain open. Physical installation is waived, not passed.
