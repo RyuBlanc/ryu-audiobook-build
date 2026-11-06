@@ -177,6 +177,27 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
                     )
                 open_url.assert_not_called()
 
+    def test_chatterbox_runtime_uninstall_preflight_uses_provider_runtime_storage(self):
+        bridge = self.make_bridge()
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            models = base / "Models"
+            runtime = base / "Provider Runtime" / "chatterbox"
+            runtime.mkdir(parents=True)
+            (runtime / "runtime.json").write_text("{}", encoding="utf-8")
+            row = {"model_id":"chatterbox-runtime","name":"Chatterbox Runtime",
+                   "component_type":"model","installed":True}
+            with (
+                patch("app.core.paths.models_root", return_value=models),
+                patch("app.tts.chatterbox_runtime.RUNTIME_DIR", runtime),
+                patch("app.tts.model_registry.build_inventory", return_value=[row]),
+            ):
+                impact = bridge._models_uninstall_preflight({"model_id":"chatterbox-runtime"})
+                outcome = bridge._models_uninstall_component("chatterbox-runtime", {}, lambda _message: None)
+            self.assertEqual(impact["targets"], [str(runtime)])
+            self.assertFalse(runtime.exists())
+            self.assertIn("Chatterbox runtime", outcome)
+
     def test_individual_qwen_model_uninstall_preserves_other_model_folders(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "Models"
