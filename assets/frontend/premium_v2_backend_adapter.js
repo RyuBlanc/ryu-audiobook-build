@@ -7868,6 +7868,81 @@
     }
     return rows;
   }
+  async function renderHardwareOptimizationSettings(result = {}) {
+    const section = $('performance');
+    if (!section) return;
+    let panel = $('performanceHardwareOptimization');
+    if (!panel) {
+      panel = document.createElement('section');
+      panel.id = 'performanceHardwareOptimization';
+      panel.className = 'card';
+      panel.style.marginTop = '18px';
+      section.appendChild(panel);
+    }
+    let settings = {};
+    try { settings = await call('settings.get', {}); } catch (error) {
+      panel.innerHTML = '<h3>Hardware Optimization</h3><p class="muted">Settings are unavailable: ' + esc(error?.message || error) + '</p>';
+      return;
+    }
+    const accelerators = Array.isArray(result.accelerators) ? result.accelerators : [];
+    const available = [...new Set(accelerators
+      .filter(item => item && item.supported === true && ['cuda', 'rocm', 'xpu'].includes(String(item.backend)))
+      .map(item => String(item.backend)))];
+    const options = [
+      {value:'automatic', label:'Automatic — choose the best validated backend'},
+      {value:'cpu', label:'CPU only'}
+    ];
+    if (available.includes('cuda')) options.push({value:'cuda',label:'NVIDIA CUDA'});
+    if (available.includes('rocm')) options.push({value:'rocm',label:'AMD ROCm'});
+    if (available.includes('xpu')) options.push({value:'xpu',label:'Intel XPU'});
+    const selected = String(settings.qwen_backend || 'automatic').toLowerCase();
+    if (!options.some(option => option.value === selected)) {
+      options.push({value:selected,label:selected.toUpperCase() + ' — saved choice, currently unavailable'});
+    }
+    const lowMemory = settings.qwen_low_memory === true;
+    const concurrency = lowMemory ? 1 : Math.max(1, Math.min(3, Number(settings.concurrency || 1)));
+    const last = result.last_inference && typeof result.last_inference === 'object' ? result.last_inference : {};
+    const actual = last.verified_inference
+      ? String(last.backend || 'unknown').toUpperCase() + ' · ' + String(last.device || 'device unavailable')
+      : 'No verified Qwen inference recorded yet';
+    panel.innerHTML =
+      '<div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">' +
+        '<div><h3 style="margin:0">Hardware Optimization</h3>' +
+        '<p class="muted" style="margin:4px 0 0">Hardware detection, validated runtime and actual model inference are reported separately.</p></div>' +
+        '<span class="muted" style="font-size:12px">Last Qwen inference: ' + esc(actual) + '</span></div>' +
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:14px">' +
+        '<label>Preferred Qwen backend<select id="performanceQwenBackend" class="input" style="display:block;width:100%;margin-top:6px">' +
+          options.map(option => '<option value="' + esc(option.value) + '"' + (option.value === selected ? ' selected' : '') + '>' + esc(option.label) + '</option>').join('') +
+        '</select></label>' +
+        '<label style="display:flex;gap:8px;align-items:center"><input id="performanceQwenLowMemory" type="checkbox"' + (lowMemory ? ' checked' : '') + '> Low-memory mode</label>' +
+        '<label>Maximum concurrent audiobook jobs<select id="performanceHeavyConcurrency" class="input" style="display:block;width:100%;margin-top:6px"' + (lowMemory ? ' disabled' : '') + '>' +
+          [1,2,3].map(value => '<option value="' + value + '"' + (value === concurrency ? ' selected' : '') + '>' + value + '</option>').join('') +
+        '</select></label>' +
+      '</div>' +
+      '<p class="muted" style="margin:10px 0 0;font-size:12px">Low-memory mode enforces one heavy generation job, enables low-memory model loading and checks available accelerator memory before loading. If a GPU runtime cannot be validated, Auto reports the reason and falls back to CPU without changing the selected model or voice identity. Settings apply to new jobs; active inference is never switched mid-job.</p>' +
+      '<div style="display:flex;justify-content:flex-end;margin-top:12px"><button type="button" class="' + esc($('runTtsBenchmark')?.className || $('runBenchmark')?.className || 'btn') + '" data-save-hardware-optimization>Save optimization settings</button></div>';
+    const low = panel.querySelector('#performanceQwenLowMemory');
+    const concurrencySelect = panel.querySelector('#performanceHeavyConcurrency');
+    low?.addEventListener('change', () => {
+      if (concurrencySelect) {
+        concurrencySelect.disabled = low.checked;
+        if (low.checked) concurrencySelect.value = '1';
+      }
+    });
+    panel.querySelector('[data-save-hardware-optimization]')?.addEventListener('click', act(async () => {
+      const backend = panel.querySelector('#performanceQwenBackend')?.value || 'automatic';
+      const lowMemoryEnabled = Boolean(low?.checked);
+      const maxConcurrent = lowMemoryEnabled ? 1 : Number(concurrencySelect?.value || 1);
+      await call('settings.save', {
+        qwen_backend: backend,
+        qwen_low_memory: lowMemoryEnabled,
+        concurrency: maxConcurrent
+      });
+      message('Hardware optimization settings saved. They apply to newly started Qwen and audiobook generation jobs.');
+      await refreshPerformance();
+    }));
+  }
+
   function renderPerformanceHistory(result = {}) {
     const section = $('performance');
     if (!section) return;
@@ -7997,6 +8072,7 @@
       if($('benchmarkResult'))$('benchmarkResult').textContent='Not tested';
       const note=$('benchmarkResult')?.parentElement?.querySelector('p.muted');
       if(note)note.textContent=result?.reason||'Host telemetry is unavailable on this device.';
+      await renderHardwareOptimizationSettings(result || {});
       renderPerformanceHistory(result || {});
       return {...(result||{}),available:false};
     }
@@ -8029,6 +8105,7 @@
     const note=$('benchmarkResult')?.parentElement?.querySelector('p.muted');
     if(note)note.textContent=(result.reason||'Live host telemetry connected.')+' · '+(result.platform||'')+' · '+(result.processor||'');
     if($('benchmarkResult'))$('benchmarkResult').textContent=duration===null?'Not tested':duration.toFixed(1)+' s';
+    await renderHardwareOptimizationSettings(result);
     renderPerformanceHistory(result);
     return result;
   }

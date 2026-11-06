@@ -12,6 +12,8 @@ from app.tts.providers.elevenlabs import ElevenLabsProvider
 from app.tts.providers.qwen_character import QwenCharacterProvider
 from app.tts.qwen_model_preference import (
     get_qwen_model_preference,
+    get_qwen_backend_preference,
+    get_qwen_low_memory_mode,
     qwen_model_kinds_for_preference,
 )
 
@@ -34,12 +36,19 @@ def provider_from_profile(profile: VoiceProfile):
             mode, get_qwen_model_preference()
         )
         effective_model_kind = global_model_kind or profile.model_id or "auto"
+        profile_backend = str(profile.backend or "automatic").strip().casefold()
+        effective_backend = (
+            get_qwen_backend_preference()
+            if profile_backend in {"auto", "automatic", ""}
+            else profile_backend
+        )
         return (
             QwenCharacterProvider(
                 voice_id=profile.voice_id,
                 language=profile.language or "English",
                 instruct=profile.qwen_prompt or profile.notes,
-                backend=profile.backend,
+                backend=effective_backend,
+                low_memory=get_qwen_low_memory_mode(),
                 model_kind=effective_model_kind,
                 reference_audio=(
                     Path(profile.sample_path).expanduser()

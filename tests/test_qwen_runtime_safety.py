@@ -81,6 +81,62 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
         self.assertTrue(any("CPU compatibility mode" in message for message in messages))
         self.assertEqual(runner.call_count, 6)
 
+    def test_preflight_gpu_memory_guard_rejects_model_that_exceeds_free_vram(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from app.tts import qwen_character_worker as worker
+
+        class FakeCuda:
+            @staticmethod
+            def mem_get_info(_device=None):
+                return 100, 1000
+
+        fake_torch = SimpleNamespace(cuda=FakeCuda())
+        with TemporaryDirectory() as temporary:
+            model_path = Path(temporary)
+            (model_path / "model.safetensors").write_bytes(b"x" * 100)
+            with self.assertRaisesRegex(RuntimeError, "cuda:0 out of memory"):
+                worker._preflight_device_memory(fake_torch, "cuda:0", model_path, False)
+
+    def test_low_memory_worker_flag_uses_low_cpu_mem_usage_and_same_model(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.tts import qwen_character_worker as worker
+
+        calls = []
+        class FakeCuda:
+            @staticmethod
+            def is_available():
+                return False
+        class FakeTorch:
+            float32 = "float32"
+            cuda = FakeCuda()
+            version = SimpleNamespace(hip=None)
+            @staticmethod
+            def set_num_threads(_count):
+                return None
+        class FakeModel:
+            @staticmethod
+            def from_pretrained(path, **kwargs):
+                calls.append((path, kwargs))
+                return object()
+        with TemporaryDirectory() as temporary:
+            model_root = Path(temporary)
+            (model_root / "custom-1.7b").mkdir()
+            with (
+                patch.dict(sys.modules, {"torch": FakeTorch, "qwen_tts": SimpleNamespace(Qwen3TTSModel=FakeModel)}),
+                patch.object(worker, "best_accelerator", return_value=SimpleNamespace(
+                    supported=False, backend="cpu", device="cpu", name="CPU", reason=""
+                )),
+            ):
+                _model, device = worker._load_model("custom-1.7b", "cpu", model_root, low_memory=True)
+        self.assertEqual(device, "cpu")
+        self.assertEqual(calls[0][0], str(model_root / "custom-1.7b"))
+        self.assertTrue(calls[0][1].get("low_cpu_mem_usage"))
+
     def test_stdout_drain_uses_captured_queue_after_close_clears_provider_state(self):
         import queue
         import threading
@@ -130,6 +186,27 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
         self.assertFalse(reader.is_alive(), "Qwen stdout reader did not terminate.")
         self.assertEqual(output_queue.get_nowait(), '{"ready": true}')
         self.assertIsNone(output_queue.get_nowait())
+
+    def test_qwen_provider_persists_verified_last_inference_device(self):
+        import json
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from app.tts.providers import qwen_character
+
+        provider = qwen_character.QwenCharacterProvider(
+            voice_id="telemetry-test", backend="automatic", model_kind="custom-1.7b"
+        )
+        with TemporaryDirectory() as temporary:
+            with patch.object(qwen_character, "settings_root", return_value=Path(temporary)):
+                provider._record_execution_context({
+                    "device": "cuda:0", "kind": "custom-1.7b", "task": "custom"
+                })
+            record = json.loads((Path(temporary) / "qwen_last_inference.json").read_text(encoding="utf-8"))
+        self.assertTrue(record["verified_inference"])
+        self.assertEqual(record["backend"], "cuda")
+        self.assertEqual(record["device"], "cuda:0")
+        self.assertEqual(record["model_kind"], "custom-1.7b")
 
     def test_close_tolerates_already_closed_qwen_streams(self):
         from types import SimpleNamespace

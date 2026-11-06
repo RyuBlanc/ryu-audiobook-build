@@ -4,6 +4,7 @@ import argparse
 from contextlib import redirect_stdout
 from pathlib import Path
 import gc
+import os
 import hashlib
 import json
 import sys
@@ -50,7 +51,52 @@ MODEL_IDS = {
 }
 
 
-def _load_model(kind: str, backend: str, root: Path):
+def _model_weight_bytes(model_path: Path) -> int:
+    weight_suffixes = {".safetensors", ".bin", ".pt", ".pth"}
+    total = 0
+    try:
+        for path in model_path.rglob("*"):
+            if path.is_file() and path.suffix.casefold() in weight_suffixes:
+                total += path.stat().st_size
+    except OSError:
+        return 0
+    return total
+
+
+def _preflight_device_memory(torch, device: str, model_path: Path, low_memory: bool) -> None:
+    if not (str(device).startswith("cuda") or str(device).startswith("xpu")):
+        return
+    try:
+        if str(device).startswith("cuda"):
+            try:
+                free_bytes, total_bytes = torch.cuda.mem_get_info(device)
+            except TypeError:
+                free_bytes, total_bytes = torch.cuda.mem_get_info()
+        else:
+            mem_get_info = getattr(torch.xpu, "mem_get_info", None)
+            if not callable(mem_get_info):
+                return
+            try:
+                free_bytes, total_bytes = mem_get_info(0)
+            except TypeError:
+                free_bytes, total_bytes = mem_get_info()
+    except Exception:
+        return
+    weight_bytes = _model_weight_bytes(model_path)
+    if weight_bytes <= 0:
+        return
+    reserve_factor = 1.15 if low_memory else 1.30
+    required_bytes = int(weight_bytes * reserve_factor)
+    if int(free_bytes) < required_bytes:
+        raise RuntimeError(
+            f"{device} out of memory: Qwen model weights require about "
+            f"{weight_bytes / (1024 ** 3):.2f} GB plus a {int((reserve_factor - 1) * 100)}% "
+            f"runtime reserve, but only {int(free_bytes) / (1024 ** 3):.2f} GB is free. "
+            "The same selected model will be retried on CPU."
+        )
+
+
+def _load_model(kind: str, backend: str, root: Path, low_memory: bool = False):
     import torch
     from qwen_tts import Qwen3TTSModel
 
@@ -82,6 +128,12 @@ def _load_model(kind: str, backend: str, root: Path):
             f"Detected: {selected.backend} ({selected.name}). {selected.reason}"
         )
 
+    if low_memory and device == "cpu":
+        try:
+            torch.set_num_threads(max(1, min(4, (os.cpu_count() or 4) // 2)))
+        except Exception:
+            pass
+    _preflight_device_memory(torch, device, model_path, low_memory)
     if device.startswith("cuda"):
         dtype = _inference_dtype(torch, device)
     elif device.startswith("xpu"):
@@ -100,6 +152,8 @@ def _load_model(kind: str, backend: str, root: Path):
         "dtype": dtype,
         "attn_implementation": "sdpa",
     }
+    if low_memory:
+        kwargs["low_cpu_mem_usage"] = True
     with redirect_stdout(sys.stderr):
         model = Qwen3TTSModel.from_pretrained(str(model_path), **kwargs)
     gc.collect()
@@ -409,16 +463,20 @@ def _prepare_design_clone(model, request: dict, args):
 
     requested_clone_kind = args.clone_kind
     try:
-        clone_model, clone_device = _load_model(requested_clone_kind, args.backend, root)
+        clone_model, clone_device = _load_model(
+            requested_clone_kind, args.backend, root, low_memory=args.low_memory
+        )
     except Exception as exc:
-        if _is_cuda_oom(exc) and str(requested_clone_kind) == "base-1.7b":
-            fallback_kind = "base-0.6b"
-            if (root / fallback_kind).exists():
-                print(json.dumps({"progress": "Base 1.7B exceeded available GPU memory • switching to Base 0.6B"}), flush=True)
-                clone_model, clone_device = _load_model(fallback_kind, args.backend, root)
-                args.clone_kind = fallback_kind
-            else:
-                raise
+        if _is_cuda_oom(exc) and args.backend != "cpu":
+            print(json.dumps({
+                "progress": (
+                    f"{requested_clone_kind} exceeded available GPU memory • "
+                    "retrying the same selected model on CPU without changing voice identity…"
+                )
+            }), flush=True)
+            clone_model, clone_device = _load_model(
+                requested_clone_kind, "cpu", root, low_memory=args.low_memory
+            )
         else:
             raise
 
@@ -507,11 +565,11 @@ def server(args) -> int:
         nonlocal model, device, active_kind
         try:
             print(json.dumps({"progress": f"Loading Qwen model • {kind}"}), flush=True)
-            model, device = _load_model(kind, args.backend, root)
+            model, device = _load_model(kind, args.backend, root, low_memory=args.low_memory)
         except Exception as exc:
             if allow_cpu_fallback and _is_cuda_oom(exc) and args.backend != "cpu":
                 print(json.dumps({"progress": f"{kind} did not fit GPU memory • switching to CPU compatibility mode…"}), flush=True)
-                model, device = _load_model(kind, "cpu", root)
+                model, device = _load_model(kind, "cpu", root, low_memory=args.low_memory)
             else:
                 raise
         active_kind = kind
@@ -556,7 +614,7 @@ def server(args) -> int:
                     model = None
                     gc.collect()
                     clear_model_cache(device)
-                model, device = _load_model(cached_kind, args.backend, root)
+                model, device = _load_model(cached_kind, args.backend, root, low_memory=args.low_memory)
                 active_kind = cached_kind
             return
 
@@ -599,7 +657,7 @@ def server(args) -> int:
                 gc.collect()
                 clear_model_cache(device)
             try:
-                model, device = _load_model(clone_kind, args.backend, root)
+                model, device = _load_model(clone_kind, args.backend, root, low_memory=args.low_memory)
             except Exception as exc:
                 if _is_cuda_oom(exc) and args.backend != "cpu":
                     # Respect the globally selected Base size. A GPU OOM may
@@ -608,7 +666,7 @@ def server(args) -> int:
                     print(json.dumps({
                         "progress": f"{clone_kind} did not fit GPU memory • retrying the same model on CPU…"
                     }), flush=True)
-                    model, device = _load_model(clone_kind, "cpu", root)
+                    model, device = _load_model(clone_kind, "cpu", root, low_memory=args.low_memory)
                 else:
                     raise
         active_kind = clone_kind
@@ -835,18 +893,18 @@ def server(args) -> int:
                         # A preview may fall back to CPU, but keep it on the same
                         # VoiceDesign model/prompt path; never swap into the
                         # production Base-anchor identity workflow during audition.
-                        model, device = _load_model(str(args.kind), "cpu", root)
+                        model, device = _load_model(str(args.kind), "cpu", root, low_memory=args.low_memory)
                         active_kind = str(args.kind)
                         _generate_design_preview(model, request, Path(str(request.get("output"))))
                     elif active_task == "design":
                         # Production narration retains the stable VoiceDesign/Base identity lock.
-                        model, device = _load_model(str(args.clone_kind), "cpu", root)
+                        model, device = _load_model(str(args.clone_kind), "cpu", root, low_memory=args.low_memory)
                         active_kind = str(args.clone_kind)
                         if locked_clone_prompts is None:
                             raise RuntimeError("The stable VoiceDesign identity could not be restored after GPU memory fallback.")
                         _generate_design_locked(model, locked_clone_prompts, request, Path(str(request.get("output"))))
                     else:
-                        model, device = _load_model(active_kind, "cpu", root)
+                        model, device = _load_model(active_kind, "cpu", root, low_memory=args.low_memory)
                         if active_task == "custom":
                             _generate_custom(model, request, Path(str(request.get("output"))))
                         else:
@@ -884,6 +942,7 @@ def main() -> int:
         default="custom",
     )
     parser.add_argument("--backend", default="automatic")
+    parser.add_argument("--low-memory", action="store_true")
     parser.add_argument("--models-root", required=True)
     args = parser.parse_args()
     if args.server:

@@ -5780,13 +5780,23 @@ class PremiumV2Bridge(QObject):
             "queued", "running", "paused", "pause_requested", "cancel_requested", "retrying"
         }
         with self._jobs_lock:
-            active_for_project = [
+            active_generations = [
                 row for row in getattr(self, "_jobs", {}).values()
                 if str(row.get("type") or "") == "audiobook-generation"
-                and str(row.get("project_folder") or "")
-                and Path(str(row.get("project_folder"))).expanduser().resolve() == project.folder.resolve()
                 and str(row.get("state") or "").casefold() in active_generation_states
             ]
+            active_for_project = [
+                row for row in active_generations
+                if str(row.get("project_folder") or "")
+                and Path(str(row.get("project_folder"))).expanduser().resolve() == project.folder.resolve()
+            ]
+            concurrency_limit = self._generation_concurrency_limit()
+            if len(active_generations) >= concurrency_limit:
+                raise ValueError(
+                    f"The configured heavy-generation limit is {concurrency_limit}. "
+                    "Wait for an active audiobook job to finish, or increase the limit in Performance Center. "
+                    "Low-memory mode enforces one heavy job at a time."
+                )
         if active_for_project:
             raise ValueError("This project already has an active audiobook generation job. Resume or cancel that job before starting another.")
 
@@ -5889,13 +5899,21 @@ class PremiumV2Bridge(QObject):
         # Two concurrent Generate/Retry requests can both pass the early
         # preflight check; only the first may claim this project's generation.
         with self._jobs_lock:
-            active_for_project = [
+            active_generations = [
                 row for row in getattr(self, "_jobs", {}).values()
                 if str(row.get("type") or "") == "audiobook-generation"
-                and str(row.get("project_folder") or "")
-                and Path(str(row.get("project_folder"))).expanduser().resolve() == project.folder.resolve()
                 and str(row.get("state") or "").casefold() in active_generation_states
             ]
+            active_for_project = [
+                row for row in active_generations
+                if str(row.get("project_folder") or "")
+                and Path(str(row.get("project_folder"))).expanduser().resolve() == project.folder.resolve()
+            ]
+            if len(active_generations) >= self._generation_concurrency_limit():
+                raise ValueError(
+                    "The heavy-generation concurrency limit was reached before this job could start. "
+                    "No project state was changed."
+                )
             if active_for_project:
                 raise ValueError("This project already has an active audiobook generation job. Resume or cancel that job before starting another.")
             job_id = self._new_job(
@@ -6579,7 +6597,8 @@ class PremiumV2Bridge(QObject):
                    "text_scale": "ui/text_scale", "window_size": "ui/window_size",
                    "effects": "ui/effects", "reduce_motion": "ui/reduce_motion",
                    "preview_seconds": "audio/preview_seconds", "bitrate": "production/bitrate",
-                   "concurrency": "production/concurrency", "local_first": "privacy/local_first",
+                   "concurrency": "production/concurrency", "qwen_backend": "qwen/backend_preference",
+                   "qwen_low_memory": "qwen/low_memory_mode", "local_first": "privacy/local_first",
                    "output_folder": "paths/output_folder",
                    "player_rate": "player/playback_rate",
                    "player_volume": "player/playback_volume"}
@@ -6611,6 +6630,26 @@ class PremiumV2Bridge(QObject):
                     raise ValueError("Preview duration must be 10, 30, 60, or 90 seconds.")
             if key == "bitrate" and not 128 <= int(value) <= 320:
                 raise ValueError("Bitrate must be from 128 to 320 kbps.")
+            if key == "concurrency":
+                try:
+                    value = int(value)
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise ValueError("Maximum concurrent generation jobs must be 1, 2, or 3.") from exc
+                if value not in {1, 2, 3}:
+                    raise ValueError("Maximum concurrent generation jobs must be 1, 2, or 3.")
+                if bool(payload.get("qwen_low_memory", self.settings.value("qwen/low_memory_mode", False, type=bool))):
+                    value = 1
+            if key == "qwen_backend":
+                value = str(value or "automatic").strip().casefold()
+                if value not in {"automatic", "cpu", "cuda", "rocm", "xpu"}:
+                    raise ValueError("Choose Automatic, CPU, NVIDIA CUDA, AMD ROCm, or Intel XPU.")
+                if value in {"cuda", "rocm", "xpu"}:
+                    from app.tts.qwen_accelerator import detect_accelerators
+                    active = detect_accelerators(refresh=True)
+                    if not any(item.backend == value and item.supported for item in active):
+                        raise ValueError(f"The {value.upper()} backend is not currently validated on this device.")
+            if key == "qwen_low_memory" and not isinstance(value, bool):
+                raise ValueError("Low-memory mode must be enabled or disabled.")
             if key == "player_rate":
                 try:
                     value = float(value)
@@ -6637,6 +6676,16 @@ class PremiumV2Bridge(QObject):
             if callable(apply_size):
                 apply_size(str(payload["window_size"]))
         return self._settings_get({})
+
+    def _generation_concurrency_limit(self) -> int:
+        """Return the enforced heavy-generation cap; low-memory mode is always serial."""
+        try:
+            if bool(self.settings.value("qwen/low_memory_mode", False, type=bool)):
+                return 1
+            configured = int(self.settings.value("production/concurrency", 1) or 1)
+        except (TypeError, ValueError, OverflowError):
+            configured = 1
+        return max(1, min(3, configured))
 
     def _assert_no_active_model_lifecycle(self, activity: str) -> None:
         """Prevent synthesis/analysis from opening a runtime while files are being changed."""
@@ -7608,6 +7657,15 @@ class PremiumV2Bridge(QObject):
                 latest_benchmark = dict(latest_row.get("result") or {})
                 latest_benchmark["measured_at"] = latest_row.get("completed_at") or latest_row.get("updated_at")
         generation_seconds = latest_benchmark.get("seconds")
+        last_inference: dict[str, Any] = {}
+        try:
+            inference_path = settings_root() / "qwen_last_inference.json"
+            if inference_path.is_file():
+                candidate = json.loads(inference_path.read_text(encoding="utf-8"))
+                if isinstance(candidate, dict) and candidate.get("verified_inference") is True:
+                    last_inference = candidate
+        except (OSError, ValueError, TypeError):
+            last_inference = {}
         return {
             "available": cpu_percent is not None or memory_total is not None or bool(devices),
             "cpu_percent": cpu_percent, "memory_total_bytes": memory_total,
@@ -7625,6 +7683,7 @@ class PremiumV2Bridge(QObject):
             "benchmark_provider": latest_benchmark.get("provider"),
             "benchmark_measured_at": latest_benchmark.get("measured_at"),
             "benchmark_history": benchmark_history,
+            "last_inference": last_inference,
             "measured_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -8912,6 +8971,9 @@ class PremiumV2Bridge(QObject):
                 "production/bitrate",
                 self.settings.value("audio/default_bitrate", 256),
             ) or 256),
+            "concurrency": max(1, min(3, int(self.settings.value("production/concurrency", 1) or 1))),
+            "qwen_backend": str(self.settings.value("qwen/backend_preference", "automatic") or "automatic"),
+            "qwen_low_memory": bool(self.settings.value("qwen/low_memory_mode", False, type=bool)),
         }
 
 

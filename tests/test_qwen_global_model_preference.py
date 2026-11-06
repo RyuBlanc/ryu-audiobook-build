@@ -41,6 +41,33 @@ class QwenGlobalModelPreferenceTests(unittest.TestCase):
             (None, None),
         )
 
+    def test_global_hardware_preference_and_low_memory_apply_to_auto_profiles(self):
+        saved_profile = VoiceProfile(
+            "Saved Hero", "qwen-character", "Ryan",
+            model_id="custom-1.7b", qwen_mode="custom", backend="automatic",
+        )
+        with (
+            patch("app.tts.profile_provider.get_qwen_model_preference", return_value="1.7b"),
+            patch("app.tts.profile_provider.get_qwen_backend_preference", return_value="cpu"),
+            patch("app.tts.profile_provider.get_qwen_low_memory_mode", return_value=True),
+        ):
+            provider, _voice = provider_from_profile(saved_profile)
+        self.assertEqual(provider.backend, "cpu")
+        self.assertTrue(provider.low_memory)
+
+    def test_explicit_profile_backend_is_not_overridden_by_global_preference(self):
+        saved_profile = VoiceProfile(
+            "Saved Hero", "qwen-character", "Ryan",
+            model_id="custom-1.7b", qwen_mode="custom", backend="cuda",
+        )
+        with (
+            patch("app.tts.profile_provider.get_qwen_model_preference", return_value="1.7b"),
+            patch("app.tts.profile_provider.get_qwen_backend_preference", return_value="cpu"),
+            patch("app.tts.profile_provider.get_qwen_low_memory_mode", return_value=False),
+        ):
+            provider, _voice = provider_from_profile(saved_profile)
+        self.assertEqual(provider.backend, "cuda")
+
     def test_existing_custom_profile_uses_global_override_at_provider_creation(self):
         saved_profile = VoiceProfile(
             "Saved Hero", "qwen-character", "Ryan",
