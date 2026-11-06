@@ -293,6 +293,50 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "verified storage migration is running"):
             bridge._new_job("voice-preview", "Preview", "Must wait for storage migration")
 
+    def test_premium_v2_cleanup_removes_allowlisted_cache_and_temp_without_touching_models(self):
+        from PySide6.QtWidgets import QMessageBox
+
+        bridge = self.make_bridge()
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            models = base / "Models"
+            cache = models / "huggingface"
+            downloads = cache / "downloads"
+            temp_root = base / "Temp"
+            staging = temp_root / "staging"
+            library = base / "Library"
+            exports = base / "Audiobooks"
+            for path in (downloads, staging, library, exports):
+                path.mkdir(parents=True, exist_ok=True)
+            model_file = models / "voice-weights.bin"
+            download_file = downloads / "partial.bin"
+            temp_file = staging / "work.tmp"
+            model_file.write_bytes(b"model")
+            download_file.write_bytes(b"partial")
+            temp_file.write_bytes(b"temporary")
+            with (
+                patch("app.core.paths.models_root", return_value=models),
+                patch("app.core.paths.model_cache_root", return_value=cache),
+                patch("app.core.paths.runtimes_root", return_value=models),
+                patch("app.core.paths.temporary_root", return_value=temp_root),
+                patch("app.core.paths.library_root", return_value=library),
+                patch("app.core.paths.audiobooks_root", return_value=exports),
+                patch("PySide6.QtWidgets.QMessageBox.question", return_value=QMessageBox.StandardButton.Yes),
+            ):
+                result = bridge._storage_cleanup_temp({})
+            self.assertTrue(result["cleaned"])
+            self.assertEqual(result["candidate_count"], 2)
+            self.assertEqual(len(result["removed"]), 2)
+            self.assertFalse(downloads.exists())
+            self.assertFalse(staging.exists())
+            self.assertTrue(model_file.is_file())
+
+    def test_premium_v2_cleanup_refuses_to_run_while_any_application_job_is_active(self):
+        bridge = self.make_bridge()
+        bridge._jobs["active-preview"] = {"state": "running", "type": "preview"}
+        with self.assertRaisesRegex(RuntimeError, "blocked while application jobs are active"):
+            bridge._storage_cleanup_temp({})
+
     def test_starting_second_model_operation_is_blocked_while_one_is_running(self):
         bridge = self.make_bridge()
         bridge._jobs["active-model-job"] = {"state": "running", "type": "model-install"}
