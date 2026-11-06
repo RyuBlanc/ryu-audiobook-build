@@ -861,6 +861,15 @@
         await waitFor("iframe viewport reaches " + label,() =>
           stage6ResponsiveFrame.contentWindow.innerWidth === width &&
           stage6ResponsiveFrame.contentWindow.innerHeight === height,5000);
+        // Wait for Chromium's CSS viewport/media-query state as well as
+        // window.innerWidth. The latter can update before responsive styles
+        // have been recalculated for a resized srcdoc iframe.
+        await waitFor("responsive CSS breakpoint reaches " + label,() => {
+          const frameWindow = stage6ResponsiveFrame.contentWindow;
+          if (!frameWindow) return false;
+          return frameWindow.matchMedia("(max-width: 800px)").matches === (width <= 800) &&
+            frameWindow.matchMedia("(max-width: 1250px)").matches === (width <= 1250);
+        },5000);
         const d = stage6ResponsiveDoc;
         const actualWidth = stage6ResponsiveFrame.contentWindow.innerWidth;
         const actualHeight = stage6ResponsiveFrame.contentWindow.innerHeight;
