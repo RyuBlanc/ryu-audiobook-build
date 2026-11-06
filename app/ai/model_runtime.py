@@ -12,7 +12,7 @@ import time
 import urllib.request
 import zipfile
 
-from app.core.paths import models_root
+from app.core.paths import models_root, runtimes_root
 from app.tts.chatterbox_runtime import runtime_environment
 
 try:
@@ -34,7 +34,15 @@ class BrainRuntimeError(RuntimeError):
 
 
 def brain_root() -> Path:
+    """Location for downloaded local analysis model weights."""
     root = models_root() / "audiobook-ai"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def brain_runtime_root() -> Path:
+    """Location for the separately managed llama.cpp provider runtime."""
+    root = runtimes_root() / "audiobook-ai"
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -70,7 +78,7 @@ def model_path(model_id: str | None = None) -> Path:
 
 
 def server_path() -> Path | None:
-    exe = brain_root() / "llama-server.exe"
+    exe = brain_runtime_root() / "llama-server.exe"
     return exe if exe.exists() else None
 
 
@@ -112,7 +120,7 @@ def download(url: str, target: Path, label: str = "file", progress=None) -> None
 
 
 def install_runtime(progress=None) -> Path:
-    root = brain_root()
+    root = brain_runtime_root()
     server = root / "llama-server.exe"
     if not server.exists():
         vram = detect_nvidia_vram_gb()
@@ -243,7 +251,7 @@ class LocalLLM:
                 raise BrainRuntimeError("Audiobook AI model is not installed.")
         self.process: subprocess.Popen | None = None
         self.port: int | None = None
-        self.log_path = brain_root() / "llama-server.log"
+        self.log_path = brain_runtime_root() / "llama-server.log"
 
     def start(self) -> None:
         if self.external_url:
