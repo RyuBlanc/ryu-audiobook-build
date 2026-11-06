@@ -179,6 +179,45 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
                     )
                 open_url.assert_not_called()
 
+    def test_models_page_uninstalls_qwen_weights_from_models_root_not_runtime_root(self):
+        from app.ui.models_page import UninstallComponentWorker
+
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            models = base / "Models"
+            provider_runtime = base / "Provider Runtime"
+            weights_root = models / "qwen3-tts"
+            runtime_root = provider_runtime / "qwen3-tts"
+            selected = weights_root / "custom-0.6b"
+            sibling = weights_root / "base-0.6b"
+            (selected / "weights").mkdir(parents=True)
+            (selected / "weights" / "model.safetensors").write_bytes(b"weights")
+            sibling.mkdir(parents=True)
+            (sibling / "config.json").write_text("{}", encoding="utf-8")
+            runtime_root.mkdir(parents=True)
+            (runtime_root / "runtime.json").write_text("{}", encoding="utf-8")
+
+            worker = UninstallComponentWorker("qwen-model:custom-0.6b")
+            completed = []
+            failed = []
+            worker.finished_ok.connect(completed.append)
+            worker.failed.connect(failed.append)
+            with (
+                patch("app.ui.models_page.models_root", return_value=models),
+                patch("app.ui.models_page.QWEN_MODEL_DIRS", {
+                    "custom-0.6b": selected,
+                    "base-0.6b": sibling,
+                }),
+                patch("app.ui.models_page.QWEN_RUNTIME_ROOT", runtime_root),
+            ):
+                worker.run()
+
+            self.assertEqual(completed, ["qwen-model:custom-0.6b"])
+            self.assertEqual(failed, [])
+            self.assertFalse(selected.exists())
+            self.assertTrue((sibling / "config.json").is_file())
+            self.assertTrue((runtime_root / "runtime.json").is_file())
+
     def test_individual_qwen_model_uninstall_preserves_other_model_folders(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "Models"
