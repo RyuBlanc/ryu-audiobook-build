@@ -285,6 +285,33 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
         self.assertIn("Reconnect its drive before changing the configured path", handler)
         self.assertIn("existing inventory must not be silently orphaned", handler)
 
+    def test_storage_root_validation_keeps_model_weights_and_provider_runtime_separate(self):
+        bridge = self.make_bridge()
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            models = base / "Models"
+            runtime = base / "Runtime"
+            cache = models / "huggingface"
+            library = base / "Library"
+            exports = base / "Exports"
+            temp_root = base / "Temp"
+            roots = {
+                "library": ("library", library, library),
+                "audio_assets": ("audio_assets", exports, exports),
+                "models": ("models", models, models),
+                "runtime": ("runtime", runtime, runtime),
+                "model_cache": ("model_cache", cache, cache),
+                "temporary": ("temporary", temp_root, temp_root),
+            }
+            with self.assertRaisesRegex(ValueError, "runtime"):
+                bridge._validate_storage_root_separation("models", runtime, roots)
+            with self.assertRaisesRegex(ValueError, "models"):
+                bridge._validate_storage_root_separation("runtime", models, roots)
+            # The legacy Hugging Face cache is intentionally nested in Models.
+            bridge._validate_storage_root_separation("model_cache", cache, roots)
+            with self.assertRaisesRegex(ValueError, "contain the Models root"):
+                bridge._validate_storage_root_separation("model_cache", base, roots)
+
     def test_storage_migration_excludes_new_application_jobs(self):
         bridge = self.make_bridge()
         bridge._jobs["active-storage-migration"] = {
