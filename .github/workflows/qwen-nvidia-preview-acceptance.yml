@@ -1,6 +1,16 @@
 name: Qwen NVIDIA 30-second Preview Acceptance
 
 on:
+  push:
+    branches:
+      - 'stage-7/**'
+    paths:
+      - app/tts/preview.py
+      - app/tts/providers/qwen_character.py
+      - app/tts/qwen_character_worker.py
+      - app/tts/qwen_accelerator.py
+      - tests/smoke_qwen_gpu_preview.py
+      - .github/workflows/qwen-nvidia-preview-acceptance.yml
   workflow_dispatch:
 
 permissions:
@@ -38,8 +48,8 @@ jobs:
       - name: Download the official Qwen 1.7B VoiceDesign model
         shell: pwsh
         env:
-          HF_HOME: ${{ runner.temp }}\ryu-qwen-hf
-          RYU_QWEN_MODEL_ROOT: ${{ runner.temp }}\ryu-qwen-models
+          HF_HOME: ${{ runner.temp }}\\ryu-qwen-hf
+          RYU_QWEN_MODEL_ROOT: ${{ runner.temp }}\\ryu-qwen-models
         run: |
           python -c "import os; from huggingface_hub import snapshot_download; snapshot_download(repo_id='Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign',local_dir=os.path.join(os.environ['RYU_QWEN_MODEL_ROOT'],'design-1.7b'),allow_patterns=['*.json','*.safetensors','*.txt','*.model','*.npz','*.bin','tokenizer*','vocab*'])"
 
@@ -47,9 +57,9 @@ jobs:
         shell: pwsh
         env:
           PYTHONPATH: ${{ github.workspace }}
-          HF_HOME: ${{ runner.temp }}\ryu-qwen-hf
-          RYU_QWEN_MODEL_ROOT: ${{ runner.temp }}\ryu-qwen-models
-          RYU_QWEN_GPU_OUTPUT: ${{ github.workspace }}\qwen-gpu-acceptance
+          HF_HOME: ${{ runner.temp }}\\ryu-qwen-hf
+          RYU_QWEN_MODEL_ROOT: ${{ runner.temp }}\\ryu-qwen-models
+          RYU_QWEN_GPU_OUTPUT: ${{ github.workspace }}\\qwen-gpu-acceptance
           PYTHONWARNINGS: ignore
         run: python -B tests/smoke_qwen_gpu_preview.py
 
@@ -57,7 +67,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Ryu-Stage3-Qwen-NVIDIA-Preview-${{ github.run_number }}
+          name: Ryu-Stage7-Qwen-NVIDIA-Preview-${{ github.run_number }}
           path: qwen-gpu-acceptance/
           if-no-files-found: warn
           retention-days: 30
