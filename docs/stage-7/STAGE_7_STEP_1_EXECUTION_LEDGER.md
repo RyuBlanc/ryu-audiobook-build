@@ -176,3 +176,78 @@ This alias was used historically because the earlier workflow did not include a 
 5. Record the final run URL, artifact names/IDs, artifact checksums and exact commit SHA after the run completes.
 
 **Current status: IN PROGRESS / RUNTIME ACCEPTANCE PENDING. Do not proceed to Step 2.**
+
+## 11. 2026-11-06 — Run #2400 matching-head regression and package acceptance
+
+**Workflow:** [#2400 — Stage 7 Step 1 artifact checkpoint](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42146555980)  
+**Run ID:** `42146555980`  
+**Event:** `push`  
+**Branch:** `stage-7/step-1-model-registry-inventory`  
+**Run conclusion:** `success`  
+**Exact HEAD:** `89ce5762a1194d8860e72d1cf4fb3b3b586d1ccc`  
+**Run completion:** 6 November 2026, 02:16:31 UTC
+
+The run's `head_sha` exactly matches the canonical candidate SHA. Both required jobs completed successfully.
+
+### Regression job
+
+- Job `tests` — success (job ID `127659321815`).
+- Frontend JavaScript syntax validation — passed.
+- Isolated native Qt lifecycle regression — passed.
+- Stage 6 History/Task Manager preflight — passed.
+- Full regression suite — **1,199 tests ran; OK**.
+- No failed test/job is recorded in this run.
+
+### Windows build and package job
+
+- Job `build` — success (job ID `127660114384`).
+- Installer JavaScript validation — passed.
+- Prepare, validate and build application — passed.
+- Frozen application verification — passed.
+- Bundled voice assets and critical module verification — passed.
+- Packaged Sound Design / Music Library acceptance (including Stage 5.3 generation UI) — passed.
+- Core installer payload and functional HTML installer — built successfully.
+- Original logo transparency and release hash generation — passed.
+- Microsoft Defender executable scan — passed.
+- Installer, SHA-256 manifest and portable application artifact uploads — all passed.
+- Publish verified installer release — skipped by workflow policy; this run uploaded artifacts but did not publish a GitHub release.
+
+### Artifacts uploaded by #2400
+
+All three artifacts are unexpired at the audit time and are attached to this exact branch and HEAD SHA.
+
+| Artifact | Artifact ID | Size |
+|---|---:|---:|
+| `Ryu-Audiobook-Installer-2400` | `13471707043` | 884,098,912 bytes |
+| `Ryu-Audiobook-Portable-2400` | `13471781855` | 1,368,032,093 bytes |
+| `Ryu-Audiobook-Release-SHA256-2400` | `13471632308` | 775 bytes |
+
+Artifact ZIP digests reported by GitHub:
+
+- Installer ZIP: `sha256:1c1d8b678db857bfccd7258501c23ae931fb1fec2ac0c96544283d1a827468d8`
+- Portable ZIP: `sha256:73dfb899e8effb5ff3937bcd38688f8aafc30bebf7eb25c706d68533c67f85a1`
+- SHA manifest ZIP: `sha256:d1e3f260a196f263f2145965d80a8c669f7e5e22f2ff7a6d070401495bd09e65`
+
+The SHA-256 manifest ZIP was downloaded and its JSON content inspected. It contains nine file records, including both installer executables, the portable app executable and packaged logo/installer assets. The connector rejected direct download of the installer and portable artifact ZIPs because each exceeds its 512 MB file limit; their artifact metadata, run attachment, digests and upload log remain available. The manifest's two setup executable records are:
+
+- `Ryu's Audiobook Setup.exe` — 884,098,748 bytes — SHA-256 `5b7d0a3d4c77fe029f154397d9d373535f0852ef76ea0d5a1cd43d731510df72`
+- `Ryu's Audiobook Core Setup.exe` — 657,206,062 bytes — SHA-256 `7065e96a2a7b65a9b3755db2063c9aa327f3e2613ddd28e3c89f02667716f172`
+
+Portable app executable — `Ryu's Audiobook.exe` — 12,082,466 bytes — SHA-256 `ba33c64d1bc3a4dd2addb7c87c687e0d4444c31a613e82bc971f03e3361ef9a5`.
+
+### Updated Step 1 closure assessment
+
+The following two formal gates are now satisfied:
+
+1. Full automated regression suite passes on the exact candidate SHA, including the newly added Qwen/Chatterbox shared-runtime preservation and model-refresh tests.
+2. Frozen Windows build/package and artifact/hash generation pass on that same exact candidate SHA.
+
+**Remaining Step 1 gate: actual installed-Windows-app Models Center acceptance.** The CI packaged Sound Design/Music Library test does not prove actual user-machine model lifecycle behaviour. The following still need to be exercised in the installed/portable app:
+
+- Verify real model/runtime/Python paths and actual paginated file records and sizes.
+- Remove one individual model and confirm unrelated model weights remain.
+- Remove one shared runtime and confirm its model weights/cache ownership is preserved.
+- Refresh the inventory and confirm the removed component's actual status.
+- Confirm saved voice profiles, character assignments and project data remain intact.
+
+**Status: AUTOMATED CI AND PACKAGE ACCEPTANCE PASSED; STEP 1 REMAINS OPEN ONLY FOR INSTALLED-APP MODEL INVENTORY/LIFECYCLE ACCEPTANCE. Do not proceed to Step 2 until this final gate is accepted.**
