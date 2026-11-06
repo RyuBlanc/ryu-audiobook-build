@@ -8188,6 +8188,27 @@ class PremiumV2Bridge(QObject):
         if active:
             labels = ", ".join(str(job.get("title") or job.get("type") or job_id) for job_id, job in active[:4])
             raise RuntimeError("Storage migration is blocked while active work is running: " + labels)
+        from app.core.storage_migration import prepare_migration
+        from PySide6.QtWidgets import QMessageBox
+        preflight = prepare_migration(
+            source, destination, reserve_bytes=512 * 1024 * 1024,
+            journal_dir=app_root() / "Settings" / "Storage Migrations",
+        )
+        gib = 1024 ** 3
+        question = (
+            "A verified migration will copy " + str(preflight.file_count) + " files ("
+            + f"{preflight.total_bytes / gib:.2f} GB) from:\\n" + str(source)
+            + "\\n\\nto:\\n" + str(destination)
+            + f"\\n\\nDestination free space: {preflight.free_bytes / gib:.2f} GB"
+            + "\\nA 512 MB safety reserve is required. The original source will be retained after migration.\\n\\nStart migration?"
+        )
+        answer = QMessageBox.question(
+            None, "Confirm verified storage migration", question,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return {"cancelled": True}
         job_id = self._new_job("storage-migration", "Migrate " + kind.replace("_", " ").title() + " storage",
                                "Verified copy, integrity check, root switch and rollback protection")
         self._job_update(job_id, state="running", started_at=self._now(), progress=1,
