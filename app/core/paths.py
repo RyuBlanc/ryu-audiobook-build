@@ -70,17 +70,17 @@ def models_root() -> Path:
 
 def default_runtimes_root() -> Path:
     """Legacy runtime root, preserving existing Qwen and Chatterbox installations."""
-    return default_models_root()
+    return models_root()
 
 
 def runtimes_root() -> Path:
-    """Configured provider-runtime root; defaults to the legacy Models folder."""
-    return _configured_root("storage/runtime_root", default_runtimes_root())
+    """Configured provider-runtime root; follows Models unless explicitly separated."""
+    return _configured_root("storage/runtime_root", models_root())
 
 
 def default_model_cache_root() -> Path:
-    """Legacy Hugging Face cache location."""
-    return default_models_root() / "huggingface"
+    """Default Hugging Face cache follows the effective Models root."""
+    return models_root() / "huggingface"
 
 
 def model_cache_root() -> Path:
