@@ -7208,6 +7208,13 @@ class PremiumV2Bridge(QObject):
             return "Removed the user-installed Kokoro model and voice pack. Bundled files are untouched."
 
         if requested in {"chatterbox", "chatterbox-multilingual", "chatterbox-runtime"}:
+        if requested == "chatterbox-runtime":
+            from app.tts.chatterbox_runtime import RUNTIME_DIR, runtime_python
+            runtime_path = str(RUNTIME_DIR.resolve())
+            owned_paths.append(RUNTIME_DIR)
+            python_executable = runtime_python()
+            python_path = str(python_executable.resolve()) if python_executable else str((RUNTIME_DIR / "Scripts" / "python.exe").resolve())
+
             from app.tts.chatterbox_runtime import RUNTIME_DIR
             runtime_root = Path(RUNTIME_DIR).resolve()
             from app.tts.model_registry import build_inventory
