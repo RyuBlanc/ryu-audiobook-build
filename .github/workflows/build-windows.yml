@@ -215,6 +215,11 @@ jobs:
           $models = @(Get-ChildItem 'bundled_models\piper\*.onnx')
           if ($models.Count -lt 2) { throw "Expected two bundled Piper voices, found $($models.Count)." }
 
+          Write-Host '=== Stage 7 real bundled Piper synthesis benchmark ==='
+          & $pythonExe -B 'tests\smoke_stage7_real_piper_benchmark.py' --output 'stage7-piper-benchmark.json'
+          if ($LASTEXITCODE -ne 0) { throw "Stage 7 real Piper synthesis benchmark failed with exit code $LASTEXITCODE." }
+          if (-not (Test-Path -LiteralPath 'stage7-piper-benchmark.json' -PathType Leaf)) { throw 'Stage 7 Piper benchmark evidence JSON was not created.' }
+
           Write-Host '=== Download bundled offline Kokoro voices ==='
           New-Item -ItemType Directory -Force -Path 'bundled_models\kokoro' | Out-Null
           Write-Host 'Downloading Kokoro ONNX model (maximum 600 seconds).' 
@@ -889,6 +894,14 @@ jobs:
           path: dist/Ryu's Audiobook/
           if-no-files-found: error
           compression-level: 0
+          retention-days: 30
+
+      - name: Upload Stage 7 real Piper benchmark evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ryu-Audiobook-Stage7-Piper-Benchmark-${{ github.run_number }}
+          path: stage7-piper-benchmark.json
+          if-no-files-found: error
           retention-days: 30
 
       - name: Publish verified installer release
