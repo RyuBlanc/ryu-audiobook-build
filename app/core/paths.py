@@ -147,7 +147,12 @@ def _recover_interrupted_storage_migrations() -> None:
             if not source.is_absolute() or not destination.is_absolute() or not source.is_dir():
                 continue
             matching_key = None
-            for key, default_for_key in defaults.items():
+            journal_key = str(journal.get("settings_key") or "")
+            candidate_defaults = (
+                {journal_key: defaults[journal_key]}
+                if journal_key in defaults else defaults
+            )
+            for key, default_for_key in candidate_defaults.items():
                 configured = str(settings.value(key, "") or default_for_key()).strip()
                 try:
                     if Path(configured).expanduser().resolve() in (source.resolve(), destination.resolve()):
