@@ -287,6 +287,13 @@ def recover_migration_journal(path: Path, *, persist_root: Callable[[Path], None
     destination = Path(str(payload.get("destination", ""))).expanduser()
     if not source.is_absolute() or not destination.is_absolute() or not staging.is_absolute():
         raise StorageMigrationError("Migration journal contains invalid paths.")
+    try:
+        if source.resolve() == destination.resolve() or _inside(source.resolve(), destination.resolve()) or _inside(destination.resolve(), source.resolve()):
+            raise StorageMigrationError("Migration journal contains overlapping paths.")
+        if staging.parent.resolve() != destination.parent.resolve():
+            raise StorageMigrationError("Migration journal staging path is outside the destination parent.")
+    except OSError as exc:
+        raise StorageMigrationError(f"Migration journal paths cannot be verified: {exc}") from exc
     if not source.is_dir():
         payload["state"] = "recovery_required"
         payload["recovery_error"] = "Original source is unavailable; no paths were changed."
