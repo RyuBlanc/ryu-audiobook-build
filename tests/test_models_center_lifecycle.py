@@ -700,6 +700,12 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
             project_file = Path(temporary) / "Projects" / "project.json"
             project_file.parent.mkdir(parents=True)
             project_file.write_text('{"project":"preserve"}', encoding="utf-8")
+            settings_root = Path(temporary) / "Settings"
+            settings_root.mkdir(parents=True)
+            profile_file = settings_root / "voice_profiles.json"
+            profile_file.write_text('{"profiles":[{"name":"Narrator"}]}', encoding="utf-8")
+            assignment_file = settings_root / "character_assignments.json"
+            assignment_file.write_text('{"chapter-1":{"Mira":"Voice Mira"}}', encoding="utf-8")
 
             bridge = self.make_bridge()
             with (
@@ -723,6 +729,8 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
                 self.assertTrue(directory.is_dir())
                 self.assertTrue(any(directory.iterdir()))
             self.assertEqual(project_file.read_text(encoding="utf-8"), '{"project":"preserve"}')
+            self.assertEqual(profile_file.read_text(encoding="utf-8"), '{"profiles":[{"name":"Narrator"}]}')
+            self.assertEqual(assignment_file.read_text(encoding="utf-8"), '{"chapter-1":{"Mira":"Voice Mira"}}')
             self.assertIn("model weights", message)
 
     def test_chatterbox_shared_runtime_uninstall_preserves_cached_model_assets(self):
