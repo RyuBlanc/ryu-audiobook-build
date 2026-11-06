@@ -465,6 +465,7 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
             with (
                 patch("app.core.paths.models_root", return_value=root),
                 patch("app.tts.chatterbox_runtime.RUNTIME_DIR", runtime_root),
+                patch("app.tts.model_registry.mark_installed"),
             ):
                 message = bridge._models_uninstall_component(
                     "chatterbox-runtime", {}, lambda _message: None
