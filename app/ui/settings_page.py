@@ -59,6 +59,26 @@ def _storage_capacity_summary(folder: Path) -> str:
         return "Unavailable — filesystem capacity could not be read"
 
 
+def _storage_root_change_error(current: Path, destination: Path) -> str:
+    """Refuse to orphan data until the verified migration workflow is available."""
+    source = Path(current).expanduser()
+    target = Path(destination).expanduser()
+    try:
+        if source.resolve() == target.resolve():
+            return ""
+    except OSError:
+        if str(source).casefold() == str(target).casefold():
+            return ""
+    if not source.is_dir():
+        return "The current storage location is unavailable. Reconnect its drive before changing the location so installed data is not orphaned."
+    try:
+        if any(source.iterdir()):
+            return "This location contains existing data. A verified copy, integrity check and rollback-capable migration are required before it can be changed."
+    except OSError as exc:
+        return f"The current storage location cannot be inspected safely: {exc}"
+    return ""
+
+
 def _storage_root_write_error(folder: Path) -> str:
     """Validate the chosen existing folder with a harmless temporary write probe."""
     path = Path(folder).expanduser()
@@ -473,6 +493,19 @@ class SettingsPage(QWidget):
             QMessageBox.warning(self, "Storage Location Unavailable", f"{candidate}\n\n{error}")
             self.status.setText("Storage location was not changed because the selected folder is unavailable.")
             return
+        active = {
+            "library": library_root(),
+            "audio_assets": audiobooks_root(),
+            "models": models_root(),
+            "runtime": runtimes_root(),
+            "model_cache": model_cache_root(),
+            "temporary": temporary_root(),
+        }[kind]
+        change_error = _storage_root_change_error(active, candidate)
+        if change_error:
+            QMessageBox.warning(self, "Storage Migration Required", f"{active} → {candidate}\n\n{change_error}")
+            self.status.setText("Storage location was not changed; the existing data remains at its original path.")
+            return
         self._set_root_for_kind(kind, candidate)
         self._refresh_storage_root_labels()
         self.status.setText("Storage location selected. Press Save Settings to apply it.")
@@ -511,7 +544,22 @@ class SettingsPage(QWidget):
             ("Model Cache / Downloads", self._selected_model_cache_root),
             ("Temporary / Staging", self._selected_temporary_root),
         )
+        active_roots = {
+            "Project Library": library_root(),
+            "Audio Assets": audiobooks_root(),
+            "Models": models_root(),
+            "Provider Runtime": runtimes_root(),
+            "Model Cache / Downloads": model_cache_root(),
+            "Temporary / Staging": temporary_root(),
+        }
         for label, folder in selected_roots:
+            if label in {"Models", "Provider Runtime", "Model Cache / Downloads", "Temporary / Staging"}:
+                change_error = _storage_root_change_error(active_roots[label], folder)
+                if change_error:
+                    message = f"{label} cannot be changed from {active_roots[label]} to {folder}.\n\n{change_error}"
+                    self.status.setText(message)
+                    QMessageBox.warning(self, "Storage Migration Required", message)
+                    return
             error = _storage_root_write_error(folder)
             if error:
                 message = f"{label} cannot be used at {folder}\n\n{error}"
