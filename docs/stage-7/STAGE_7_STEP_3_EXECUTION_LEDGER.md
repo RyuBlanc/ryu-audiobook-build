@@ -62,4 +62,6 @@
 - Inspect all jobs and release artifacts; do not mark Step 3 closed until the exact final candidate has green tests and package acceptance.
 - Actual installed-Windows manual checks are not represented as passed by CI. Where hardware or real installed-app interaction is unavailable to the hosted runner, record the limitation explicitly rather than inventing acceptance evidence.
 
+**Final candidate:** Step 3 implementation and UI/test integration are committed on this branch. The next commit is the matching-head Windows artifact checkpoint; closure depends on its full regression and packaged acceptance gates.
+
 **Status: IN PROGRESS — code and targeted lifecycle/UI regressions implemented; matching-head full regression and packaged acceptance pending.**
