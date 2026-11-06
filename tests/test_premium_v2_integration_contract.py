@@ -457,6 +457,13 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("chapter_bgm_strategy=self.chapter_bgm_strategy", manager)
         self.assertNotIn("scene_transition_cue_path=self.scene_transition_cue_path", manager)
 
+    def test_production_preview_ready_state_must_match_the_selected_production_chapter(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("productionPreviewMatchesSelection=Boolean(", adapter)
+        self.assertIn("voicePreviewValid && productionPreviewJobId && selectedNumber>0", adapter)
+        self.assertIn("previewChapterNumber===selectedNumber", adapter)
+        self.assertIn("'Preview ready · Chapter '+selectedNumber", adapter)
+
     def test_performance_center_exposes_a_real_tts_benchmark_separately_from_hardware_scan(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")

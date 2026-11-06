@@ -2243,7 +2243,8 @@
             Boolean(expectedOption && expectedOption.selected) &&
             optionText.includes("Chapter " + chapterNumber) &&
             (!expectedChapter?.title || optionText.includes(String(expectedChapter.title))) &&
-            statusText.includes("Chapter " + chapterNumber + " selected.");
+            statusText.includes("Chapter " + chapterNumber) &&
+            (statusText.includes("selected.") || statusText.includes("Preview ready"));
         }, 10000);
       };
       // If Chapter 2 is already auto-selected, a change to the same value is

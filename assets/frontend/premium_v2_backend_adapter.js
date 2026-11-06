@@ -1749,10 +1749,16 @@
     const status=$('productionPreviewStatus');
     const previewJobState=String(productionJobSnapshots.preview?.state||'').toLowerCase();
     const previewJobOwnsStatus=PRODUCTION_ACTIVE_JOB_STATES.has(previewJobState)||['failed','cancelled'].includes(previewJobState);
-    if(status&&voicePreviewValid){
-      status.textContent='Preview ready · '+(Number(previewAudio?.duration)>0?Number(previewAudio.duration).toFixed(1)+' seconds':'loading duration');
-    }else if(status&&!previewJobOwnsStatus&&!productionJobSnapshots.preview){
-      const selectedNumber=Number(productionPreviewSelectedChapter||0);
+    const selectedNumber=Number(productionPreviewSelectedChapter||0);
+    const previewChapterNumber=Number(lastVoicePreviewChapterNumber||0);
+    const productionPreviewMatchesSelection=Boolean(
+      voicePreviewValid && productionPreviewJobId && selectedNumber>0 &&
+      previewChapterNumber===selectedNumber
+    );
+    if(status&&productionPreviewMatchesSelection){
+      status.textContent='Preview ready · Chapter '+selectedNumber+' · '+
+        (Number(previewAudio?.duration)>0?Number(previewAudio.duration).toFixed(1)+' seconds':'loading duration');
+    }else if(status&&!previewJobOwnsStatus){
       status.textContent=selectedNumber>0
         ? 'Chapter '+selectedNumber+' selected. Generate a new preview for this chapter.'
         : 'Select a saved chapter before generating a preview.';
