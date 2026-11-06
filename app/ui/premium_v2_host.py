@@ -7057,11 +7057,15 @@ class PremiumV2Bridge(QObject):
             blocking = [
                 job for job in self._jobs.values()
                 if str(job.get("state") or "").casefold() in {"queued", "running"}
-                and any(token in str(job.get("type") or "").casefold()
-                        for token in ("voice-preview", "production", "generation", "character-analyze", "model-install", "model-repair"))
+                and (
+                    str(job.get("type") or "").casefold().startswith("model-")
+                    or any(token in str(job.get("type") or "").casefold()
+                           for token in ("voice-preview", "preview", "production", "generation",
+                                         "character-analyze", "character-analysis", "import", "analysis"))
+                )
             ]
         if blocking:
-            raise RuntimeError("Uninstall is blocked while a voice preview, audiobook generation, analysis, or model installation/repair job is active. Stop or finish that job, then retry.")
+            raise RuntimeError("Uninstall is blocked while a preview, generation, import, analysis or model lifecycle job is active. Stop or finish that job, then retry.")
 
         def report(text: str) -> None:
             if progress:
@@ -7097,9 +7101,23 @@ class PremiumV2Bridge(QObject):
 
         if requested in {"chatterbox", "chatterbox-multilingual", "chatterbox-runtime"}:
             from app.tts.chatterbox_runtime import RUNTIME_DIR
-            if RUNTIME_DIR.exists():
+            runtime_root = Path(RUNTIME_DIR).resolve()
+            from app.tts.model_registry import build_inventory
+            dependencies = [
+                row for row in build_inventory()
+                if row.get("component_type") != "provider"
+                and row.get("model_id") != "chatterbox-runtime"
+                and str(row.get("runtime_path") or "")
+                and Path(str(row["runtime_path"])).expanduser().resolve() == runtime_root
+                and row.get("installed")
+            ]
+            if dependencies:
+                names = ", ".join(str(row.get("name") or row.get("model_id")) for row in dependencies)
+                raise RuntimeError("Chatterbox runtime is shared by installed components: " + names + ". Remove or relocate those dependent components first.")
+            if runtime_root.exists():
+                runtime_allowed_root = runtime_root.parent
                 report("Removing the shared Chatterbox runtime…")
-                self._models_remove_path(RUNTIME_DIR, root)
+                self._models_remove_path(runtime_root, runtime_allowed_root)
             mark_installed("chatterbox", False)
             mark_installed("chatterbox-multilingual", False)
             return "Removed the shared Chatterbox runtime. Saved profiles and books were kept."
@@ -7109,25 +7127,52 @@ class PremiumV2Bridge(QObject):
             kind = str(payload.get("model_kind") or requested).strip().casefold()
             if kind not in MODEL_DIRS:
                 raise ValueError("Choose the exact installed Qwen model to uninstall.")
-            target = MODEL_DIRS[kind]
+            target = Path(MODEL_DIRS[kind]).resolve()
+            runtime_root = Path(RUNTIME_ROOT).resolve()
             if not target.exists():
                 raise ValueError(f"Qwen model {kind} is not installed.")
+            # Model weights may be stored beside, not necessarily inside, the
+            # provider runtime root after a user selects independent storage roots.
+            expected_parent = target.parent
+            if target == expected_parent or target.parent != expected_parent:
+                raise RuntimeError("The Qwen model path failed component ownership validation.")
+            if target.name.casefold() != kind or target.is_symlink():
+                raise RuntimeError("The selected Qwen model path is not a safe component-owned directory.")
             report(f"Removing Qwen model {kind}…")
-            self._models_remove_path(target, RUNTIME_ROOT)
+            self._models_remove_path(target, expected_parent)
             return f"Removed Qwen model {kind}. The Qwen runtime, other model folders and saved voice profiles were kept."
 
         if requested == "qwen-runtime":
             from app.tts.qwen_character_runtime import (
                 RUNTIME_ROOT, VENV_ROOT, PYTHON_ROOT, MARKER, INSTALLER_PATH, INSTALLER_LOG,
             )
+            runtime_root = Path(RUNTIME_ROOT).resolve()
+            from app.tts.model_registry import build_inventory
+            dependents = [
+                row for row in build_inventory()
+                if row.get("component_type") != "provider"
+                and row.get("model_id") not in {"qwen-runtime"}
+                and row.get("installed")
+                and str(row.get("runtime_path") or "")
+                and Path(str(row["runtime_path"])).expanduser().resolve() == Path(VENV_ROOT).resolve()
+            ]
+            if dependents:
+                names = ", ".join(str(row.get("name") or row.get("model_id")) for row in dependents)
+                raise RuntimeError("Qwen runtime is required by installed components: " + names + ". Remove or relocate dependent features first.")
             report("Removing the Qwen Python runtime only; downloaded model weights are preserved…")
-            for target in (VENV_ROOT, PYTHON_ROOT, MARKER, INSTALLER_PATH, INSTALLER_LOG):
-                if target.exists():
-                    self._models_remove_path(target, RUNTIME_ROOT)
+            owned = (VENV_ROOT, PYTHON_ROOT, MARKER, INSTALLER_PATH, INSTALLER_LOG)
+            for raw_target in owned:
+                target = Path(raw_target)
+                if not target.exists() and not target.is_symlink():
+                    continue
+                resolved = target.resolve()
+                if resolved == runtime_root or runtime_root not in resolved.parents:
+                    raise RuntimeError("Refusing Qwen runtime removal because an owned path resolves outside its runtime root: " + str(target))
+                self._models_remove_path(resolved, runtime_root)
             return "Removed the Qwen runtime. Downloaded model weights and saved voice profiles were preserved."
 
         if requested == "audiobook-ai":
-            target = root / "audiobook-ai"
+            target = (root / "audiobook-ai").resolve()
             if target.exists():
                 report("Removing the local Audiobook AI runtime and model…")
                 self._models_remove_path(target, root)
