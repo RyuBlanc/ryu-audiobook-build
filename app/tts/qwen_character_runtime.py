@@ -12,7 +12,7 @@ import time
 import urllib.request
 from functools import lru_cache
 
-from app.core.paths import models_root, runtimes_root
+from app.core.paths import models_root, runtimes_root, model_cache_root
 from app.version import APP_VERSION
 from app.tts.qwen_accelerator import (
     accelerator_report,
@@ -1024,7 +1024,7 @@ def runtime_environment() -> dict[str, str]:
         if not existing_pythonpath
         else str(app_root) + os.pathsep + existing_pythonpath
     )
-    env["HF_HOME"] = str(RUNTIME_ROOT / "huggingface")
+    cache_root = model_cache_root()\n    cache_root.mkdir(parents=True, exist_ok=True)\n    env["HF_HOME"] = str(cache_root)
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
