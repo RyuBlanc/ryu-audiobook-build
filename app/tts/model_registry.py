@@ -905,7 +905,7 @@ def build_inventory() -> list[dict[str, Any]]:
         chatterbox_assets_installed,
         "Shared Hugging Face model weights used by Chatterbox English and multilingual synthesis. The runtime may download these weights on first use.",
         status=(f"{len(chatterbox_model_dirs)} cached model snapshot(s) found" if chatterbox_assets_installed else "No downloaded Chatterbox model assets found · first-use download may be required"),
-        installable=False, repairable=False, uninstallable=False,
+        installable=False, repairable=False, uninstallable=bool(chatterbox_model_dirs),
         storage_bytes=chatterbox_assets_bytes, managed_path=str(chatterbox_cache_root),
         component_type="model", shared_cache=True,
     ))
