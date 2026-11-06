@@ -289,7 +289,7 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
         bridge = self.make_bridge()
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)
-            models = base / "Models"
+            models = base / "data" / "Models"
             runtime = base / "Runtime"
             cache = models / "huggingface"
             library = base / "Library"
@@ -315,7 +315,7 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
             bridge._validate_storage_root_separation("models", models, roots)
             bridge._validate_storage_root_separation("runtime", models, roots)
             with self.assertRaisesRegex(ValueError, "contain the Models root"):
-                bridge._validate_storage_root_separation("model_cache", base, roots)
+                bridge._validate_storage_root_separation("model_cache", base / "data", roots)
 
     def test_storage_migration_excludes_new_application_jobs(self):
         bridge = self.make_bridge()
