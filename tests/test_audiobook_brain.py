@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 from app.ai.brain import _json, BrainUnavailableError
 from app.ai.model_runtime import model_path, runtime_environment
@@ -72,7 +73,7 @@ class AudiobookBrainTests(unittest.TestCase):
 
         with (
             patch.object(model_runtime, "detect_nvidia_vram_gb", return_value=8.0),
-            patch.object(model_runtime, "shutil.which", return_value=None),
+            patch("shutil.which", return_value=None),
         ):
             self.assertEqual(model_runtime.recommended_model()[0], "qwen3-4b-q4")
             self.assertIn("cuda-12.4", model_runtime.LLAMA_CUDA12_URL)
