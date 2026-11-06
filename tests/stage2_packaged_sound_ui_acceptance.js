@@ -908,7 +908,7 @@
           "Audiobooks player grid breakpoint mismatch at " + label + ": " + playerColumns + " columns.");
         must(historyColumns === (width <= 800 ? 2 : 4),
           "History row breakpoint mismatch at " + label + ": " + historyColumns + " columns.");
-        must(jobColumns === (width <= 650 ? 2 : 3),
+        must(jobColumns === (width <= 800 ? 2 : 3),
           "Task Manager row breakpoint mismatch at " + label + ": " + jobColumns + " columns.");
         must(getComputedStyle(mini).position === "fixed",
           "Mini-player stopped using its viewport-pinned layout at " + label + ".");
