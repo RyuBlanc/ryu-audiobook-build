@@ -72,6 +72,7 @@ class StorageMigrationWorker(QThread):
                 self.source, self.destination, persist_root=persist,
                 validate_root=validate, reserve_bytes=512 * 1024 * 1024,
                 journal_dir=app_root() / "Settings" / "Storage Migrations",
+                settings_key=self.settings_key,
                 progress=lambda stage, done, total: self.progress.emit(
                     f"Storage migration {stage}: {done}/{total} files"
                 ),
