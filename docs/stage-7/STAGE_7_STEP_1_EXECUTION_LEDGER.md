@@ -307,3 +307,9 @@ The user has chosen to proceed without the separate installed-Windows-app manual
 - Exact run: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42248725120
 - Manual installed-Windows acceptance remains user-waived/not run.
 - Real GPU acceptance remains pending: NVIDIA run #1 and AMD/Intel run #9 have not started because their self-hosted jobs are queued. No GPU target or under-60-second Qwen performance result is claimed.
+
+## Cross-step Qwen verification update — 7 November 2026
+
+- Companion hosted Windows CPU Qwen acceptance workflow [run #1](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42301856102) passed its real inference flow and uploaded audio/diagnostics. Actual output was valid 30.000-second mono 24 kHz PCM; warmed synthesis took 268.184 seconds, so under-60-second target was not met on CPU.
+- Source CI [#2662](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42301856057) passed 38 focused tests and 1,258 full regression tests.
+- Real NVIDIA/AMD/Intel hardware acceptance remains queued and is not represented as passed. Physical installed-app checks remain user-waived/not run.
