@@ -59,14 +59,16 @@ class AudiobookBrainTests(unittest.TestCase):
     def test_offline_understanding_keeps_model_weights_and_llama_runtime_in_separate_roots(self):
         from unittest.mock import patch
         from app.ai import model_runtime
+        import tempfile
 
-        with (
-            patch.object(model_runtime, "models_root", return_value=Path("X:/Models")),
-            patch.object(model_runtime, "runtimes_root", return_value=Path("X:/Runtime")),
-            patch.object(model_runtime, "Path.mkdir"),
-        ):
-            self.assertEqual(model_runtime.brain_root(), Path("X:/Models/audiobook-ai"))
-            self.assertEqual(model_runtime.brain_runtime_root(), Path("X:/Runtime/audiobook-ai"))
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with (
+                patch.object(model_runtime, "models_root", return_value=root / "Models"),
+                patch.object(model_runtime, "runtimes_root", return_value=root / "Runtime"),
+            ):
+                self.assertEqual(model_runtime.brain_root(), root / "Models" / "audiobook-ai")
+                self.assertEqual(model_runtime.brain_runtime_root(), root / "Runtime" / "audiobook-ai")
 
     def test_offline_understanding_recommends_cpu_or_cuda_llama_runtime_from_detected_hardware(self):
         from unittest.mock import patch
