@@ -255,3 +255,11 @@ The migration-engine source commit #2421 passed the test job. The following comm
 - The physical USB/removable-drive unplug/replug check is **WAIVED for progression, NOT RUN and NOT CLAIMED AS PASSED**. The Windows SUBST disconnect/reconnect simulation is the automated substitute and passed. If a physical drive issue appears during installed-app use, fix it as a regression without discarding the completed CI/package evidence.
 
 **Final status: STEP 2 CLOSED FOR PROGRESSION. Proceed to Stage 7 Step 3 — Complete Model Lifecycle and Safe Uninstallation.**
+
+## 2026-11-06 — latest combined-head confirmation
+
+- The canonical Stage 7 branch's matching-head checkpoint #2628 passed both full regression (1,258 tests) and Windows package acceptance on `0fc9d8189311419414746ffb23d89df9c65d116c`.
+- The earlier Step 2 matching-head packaged closeout remains recorded; later source changes were covered by #2628 regression and packaging.
+- Configurable roots, split model/runtime/cache ownership, migration journaling/recovery, interrupted migration handling, active-job protection and cleanup safeguards remain covered by the Stage 7 regression suite.
+
+**Current disposition:** STEP 2 CLOSED FOR PROGRESSION. Physical removable-drive unplug/replug remains waived/not run; the simulated disconnect/reconnect and automated recovery tests are not represented as physical-drive evidence.
