@@ -41,6 +41,10 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
 
     def test_models_bridge_exposes_install_repair_uninstall_and_verify(self):
         source = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn('"models.uninstall_preflight": self._models_uninstall_preflight', source)
+        self.assertIn('"models.uninstall_preflight": True', source)
+
+        source = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         for command, handler in (
             ("models.list", "_models_list"),
             ("models.install", "_models_install"),
