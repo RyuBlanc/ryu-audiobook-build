@@ -318,6 +318,10 @@ def runtime_environment() -> dict[str, str]:
     hf_home = model_cache_root()
     hf_home.mkdir(parents=True, exist_ok=True)
     env["HF_HOME"] = str(hf_home)
+    temp_root = temporary_root()
+    env["TEMP"] = str(temp_root)
+    env["TMP"] = str(temp_root)
+    env["TMPDIR"] = str(temp_root)
     env.setdefault("TRANSFORMERS_ATTN_IMPLEMENTATION", "eager")
     # The Windows parent/child IPC carries Japanese/Korean/emoji and other
     # Unicode book text. Force UTF-8 so the child never falls back to cp1252
