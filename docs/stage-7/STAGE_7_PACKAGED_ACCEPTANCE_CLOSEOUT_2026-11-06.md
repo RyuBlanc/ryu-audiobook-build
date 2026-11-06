@@ -114,3 +114,8 @@ The user confirms the necessary hardware is not currently available and directs 
 The exact-head #2672 checkpoint is still running at the time of this ledger update. Its regression job passed; frozen-app verification, bundled-module verification and packaged Sound Design/Music Library acceptance passed; functional HTML installer packaging and remaining release-artifact gates are still running/pending.
 
 **Disposition:** pending successful #2672, Stage 7 may be closed for software implementation, regression and packaged acceptance, with GPU performance and physical installed-app checks clearly carried forward as deferred acceptance. No GPU performance pass is claimed. Stage 8 may start on that basis.
+
+
+## Final deferred-hardware documentation-head checkpoint request — 7 November 2026
+
+The user has approved deferring real GPU and physical installed-app tests until the required hardware is available. These remain explicit carry-forward checks, not passed criteria. The four closeout records now reflect this decision. Run a fresh exact-head full regression and Windows package checkpoint against this updated documentation head before declaring the Stage 7 software/package closeout ready for Stage 8.
