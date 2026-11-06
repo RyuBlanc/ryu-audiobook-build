@@ -68,6 +68,7 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
             with (
                 patch.object(bridge, "_jobs_path", return_value=base / "jobs.json"),
                 patch.object(bridge, "_history_path", return_value=base / "history.json"),
+                patch.object(bridge, "_performance_history_path", return_value=base / "performance-history.json"),
                 patch("app.tts.providers.piper.PiperProvider.model_paths", return_value=[voice]),
                 patch("app.tts.benchmark.benchmark_provider", return_value=result),
                 patch("threading.Thread", ImmediateThread),
@@ -77,6 +78,8 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
                 self.assertEqual(row["state"], "completed")
                 self.assertTrue(row["result"]["success"])
                 self.assertEqual(row["result"]["voice"], voice.stem)
+                self.assertEqual(len(bridge._performance_history), 1)
+                self.assertEqual(bridge._performance_history[0]["result"]["voice"], voice.stem)
 
                 device = type("Device", (), {
                     "backend":"cpu", "device":"cpu", "name":"CPU",
@@ -95,6 +98,31 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
                 self.assertEqual(info["benchmark_audio_seconds"], 2.5)
                 self.assertEqual(info["benchmark_realtime_factor"], 0.5)
                 self.assertEqual(info["benchmark_voice"], voice.stem)
+                self.assertEqual(len(info["benchmark_history"]), 1)
+                self.assertEqual(info["benchmark_history"][0]["result"]["voice"], voice.stem)
+
+    def test_performance_history_clear_does_not_delete_background_job_history(self):
+        bridge = self.make_bridge()
+        with tempfile.TemporaryDirectory() as temporary:
+            history_path = Path(temporary) / "performance-history.json"
+            job = {"job_id": "benchmark-1", "type": "tts-benchmark", "state": "completed"}
+            bridge._jobs[job["job_id"]] = dict(job)
+            bridge._history[job["job_id"]] = dict(job)
+            with patch.object(bridge, "_performance_history_path", return_value=history_path):
+                bridge._performance_history = [{
+                    "benchmark_id": "benchmark-1",
+                    "job_id": "benchmark-1",
+                    "measured_at": "2026-11-06T12:00:00Z",
+                    "state": "completed",
+                    "result": {"success": True, "voice": "en_US-test-medium"},
+                }]
+                bridge._persist_performance_history()
+                result = bridge._performance_history_clear({})
+                self.assertEqual(result["cleared"], 1)
+                self.assertTrue(result["background_job_history_preserved"])
+                self.assertIn("benchmark-1", bridge._jobs)
+                self.assertIn("benchmark-1", bridge._history)
+                self.assertEqual(json.loads(history_path.read_text(encoding="utf-8")), [])
 
     def test_performance_info_reports_real_cpu_memory_and_gpu_device_inventory(self):
         bridge = self.make_bridge()

@@ -352,12 +352,15 @@ class PremiumV2Bridge(QObject):
         ensure_roots()
         self.settings = QSettings("RyuBlanc", "Ryu's Audiobook")
         self._jobs_lock = threading.RLock()
+        self._performance_history_lock = threading.RLock()
         # Serialize review-skip writes with the character-analysis worker's final
         # reconciliation so a click during a long analysis cannot be overwritten.
         self._character_review_state_lock = threading.RLock()
         self._jobs: dict[str, dict[str, Any]] = {}
         self._history: dict[str, dict[str, Any]] = {}
+        self._performance_history: list[dict[str, Any]] = []
         self._load_durable_history()
+        self._load_performance_history()
         self._generators: dict[str, GenerationManager] = {}
         self._import_cancel_events: dict[str, threading.Event] = {}
         self._preview_cancel_events: dict[str, threading.Event] = {}
@@ -474,6 +477,8 @@ class PremiumV2Bridge(QObject):
                 "models.verify": self._models_verify,
                 "performance.info": self._performance_info,
                 "performance.benchmark": self._performance_benchmark,
+                "performance.history.clear": self._performance_history_clear,
+                "performance.history.export": self._performance_history_export,
                 "diagnostics.check": self._diagnostics_check,
                 "diagnostics.export_logs": self._diagnostics_export_logs,
                 "system.open_output": self._system_open_output,
@@ -1647,6 +1652,24 @@ class PremiumV2Bridge(QObject):
         """Immutable-ish completed-operation journal, independent of queue visibility."""
         return settings_root() / "premium_v2_history.json"
 
+    def _performance_history_path(self) -> Path:
+        """Benchmark-only journal, deliberately separate from Background Job history."""
+        return settings_root() / "premium_v2_performance_history.json"
+
+    def _load_performance_history(self) -> None:
+        path = self._performance_history_path()
+        try:
+            rows = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else []
+        except (OSError, ValueError, TypeError):
+            rows = []
+        if not isinstance(rows, list):
+            rows = []
+        with self._performance_history_lock:
+            self._performance_history = [
+                dict(row) for row in rows
+                if isinstance(row, dict) and row.get("benchmark_id")
+            ]
+
     @staticmethod
     def _terminal_job_state(row: dict[str, Any]) -> bool:
         return str(row.get("state") or "").lower() in {"completed", "failed", "cancelled"}
@@ -1682,6 +1705,35 @@ class PremiumV2Bridge(QObject):
                     Path(temp_name).unlink(missing_ok=True)
                 except OSError:
                     log.warning("Could not remove temporary persistence file: %s", temp_name, exc_info=True)
+
+    def _persist_performance_history(self) -> None:
+        with self._performance_history_lock:
+            self._persist_json_rows(
+                self._performance_history_path(),
+                list(self._performance_history),
+            )
+
+    def _record_performance_benchmark(
+        self, job_id: str, result: dict[str, Any], state: str
+    ) -> None:
+        """Persist a benchmark record independently of queue and general History cleanup."""
+        record = {
+            "benchmark_id": str(job_id),
+            "job_id": str(job_id),
+            "measured_at": self._now(),
+            "state": str(state or "failed"),
+            "result": dict(result),
+        }
+        with self._performance_history_lock:
+            self._performance_history = [
+                row for row in self._performance_history
+                if str(row.get("benchmark_id") or "") != str(job_id)
+            ]
+            self._performance_history.append(record)
+            self._persist_json_rows(
+                self._performance_history_path(),
+                list(self._performance_history),
+            )
 
     def _persist_jobs(self) -> None:
         path = self._jobs_path()
@@ -7364,11 +7416,35 @@ class PremiumV2Bridge(QObject):
                 backend="automatic",
             )
             result_data = {
-                "provider": result.provider, "backend": result.backend, "voice": voice,
+                "provider": result.provider, "backend": result.backend,
+                "requested_backend": "automatic", "voice": voice,
                 "seconds": float(result.seconds), "audio_seconds": float(result.audio_seconds),
                 "realtime_factor": float(result.realtime_factor), "success": bool(result.success),
                 "error": str(result.error or ""),
             }
+            try:
+                telemetry = self._performance_info({"refresh": True})
+                result_data["hardware"] = {
+                    key: telemetry.get(key) for key in (
+                        "platform", "processor", "gpu_name", "backend",
+                        "recommended_backend", "backend_active", "accelerators",
+                    )
+                }
+                result_data["resources"] = {
+                    key: telemetry.get(key) for key in (
+                        "cpu_percent", "memory_total_bytes", "memory_available_bytes",
+                        "memory_percent", "gpu_percent", "vram_used_mb",
+                        "vram_total_mb", "gpu_temperature_c",
+                    )
+                }
+                result_data["resource_snapshot_at"] = telemetry.get("measured_at")
+            except Exception as telemetry_error:
+                result_data["hardware"] = {}
+                result_data["resources"] = {}
+                result_data["resource_error"] = str(telemetry_error)
+            self._record_performance_benchmark(
+                job_id, result_data, "completed" if result.success else "failed"
+            )
             if not result.success:
                 detail = result_data["error"] or "The local TTS benchmark did not produce valid audio."
                 self._job_update(
@@ -7389,6 +7465,15 @@ class PremiumV2Bridge(QObject):
         except Exception as exc:
             log.exception("Local TTS performance benchmark failed")
             detail = str(exc) or type(exc).__name__
+            self._record_performance_benchmark(
+                job_id,
+                {
+                    "provider": "PiperProvider", "backend": "unverified",
+                    "requested_backend": "automatic", "voice": voice,
+                    "success": False, "error": detail,
+                },
+                "failed",
+            )
             self._job_update(
                 job_id, state="failed", stage="Benchmark failed", message=detail,
                 error={"code": "benchmark_failed", "message": detail},
@@ -7494,7 +7579,17 @@ class PremiumV2Bridge(QObject):
             recommendation = backend.replace("-unsupported","").upper() + " detected — unsupported runtime"
         else:
             recommendation = "Unavailable"
+        with self._performance_history_lock:
+            benchmark_history = [
+                dict(row) for row in reversed(self._performance_history[-100:])
+            ]
         latest_benchmark: dict[str, Any] = {}
+        for history_row in benchmark_history:
+            history_result = history_row.get("result")
+            if isinstance(history_result, dict) and history_result.get("success") is True:
+                latest_benchmark = dict(history_result)
+                latest_benchmark["measured_at"] = history_row.get("measured_at")
+                break
         with self._jobs_lock:
             successful_benchmarks = [
                 row for row in self._jobs.values()
@@ -7503,7 +7598,7 @@ class PremiumV2Bridge(QObject):
                 and isinstance(row.get("result"), dict)
                 and row["result"].get("success") is True
             ]
-            if successful_benchmarks:
+            if successful_benchmarks and not latest_benchmark:
                 latest_row = max(successful_benchmarks,
                     key=lambda row: str(row.get("completed_at") or row.get("updated_at") or ""))
                 latest_benchmark = dict(latest_row.get("result") or {})
@@ -7525,10 +7620,50 @@ class PremiumV2Bridge(QObject):
             "benchmark_voice": latest_benchmark.get("voice"),
             "benchmark_provider": latest_benchmark.get("provider"),
             "benchmark_measured_at": latest_benchmark.get("measured_at"),
+            "benchmark_history": benchmark_history,
             "measured_at": datetime.now(timezone.utc).isoformat(),
         }
 
+    def _performance_history_clear(self, _payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Clear only benchmark records; preserve Background Jobs and general History."""
+        with self._performance_history_lock:
+            cleared = len(self._performance_history)
+            self._performance_history = []
+            self._persist_json_rows(self._performance_history_path(), [])
+        return {
+            "cleared": cleared,
+            "background_job_history_preserved": True,
+        }
 
+    def _performance_history_export(self, _payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Export benchmark evidence without modifying job history or model files."""
+        with self._performance_history_lock:
+            records = [dict(row) for row in self._performance_history]
+        if not records:
+            return {"cancelled": False, "exported": False, "records": 0}
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        suggested = settings_root() / f"ryu-performance-benchmarks-{timestamp}.json"
+        target, _filter = QFileDialog.getSaveFileName(
+            None, "Export performance benchmark history", str(suggested),
+            "JSON reports (*.json);;All files (*.*)",
+        )
+        if not target:
+            return {"cancelled": True, "exported": False, "records": len(records)}
+        destination = Path(target).expanduser().resolve()
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "schema": "ryu.performance-benchmark-history.v1",
+            "exported_at": self._now(),
+            "records": records,
+        }
+        temporary = destination.with_name(destination.name + ".tmp")
+        try:
+            temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
+            temporary.replace(destination)
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            raise
+        return {"cancelled": False, "exported": True, "path": str(destination), "records": len(records)}
 
     def _diagnostics_check(self, _payload: dict[str, Any]) -> dict[str, Any]:
         checks = []

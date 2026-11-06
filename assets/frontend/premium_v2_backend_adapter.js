@@ -7868,6 +7868,108 @@
     }
     return rows;
   }
+  function renderPerformanceHistory(result = {}) {
+    const section = $('performance');
+    if (!section) return;
+    let panel = $('performanceBenchmarkHistory');
+    if (!panel) {
+      panel = document.createElement('section');
+      panel.id = 'performanceBenchmarkHistory';
+      panel.className = 'card';
+      panel.style.marginTop = '18px';
+      section.appendChild(panel);
+    }
+    const records = Array.isArray(result.benchmark_history) ? result.benchmark_history : [];
+    const buttonClass = $('runTtsBenchmark')?.className || $('runBenchmark')?.className || 'btn';
+    const rows = records.map((record, index) => {
+      const data = record?.result && typeof record.result === 'object' ? record.result : {};
+      const hardware = data.hardware && typeof data.hardware === 'object' ? data.hardware : {};
+      const resources = data.resources && typeof data.resources === 'object' ? data.resources : {};
+      const success = data.success === true;
+      const status = success ? 'Successful' : 'Failed';
+      const measuredAt = record.measured_at ? new Date(record.measured_at).toLocaleString() : 'Date unavailable';
+      const duration = Number.isFinite(Number(data.seconds)) ? Number(data.seconds).toFixed(2) + ' s' : 'Not measured';
+      const audio = Number.isFinite(Number(data.audio_seconds)) ? Number(data.audio_seconds).toFixed(2) + ' s' : 'Not measured';
+      const rtf = Number.isFinite(Number(data.realtime_factor)) ? Number(data.realtime_factor).toFixed(3) : 'Not measured';
+      const cpu = Number.isFinite(Number(resources.cpu_percent)) ? Number(resources.cpu_percent).toFixed(1) + '%' : 'Unavailable';
+      const ram = Number.isFinite(Number(resources.memory_available_bytes)) ? (Number(resources.memory_available_bytes) / 1024 ** 3).toFixed(1) + ' GB free' : 'Unavailable';
+      const gpu = hardware.gpu_name || 'No GPU reported';
+      const backend = hardware.backend || data.backend || 'Unverified';
+      return '<article class="performance-history-row" style="padding:12px 0;border-top:1px solid var(--border-subtle,rgba(255,255,255,.10))">' +
+        '<div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center">' +
+          '<strong>' + esc(String(data.voice || 'Piper')) + '</strong>' +
+          '<span class="muted">' + esc(status) + ' · ' + esc(measuredAt) + '</span>' +
+        '</div>' +
+        '<div class="muted" style="margin-top:5px;font-size:12px">' +
+          'Backend: ' + esc(String(backend)) + ' · GPU: ' + esc(String(gpu)) +
+        '</div>' +
+        '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:6px;font-size:12px">' +
+          '<span>Synthesis: ' + esc(duration) + '</span><span>Audio: ' + esc(audio) +
+          '</span><span>RTF: ' + esc(rtf) + '</span><span>CPU: ' + esc(cpu) +
+          '</span><span>RAM: ' + esc(ram) + '</span>' +
+        '</div>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">' +
+          '<button type="button" class="' + esc(buttonClass) + '" data-performance-repeat="' + index + '">Repeat</button>' +
+          '<details><summary class="muted" style="cursor:pointer;padding:7px">View details</summary>' +
+          '<pre class="muted" style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;max-height:240px;overflow:auto">' +
+          esc(JSON.stringify(record, null, 2)) + '</pre></details>' +
+        '</div></article>';
+    }).join('');
+    panel.innerHTML =
+      '<div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">' +
+        '<div><h3 style="margin:0">Benchmark History</h3>' +
+        '<p class="muted" style="margin:4px 0 0">Persisted local synthesis measurements; clearing this list does not clear Background Jobs or model files.</p></div>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+          '<button type="button" class="' + esc(buttonClass) + '" data-performance-export ' + (records.length ? '' : 'disabled') + '>Export report</button>' +
+          '<button type="button" class="' + esc(buttonClass) + '" data-performance-clear ' + (records.length ? '' : 'disabled') + '>Clear history</button>' +
+        '</div></div>' +
+      (rows || '<p class="muted" style="margin:12px 0 0">No benchmark runs have been recorded yet. Run a real local TTS benchmark to create the first record.</p>');
+    panel.querySelector('[data-performance-export]')?.addEventListener('click', act(async () => {
+      const exported = await call('performance.history.export', {});
+      if (exported?.cancelled) return;
+      if (!exported?.exported) { message('There are no benchmark records to export.', true); return; }
+      message('Benchmark report exported: ' + (exported.path || 'saved'));
+    }));
+    panel.querySelector('[data-performance-clear]')?.addEventListener('click', act(async () => {
+      const accepted = await requestModelActionDialog({
+        title: 'Clear benchmark history',
+        description: 'Only saved Performance Center benchmark records will be cleared. Background Jobs history, projects, model files and voice profiles will remain untouched.',
+        confirmLabel: 'Clear benchmark records',
+        danger: true
+      });
+      if (!accepted) return;
+      const cleared = await call('performance.history.clear', {});
+      message('Cleared ' + Number(cleared?.cleared || 0) + ' benchmark record(s). Background Job history was preserved.');
+      await refreshPerformance();
+    }));
+    panel.querySelectorAll('[data-performance-repeat]').forEach(button => {
+      button.addEventListener('click', act(async () => {
+        const index = Number(button.dataset.performanceRepeat);
+        const record = records[index];
+        const voice = String(record?.result?.voice || '').trim();
+        if (!voice) { message('The saved benchmark does not contain a repeatable voice selection.', true); return; }
+        button.disabled = true;
+        try {
+          const queued = await call('performance.benchmark', {voice});
+          await refreshJobs();
+          message('Repeat benchmark queued for ' + voice + '.');
+          await monitorJob(queued.job_id, null, async job => {
+            await refreshPerformance();
+            await refreshJobs();
+            if (job?.state === 'completed' && job?.result?.success) {
+              message('Repeat benchmark complete: ' + Number(job.result.seconds).toFixed(2) +
+                's synthesis · RTF ' + Number(job.result.realtime_factor).toFixed(3));
+            } else {
+              message(job?.error?.message || job?.message || 'Repeat benchmark failed.', true);
+            }
+          });
+        } finally {
+          button.disabled = false;
+        }
+      }));
+    });
+  }
+
   async function refreshPerformance() {
     let result;
     try {
@@ -7892,6 +7994,7 @@
       if($('benchmarkResult'))$('benchmarkResult').textContent='Not tested';
       const note=$('benchmarkResult')?.parentElement?.querySelector('p.muted');
       if(note)note.textContent=result?.reason||'Host telemetry is unavailable on this device.';
+      renderPerformanceHistory(result || {});
       return {...(result||{}),available:false};
     }
     const metrics=section?.querySelectorAll('.grid.metrics .metric');
@@ -7923,6 +8026,7 @@
     const note=$('benchmarkResult')?.parentElement?.querySelector('p.muted');
     if(note)note.textContent=(result.reason||'Live host telemetry connected.')+' · '+(result.platform||'')+' · '+(result.processor||'');
     if($('benchmarkResult'))$('benchmarkResult').textContent=duration===null?'Not tested':duration.toFixed(1)+' s';
+    renderPerformanceHistory(result);
     return result;
   }
   function requestModelActionDialog(options = {}) {
