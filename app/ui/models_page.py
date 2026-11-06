@@ -19,9 +19,9 @@ from PySide6.QtWidgets import (
     QInputDialog, QComboBox
 )
 
-from app.core.paths import models_root, ensure_roots, runtimes_root, model_cache_root, temporary_root
+from app.core.paths import app_root, models_root, ensure_roots, runtimes_root, model_cache_root, temporary_root
 from app.tts.chatterbox_runtime import install_runtime, runtime_status, RUNTIME_DIR as CHATTERBOX_RUNTIME_DIR
-from app.core.storage_migration import inventory_storage_root, safe_cleanup
+from app.core.storage_migration import inventory_storage_root, safe_cleanup, cleanup_migrated_source, read_migration_journal
 from app.tts.model_registry import BUILTIN_CATALOG, installed_models, mark_installed
 from app.tts.providers.piper import PiperProvider
 from app.tts.providers.kokoro import (
@@ -427,6 +427,9 @@ class ModelsPage(QWidget):
         cleanup_storage = QPushButton("Preview temporary cleanup")
         cleanup_storage.clicked.connect(self.preview_temporary_cleanup)
         storage_actions.addWidget(cleanup_storage)
+        source_cleanup = QPushButton("Review old source copies")
+        source_cleanup.clicked.connect(self.review_migrated_source_cleanup)
+        storage_actions.addWidget(source_cleanup)
         storage_layout.addLayout(storage_actions)
         layout.addWidget(storage_group)
         self.refresh_storage_summary()
@@ -621,6 +624,56 @@ class ModelsPage(QWidget):
             self, "Storage inventory and SHA-256 checksums",
             "Read-only inventory. No files are changed.", "\n".join(lines)
         )
+
+    def review_migrated_source_cleanup(self) -> None:
+        journal_root = app_root() / "Settings" / "Storage Migrations"
+        candidates = []
+        if journal_root.is_dir():
+            for path in journal_root.glob("ryu-storage-migration-*.json"):
+                try:
+                    journal = read_migration_journal(path)
+                    if journal.get("state") == "complete_source_retained":
+                        candidates.append((path, journal))
+                except Exception:
+                    continue
+        if not candidates:
+            QMessageBox.information(self, "Migrated Source Copies", "No completed migration source copies are waiting for cleanup.")
+            return
+        labels = [
+            f"{journal.get('source')}  →  {journal.get('destination')}"
+            for _path, journal in candidates
+        ]
+        selected, ok = QInputDialog.getItem(
+            self, "Review Migrated Source Copies",
+            "Select one old source copy. It is retained until you explicitly confirm deletion:",
+            labels, 0, False,
+        )
+        if not ok:
+            return
+        index = labels.index(selected)
+        journal_path, journal = candidates[index]
+        source = Path(str(journal.get("source", "")))
+        destination = Path(str(journal.get("destination", "")))
+        answer = QMessageBox.question(
+            self, "Confirm Old Source Cleanup",
+            f"Delete the retained source copy?\\n\\nSource: {source}\\nVerified destination: {destination}\\n\\n"
+            "Before deletion, Ryu will recheck file count, sizes, relative paths and every SHA-256 hash. "
+            "If any check fails, the source will be preserved.",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        protected = (models_root(), runtimes_root(), model_cache_root(), temporary_root())
+        try:
+            result = cleanup_migrated_source(journal_path, protected_roots=protected)
+        except Exception as exc:
+            QMessageBox.warning(self, "Source Copy Retained", str(exc))
+            return
+        QMessageBox.information(
+            self, "Old Source Copy Removed",
+            f"Verified {result['verified_files']} files against the active destination.\\n"
+            f"Removed: {result['source']}",
+        )
+        self.refresh_storage_summary()
 
     def preview_temporary_cleanup(self) -> None:
         if self._active_operation is not None:
