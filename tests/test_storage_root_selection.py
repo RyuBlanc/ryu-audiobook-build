@@ -1,5 +1,7 @@
 """Acceptance tests for selectable project/audio storage roots and disk capacity."""
 from pathlib import Path
+import os
+import subprocess
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
@@ -123,6 +125,39 @@ class StorageRootSelectionTests(unittest.TestCase):
                 self.assertEqual(paths.runtimes_root(), Path(selected["storage/runtime_root"]))
                 self.assertEqual(paths.model_cache_root(), Path(selected["storage/model_cache_root"]))
                 self.assertEqual(paths.temporary_root(), Path(selected["storage/temporary_root"]))
+
+    @unittest.skipUnless(os.name == "nt", "Windows drive-letter disconnect simulation")
+    def test_windows_subst_drive_disconnect_and_reconnect_preserves_root_availability(self):
+        from app.tts.model_registry import _storage_location_available
+
+        with TemporaryDirectory() as temporary:
+            letter = next(
+                (value for value in "ZYXWVUTSRQPONMLKJIHGFED"
+                 if not Path(value + ":\\\\").exists()),
+                None,
+            )
+            if letter is None:
+                self.skipTest("No unused drive letter is available for the Windows disconnect simulation.")
+            drive = letter + ":"
+            root = Path(drive + "\\\\Models")
+            mapped = False
+            try:
+                try:
+                    subprocess.run(["subst", drive, temporary], check=True, capture_output=True, text=True)
+                except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+                    self.skipTest("Windows SUBST drive mapping is unavailable: " + str(exc))
+                mapped = True
+                root.mkdir(parents=True, exist_ok=True)
+                self.assertTrue(_storage_location_available(root))
+                subprocess.run(["subst", drive, "/D"], check=True, capture_output=True, text=True)
+                mapped = False
+                self.assertFalse(_storage_location_available(root))
+                subprocess.run(["subst", drive, temporary], check=True, capture_output=True, text=True)
+                mapped = True
+                self.assertTrue(_storage_location_available(root))
+            finally:
+                if mapped:
+                    subprocess.run(["subst", drive, "/D"], check=False, capture_output=True, text=True)
 
     def test_chatterbox_bootstrap_installer_uses_configured_temporary_root(self):
         source = (Path(__file__).resolve().parents[1] / "app" / "tts" / "chatterbox_runtime.py").read_text(encoding="utf-8")
