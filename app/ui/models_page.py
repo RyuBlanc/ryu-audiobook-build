@@ -353,7 +353,9 @@ class UninstallComponentWorker(QThread):
                 mark_installed("kokoro", False)
 
             elif component_id == "chatterbox-runtime":
-                self._remove_path(CHATTERBOX_RUNTIME_DIR, root)
+                # Chatterbox's isolated Python environment belongs to
+                # Provider Runtime, not the selected Models weights directory.
+                self._remove_path(CHATTERBOX_RUNTIME_DIR, runtimes_root())
                 mark_installed("chatterbox", False)
                 mark_installed("chatterbox-multilingual", False)
 
