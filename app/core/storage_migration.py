@@ -307,6 +307,47 @@ def recover_migration_journal(path: Path, *, persist_root: Callable[[Path], None
     return payload
 
 
+
+def cleanup_migrated_source(
+    journal_path: Path,
+    *,
+    protected_roots: tuple[Path, ...] = (),
+) -> dict:
+    """Delete an old source only after explicit caller confirmation and re-verification."""
+    journal = read_migration_journal(journal_path)
+    if journal.get("state") != "complete_source_retained":
+        raise StorageMigrationError("Only a completed migration with a retained source can be cleaned.")
+    source = Path(str(journal.get("source", ""))).expanduser()
+    destination = Path(str(journal.get("destination", ""))).expanduser()
+    if not source.is_absolute() or not destination.is_absolute() or not source.is_dir() or not destination.is_dir():
+        raise StorageMigrationError("Both the retained source and active destination must be available.")
+    src = source.resolve()
+    dest = destination.resolve()
+    if src == dest or _inside(src, dest) or _inside(dest, src):
+        raise StorageMigrationError("Source and destination overlap; cleanup is unsafe.")
+    for protected in protected_roots:
+        item = Path(protected).expanduser().resolve()
+        if src == item or _inside(src, item) or _inside(item, src):
+            raise StorageMigrationError(f"Retained source overlaps an active protected root: {item}")
+    source_rows = _walk_files(src)
+    destination_rows = _walk_files(dest)
+    if len(source_rows) != len(destination_rows):
+        raise StorageMigrationError("Source and destination file counts differ; source retained.")
+    for source_row, destination_row in zip(source_rows, destination_rows):
+        source_file, source_relative, source_size = source_row
+        destination_file, destination_relative, destination_size = destination_row
+        if source_relative != destination_relative or source_size != destination_size:
+            raise StorageMigrationError(f"Source/destination inventory differs at {source_relative}.")
+        if _sha256(source_file) != _sha256(destination_file):
+            raise StorageMigrationError(f"Source/destination hash mismatch at {source_relative}.")
+    shutil.rmtree(src)
+    journal["state"] = "source_cleanup_confirmed"
+    journal["source_cleanup_at"] = time.time()
+    _write_journal(Path(journal_path), journal)
+    return {"source": str(src), "destination": str(dest), "deleted": True, "verified_files": len(source_rows)}
+
+
+
 def safe_cleanup(
     *,
     cache_roots: tuple[Path, ...] = (),
