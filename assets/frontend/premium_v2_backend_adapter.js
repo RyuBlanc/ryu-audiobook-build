@@ -8017,9 +8017,11 @@
         : '';
       return '<article class="performance-history-row" style="padding:12px 0;border-top:1px solid var(--border-subtle,rgba(255,255,255,.10))">' +
         '<div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center">' +
+          '<label style="display:flex;gap:7px;align-items:center"><input type="checkbox" data-performance-select="' + esc(String(record.benchmark_id || '')) + '"> Compare</label>' +
           '<strong>' + esc(String(data.model_kind || data.voice || 'Piper')) + '</strong>' +
           (data.provider ? '<span class="muted" style="margin-left:8px">' + esc(String(data.provider)) + '</span>' : '') +
-          '<span class="muted">' + esc(status) + ' · ' + esc(measuredAt) + '</span>' +
+          '<span class="muted">' + esc(status) + ' · ' + esc(measuredAt) +
+          (record.source_origin === 'imported' ? ' · Imported from ' + esc(String(record.source_file_name || 'another PC')) : ' · This PC') + '</span>' +
         '</div>' +
         '<div class="muted" style="margin-top:5px;font-size:12px">' +
           'Actual inference backend: ' + esc(String(backend)) + ' · GPU: ' + esc(String(gpu)) +
@@ -8044,10 +8046,55 @@
         '<div><h3 style="margin:0">Benchmark History</h3>' +
         '<p class="muted" style="margin:4px 0 0">Persisted local synthesis measurements; clearing this list does not clear Background Jobs or model files.</p></div>' +
         '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+          '<button type="button" class="' + esc(buttonClass) + '" data-performance-import>Import PC report</button>' +
+          '<button type="button" class="' + esc(buttonClass) + '" data-performance-compare ' + (records.length >= 2 ? '' : 'disabled') + '>Compare selected (2)</button>' +
           '<button type="button" class="' + esc(buttonClass) + '" data-performance-export ' + (records.length ? '' : 'disabled') + '>Export report</button>' +
           '<button type="button" class="' + esc(buttonClass) + '" data-performance-clear ' + (records.length ? '' : 'disabled') + '>Clear history</button>' +
         '</div></div>' +
       (rows || '<p class="muted" style="margin:12px 0 0">No benchmark runs have been recorded yet. Run a real local TTS benchmark to create the first record.</p>');
+    const comparisonButton = panel.querySelector('[data-performance-compare]');
+    const comparisonChecks = [...panel.querySelectorAll('[data-performance-select]')];
+    const updateComparisonButton = () => {
+      const selectedCount = comparisonChecks.filter(input => input.checked).length;
+      if (comparisonButton) {
+        comparisonButton.disabled = selectedCount !== 2;
+        comparisonButton.textContent = 'Compare selected (' + selectedCount + '/2)';
+      }
+    };
+    comparisonChecks.forEach(input => input.addEventListener('change', () => {
+      const checked = comparisonChecks.filter(item => item.checked);
+      if (checked.length > 2) input.checked = false;
+      updateComparisonButton();
+    }));
+    updateComparisonButton();
+    panel.querySelector('[data-performance-import]')?.addEventListener('click', act(async () => {
+      const imported = await call('performance.history.import', {});
+      if (imported?.cancelled) return;
+      message('Imported ' + Number(imported?.imported || 0) + ' benchmark record(s). Original PC hardware information was preserved.');
+      await refreshPerformance();
+    }));
+    comparisonButton?.addEventListener('click', act(async () => {
+      const selected = comparisonChecks.filter(input => input.checked).map(input => input.dataset.performanceSelect);
+      if (selected.length !== 2) return;
+      const comparison = await call('performance.history.compare', {benchmark_ids:selected});
+      let resultPanel = panel.querySelector('#performanceComparisonResult');
+      if (!resultPanel) {
+        resultPanel = document.createElement('section');
+        resultPanel.id = 'performanceComparisonResult';
+        resultPanel.className = 'card';
+        resultPanel.style.marginTop = '12px';
+        panel.appendChild(resultPanel);
+      }
+      const first = comparison.records?.[0] || {}, second = comparison.records?.[1] || {};
+      const fmt = value => Number.isFinite(Number(value)) ? Number(value).toFixed(2) : 'Unavailable';
+      resultPanel.innerHTML =
+        '<h4 style="margin:0 0 8px">PC performance comparison</h4>' +
+        '<p class="muted" style="margin:0 0 8px">Same provider, model, voice and workload. Imported results retain their source-PC details.</p>' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px">' +
+          '<div><strong>' + esc(String(first.label || 'PC A')) + '</strong><div class="muted">Backend: ' + esc(String(first.backend || 'Unavailable')) + '</div><div>Synthesis: ' + fmt(first.synthesis_seconds) + ' s</div><div>RTF: ' + fmt(first.realtime_factor) + '</div></div>' +
+          '<div><strong>' + esc(String(second.label || 'PC B')) + '</strong><div class="muted">Backend: ' + esc(String(second.backend || 'Unavailable')) + '</div><div>Synthesis: ' + fmt(second.synthesis_seconds) + ' s</div><div>RTF: ' + fmt(second.realtime_factor) + '</div></div>' +
+        '</div><p style="margin:10px 0 0"><strong>Faster: ' + esc(String(comparison.faster || 'Equal')) + '</strong> · ' + fmt(comparison.speedup_ratio) + '× relative speed difference</p>';
+    }));
     panel.querySelector('[data-performance-export]')?.addEventListener('click', act(async () => {
       const exported = await call('performance.history.export', {});
       if (exported?.cancelled) return;

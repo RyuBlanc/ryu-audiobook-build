@@ -1157,3 +1157,62 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_performance_history_import_preserves_source_pc_hardware(self):
+        bridge = self.make_bridge()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            report = root / "pc-b-report.json"
+            report.write_text(json.dumps({
+                "schema": "ryu.performance-benchmark-history.v1",
+                "exported_at": "2026-11-06T10:00:00Z",
+                "records": [{
+                    "benchmark_id": "source-run-1",
+                    "measured_at": "2026-11-06T09:00:00Z",
+                    "state": "completed",
+                    "result": {
+                        "provider": "PiperProvider",
+                        "workload_id": "piper-default-preview-v1",
+                        "voice": "en_US-test-medium",
+                        "seconds": 2.0,
+                        "audio_seconds": 4.0,
+                        "realtime_factor": 0.5,
+                        "success": True,
+                        "hardware": {"platform": "Windows PC B", "gpu_name": "RTX test B"},
+                    },
+                }],
+            }), encoding="utf-8")
+            with patch.object(bridge, "_performance_history_path", return_value=root / "history.json"):
+                result = bridge._performance_history_import({"path": str(report)})
+                imported = bridge._performance_history[0]
+        self.assertEqual(result["imported"], 1)
+        self.assertEqual(imported["source_origin"], "imported")
+        self.assertEqual(imported["source_file_name"], report.name)
+        self.assertEqual(imported["source_hardware"]["gpu_name"], "RTX test B")
+        self.assertNotEqual(imported["benchmark_id"], "source-run-1")
+
+    def test_performance_history_compare_requires_matching_workload_and_reports_pc_speed(self):
+        bridge = self.make_bridge()
+        bridge._performance_history = [
+            {
+                "benchmark_id": "pc-a", "state": "completed", "source_origin": "local",
+                "source_hardware": {"platform": "Windows A", "processor": "CPU A", "gpu_name": "GPU A"},
+                "result": {"success": True, "provider": "PiperProvider", "workload_id": "piper-default-preview-v1",
+                           "voice": "en_US-test-medium", "seconds": 2.0, "audio_seconds": 4.0,
+                           "realtime_factor": 0.5, "backend": "cpu"},
+            },
+            {
+                "benchmark_id": "pc-b", "state": "completed", "source_origin": "imported",
+                "source_hardware": {"platform": "Windows B", "processor": "CPU B", "gpu_name": "GPU B"},
+                "result": {"success": True, "provider": "PiperProvider", "workload_id": "piper-default-preview-v1",
+                           "voice": "en_US-test-medium", "seconds": 1.0, "audio_seconds": 4.0,
+                           "realtime_factor": 0.25, "backend": "cuda"},
+            },
+        ]
+        comparison = bridge._performance_history_compare({"benchmark_ids": ["pc-a", "pc-b"]})
+        self.assertTrue(comparison["comparable"])
+        self.assertEqual(comparison["faster"], "Windows B · CPU B · GPU B")
+        self.assertEqual(comparison["speedup_ratio"], 2.0)
+        bridge._performance_history[1]["result"]["workload_id"] = "different-workload"
+        with self.assertRaisesRegex(ValueError, "not comparable"):
+            bridge._performance_history_compare({"benchmark_ids": ["pc-a", "pc-b"]})

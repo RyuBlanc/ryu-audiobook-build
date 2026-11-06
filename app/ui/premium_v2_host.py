@@ -480,6 +480,8 @@ class PremiumV2Bridge(QObject):
                 "performance.qwen_benchmark": self._performance_qwen_benchmark,
                 "performance.history.clear": self._performance_history_clear,
                 "performance.history.export": self._performance_history_export,
+                "performance.history.import": self._performance_history_import,
+                "performance.history.compare": self._performance_history_compare,
                 "diagnostics.check": self._diagnostics_check,
                 "diagnostics.export_logs": self._diagnostics_export_logs,
                 "system.open_output": self._system_open_output,
@@ -1726,6 +1728,8 @@ class PremiumV2Bridge(QObject):
             "job_id": str(job_id),
             "measured_at": self._now(),
             "state": str(state or "failed"),
+            "source_origin": "local",
+            "source_hardware": dict(result.get("hardware") or {}),
             "result": dict(result),
         }
         with self._performance_history_lock:
@@ -7517,6 +7521,7 @@ class PremiumV2Bridge(QObject):
             target_met = bool(result.success and target_duration_met and under_60_seconds)
             result_data = {
                 "provider": "QwenCharacterProvider",
+                "workload_id": "qwen-customvoice-preview-30s-v1",
                 "model_kind": model_kind,
                 "voice": voice,
                 "backend": result.backend,
@@ -7660,7 +7665,8 @@ class PremiumV2Bridge(QObject):
                 backend="automatic",
             )
             result_data = {
-                "provider": result.provider, "backend": result.backend,
+                "provider": result.provider, "workload_id": "piper-default-preview-v1",
+                "backend": result.backend,
                 "requested_backend": result.requested_backend or "automatic",
                 "execution_providers": list(result.execution_providers),
                 "backend_verified": bool(result.backend_verified), "voice": voice,
@@ -7890,6 +7896,127 @@ class PremiumV2Bridge(QObject):
                 if self._qwen_model_installed(kind)
             ],
             "measured_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def _performance_history_import(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Import bounded, schema-validated benchmark evidence while preserving source PC provenance."""
+        payload = payload or {}
+        selected_path = str(payload.get("path") or "").strip()
+        if selected_path:
+            source = Path(selected_path).expanduser().resolve()
+        else:
+            target, _filter = QFileDialog.getOpenFileName(
+                None, "Import performance benchmark report", str(settings_root()),
+                "JSON reports (*.json);;All files (*.*)",
+            )
+            if not target:
+                return {"cancelled": True, "imported": 0}
+            source = Path(target).expanduser().resolve()
+        if not source.is_file():
+            raise ValueError("The selected benchmark report does not exist.")
+        if source.stat().st_size > 10 * 1024 * 1024:
+            raise ValueError("Benchmark reports larger than 10 MB cannot be imported.")
+        try:
+            document = json.loads(source.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError) as exc:
+            raise ValueError(f"The benchmark report is not valid UTF-8 JSON: {exc}") from exc
+        if not isinstance(document, dict) or document.get("schema") != "ryu.performance-benchmark-history.v1":
+            raise ValueError("This is not a supported Ryu performance benchmark report.")
+        incoming = document.get("records")
+        if not isinstance(incoming, list) or not incoming or len(incoming) > 500:
+            raise ValueError("The report must contain between 1 and 500 benchmark records.")
+        imported: list[dict[str, Any]] = []
+        for row in incoming:
+            if not isinstance(row, dict) or not isinstance(row.get("result"), dict):
+                continue
+            result = dict(row["result"])
+            try:
+                seconds = float(result.get("seconds"))
+                audio_seconds = float(result.get("audio_seconds"))
+                realtime_factor = float(result.get("realtime_factor"))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if not all(math.isfinite(value) and value >= 0 for value in (seconds, audio_seconds, realtime_factor)):
+                continue
+            provider = str(result.get("provider") or "").strip()
+            voice = str(result.get("voice") or "").strip()
+            workload_id = str(result.get("workload_id") or "").strip()
+            if not provider or not voice or not workload_id:
+                continue
+            record = dict(row)
+            original_id = str(row.get("benchmark_id") or row.get("job_id") or "")
+            record.update({
+                "benchmark_id": "imported-" + uuid.uuid4().hex,
+                "job_id": "",
+                "source_origin": "imported",
+                "source_file_name": source.name,
+                "source_benchmark_id": original_id,
+                "source_hardware": dict(result.get("hardware") or row.get("source_hardware") or {}),
+                "result": result,
+            })
+            if not isinstance(record.get("measured_at"), str) or not record["measured_at"].strip():
+                record["measured_at"] = str(document.get("exported_at") or self._now())
+            imported.append(record)
+        if not imported:
+            raise ValueError("The report contains no valid benchmark records with real measurements and workload provenance.")
+        with self._performance_history_lock:
+            self._performance_history.extend(imported)
+            self._persist_json_rows(self._performance_history_path(), list(self._performance_history))
+        return {
+            "cancelled": False,
+            "imported": len(imported),
+            "source_file": source.name,
+            "source_hardware_preserved": True,
+        }
+
+    def _performance_history_compare(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Compare two real runs only when provider, model, voice and workload match."""
+        payload = payload or {}
+        ids = payload.get("benchmark_ids")
+        if not isinstance(ids, list) or len(ids) != 2 or not all(isinstance(value, str) and value for value in ids) or ids[0] == ids[1]:
+            raise ValueError("Select exactly two different benchmark records to compare.")
+        with self._performance_history_lock:
+            by_id = {str(row.get("benchmark_id") or ""): dict(row) for row in self._performance_history}
+        rows = [by_id.get(value) for value in ids]
+        if any(row is None for row in rows):
+            raise ValueError("One of the selected benchmark records is no longer available.")
+        first, second = rows
+        a, b = first.get("result") or {}, second.get("result") or {}
+        if first.get("state") != "completed" or second.get("state") != "completed" or a.get("success") is not True or b.get("success") is not True:
+            raise ValueError("Only successful completed benchmark records can be compared.")
+        keys = ("provider", "model_kind", "voice", "workload_id")
+        mismatches = [key for key in keys if str(a.get(key) or "") != str(b.get(key) or "")]
+        if mismatches:
+            labels = ", ".join(mismatches)
+            raise ValueError("These runs are not comparable because the following workload details differ or are missing: " + labels + ".")
+        try:
+            seconds_a, seconds_b = float(a["seconds"]), float(b["seconds"])
+            audio_a, audio_b = float(a["audio_seconds"]), float(b["audio_seconds"])
+            rtf_a, rtf_b = float(a["realtime_factor"]), float(b["realtime_factor"])
+        except (KeyError, TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("The selected benchmark records are missing valid timing measurements.") from exc
+        if min(audio_a, audio_b) <= 0 or abs(audio_a - audio_b) > max(3.0, min(audio_a, audio_b) * 0.10):
+            raise ValueError("The generated audio durations differ too much for a fair comparison.")
+        hardware_a = dict(first.get("source_hardware") or a.get("hardware") or {})
+        hardware_b = dict(second.get("source_hardware") or b.get("hardware") or {})
+        label_a = " · ".join(str(hardware_a.get(key) or "").strip() for key in ("platform", "processor", "gpu_name") if str(hardware_a.get(key) or "").strip()) or ("Imported PC" if first.get("source_origin") == "imported" else "This PC")
+        label_b = " · ".join(str(hardware_b.get(key) or "").strip() for key in ("platform", "processor", "gpu_name") if str(hardware_b.get(key) or "").strip()) or ("Imported PC" if second.get("source_origin") == "imported" else "This PC")
+        faster = label_a if seconds_a < seconds_b else label_b if seconds_b < seconds_a else "Equal"
+        return {
+            "comparable": True,
+            "provider": a.get("provider"),
+            "model_kind": a.get("model_kind"),
+            "voice": a.get("voice"),
+            "workload_id": a.get("workload_id"),
+            "records": [
+                {"benchmark_id": first["benchmark_id"], "label": label_a, "source_origin": first.get("source_origin", "local"), "synthesis_seconds": seconds_a, "audio_seconds": audio_a, "realtime_factor": rtf_a, "backend": a.get("backend"), "hardware": hardware_a},
+                {"benchmark_id": second["benchmark_id"], "label": label_b, "source_origin": second.get("source_origin", "local"), "synthesis_seconds": seconds_b, "audio_seconds": audio_b, "realtime_factor": rtf_b, "backend": b.get("backend"), "hardware": hardware_b},
+            ],
+            "faster": faster,
+            "speedup_ratio": (max(seconds_a, seconds_b) / min(seconds_a, seconds_b)) if min(seconds_a, seconds_b) > 0 else None,
+            "synthesis_delta_seconds": abs(seconds_a - seconds_b),
+            "audio_duration_delta_seconds": abs(audio_a - audio_b),
+            "rtf_delta": abs(rtf_a - rtf_b),
         }
 
     def _performance_history_clear(self, _payload: dict[str, Any] | None = None) -> dict[str, Any]:
