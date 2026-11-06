@@ -357,6 +357,10 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
         self.assertEqual(sorted(frontend_commands - backend_commands), [],
                          "Frontend commands are missing from the Python bridge allow-list.")
         self.assertIn("const modelLifecycleCommands = {install:'models.install',repair:'models.repair',uninstall:'models.uninstall'};", adapter)
+        self.assertIn("if (model.uninstallable && !isPiper)", adapter)
+        self.assertIn("data-model-uninstall", adapter)
+        self.assertIn("danger:action === 'uninstall'", adapter)
+        self.assertIn("Uninstall is blocked while a voice preview, generation, analysis or model lifecycle job is running.", adapter)
         self.assertTrue({"models.install", "models.repair", "models.uninstall"}.issubset(backend_commands))
         missing_methods = sorted({method for _command, method in handler_rows if method not in defined_methods})
         self.assertEqual(missing_methods, [], "Bridge command handlers reference missing Python methods.")
