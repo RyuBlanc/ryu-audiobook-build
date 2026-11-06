@@ -320,10 +320,10 @@ class SettingsPage(QWidget):
         storage = QGroupBox("Local storage")
         storage_layout = QVBoxLayout(storage)
         note = QLabel(
-            "All content stays local. Project Library controls where new imports are stored; "
-            "existing projects remain visible in their original folders. Audio Assets controls "
-            "the default destination for new audiobook exports. Free space is read from the "
-            "selected folder's actual filesystem."
+            "All content stays local. Project Library controls new imports and Audio Assets controls new exports. "
+            "Models, Provider Runtime, Model Cache and Temporary/Staging roots are independently configurable. "
+            "Changing a non-empty managed root is blocked until verified migration is available; existing files are never moved by changing a setting. "
+            "Filesystem capacity is read from the selected drive. Restart the app after changing a managed root."
         )
         note.setObjectName("muted")
         note.setWordWrap(True)
@@ -501,11 +501,12 @@ class SettingsPage(QWidget):
             "model_cache": model_cache_root(),
             "temporary": temporary_root(),
         }[kind]
-        change_error = _storage_root_change_error(active, candidate)
-        if change_error:
-            QMessageBox.warning(self, "Storage Migration Required", f"{active} → {candidate}\n\n{change_error}")
-            self.status.setText("Storage location was not changed; the existing data remains at its original path.")
-            return
+        if kind in {"models", "runtime", "model_cache", "temporary"}:
+            change_error = _storage_root_change_error(active, candidate)
+            if change_error:
+                QMessageBox.warning(self, "Storage Migration Required", f"{active} → {candidate}\n\n{change_error}")
+                self.status.setText("Storage location was not changed; the existing data remains at its original path.")
+                return
         self._set_root_for_kind(kind, candidate)
         self._refresh_storage_root_labels()
         self.status.setText("Storage location selected. Press Save Settings to apply it.")
@@ -628,8 +629,9 @@ class SettingsPage(QWidget):
         if callable(apply_size):
             apply_size(window_size)
         self.status.setText(
-            "Settings saved locally. New imports use the selected Project Library and new exports use Audio Assets; "
-            "existing projects and saved output destinations stay in place. UI preferences and default audio quality are also saved."
+            "Settings saved locally. New imports use Project Library and new exports use Audio Assets. "
+            "Model/runtime/cache/temporary roots are saved for the next app launch; restart Ryu's Audiobook to apply them. "
+            "Existing projects and saved output destinations stay in place."
         )
 
     @staticmethod
