@@ -28,7 +28,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QApplication, QFileDialog, QLabel, QMainWindow, QProgressBar, QPushButton, QStackedWidget, QVBoxLayout, QWidget
 from PySide6.QtGui import QDesktopServices, QImageReader, QPixmap
 
-from app.core.paths import app_root, audiobooks_root, ensure_roots, library_root, settings_root
+from app.core.paths import app_root, audiobooks_root, ensure_roots, library_root, settings_root, models_root, runtimes_root
 from app.audio.playback import is_iso_bmff_file, prepare_audiobook_playback_source
 from app.ui.frontend_assets import (
     FrontendAssetError,
@@ -7097,15 +7097,22 @@ class PremiumV2Bridge(QObject):
 
         if requested in {"chatterbox", "chatterbox-multilingual", "chatterbox-runtime"}:
             from app.tts.chatterbox_runtime import RUNTIME_DIR
+            # Chatterbox's isolated Python environment lives under Provider Runtime,
+            # not Models. Validate deletion against that independently configurable
+            # root so the safety guard protects the correct ownership boundary.
+            provider_runtime_root = runtimes_root().resolve()
             if RUNTIME_DIR.exists():
                 report("Removing the shared Chatterbox runtime…")
-                self._models_remove_path(RUNTIME_DIR, root)
+                self._models_remove_path(RUNTIME_DIR, provider_runtime_root)
             mark_installed("chatterbox", False)
             mark_installed("chatterbox-multilingual", False)
             return "Removed the shared Chatterbox runtime. Saved profiles and books were kept."
 
         if requested == "qwen-model" or requested in {"custom-0.6b", "custom-1.7b", "design-1.7b", "base-0.6b", "base-1.7b"}:
-            from app.tts.qwen_character_runtime import MODEL_DIRS, RUNTIME_ROOT
+            from app.tts.qwen_character_runtime import MODEL_DIRS
+            # Qwen weights are stored under Models; only the Python environment
+            # belongs to Provider Runtime. Keep the two deletion roots distinct.
+            model_component_root = (models_root() / "qwen3-tts").resolve()
             kind = str(payload.get("model_kind") or requested).strip().casefold()
             if kind not in MODEL_DIRS:
                 raise ValueError("Choose the exact installed Qwen model to uninstall.")
@@ -7113,7 +7120,7 @@ class PremiumV2Bridge(QObject):
             if not target.exists():
                 raise ValueError(f"Qwen model {kind} is not installed.")
             report(f"Removing Qwen model {kind}…")
-            self._models_remove_path(target, RUNTIME_ROOT)
+            self._models_remove_path(target, model_component_root)
             return f"Removed Qwen model {kind}. The Qwen runtime, other model folders and saved voice profiles were kept."
 
         if requested == "qwen-runtime":
