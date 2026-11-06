@@ -228,3 +228,19 @@ The migration-engine source commit #2421 passed the test job. The following comm
 - The packaged checkpoint #2499 passed the Windows frozen-app, packaged Sound Design/Music Library and Stage 5.3 generation acceptance, and uploaded installer, portable and SHA-256 artifacts for its earlier source SHA. A later checkpoint #2507 has also passed frozen-app verification, bundled assets, packaged Sound Design/Music Library acceptance and core installer payload creation; its HTML installer/release verification steps are still running. Neither is the final matching-head package for the latest provider-temp/root-validation changes.
 
 **Remaining before Step 2 closure:** run a fresh matching-head `[artifact-checkpoint]` against the final root-validation and provider-temp code; require Windows installer/portable packaging, release hashes, Defender scan and artifact uploads to pass. The Windows SUBST test now covers drive-letter disconnect/reconnect in CI, but a physical USB/removable-drive unplug/replug test still requires the installed application and actual hardware. Keep Step 2 open until the matching-head package is green and record the physical-hardware check as the only manual acceptance item.
+
+### Matching-head packaged acceptance and automated Step 2 closeout — 2026-11-06
+
+- **Final artifact checkpoint #2524 PASSED** on source commit `8f6db45191` (workflow run `42173215300`).
+- Full regression: **1,225 tests passed** in 56.774 seconds. Frontend JavaScript syntax validation, isolated native Qt lifecycle regression, focused Stage 6 History/Task Manager preflight and remaining full regression all passed. The Windows log explicitly confirms the storage-root legacy validation test, provider child-process temporary-root inheritance test, Chatterbox bootstrap temp-root test, and the earlier Windows SUBST disconnect/reconnect simulation are green.
+- Windows build/package gates all passed: installer JavaScript syntax; frozen application build and verification; bundled voice assets and critical modules; packaged Sound Design/Music Library acceptance including Stage 5.3 generation UI; Inno Setup; core installer payload; functional HTML installer; original logo transparency and release hashes; Microsoft Defender scan; installer, SHA-256 manifest and portable artifact uploads.
+- Microsoft Defender scanned the frozen app executable, full installer and core installer. All three scans reported **no threats**.
+- Published build artifacts for #2524:
+  - `Ryu-Audiobook-Installer-2524` — artifact ID `13482818177`, 884,111,305 bytes.
+  - `Ryu-Audiobook-Portable-2524` — artifact ID `13483361935`, 1,368,131,522 bytes.
+  - `Ryu-Audiobook-Release-SHA256-2524` — artifact ID `13482912947`, 777 bytes.
+- The workflow run completed with overall conclusion `success`; both `tests` and `build` jobs succeeded. No failed steps remain in this matching-head checkpoint.
+- Historical failures #2509–#2521 and #2493 remain visible as failed runs, correctly retained in GitHub history. Their identified test-fixture, legacy shared-root/cache validation, bridge capability and provider temp-root issues were corrected in subsequent commits and are covered by the green 1,225-test final run. They are not unresolved failures.
+- The Windows SUBST acceptance test verifies unavailable/reconnected drive-letter behaviour, but it is a simulated drive mapping rather than a physical USB/removable drive unplug. Actual hardware disconnect/reconnect still requires the installed application and a real removable drive.
+
+**Step 2 status:** automated implementation, regression, packaged acceptance, release hashing, Defender scanning and artifact upload are COMPLETE on #2524. Do not claim physical removable-drive acceptance complete until the real installed-app test is performed. This is the only explicitly identified manual hardware acceptance item remaining for Step 2. All other previously listed automated Step 2 gates are green.
