@@ -819,6 +819,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             "Live host telemetry is connected and must remain advertised.",
         )
         self.assertEqual(capabilities.get("performance.history.clear"), "True")
+        self.assertEqual(capabilities.get("performance.qwen_benchmark"), "True")
         self.assertEqual(capabilities.get("performance.history.export"), "True")
 
 

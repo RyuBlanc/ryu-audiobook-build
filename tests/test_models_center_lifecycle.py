@@ -101,6 +101,81 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
                 self.assertEqual(len(info["benchmark_history"]), 1)
                 self.assertEqual(info["benchmark_history"][0]["result"]["voice"], voice.stem)
 
+    def test_qwen_warm_preview_benchmark_records_real_duration_and_target_verdict(self):
+        from app.tts.benchmark import BenchmarkResult
+
+        bridge = self.make_bridge()
+        result = BenchmarkResult(
+            provider="QwenCharacterProvider", backend="cuda", seconds=45.0,
+            audio_seconds=30.0, realtime_factor=1.5, success=True,
+            requested_backend="automatic", backend_verified=True,
+        )
+        providers = []
+        class FakeQwenProvider:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+                self.last_execution_context = {
+                    "device": "cuda:0", "backend": "cuda",
+                    "model_kind": kwargs["model_kind"], "verified_inference": True,
+                }
+                self.closed = False
+                providers.append(self)
+            def synthesize(self, _text, output_path, voice=None):
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_bytes(b"warmup")
+                return output_path
+            def close(self):
+                self.closed = True
+            @property
+            def execution_backend(self):
+                return self.last_execution_context["backend"]
+            @property
+            def execution_backend_verified(self):
+                return True
+            @property
+            def execution_providers(self):
+                return ()
+
+        class ImmediateThread:
+            def __init__(self, target, args=(), **_kwargs):
+                self.target, self.args = target, args
+            def start(self):
+                self.target(*self.args)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            with (
+                patch.object(bridge, "_qwen_model_installed", return_value=True),
+                patch("app.tts.providers.qwen_character.QwenCharacterProvider", FakeQwenProvider),
+                patch("app.tts.benchmark.benchmark_provider", return_value=result),
+                patch.object(bridge, "_performance_info", return_value={
+                    "platform": "Windows test", "processor": "CPU test",
+                    "gpu_name": "RTX test", "backend": "cuda",
+                    "recommended_backend": "CUDA", "backend_active": True,
+                    "accelerators": [], "cpu_percent": 45.0,
+                    "memory_total_bytes": 16 * 1024**3,
+                    "memory_available_bytes": 8 * 1024**3,
+                    "memory_percent": 50.0, "gpu_percent": 55.0,
+                    "vram_used_mb": 2048.0, "vram_total_mb": 8192.0,
+                    "gpu_temperature_c": 60.0, "last_inference": {},
+                    "measured_at": "2026-11-06T13:00:00Z",
+                }),
+                patch.object(bridge, "_jobs_path", return_value=base / "jobs.json"),
+                patch.object(bridge, "_history_path", return_value=base / "history.json"),
+                patch.object(bridge, "_performance_history_path", return_value=base / "performance-history.json"),
+                patch("threading.Thread", ImmediateThread),
+            ):
+                queued = bridge._performance_qwen_benchmark({"model_kind": "custom-1.7b"})
+                row = bridge._jobs[queued["job_id"]]
+                self.assertEqual(row["state"], "completed")
+                self.assertTrue(row["result"]["target_duration_met"])
+                self.assertTrue(row["result"]["under_60_seconds"])
+                self.assertTrue(row["result"]["target_performance_met"])
+                self.assertEqual(row["result"]["execution_device"], "cuda:0")
+                self.assertEqual(row["result"]["model_kind"], "custom-1.7b")
+                self.assertEqual(len(providers), 1)
+                self.assertTrue(providers[0].closed)
+
     def test_performance_history_clear_does_not_delete_background_job_history(self):
         bridge = self.make_bridge()
         with tempfile.TemporaryDirectory() as temporary:

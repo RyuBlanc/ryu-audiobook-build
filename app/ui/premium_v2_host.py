@@ -477,6 +477,7 @@ class PremiumV2Bridge(QObject):
                 "models.verify": self._models_verify,
                 "performance.info": self._performance_info,
                 "performance.benchmark": self._performance_benchmark,
+                "performance.qwen_benchmark": self._performance_qwen_benchmark,
                 "performance.history.clear": self._performance_history_clear,
                 "performance.history.export": self._performance_history_export,
                 "diagnostics.check": self._diagnostics_check,
@@ -631,6 +632,7 @@ class PremiumV2Bridge(QObject):
             "models.verify": True,
             "performance.info": True,
             "performance.benchmark": True,
+            "performance.qwen_benchmark": True,
             "performance.history.clear": True,
             "performance.history.export": True,
             "diagnostics.check": True,
@@ -7415,6 +7417,194 @@ class PremiumV2Bridge(QObject):
             return result.stdout.strip() if result.returncode == 0 else ""
         except (OSError, subprocess.SubprocessError):
             return ""
+
+    def _performance_qwen_benchmark(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Queue a warmed, real Qwen CustomVoice preview benchmark."""
+        payload = payload or {}
+        model_kind = str(payload.get("model_kind") or "custom-0.6b").strip()
+        if model_kind not in {"custom-0.6b", "custom-1.7b"}:
+            raise ValueError("Choose an installed Qwen CustomVoice 0.6B or 1.7B model.")
+        if not self._qwen_model_installed(model_kind):
+            raise ValueError(
+                f"The selected Qwen model is not installed or is incomplete: {model_kind}. "
+                "Install and verify it in Models Center before benchmarking."
+            )
+        voice = str(payload.get("voice") or "Ryan").strip() or "Ryan"
+        backend = str(payload.get("backend") or self.settings.value(
+            "qwen/backend_preference", "automatic"
+        ) or "automatic").strip().casefold()
+        low_memory = bool(self.settings.value("qwen/low_memory_mode", False, type=bool))
+        with self._jobs_lock:
+            active = [
+                row for row in self._jobs.values()
+                if str(row.get("state") or "").casefold() in {"queued", "running", "paused"}
+            ]
+        if active:
+            raise RuntimeError(
+                "The Qwen benchmark is blocked while another application job is active. "
+                "Wait for it to finish, then retry."
+            )
+        job_id = self._new_job(
+            "tts-benchmark",
+            "Qwen 30-second warm preview benchmark",
+            f"Warm Qwen CustomVoice {model_kind} using {voice}, then measure a real ~30-second audio preview.",
+        )
+        threading.Thread(
+            target=self._performance_qwen_benchmark_worker,
+            args=(job_id, model_kind, voice, backend, low_memory),
+            daemon=True,
+            name="RyuQwenPerformanceBenchmark",
+        ).start()
+        return {"job_id": job_id, "model_kind": model_kind, "voice": voice, "backend": backend, "queued": True}
+
+    def _performance_qwen_benchmark_worker(
+        self, job_id: str, model_kind: str, voice: str, backend: str, low_memory: bool
+    ) -> None:
+        """Warm the Qwen worker first, then measure one real preview synthesis."""
+        import tempfile
+        from app.tts.benchmark import benchmark_provider
+        from app.tts.providers.qwen_character import QwenCharacterProvider
+
+        sample_text = (
+            "During this local performance test, the narrator reads a continuous passage at a natural audiobook pace. "
+            "The passage includes ordinary sentences, short pauses, and a few longer phrases so the benchmark reflects "
+            "a realistic preview rather than a tiny single-line sample. Ryu records the generated audio duration, "
+            "warm synthesis time, real-time factor, selected model, actual execution device, CPU use, memory "
+            "availability, and accelerator telemetry without changing the saved voice profile or project."
+        )
+        provider = None
+        self._job_update(
+            job_id, state="running", stage="Warming Qwen model",
+            message=f"Loading {model_kind} and warming the selected Qwen worker before the timed preview.",
+            started_at=self._now(), progress=5,
+        )
+        try:
+            def report_progress(message: str) -> None:
+                self._job_update(
+                    job_id, state="running", stage="Qwen synthesis",
+                    message=str(message), progress=25,
+                )
+
+            provider = QwenCharacterProvider(
+                voice_id=voice,
+                language="English",
+                model_kind=model_kind,
+                qwen_mode="custom",
+                backend=backend,
+                low_memory=low_memory,
+                status_callback=report_progress,
+            )
+            with tempfile.TemporaryDirectory(prefix="ryu-qwen-bench-warmup-") as temporary:
+                warmup_path = Path(temporary) / "warmup.wav"
+                warmup_started = time.perf_counter()
+                provider.synthesize(
+                    "This is a short warm-up for the local Qwen speech model.",
+                    warmup_path,
+                    voice=voice,
+                )
+                warmup_seconds = time.perf_counter() - warmup_started
+            self._job_update(
+                job_id, state="running", stage="Measuring warm preview",
+                message="Qwen model is warm. Measuring the real preview synthesis now.",
+                progress=45,
+            )
+            result = benchmark_provider(
+                provider, voice=voice, backend=backend, text=sample_text,
+            )
+            execution = dict(getattr(provider, "last_execution_context", {}) or {})
+            target_duration_met = abs(float(result.audio_seconds) - 30.0) <= 3.0
+            under_60_seconds = float(result.seconds) < 60.0
+            target_met = bool(result.success and target_duration_met and under_60_seconds)
+            result_data = {
+                "provider": "QwenCharacterProvider",
+                "model_kind": model_kind,
+                "voice": voice,
+                "backend": result.backend,
+                "requested_backend": result.requested_backend or backend,
+                "execution_providers": list(result.execution_providers),
+                "backend_verified": bool(result.backend_verified),
+                "execution_device": execution.get("device"),
+                "execution_backend": execution.get("backend"),
+                "execution_measured_at": execution.get("measured_at"),
+                "warmup_seconds": float(warmup_seconds),
+                "seconds": float(result.seconds),
+                "audio_seconds": float(result.audio_seconds),
+                "realtime_factor": float(result.realtime_factor),
+                "target_audio_seconds": 30.0,
+                "target_duration_tolerance_seconds": 3.0,
+                "target_duration_met": target_duration_met,
+                "under_60_seconds": under_60_seconds,
+                "target_performance_met": target_met,
+                "success": bool(result.success),
+                "error": str(result.error or ""),
+            }
+            try:
+                telemetry = self._performance_info({"refresh": True})
+                result_data["hardware"] = {
+                    key: telemetry.get(key) for key in (
+                        "platform", "processor", "gpu_name", "backend",
+                        "recommended_backend", "backend_active", "accelerators",
+                    )
+                }
+                result_data["resources"] = {
+                    key: telemetry.get(key) for key in (
+                        "cpu_percent", "memory_total_bytes", "memory_available_bytes",
+                        "memory_percent", "gpu_percent", "vram_used_mb",
+                        "vram_total_mb", "gpu_temperature_c",
+                    )
+                }
+                result_data["last_inference"] = telemetry.get("last_inference") or execution
+                result_data["resource_snapshot_at"] = telemetry.get("measured_at")
+            except Exception as telemetry_error:
+                result_data["hardware"] = {}
+                result_data["resources"] = {}
+                result_data["resource_error"] = str(telemetry_error)
+                result_data["last_inference"] = execution
+            self._record_performance_benchmark(
+                job_id, result_data, "completed" if result.success else "failed"
+            )
+            if not result.success:
+                detail = result_data["error"] or "Qwen did not produce valid benchmark audio."
+                self._job_update(
+                    job_id, state="failed", stage="Qwen benchmark failed", message=detail,
+                    error={"code": "qwen_benchmark_failed", "message": detail},
+                    result=result_data, progress=100, recoverable=True,
+                )
+                return
+            duration_label = "30-second duration target met" if target_duration_met else "30-second duration target not met"
+            speed_label = "under-60-second target met" if under_60_seconds else "under-60-second target not met"
+            detail = (
+                f"{model_kind} / {result.backend}: {result.seconds:.2f}s warm synthesis for "
+                f"{result.audio_seconds:.2f}s audio; RTF {result.realtime_factor:.3f}. "
+                f"{duration_label}; {speed_label}."
+            )
+            self._job_update(
+                job_id, state="completed", stage="Qwen benchmark complete", message=detail,
+                result=result_data, progress=100, recoverable=False,
+            )
+        except Exception as exc:
+            log.exception("Qwen warm-preview performance benchmark failed")
+            detail = str(exc) or type(exc).__name__
+            self._record_performance_benchmark(
+                job_id,
+                {
+                    "provider": "QwenCharacterProvider", "model_kind": model_kind,
+                    "voice": voice, "backend": "unverified",
+                    "requested_backend": backend, "success": False, "error": detail,
+                },
+                "failed",
+            )
+            self._job_update(
+                job_id, state="failed", stage="Qwen benchmark failed", message=detail,
+                error={"code": "qwen_benchmark_failed", "message": detail},
+                progress=100, recoverable=True,
+            )
+        finally:
+            if provider is not None:
+                try:
+                    provider.close()
+                except Exception:
+                    log.debug("Qwen benchmark provider cleanup failed", exc_info=True)
 
     def _performance_benchmark(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Queue a real local Piper synthesis benchmark; never block the Qt event thread."""

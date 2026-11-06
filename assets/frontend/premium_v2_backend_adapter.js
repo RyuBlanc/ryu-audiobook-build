@@ -7901,6 +7901,7 @@
     }
     const lowMemory = settings.qwen_low_memory === true;
     const concurrency = lowMemory ? 1 : Math.max(1, Math.min(3, Number(settings.concurrency || 1)));
+    const qwenModels = Array.isArray(result.qwen_models_installed) ? result.qwen_models_installed : [];
     const last = result.last_inference && typeof result.last_inference === 'object' ? result.last_inference : {};
     const actual = last.verified_inference
       ? String(last.backend || 'unknown').toUpperCase() + ' · ' + String(last.device || 'device unavailable')
@@ -7919,7 +7920,14 @@
           [1,2,3].map(value => '<option value="' + value + '"' + (value === concurrency ? ' selected' : '') + '>' + value + '</option>').join('') +
         '</select></label>' +
       '</div>' +
-      '<p class="muted" style="margin:10px 0 0;font-size:12px">Low-memory mode enforces one heavy generation job, enables low-memory model loading and checks available accelerator memory before loading. If a GPU runtime cannot be validated, Auto reports the reason and falls back to CPU without changing the selected model or voice identity. Settings apply to new jobs; active inference is never switched mid-job.</p>' +
+      '<p class="muted" style="margin:10px 0 0;font-size:12px">Low-memory mode enforces one heavy generation job, requests low-memory model loading when supported and checks actual free accelerator memory before loading. If a GPU runtime cannot be validated, Auto reports the reason and falls back to CPU without changing the selected model or voice identity. Settings apply to new jobs; active inference is never switched mid-job.</p>' +
+      '<div style="display:grid;grid-template-columns:minmax(180px,1fr) auto;gap:10px;align-items:end;margin-top:14px">' +
+        '<label>Qwen CustomVoice benchmark model<select id="performanceQwenBenchmarkModel" class="input" style="display:block;width:100%;margin-top:6px">' +
+          qwenModels.map(kind => '<option value="' + esc(kind) + '">' + esc(kind) + '</option>').join('') +
+        '</select></label>' +
+        '<button type="button" class="' + esc($('runTtsBenchmark')?.className || $('runBenchmark')?.className || 'btn') + '" data-run-qwen-benchmark ' + (qwenModels.length ? '' : 'disabled') + '>Run Qwen 30s warm preview benchmark</button>' +
+      '</div>' +
+      (!qwenModels.length ? '<p class="muted" style="margin:6px 0 0;font-size:12px">Install and verify a Qwen CustomVoice 0.6B or 1.7B model in Models Center to run this benchmark.</p>' : '') +
       '<div style="display:flex;justify-content:flex-end;margin-top:12px"><button type="button" class="' + esc($('runTtsBenchmark')?.className || $('runBenchmark')?.className || 'btn') + '" data-save-hardware-optimization>Save optimization settings</button></div>';
     const low = panel.querySelector('#performanceQwenLowMemory');
     const concurrencySelect = panel.querySelector('#performanceHeavyConcurrency');
@@ -7929,6 +7937,32 @@
         if (low.checked) concurrencySelect.value = '1';
       }
     });
+    panel.querySelector('[data-run-qwen-benchmark]')?.addEventListener('click', act(async () => {
+      const modelKind = panel.querySelector('#performanceQwenBenchmarkModel')?.value;
+      if (!modelKind) { message('Install a Qwen CustomVoice model before benchmarking.', true); return; }
+      const button = panel.querySelector('[data-run-qwen-benchmark]');
+      if (button) button.disabled = true;
+      try {
+        const queued = await call('performance.qwen_benchmark', {model_kind: modelKind, voice: 'Ryan'});
+        await refreshJobs();
+        message('Qwen 30-second warm preview benchmark queued for ' + modelKind + '.');
+        await monitorJob(queued.job_id, null, async job => {
+          await refreshPerformance();
+          await refreshJobs();
+          const result = job?.result || {};
+          if (job?.state === 'completed' && result.success) {
+            message('Qwen benchmark: ' + Number(result.seconds).toFixed(2) + 's for ' +
+              Number(result.audio_seconds).toFixed(2) + 's audio · RTF ' +
+              Number(result.realtime_factor).toFixed(3) + ' · ' +
+              (result.target_performance_met ? '30s / under-60s target met' : 'target not met'));
+          } else {
+            message(job?.error?.message || job?.message || 'Qwen benchmark failed.', true);
+          }
+        });
+      } finally {
+        if (button) button.disabled = false;
+      }
+    }));
     panel.querySelector('[data-save-hardware-optimization]')?.addEventListener('click', act(async () => {
       const backend = panel.querySelector('#performanceQwenBackend')?.value || 'automatic';
       const lowMemoryEnabled = Boolean(low?.checked);
@@ -7972,9 +8006,19 @@
       const backend = data.backend_verified === true
         ? String(data.backend || 'unknown').toUpperCase() + ' · verified'
         : 'Unverified · requested ' + String(data.requested_backend || 'automatic');
+      const gpuUse = resources.gpu_percent !== null && resources.gpu_percent !== undefined && Number.isFinite(Number(resources.gpu_percent))
+        ? Number(resources.gpu_percent).toFixed(1) + '%' : 'Unavailable';
+      const vram = resources.vram_used_mb !== null && resources.vram_used_mb !== undefined &&
+        resources.vram_total_mb !== null && resources.vram_total_mb !== undefined
+        ? Number(resources.vram_used_mb).toFixed(0) + ' / ' + Number(resources.vram_total_mb).toFixed(0) + ' MB'
+        : 'Unavailable';
+      const target = data.target_audio_seconds === 30
+        ? (data.target_performance_met ? '30s preview / under 60s: met' : '30s preview / under 60s: not met')
+        : '';
       return '<article class="performance-history-row" style="padding:12px 0;border-top:1px solid var(--border-subtle,rgba(255,255,255,.10))">' +
         '<div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center">' +
-          '<strong>' + esc(String(data.voice || 'Piper')) + '</strong>' +
+          '<strong>' + esc(String(data.model_kind || data.voice || 'Piper')) + '</strong>' +
+          (data.provider ? '<span class="muted" style="margin-left:8px">' + esc(String(data.provider)) + '</span>' : '') +
           '<span class="muted">' + esc(status) + ' · ' + esc(measuredAt) + '</span>' +
         '</div>' +
         '<div class="muted" style="margin-top:5px;font-size:12px">' +
@@ -7984,8 +8028,10 @@
         '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:6px;font-size:12px">' +
           '<span>Synthesis: ' + esc(duration) + '</span><span>Audio: ' + esc(audio) +
           '</span><span>RTF: ' + esc(rtf) + '</span><span>CPU: ' + esc(cpu) +
-          '</span><span>RAM: ' + esc(ram) + '</span>' +
+          '</span><span>RAM: ' + esc(ram) + '</span><span>GPU: ' + esc(gpuUse) +
+          '</span><span>VRAM: ' + esc(vram) + '</span>' +
         '</div>' +
+        (target ? '<div style="margin-top:6px;font-size:12px"><strong>' + esc(target) + '</strong></div>' : '') +
         '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">' +
           '<button type="button" class="' + esc(buttonClass) + '" data-performance-repeat="' + index + '">Repeat</button>' +
           '<details><summary class="muted" style="cursor:pointer;padding:7px">View details</summary>' +
@@ -8028,7 +8074,10 @@
         if (!voice) { message('The saved benchmark does not contain a repeatable voice selection.', true); return; }
         button.disabled = true;
         try {
-          const queued = await call('performance.benchmark', {voice});
+          const isQwen = data.provider === 'QwenCharacterProvider';
+          const command = isQwen ? 'performance.qwen_benchmark' : 'performance.benchmark';
+          const payload = isQwen ? {voice, model_kind: data.model_kind} : {voice};
+          const queued = await call(command, payload);
           await refreshJobs();
           message('Repeat benchmark queued for ' + voice + '.');
           await monitorJob(queued.job_id, null, async job => {

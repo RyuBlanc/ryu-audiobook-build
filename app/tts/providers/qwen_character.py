@@ -213,8 +213,20 @@ class QwenCharacterProvider(TTSProvider):
             except Exception:
                 pass
 
+    @property
+    def execution_backend(self) -> str:
+        return str(self.last_execution_context.get("backend") or "unverified")
+
+    @property
+    def execution_backend_verified(self) -> bool:
+        return self.last_execution_context.get("verified_inference") is True
+
+    @property
+    def execution_providers(self) -> tuple[str, ...]:
+        return tuple(self.last_execution_context.get("execution_providers") or ())
+
     def _record_execution_context(self, response: dict) -> None:
-        if not isinstance(response, dict):
+        if not isinstance(response, dict) or response.get("ok") is not True:
             return
         device = str(response.get("device") or "").strip()
         kind = str(response.get("kind") or self.model_kind).strip()

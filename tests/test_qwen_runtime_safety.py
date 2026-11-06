@@ -209,6 +209,23 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
         self.assertEqual(record["device"], "cuda:0")
         self.assertEqual(record["model_kind"], "custom-1.7b")
 
+    def test_qwen_provider_does_not_record_worker_ready_as_actual_inference(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from app.tts.providers import qwen_character
+
+        provider = qwen_character.QwenCharacterProvider(
+            voice_id="telemetry-ready-test", backend="automatic", model_kind="custom-0.6b"
+        )
+        with TemporaryDirectory() as temporary:
+            with patch.object(qwen_character, "settings_root", return_value=Path(temporary)):
+                provider._record_execution_context({
+                    "ready": True, "device": "cuda:0", "backend": "cuda",
+                    "kind": "custom-0.6b", "task": "custom",
+                })
+            self.assertFalse((Path(temporary) / "qwen_last_inference.json").exists())
+
     def test_close_tolerates_already_closed_qwen_streams(self):
         from types import SimpleNamespace
         from app.tts.providers.qwen_character import QwenCharacterProvider

@@ -85,7 +85,8 @@ def _preflight_device_memory(torch, device: str, model_path: Path, low_memory: b
     weight_bytes = _model_weight_bytes(model_path)
     if weight_bytes <= 0:
         return
-    reserve_factor = 1.15 if low_memory else 1.30
+    # Low-memory loading reduces host-side pressure, not the model's GPU weight footprint.
+    reserve_factor = 1.30
     required_bytes = int(weight_bytes * reserve_factor)
     if int(free_bytes) < required_bytes:
         raise RuntimeError(
@@ -133,6 +134,17 @@ def _load_model(kind: str, backend: str, root: Path, low_memory: bool = False):
             torch.set_num_threads(max(1, min(4, (os.cpu_count() or 4) // 2)))
         except Exception:
             pass
+    gc.collect()
+    if device.startswith("cuda"):
+        try:
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
+    elif device.startswith("xpu"):
+        try:
+            torch.xpu.empty_cache()
+        except Exception:
+            pass
     _preflight_device_memory(torch, device, model_path, low_memory)
     if device.startswith("cuda"):
         dtype = _inference_dtype(torch, device)
@@ -155,7 +167,20 @@ def _load_model(kind: str, backend: str, root: Path, low_memory: bool = False):
     if low_memory:
         kwargs["low_cpu_mem_usage"] = True
     with redirect_stdout(sys.stderr):
-        model = Qwen3TTSModel.from_pretrained(str(model_path), **kwargs)
+        try:
+            model = Qwen3TTSModel.from_pretrained(str(model_path), **kwargs)
+        except TypeError as exc:
+            if low_memory and "low_cpu_mem_usage" in str(exc):
+                kwargs.pop("low_cpu_mem_usage", None)
+                print(json.dumps({
+                    "progress": (
+                        "This Qwen runtime wrapper does not expose low_cpu_mem_usage; "
+                        "continuing with single-job, CPU-thread and accelerator-memory safeguards."
+                    )
+                }), flush=True)
+                model = Qwen3TTSModel.from_pretrained(str(model_path), **kwargs)
+            else:
+                raise
     gc.collect()
     if device.startswith("cuda"):
         try:
