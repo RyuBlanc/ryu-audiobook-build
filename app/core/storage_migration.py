@@ -354,7 +354,7 @@ def safe_cleanup(
     temporary_roots: tuple[Path, ...] = (),
     dry_run: bool = True,
     protected_paths: tuple[Path, ...] = (),
-    allowed_names: tuple[str, ...] = ("staging", "downloads", "temporary", "tmp", "cache"),
+    allowed_names: tuple[str, ...] = ("staging", "downloads", "temporary", "tmp"),
 ) -> dict:
     """Clean only app-owned cache/temp contents; never traverse protected paths.
 
