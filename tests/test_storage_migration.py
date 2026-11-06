@@ -145,7 +145,7 @@ class StorageMigrationTests(unittest.TestCase):
             journal_paths = []
             def persist(path):
                 path = Path(path)
-                if path == source:
+                if Path(path).resolve() == source.resolve():
                     raise OSError("settings backend unavailable")
             def progress(_stage, _done, _total):
                 pass
