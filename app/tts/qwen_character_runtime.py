@@ -1024,7 +1024,9 @@ def runtime_environment() -> dict[str, str]:
         if not existing_pythonpath
         else str(app_root) + os.pathsep + existing_pythonpath
     )
-    cache_root = model_cache_root()\n    cache_root.mkdir(parents=True, exist_ok=True)\n    env["HF_HOME"] = str(cache_root)
+    cache_root = model_cache_root()
+    cache_root.mkdir(parents=True, exist_ok=True)
+    env["HF_HOME"] = str(cache_root)
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
