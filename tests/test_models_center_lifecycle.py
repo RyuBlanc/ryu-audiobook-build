@@ -309,6 +309,11 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
                 bridge._validate_storage_root_separation("runtime", models, roots)
             # The legacy Hugging Face cache is intentionally nested in Models.
             bridge._validate_storage_root_separation("model_cache", cache, roots)
+            # Existing installations may share a Models base while keeping
+            # model weights and provider runtimes in separate subdirectories.
+            roots["runtime"] = ("runtime", models, models)
+            bridge._validate_storage_root_separation("models", models, roots)
+            bridge._validate_storage_root_separation("runtime", models, roots)
             with self.assertRaisesRegex(ValueError, "contain the Models root"):
                 bridge._validate_storage_root_separation("model_cache", base, roots)
 
