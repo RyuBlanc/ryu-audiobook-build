@@ -223,7 +223,9 @@ def install_runtime(progress=None) -> Path:
             )
 
     model_id, filename, _size = recommended_model()
-    target = root / filename
+    # The GGUF model belongs in Models; only llama.cpp executables/DLLs live
+    # in the independently configurable Provider Runtime root.
+    target = brain_root() / filename
     if not target.exists():
         if progress:
             progress(f"Downloading Audiobook AI model: {filename}…")
