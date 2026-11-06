@@ -1172,7 +1172,6 @@ if __name__ == "__main__":
                     "state": "completed",
                     "result": {
                         "provider": "PiperProvider",
-                        "workload_id": "piper-default-preview-v1",
                         "voice": "en_US-test-medium",
                         "seconds": 2.0,
                         "audio_seconds": 4.0,
@@ -1189,6 +1188,7 @@ if __name__ == "__main__":
         self.assertEqual(imported["source_origin"], "imported")
         self.assertEqual(imported["source_file_name"], report.name)
         self.assertEqual(imported["source_hardware"]["gpu_name"], "RTX test B")
+        self.assertEqual(imported["result"]["workload_id"], "piper-default-preview-v1")
         self.assertNotEqual(imported["benchmark_id"], "source-run-1")
 
     def test_performance_history_compare_requires_matching_workload_and_reports_pc_speed(self):

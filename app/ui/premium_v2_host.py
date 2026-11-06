@@ -637,6 +637,8 @@ class PremiumV2Bridge(QObject):
             "performance.qwen_benchmark": True,
             "performance.history.clear": True,
             "performance.history.export": True,
+            "performance.history.import": True,
+            "performance.history.compare": True,
             "diagnostics.check": True,
             "diagnostics.export_logs": True,
             "system.open_output": True,
@@ -649,7 +651,7 @@ class PremiumV2Bridge(QObject):
             "sound.cues.clear": True,
             "sound.chapter_bgm.get": True,
             "sound.chapter_bgm.save": True,
-            "reason": "Local import, chapter editing, saved voice selection and preview, character analysis and editing, pronunciation rules, audiobook generation, background jobs, history, playback metadata, local model installation, settings, live hardware telemetry, TTS benchmarks, and persistent benchmark history are connected.",
+            "reason": "Local import, chapter editing, saved voice selection and preview, character analysis and editing, pronunciation rules, audiobook generation, background jobs, history, playback metadata, local model installation, settings, live hardware telemetry, TTS benchmarks, persistent benchmark history, PC benchmark import and comparable cross-PC reports are connected.",
         }
 
     def _project_summary(self, project) -> dict[str, Any]:
@@ -7941,7 +7943,17 @@ class PremiumV2Bridge(QObject):
             provider = str(result.get("provider") or "").strip()
             voice = str(result.get("voice") or "").strip()
             workload_id = str(result.get("workload_id") or "").strip()
-            if not provider or not voice or not workload_id:
+            if not workload_id:
+                # Legacy local Piper exports used the stable built-in benchmark
+                # passage before workload IDs were added to the report schema.
+                if provider == "PiperProvider":
+                    workload_id = "piper-default-preview-v1"
+                elif provider == "QwenCharacterProvider" and float(result.get("target_audio_seconds") or 0) == 30.0:
+                    workload_id = "qwen-customvoice-preview-30s-v1"
+                else:
+                    continue
+                result["workload_id"] = workload_id
+            if not provider or not voice:
                 continue
             record = dict(row)
             original_id = str(row.get("benchmark_id") or row.get("job_id") or "")

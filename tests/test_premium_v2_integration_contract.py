@@ -821,6 +821,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertEqual(capabilities.get("performance.history.clear"), "True")
         self.assertEqual(capabilities.get("performance.qwen_benchmark"), "True")
         self.assertEqual(capabilities.get("performance.history.export"), "True")
+        self.assertEqual(capabilities.get("performance.history.import"), "True")
+        self.assertEqual(capabilities.get("performance.history.compare"), "True")
 
 
     def test_dashboard_recent_project_cards_open_real_local_project(self):
