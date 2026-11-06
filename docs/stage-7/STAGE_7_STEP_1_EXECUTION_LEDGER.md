@@ -87,24 +87,26 @@ Read-only path/file detail is part of the first inventory contract. Storage-root
 - Voice Studio selectors use the same status and never offer incompatible/unusable local models.
 - Refresh is stable, non-blocking, and does not destroy selection or saved profiles.
 
-## 6. CI wiring issue to resolve before the first Step 1 checkpoint
+## 6. CI wiring — current state
 
-The Stage 6 baseline workflow `.github/workflows/build-windows.yml` has push filters for `stage-6/**`, but does not yet include `stage-7/**`. It supports `workflow_dispatch`. Ensure Stage 7 has a reliable CI trigger before treating any Step 1 commit as verified. Do not alter the default branch or start an unrelated main-branch package build just to work around this.
+The workflow `.github/workflows/build-windows.yml` now includes the `stage-7/**` push filter and retains `workflow_dispatch`. This was verified directly in the workflow at checkpoint `ec8a15c0dbb26beda183720012eeb7843a5f0334` (workflow blob `72be0c5073726d66d0961225292c10ecf0aa57ec`). The earlier statement that the filter was absent is historical and stale; it must not be used to justify routing future canonical Stage 7 commits through the Stage 6 alias.
+
+A push to the canonical Stage 7 branch is now the intended CI trigger. A matching-head test/package result must still be checked before acceptance.
 
 ## 7. Current status
 
-**Step 1: IN PROGRESS — source audit completed; implementation and verification not yet completed.**
+**Step 1: IN PROGRESS — unified inventory implementation is present; matching-head CI and installed-app acceptance remain open.**
 
-No Step 1 source code changes or Step 1 test runs are recorded in this ledger. Do not mark Step 1 complete until the unified implementation, regression tests, matching-commit CI, and required packaged/runtime acceptance evidence are recorded.
+The source implementation and initial regression coverage are committed. The latest candidate is recorded in Section 10. Do not mark Step 1 complete until the candidate's full regression run, Windows packaging, and required installed-app acceptance evidence are recorded.
 
 ## 8. Next action
 
-Implement the authoritative registry/scanner and integrate the Premium V2 bridge and Voice Studio selectors. Add focused tests first, then run the focused model lifecycle/inventory tests, the full regression suite, and a matching-head Windows build/package checkpoint. Investigate and fix root causes of any failures before proceeding to Step 2.
+Run the full regression suite and Windows packaging checkpoint on the latest canonical candidate recorded in Section 10. Investigate any failures at their root cause, preserve existing working functionality, and rerun on the corrected head. Then perform actual installed-Windows-app Models Center acceptance for model/runtime paths, file inventory and sizes, individual model removal, shared-runtime removal with model weights retained, and post-removal refresh. Do not begin Step 2 until those closure checks are accepted.
 
 
 ## 9. CI validation branch alias
 
-The repository's default-branch Actions workflow currently has a `stage-6/**` push filter but not a `stage-7/**` filter. To obtain matching-commit CI without changing the default branch or triggering an unrelated main package build, `stage-6/stage-7-step-1-ci-validation` mirrors the Stage 7 working branch for CI events. The canonical Stage 7 branch must be advanced to the exact tested commit SHA after each validation checkpoint. This alias is only a workflow-trigger compatibility measure; Stage 7 scope and acceptance remain unchanged.
+This alias was used historically because the earlier workflow did not include a `stage-7/**` push filter. The filter is now present, so the canonical Stage 7 branch is the authoritative CI branch. At checkpoint `ec8a15c0dbb26beda183720012eeb7843a5f0334`, the alias and canonical branch were identical. Subsequent regression-test commits were added only to the canonical branch; the alias is now behind and must not be treated as the latest candidate.
 
 
 ## 2026-11-05 — CI failure audit update
@@ -126,3 +128,51 @@ The repository's default-branch Actions workflow currently has a `stage-6/**` pu
 - Latest regression checkpoint #2395: 1,196 tests passed; isolated Qt lifecycle regression passed; Stage 6 preflight passed (37 tests); frontend JavaScript syntax passed.
 - New matching-head packaged acceptance and Windows installer verification are still required before Step 1 closure.
 - Current source commit before package checkpoint: 089a2613dab94686b1f32395a794f7ee748e5217.
+
+
+## 10. 2026-11-06 — canonical fast-forward, regression additions and closure status
+
+### Canonical branch
+
+- Canonical branch: `stage-7/step-1-model-registry-inventory`.
+- The canonical branch was safely fast-forwarded from `6edd3be6c6e61705141630583d2e01ad564888c7` to tested checkpoint `ec8a15c0dbb26beda183720012eeb7843a5f0334` (23 commits ahead, 0 behind; no divergence; non-forced fast-forward).
+- The CI alias `stage-6/stage-7-step-1-ci-validation` was identical to `ec8a15c0dbb26beda183720012eeb7843a5f0334` at that point.
+- Additional Step 1 acceptance regressions were then committed to the canonical branch: `6492b2f4da07bd100649eee7775a099129dfbe3d` and fixture-isolation correction `d153751c7763e409cc84192b9b470f8b0faae379`.
+- Latest canonical candidate before this ledger checkpoint: `d153751c7763e409cc84192b9b470f8b0faae379`. It is two commits ahead of the alias. The alias is not the latest tested candidate.
+
+### Implementation verified by source inspection
+
+- `app/tts/model_registry.py` provides the unified live `build_inventory()`, exact component paths, paginated `component_file_inventory()`, file sizes, status normalization, persisted inventory snapshot and Voice Studio availability projection.
+- `app/ui/premium_v2_host.py` delegates Models Center inventory and file requests to the registry; model lifecycle operations refresh the inventory after completion and include the refreshed rows in the Background Job result.
+- Premium V2 displays model/runtime/Python locations and exposes paginated file details with per-file sizes. The existing approved Premium V2 visual structure is retained.
+- Existing lifecycle code uses component-owned path checks and blocks removal during active preview/generation/analysis or model lifecycle jobs.
+- Source inspection is not a substitute for installed-Windows-app acceptance.
+
+### Failure audit and prior CI evidence
+
+- #2386: file-inventory pagination failure was corrected in the subsequent safe-runtime-path implementation.
+- #2387: safe runtime path discovery — recorded successful.
+- #2388: storage accounting and Voice Studio mapping — recorded successful.
+- #2389: Voice Studio registry synchronization and exact runtime paths — recorded successful.
+- #2390: failed on a stale Stage 4 provider-health source assertion. The assertion was updated to the current Stage 7 truthful status taxonomy rather than restoring the retired generic label. The full #2390 run reported this as its remaining failure.
+- #2392 packaged SD/Music acceptance passed.
+- #2393 packaged SD/Music acceptance timed out waiting for Production-owned Chapter 2 selection. This was not deterministic because #2392 passed the same acceptance.
+- The selector identity reconciliation fix was committed as `089a2613dab94686b1f32395a794f7ee748e5217`.
+- #2395: 1,196 regression tests passed; isolated Qt lifecycle regression passed; Stage 6 preflight passed (37 tests); frontend JavaScript syntax passed. This evidence is for source commit `089a2613dab94686b1f32395a794f7ee748e5217`, not the latest candidate. A new matching-head result is required.
+
+### New acceptance regressions added to the canonical candidate
+
+- Existing tests already cover individual Qwen model removal preserving sibling model folders, removal path containment, active-job protection and actual paginated file inventory sizes.
+- `6492b2f4da07bd100649eee7775a099129dfbe3d` adds controlled temporary-directory tests for Qwen shared-runtime removal preserving all Qwen model weights and project data, Chatterbox shared-runtime removal preserving cached model assets, and inventory refresh reporting an individually removed Qwen model as `Missing` while retaining another model.
+- `d153751c7763e409cc84192b9b470f8b0faae379` isolates the Chatterbox test's registry mutation so the test does not touch the real user settings manifest.
+- These newly added tests have not yet been confirmed by a matching-head CI result. They use temporary fixtures; no real installed model files were used or removed.
+
+### Remaining closure gates — Step 1 stays OPEN
+
+1. Full regression suite must pass on the latest candidate (including the new shared-runtime and post-uninstall refresh tests).
+2. Windows installer/portable packaging must pass on the exact same final candidate SHA; artifact metadata and SHA-256 manifest must identify that SHA.
+3. Installed Windows application acceptance is still pending. Verify actual detected model and runtime paths, actual file inventory and per-file/aggregate sizes, one individual model uninstall, one shared runtime uninstall while preserving unrelated model weights, and Refresh Status showing the removed component as Missing/not installed.
+4. Verify saved voice profiles, character assignments, project files and unrelated models remain intact after the actual uninstall operations.
+5. Record the final run URL, artifact names/IDs, artifact checksums and exact commit SHA after the run completes.
+
+**Current status: IN PROGRESS / RUNTIME ACCEPTANCE PENDING. Do not proceed to Step 2.**
