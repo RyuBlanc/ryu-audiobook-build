@@ -140,7 +140,11 @@ def _recover_interrupted_storage_migrations() -> None:
     for journal_path in sorted(journal_root.glob("ryu-storage-migration-*.json")):
         try:
             journal = read_migration_journal(journal_path)
-            if journal.get("state") == "complete_source_retained":
+            if journal.get("state") in {
+                "complete_source_retained",
+                "source_cleanup_confirmed",
+                "recovered_source_restored",
+            }:
                 continue
             source = Path(str(journal.get("source", ""))).expanduser()
             destination = Path(str(journal.get("destination", ""))).expanduser()
