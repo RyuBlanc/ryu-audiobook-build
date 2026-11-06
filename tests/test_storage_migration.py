@@ -92,5 +92,73 @@ class StorageMigrationTests(unittest.TestCase):
                 prepare_migration(source, base / "target", reserve_bytes=0)
 
 
+
+    def test_recovery_restores_source_and_removes_only_staging(self):
+        with TemporaryDirectory() as temp:
+            import json
+            base = Path(temp)
+            source = base / "source"
+            source.mkdir()
+            destination = base / "target"
+            staging = base / ".target.ryu-migration-token.staging"
+            staging.mkdir()
+            (staging / "partial").write_text("partial", encoding="utf-8")
+            journal = base / "journal.json"
+            journal.write_text(json.dumps({
+                "schema_version": 1, "state": "copying",
+                "source": str(source), "destination": str(destination),
+                "staging": str(staging),
+            }), encoding="utf-8")
+            persisted = []
+            result = recover_migration_journal(journal, persist_root=lambda p: persisted.append(p))
+            self.assertEqual([Path(p).resolve() for p in persisted], [source.resolve()])
+            self.assertFalse(staging.exists())
+            self.assertEqual(result["state"], "recovered_source_restored")
+
+    def test_safe_cleanup_dry_run_and_protected_path(self):
+        with TemporaryDirectory() as temp:
+            base = Path(temp)
+            cache = base / "cache"
+            cache.mkdir()
+            old = cache / "old-cache"
+            old.mkdir()
+            (old / "blob.bin").write_bytes(b"x" * 128)
+            protected = cache / "voice-reference"
+            protected.mkdir()
+            (protected / "keep.wav").write_bytes(b"voice")
+            preview = safe_cleanup(cache_roots=(cache,), dry_run=True, protected_paths=(protected,))
+            self.assertEqual(preview["candidate_count"], 1)
+            self.assertTrue(old.exists())
+            self.assertTrue(protected.exists())
+            result = safe_cleanup(cache_roots=(cache,), dry_run=False, protected_paths=(protected,))
+            self.assertFalse(old.exists())
+            self.assertTrue(protected.joinpath("keep.wav").is_file())
+            self.assertEqual(len(result["removed"]), 1)
+
+    def test_rollback_does_not_delete_destination_if_setting_restore_fails(self):
+        with TemporaryDirectory() as temp:
+            base = Path(temp)
+            source = base / "source"
+            destination = base / "target"
+            source.mkdir()
+            (source / "model.bin").write_bytes(b"model")
+            journal_paths = []
+            def persist(path):
+                path = Path(path)
+                if path == source:
+                    raise OSError("settings backend unavailable")
+            def progress(_stage, _done, _total):
+                pass
+            with self.assertRaises(StorageMigrationError):
+                migrate_storage_root(
+                    source, destination, persist_root=persist,
+                    validate_root=lambda _path: False, reserve_bytes=0,
+                    progress=progress, journal_dir=base,
+                )
+            self.assertTrue(source.joinpath("model.bin").is_file())
+            self.assertTrue(destination.joinpath("model.bin").is_file())
+            journal = next(base.glob("ryu-storage-migration-*.json"))
+            self.assertEqual(read_migration_journal(journal)["state"], "rollback_required")
+
 if __name__ == "__main__":
     unittest.main()
