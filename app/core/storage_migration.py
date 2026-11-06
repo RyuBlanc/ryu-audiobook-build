@@ -314,13 +314,14 @@ def safe_cleanup(
     app-owned cache/temp roots. Model roots, project folders, source books,
     exports, voice references and profiles must never be passed as targets.
     """
-    allowed_roots = tuple(Path(p).expanduser().resolve() for p in (*cache_roots, *temporary_roots))
+    raw_roots = tuple(Path(p).expanduser() for p in (*cache_roots, *temporary_roots))
     protected = tuple(Path(p).expanduser().resolve() for p in protected_paths)
     candidates: list[Path] = []
     total_bytes = 0
-    for root in allowed_roots:
-        if not root.exists() or not root.is_dir() or root.is_symlink():
+    for raw_root in raw_roots:
+        if raw_root.is_symlink() or not raw_root.exists() or not raw_root.is_dir():
             continue
+        root = raw_root.resolve()
         allowed = {name.casefold() for name in allowed_names}
         for child in root.iterdir():
             if child.name.casefold() not in allowed:
