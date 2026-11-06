@@ -2,7 +2,7 @@
 
 **Target:** Version 1.2.0  
 **Canonical branch:** `stage-7/step-6-safe-auto-fallback`  
-**Evidence baseline:** #2628, `0fc9d8189311419414746ffb23d89df9c65d116c`  
+**Evidence baseline:** #2640 regression pass, `5a0b87b0ad3c5f7007cf2775dd9cb2bb90606c60`; packaged baseline #2628  
 **Audit date:** 6 November 2026
 
 ## Status conventions
@@ -50,9 +50,9 @@ PASS = automated regression/package evidence passed. OPEN = evidence outstanding
 
 ## Current blockers
 
-1. NVIDIA #1 and AMD/Intel #9 are queued on self-hosted runner labels; verify runner availability or record the unavailable hardware limitation.
+1. NVIDIA #1 and AMD/Intel #9 remain queued on self-hosted runner labels; verify runner availability or record the unavailable hardware limitation.
 2. Qwen target requires real 27–33 second audio, warmed synthesis under 60 seconds, verified active backend and quality evidence.
-3. Final documentation commit must pass matching-head regression and package checkpoint.
+3. The latest exact-head full regression passed in #2640 (1,258 tests); its build job was skipped because this was a test-only commit. A dedicated artifact-checkpoint commit and matching-head package run are still required.
 4. Physical installation is user-waived / not run.
 
 ## Evidence links
@@ -65,7 +65,7 @@ PASS = automated regression/package evidence passed. OPEN = evidence outstanding
 - #2625 Performance Center package: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42231677314
 - #2624 PC benchmark comparison/import: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42231216994
 
-**Disposition:** Software and package gates green through #2628. Hardware performance and final documentation-head acceptance remain open. Physical installation is waived, not passed.
+**Disposition:** Full regression passed on #2640 (1,258 tests); package acceptance still needs a dedicated exact-head artifact checkpoint. Hardware performance remains open pending real runner evidence. Physical installation is waived, not passed.
 
 
 ## Final documentation-head checkpoint request — 6 November 2026
@@ -73,3 +73,4 @@ PASS = automated regression/package evidence passed. OPEN = evidence outstanding
 All seven execution ledgers and this master register are now present on the canonical Stage 7 branch. The final documentation candidate must be validated on its exact commit with the full regression and Windows package workflow. This checkpoint is deliberately marked as an artifact checkpoint so the build job is not skipped.
 
 Physical installed-app acceptance remains user-waived/not run. Real NVIDIA/AMD/Intel inference remains dependent on the queued self-hosted jobs and cannot be converted into a pass by this documentation checkpoint.
+\n\n## Subsequent responsive acceptance correction — 6 November 2026\n\n- #2637 failed at the 600x800 responsive viewport check (Task Manager measured 780px wide in a 600px viewport).\n- #2638 passed after adding synchronization for iframe CSS media-query recalculation.\n- #2639 failed in the Python preflight because the new JavaScript `matchMedia` markers were mistakenly asserted in the Python launcher as well as the browser script. This was a test-contract ownership error.\n- #2640 corrected the Python test to assert browser-only `matchMedia` markers in the JavaScript fixture, while retaining the original 41-resolution packaged acceptance. Full regression: 1,258 tests passed.\n- #2640 is test-only; its build job was skipped. Do not treat it as a packaged acceptance pass. A dedicated artifact-checkpoint run must validate the frozen executable and installer on the exact candidate.\n
