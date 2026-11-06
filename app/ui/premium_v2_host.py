@@ -7726,6 +7726,14 @@ class PremiumV2Bridge(QObject):
                 progress=100, recoverable=True,
             )
 
+    @staticmethod
+    def _qwen_model_installed(kind: str) -> bool:
+        try:
+            from app.tts.qwen_character_runtime import model_installed
+            return bool(model_installed(kind))
+        except Exception:
+            return False
+
     def _performance_info(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Return live host telemetry and Qwen backend discovery without inventing measurements."""
         import platform
@@ -7877,6 +7885,10 @@ class PremiumV2Bridge(QObject):
             "benchmark_measured_at": latest_benchmark.get("measured_at"),
             "benchmark_history": benchmark_history,
             "last_inference": last_inference,
+            "qwen_models_installed": [
+                kind for kind in ("custom-0.6b", "custom-1.7b")
+                if self._qwen_model_installed(kind)
+            ],
             "measured_at": datetime.now(timezone.utc).isoformat(),
         }
 
