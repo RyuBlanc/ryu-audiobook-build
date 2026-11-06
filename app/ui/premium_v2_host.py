@@ -7116,7 +7116,9 @@ class PremiumV2Bridge(QObject):
                 and row.get("model_id") != "chatterbox-runtime"
                 and row.get("installed")
                 and str(row.get("runtime_path") or "")
-                and Path(str(row["runtime_path"])).expanduser().resolve() == runtime.resolve()
+                and Path(str(row["runtime_path"])).expanduser().exists()
+                and runtime.exists()
+                and Path(str(row["runtime_path"])).expanduser().samefile(runtime)
             ]
             preservation.append("Chatterbox Hugging Face model cache and voice profiles remain installed.")
         elif requested in {"qwen-model", "custom-0.6b", "custom-1.7b", "design-1.7b", "base-0.6b", "base-1.7b"}:
@@ -7291,7 +7293,11 @@ class PremiumV2Bridge(QObject):
             if raw_target.is_symlink() or expected_parent.is_symlink():
                 raise RuntimeError("The selected Qwen model path contains a symbolic link.")
             target = raw_target.resolve()
-            if target.parent != expected_parent.resolve() or target.name.casefold() != kind or not target.is_dir():
+            try:
+                parent_matches = target.parent.samefile(expected_parent)
+            except OSError:
+                parent_matches = False
+            if not parent_matches or target.name.casefold() != kind or not target.is_dir():
                 raise RuntimeError("The selected Qwen model failed exact Models component ownership validation.")
             if not any(path.is_file() and not path.is_symlink() for path in target.rglob("*")):
                 raise ValueError(f"Qwen model {kind} contains no installed model files.")
