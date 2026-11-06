@@ -89,3 +89,7 @@ A green source regression run, a hosted CPU benchmark, a queued self-hosted job,
 - Exact run: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42248725120
 - Manual installed-Windows acceptance remains user-waived/not run.
 - Real GPU acceptance remains pending: NVIDIA run #1 and AMD/Intel run #9 have not started because their self-hosted jobs are queued. No GPU target or under-60-second Qwen performance result is claimed.
+
+## Final all-ledger exact-head checkpoint request — 6 November 2026
+
+All seven execution ledgers, the master requirement/bug/change register and this closeout record now include the successful #2641 package evidence. This commit requests one final full regression and Windows installer/portable package run against the combined documentation head. Physical installed-app checks remain user-waived/not run. Real NVIDIA/AMD/Intel hardware acceptance remains pending because the self-hosted jobs have not started; queued jobs are not accepted as results.
