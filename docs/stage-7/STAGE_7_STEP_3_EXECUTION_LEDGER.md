@@ -81,3 +81,5 @@
 - These test runs include the existing safe path-boundary, shared-runtime preservation, active-job blocking, operation serialization, inventory refresh and partial-asset checks.
 
 **Final packaged acceptance remains required on the exact combined source head.** The previous #2540 package checkpoint passed before these final legacy-worker corrections; it is not being reused as evidence for the newer code.
+
+- Final matching-head artifact checkpoint requested after the combined 1,235-test candidate: installer/portable build, frozen-app verification, bundled assets, packaged feature acceptance, SHA-256 manifest, Defender scans and artifact uploads. Step 3 remains open until this run succeeds.
