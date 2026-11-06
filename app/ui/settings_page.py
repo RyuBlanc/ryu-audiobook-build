@@ -26,6 +26,8 @@ from PySide6.QtWidgets import (
 from app.core.paths import (
     app_root, audio_library_root, audiobooks_root, default_audiobooks_root,
     default_library_root, library_root, models_root, voices_root,
+    default_models_root, default_runtimes_root, default_model_cache_root,
+    default_temporary_root, runtimes_root, model_cache_root, temporary_root,
 )
 from app.version import full_version
 
@@ -41,6 +43,20 @@ def _storage_space_summary(folder: Path) -> str:
         return f"Unavailable — {exc}"
     gib = 1024 ** 3
     return f"{usage.free / gib:.1f} GB free of {usage.total / gib:.1f} GB"
+
+
+def _storage_capacity_summary(folder: Path) -> str:
+    """Show used, free and total bytes for the filesystem containing a storage root."""
+    path = Path(folder).expanduser()
+    if not path.is_dir():
+        return "Unavailable — folder missing or drive disconnected"
+    try:
+        usage = shutil.disk_usage(str(path))
+        used = max(0, int(usage.total) - int(usage.free))
+        gib = 1024 ** 3
+        return f"{used / gib:.1f} GB used · {usage.free / gib:.1f} GB free · {usage.total / gib:.1f} GB total"
+    except OSError:
+        return "Unavailable — filesystem capacity could not be read"
 
 
 def _storage_root_write_error(folder: Path) -> str:
@@ -192,6 +208,10 @@ class SettingsPage(QWidget):
         self.settings = QSettings("RyuBlanc", "Ryu's Audiobook")
         self._selected_library_root = library_root()
         self._selected_audio_assets_root = audiobooks_root()
+        self._selected_models_root = models_root()
+        self._selected_runtime_root = runtimes_root()
+        self._selected_model_cache_root = model_cache_root()
+        self._selected_temporary_root = temporary_root()
         self._storage_path_labels = {}
         self._storage_space_labels = {}
 
@@ -294,6 +314,10 @@ class SettingsPage(QWidget):
         self._add_storage_root_row(
             storage_layout, "Audio Assets (new exports)", "audio_assets", self._selected_audio_assets_root
         )
+        self._add_storage_root_row(storage_layout, "Models (model weights)", "models", self._selected_models_root)
+        self._add_storage_root_row(storage_layout, "Provider Runtime (Python / engines)", "runtime", self._selected_runtime_root)
+        self._add_storage_root_row(storage_layout, "Model Cache / Downloads", "model_cache", self._selected_model_cache_root)
+        self._add_storage_root_row(storage_layout, "Temporary / Staging", "temporary", self._selected_temporary_root)
         for label, folder in (
             ("Open Application Data", app_root()),
             ("Open Voice Profiles", voices_root()),
@@ -361,6 +385,14 @@ class SettingsPage(QWidget):
             return self._selected_library_root
         if kind == "audio_assets":
             return self._selected_audio_assets_root
+        if kind == "models":
+            return self._selected_models_root
+        if kind == "runtime":
+            return self._selected_runtime_root
+        if kind == "model_cache":
+            return self._selected_model_cache_root
+        if kind == "temporary":
+            return self._selected_temporary_root
         raise ValueError(f"Unknown storage root: {kind}")
 
     def _set_root_for_kind(self, kind: str, path: Path) -> None:
@@ -368,6 +400,14 @@ class SettingsPage(QWidget):
             self._selected_library_root = path
         elif kind == "audio_assets":
             self._selected_audio_assets_root = path
+        elif kind == "models":
+            self._selected_models_root = path
+        elif kind == "runtime":
+            self._selected_runtime_root = path
+        elif kind == "model_cache":
+            self._selected_model_cache_root = path
+        elif kind == "temporary":
+            self._selected_temporary_root = path
         else:
             raise ValueError(f"Unknown storage root: {kind}")
 
@@ -378,7 +418,7 @@ class SettingsPage(QWidget):
         path_label = QLabel(str(folder))
         path_label.setObjectName("muted")
         path_label.setWordWrap(True)
-        space_label = QLabel(_storage_space_summary(folder))
+        space_label = QLabel(_storage_capacity_summary(folder))
         space_label.setObjectName("muted")
         change = QPushButton("Choose…")
         change.clicked.connect(
@@ -392,6 +432,10 @@ class SettingsPage(QWidget):
         open_button.clicked.connect(
             lambda _checked=False, root_kind=kind: self.open_folder(self._root_for_kind(root_kind))
         )
+        copy_button = QPushButton("Copy Path")
+        copy_button.clicked.connect(
+            lambda _checked=False, root_kind=kind: QApplication.clipboard().setText(str(self._root_for_kind(root_kind)))
+        )
         self._storage_path_labels[kind] = path_label
         self._storage_space_labels[kind] = space_label
         row.addWidget(detail)
@@ -400,17 +444,26 @@ class SettingsPage(QWidget):
         row.addWidget(change)
         row.addWidget(use_default)
         row.addWidget(open_button)
+        row.addWidget(copy_button)
         layout.addLayout(row)
 
     def _refresh_storage_root_labels(self) -> None:
-        for kind in ("library", "audio_assets"):
+        for kind in ("library", "audio_assets", "models", "runtime", "model_cache", "temporary"):
             folder = self._root_for_kind(kind)
             self._storage_path_labels[kind].setText(str(folder))
-            self._storage_space_labels[kind].setText(_storage_space_summary(folder))
+            self._storage_space_labels[kind].setText(_storage_capacity_summary(folder))
 
     def _choose_storage_root(self, kind: str) -> None:
         current = self._root_for_kind(kind)
-        caption = "Choose Project Library Folder" if kind == "library" else "Choose Audio Assets Folder"
+        captions = {
+            "library": "Choose Project Library Folder",
+            "audio_assets": "Choose Audio Assets Folder",
+            "models": "Choose Models Folder",
+            "runtime": "Choose Provider Runtime Folder",
+            "model_cache": "Choose Model Cache Folder",
+            "temporary": "Choose Temporary / Staging Folder",
+        }
+        caption = captions[kind]
         selected = QFileDialog.getExistingDirectory(self, caption, str(current))
         if not selected:
             return
@@ -425,7 +478,15 @@ class SettingsPage(QWidget):
         self.status.setText("Storage location selected. Press Save Settings to apply it.")
 
     def _use_default_storage_root(self, kind: str) -> None:
-        default = default_library_root() if kind == "library" else default_audiobooks_root()
+        defaults = {
+            "library": default_library_root(),
+            "audio_assets": default_audiobooks_root(),
+            "models": default_models_root(),
+            "runtime": default_runtimes_root(),
+            "model_cache": default_model_cache_root(),
+            "temporary": default_temporary_root(),
+        }
+        default = defaults[kind]
         self._set_root_for_kind(kind, default)
         self._refresh_storage_root_labels()
         self.status.setText("Default storage location selected. Press Save Settings to apply it.")
@@ -445,6 +506,10 @@ class SettingsPage(QWidget):
         selected_roots = (
             ("Project Library", self._selected_library_root),
             ("Audio Assets", self._selected_audio_assets_root),
+            ("Models", self._selected_models_root),
+            ("Provider Runtime", self._selected_runtime_root),
+            ("Model Cache / Downloads", self._selected_model_cache_root),
+            ("Temporary / Staging", self._selected_temporary_root),
         )
         for label, folder in selected_roots:
             error = _storage_root_write_error(folder)
@@ -465,10 +530,22 @@ class SettingsPage(QWidget):
         self.settings.setValue("ui/reduce_motion", self.reduce_motion.isChecked())
         self.settings.setValue("storage/library_root", str(self._selected_library_root))
         self.settings.setValue("storage/audio_assets_root", str(self._selected_audio_assets_root))
+        self.settings.setValue("storage/models_root", str(self._selected_models_root))
+        self.settings.setValue("storage/runtime_root", str(self._selected_runtime_root))
+        self.settings.setValue("storage/model_cache_root", str(self._selected_model_cache_root))
+        self.settings.setValue("storage/temporary_root", str(self._selected_temporary_root))
         self.settings.sync()
-        roots_persisted = (
-            str(self.settings.value("storage/library_root", "") or "") == str(self._selected_library_root)
-            and str(self.settings.value("storage/audio_assets_root", "") or "") == str(self._selected_audio_assets_root)
+        expected_roots = {
+            "storage/library_root": self._selected_library_root,
+            "storage/audio_assets_root": self._selected_audio_assets_root,
+            "storage/models_root": self._selected_models_root,
+            "storage/runtime_root": self._selected_runtime_root,
+            "storage/model_cache_root": self._selected_model_cache_root,
+            "storage/temporary_root": self._selected_temporary_root,
+        }
+        roots_persisted = all(
+            str(self.settings.value(key, "") or "") == str(path)
+            for key, path in expected_roots.items()
         )
         if self.settings.status() != QSettings.Status.NoError or not roots_persisted:
             self.status.setText("Settings could not be verified on disk; storage locations were not applied.")
@@ -479,6 +556,10 @@ class SettingsPage(QWidget):
             return
         self._selected_library_root = library_root()
         self._selected_audio_assets_root = audiobooks_root()
+        self._selected_models_root = models_root()
+        self._selected_runtime_root = runtimes_root()
+        self._selected_model_cache_root = model_cache_root()
+        self._selected_temporary_root = temporary_root()
         self._refresh_storage_root_labels()
         app = QApplication.instance()
         if app is not None:
