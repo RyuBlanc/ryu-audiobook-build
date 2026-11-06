@@ -606,6 +606,28 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
             self.assertTrue((qwen_runtime / "runtime").is_dir())
             self.assertIn("other model folders", message)
 
+    def test_chatterbox_model_asset_uninstall_removes_only_chatterbox_cache_folders(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            root = base / "Models"
+            cache_root = base / "Model Cache" / "hub"
+            english = cache_root / "models--resemble-ai--chatterbox"
+            multilingual = cache_root / "models--resemble-ai--chatterbox-multilingual"
+            other_provider = cache_root / "models--Qwen--Qwen3-TTS"
+            for folder in (english, multilingual, other_provider):
+                folder.mkdir(parents=True)
+                (folder / "weights.safetensors").write_bytes(b"weights")
+            bridge = self.make_bridge()
+            with (
+                patch("app.core.paths.models_root", return_value=root),
+                patch("app.tts.model_registry._chatterbox_cache_root", return_value=cache_root),
+            ):
+                message = bridge._models_uninstall_component("chatterbox-model-assets", {}, None)
+            self.assertFalse(english.exists())
+            self.assertFalse(multilingual.exists())
+            self.assertTrue((other_provider / "weights.safetensors").is_file())
+            self.assertIn("Other provider caches", message)
+
     def test_piper_uninstall_removes_only_selected_local_voice_and_sidecar(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "Models"
