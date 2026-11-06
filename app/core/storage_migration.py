@@ -137,6 +137,7 @@ def migrate_storage_root(
     progress: Callable[[str, int, int], None] | None = None,
     reserve_bytes: int = 512 * 1024 * 1024,
     journal_dir: Path | None = None,
+    settings_key: str | None = None,
 ) -> MigrationPlan:
     """Copy, hash-verify, switch settings, validate, and roll back on any failure.
 
@@ -155,6 +156,7 @@ def migrate_storage_root(
         "staging": str(plan.staging), "file_count": plan.file_count,
         "total_bytes": plan.total_bytes, "verified_files": 0,
         "verified_bytes": 0, "created_at": time.time(),
+        "settings_key": settings_key,
     }
     _write_journal(plan.journal, payload)
     copied = 0
