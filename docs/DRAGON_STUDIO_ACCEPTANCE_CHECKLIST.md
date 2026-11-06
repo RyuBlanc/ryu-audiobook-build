@@ -195,3 +195,15 @@ The acceptance target is the **installed PySide6 desktop application**, not mere
 - [ ] Once the user's upcoming HTML is supplied, diff it against these current references and process screen-by-screen. Do not replace the existing baseline before comparing and recording differences.
 
 **Audit evidence so far:** `app/ui/workflow.py` defines the desktop shell and route dispatch; `tests/test_stage73_ui_acceptance.py` statically guards the 14 routes and several key flows. The app also has a non-blocking `StudioToast` component with fade/reduced-motion handling. These findings establish a starting point only: the current static checks do not yet prove every HTML popup/control is fully replicated or manually functional in the installed app.
+
+
+### Help & Guide — user-facing content acceptance
+
+- [ ] Help & Guide opens from the application's Help entry point and remains readable at normal and reduced window sizes.
+- [ ] Instructions use current UI names and explain the end-to-end project workflow: import, chapters, voices/profiles, character assignments, pronunciation, sound design, preview, generation, playback, and output location.
+- [ ] Models Center and Performance Center guidance accurately explains installation locations, model/runtime status, verification/repair, hardware/backend detection, and measured benchmarks.
+- [ ] Settings guidance covers project/storage/output paths, global defaults versus project overrides, supported 10/30/60/90-second previews, output options, and local-first/offline versus online-provider behavior.
+- [ ] Generation guidance explains readiness, truthful progress, elapsed time/ETA, pause/resume, cancel, retry/recovery, history, and common failure states.
+- [ ] Troubleshooting gives safe, actionable steps for missing models/dependencies, provider/network failures, reference-audio permissions, preview failures, interrupted jobs, missing outputs, and storage issues.
+- [ ] No stale screenshots, obsolete controls, placeholder claims, unsupported capabilities, or deferred hardware tests are presented as completed/current functionality.
+- [ ] Links, screenshots, version references, spelling, and terminology are checked against the exact candidate build; evidence records the app version/commit and reviewed sections.
