@@ -93,3 +93,9 @@ A green source regression run, a hosted CPU benchmark, a queued self-hosted job,
 ## Final all-ledger exact-head checkpoint request — 6 November 2026
 
 All seven execution ledgers, the master requirement/bug/change register and this closeout record now include the successful #2641 package evidence. This commit requests one final full regression and Windows installer/portable package run against the combined documentation head. Physical installed-app checks remain user-waived/not run. Real NVIDIA/AMD/Intel hardware acceptance remains pending because the self-hosted jobs have not started; queued jobs are not accepted as results.
+
+## Cross-step Qwen verification update — 7 November 2026
+
+- Companion hosted Windows CPU Qwen acceptance workflow [run #1](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42301856102) passed its real inference flow and uploaded audio/diagnostics. Actual output was valid 30.000-second mono 24 kHz PCM; warmed synthesis took 268.184 seconds, so under-60-second target was not met on CPU.
+- Source CI [#2662](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42301856057) passed 38 focused tests and 1,258 full regression tests.
+- Real NVIDIA/AMD/Intel hardware acceptance remains queued and is not represented as passed. Physical installed-app checks remain user-waived/not run.
