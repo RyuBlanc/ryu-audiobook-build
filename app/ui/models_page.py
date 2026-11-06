@@ -629,10 +629,15 @@ class ModelsPage(QWidget):
         app = QApplication.instance()
         if app is not None:
             running = [
+                value for widget in app.allWidgets()
+                for value in vars(widget).values()
+                if isinstance(value, QThread) and value.isRunning()
+            ]
+            running.extend(
                 thread for widget in app.allWidgets()
                 for thread in widget.findChildren(QThread)
                 if thread.isRunning()
-            ]
+            )
             if running:
                 QMessageBox.warning(
                     self, "Storage In Use",
