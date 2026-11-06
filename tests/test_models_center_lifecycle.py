@@ -278,6 +278,102 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
                 ):
                     invoke()
 
+    def test_chatterbox_uninstall_uses_provider_runtime_parent_and_refuses_installed_dependents(self):
+        bridge = self.make_bridge()
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            models = base / "Models"
+            runtime_parent = base / "ProviderRuntime"
+            runtime = runtime_parent / "chatterbox"
+            runtime.mkdir(parents=True)
+            marker = runtime / "runtime.json"
+            marker.write_text("{}", encoding="utf-8")
+            row = {
+                "model_id": "chatterbox-model-assets",
+                "name": "Chatterbox model assets",
+                "component_type": "model",
+                "installed": True,
+                "runtime_path": str(runtime),
+            }
+            with (
+                patch("app.core.paths.models_root", return_value=models),
+                patch("app.tts.chatterbox_runtime.RUNTIME_DIR", runtime),
+                patch("app.tts.model_registry.build_inventory", return_value=[row]),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "shared by installed components"):
+                    bridge._models_uninstall_component("chatterbox-runtime", {}, lambda _message: None)
+                row["installed"] = False
+                outcome = bridge._models_uninstall_component("chatterbox-runtime", {}, lambda _message: None)
+            self.assertFalse(runtime.exists())
+            self.assertIn("shared Chatterbox runtime", outcome)
+
+    def test_qwen_runtime_uninstall_only_removes_runtime_owned_paths(self):
+        bridge = self.make_bridge()
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            runtime_root = base / "ProviderRuntime" / "qwen3-tts"
+            venv = runtime_root / "runtime"
+            python_root = runtime_root / "python312"
+            marker = runtime_root / "runtime.json"
+            installer = runtime_root / "python.exe"
+            install_log = runtime_root / "python-install.log"
+            weights = base / "Models" / "qwen3-tts" / "custom-0.6b"
+            for folder in (venv, python_root, weights):
+                folder.mkdir(parents=True)
+            for path in (marker, installer, install_log):
+                path.write_text("runtime", encoding="utf-8")
+            with (
+                patch("app.core.paths.models_root", return_value=base / "Models"),
+                patch("app.tts.qwen_character_runtime.RUNTIME_ROOT", runtime_root),
+                patch("app.tts.qwen_character_runtime.VENV_ROOT", venv),
+                patch("app.tts.qwen_character_runtime.PYTHON_ROOT", python_root),
+                patch("app.tts.qwen_character_runtime.MARKER", marker),
+                patch("app.tts.qwen_character_runtime.INSTALLER_PATH", installer),
+                patch("app.tts.qwen_character_runtime.INSTALLER_LOG", install_log),
+                patch("app.tts.model_registry.build_inventory", return_value=[]),
+            ):
+                outcome = bridge._models_uninstall_component("qwen-runtime", {}, lambda _message: None)
+            self.assertFalse(venv.exists())
+            self.assertFalse(python_root.exists())
+            self.assertFalse(marker.exists())
+            self.assertTrue(weights.is_dir())
+            self.assertIn("weights", outcome)
+
+    def test_uninstall_preflight_reports_exact_target_sizes_and_dependent_runtime_block(self):
+        bridge = self.make_bridge()
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            models = base / "Models"
+            runtime_parent = base / "ProviderRuntime"
+            runtime = runtime_parent / "chatterbox"
+            runtime.mkdir(parents=True)
+            payload_file = runtime / "runtime.bin"
+            payload_file.write_bytes(b"123456789")
+            model = {
+                "model_id": "chatterbox-runtime",
+                "name": "Chatterbox Runtime",
+                "component_type": "model",
+                "installed": True,
+            }
+            dependent = {
+                "model_id": "chatterbox-model-assets",
+                "name": "Chatterbox Model Assets",
+                "component_type": "model",
+                "installed": True,
+                "runtime_path": str(runtime),
+            }
+            with (
+                patch("app.core.paths.models_root", return_value=models),
+                patch("app.tts.chatterbox_runtime.RUNTIME_DIR", runtime),
+                patch("app.tts.model_registry.build_inventory", return_value=[model, dependent]),
+            ):
+                result = bridge._models_uninstall_preflight({"model_id": "chatterbox-runtime"})
+            self.assertTrue(result["blocked"])
+            self.assertEqual(result["file_count"], 1)
+            self.assertEqual(result["total_bytes"], 9)
+            self.assertEqual(result["targets"], [str(runtime)])
+            self.assertIn("Chatterbox Model Assets", result["block_reason"])
+
     def test_premium_v2_storage_root_change_refuses_to_replace_a_disconnected_location(self):
         source = (Path(__file__).resolve().parents[1] / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         handler = source.split("def _storage_choose_root", 1)[1].split("def _storage_open_root", 1)[0]
