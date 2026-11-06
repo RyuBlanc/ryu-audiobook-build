@@ -458,6 +458,10 @@ class PremiumV2Bridge(QObject):
                 "player.position.save": self._player_position_save,
                 "settings.get": self._settings_get,
                 "settings.save": self._settings_save,
+                "storage.get": self._storage_get,
+                "storage.choose_root": self._storage_choose_root,
+                "storage.open_root": self._storage_open_root,
+                "storage.copy_root": self._storage_copy_root,
                 "models.list": self._models_list,
                 "models.files": self._models_files,
                 "models.open_folder": self._models_open_folder,
@@ -8080,6 +8084,154 @@ class PremiumV2Bridge(QObject):
                     (message or "Startup failed without a diagnostic message.")
                 )
         return True
+
+    def _storage_root_map(self) -> dict[str, tuple[str, Path, Path]]:
+        from app.core.paths import (
+            library_root, audiobooks_root, models_root, runtimes_root,
+            model_cache_root, temporary_root, default_library_root,
+            default_audiobooks_root, default_models_root, default_runtimes_root,
+            default_model_cache_root, default_temporary_root,
+        )
+        return {
+            "library": ("storage/library_root", library_root(), default_library_root()),
+            "audio_assets": ("storage/audio_assets_root", audiobooks_root(), default_audiobooks_root()),
+            "models": ("storage/models_root", models_root(), default_models_root()),
+            "runtime": ("storage/runtime_root", runtimes_root(), default_runtimes_root()),
+            "model_cache": ("storage/model_cache_root", model_cache_root(), default_model_cache_root()),
+            "temporary": ("storage/temporary_root", temporary_root(), default_temporary_root()),
+        }
+
+    def _storage_get(self, _payload: dict[str, Any]) -> dict[str, Any]:
+        from app.core.storage_migration import inventory_storage_root
+        rows = []
+        for kind, (key, current, default) in self._storage_root_map().items():
+            path = Path(current).expanduser()
+            info = inventory_storage_root(path, include_hashes=False)
+            capacity = {"total_bytes": 0, "used_bytes": 0, "free_bytes": 0}
+            if info.get("available"):
+                try:
+                    usage = shutil.disk_usage(str(path))
+                    capacity = {"total_bytes": int(usage.total),
+                                "used_bytes": max(0, int(usage.total) - int(usage.free)),
+                                "free_bytes": int(usage.free)}
+                except OSError:
+                    pass
+            rows.append({"kind": kind, "settings_key": key, "path": str(path),
+                         "default_path": str(default), "available": bool(info.get("available")),
+                         "file_count": int(info.get("file_count", 0)),
+                         "component_bytes": int(info.get("total_bytes", 0)), **capacity})
+        return {"roots": rows, "restart_required": True}
+
+    def _storage_choose_root(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from app.core.storage_migration import migrate_storage_root, inventory_storage_root
+        from app.core.paths import app_root
+        roots = self._storage_root_map()
+        kind = str(payload.get("kind") or "").strip().casefold()
+        if kind not in roots:
+            raise ValueError("Choose a supported storage location.")
+        key, current, default = roots[kind]
+        if payload.get("use_default") is True:
+            destination = Path(default).expanduser()
+            destination.mkdir(parents=True, exist_ok=True)
+        else:
+            selected = QFileDialog.getExistingDirectory(
+                None, "Choose " + kind.replace("_", " ").title() + " Storage Folder", str(current))
+            if not selected:
+                return {"cancelled": True}
+            destination = Path(selected).expanduser()
+        if not destination.is_absolute() or not destination.is_dir():
+            raise ValueError("The selected storage folder must exist and be an absolute path.")
+        probe = destination / (".ryu-storage-probe-" + uuid.uuid4().hex)
+        try:
+            probe.write_bytes(b"")
+        except OSError as exc:
+            raise ValueError("The selected storage folder is not writable: " + str(exc)) from exc
+        finally:
+            probe.unlink(missing_ok=True)
+        source = Path(current).expanduser()
+        try:
+            if source.resolve() == destination.resolve():
+                return {"saved": True, "path": str(source), "unchanged": True}
+        except OSError:
+            pass
+        try:
+            has_data = source.is_dir() and any(source.iterdir())
+        except OSError as exc:
+            raise ValueError("The current storage folder cannot be inspected safely: " + str(exc)) from exc
+        if not has_data:
+            self.settings.setValue(key, str(destination))
+            self.settings.sync()
+            if self.settings.status() != QSettings.Status.NoError or str(self.settings.value(key, "")) != str(destination):
+                raise RuntimeError("Windows did not confirm the storage location setting.")
+            return {"saved": True, "path": str(destination), "restart_required": True}
+        with self._jobs_lock:
+            active = [(job_id, job) for job_id, job in self._jobs.items()
+                      if str(job.get("state") or "").casefold() in {"queued", "running"}]
+        if active:
+            labels = ", ".join(str(job.get("title") or job.get("type") or job_id) for job_id, job in active[:4])
+            raise RuntimeError("Storage migration is blocked while active work is running: " + labels)
+        job_id = self._new_job("storage-migration", "Migrate " + kind.replace("_", " ").title() + " storage",
+                               "Verified copy, integrity check, root switch and rollback protection")
+        self._job_update(job_id, state="running", started_at=self._now(), progress=1,
+                         stage="Preparing verified storage migration", message="Migration started.")
+        def worker() -> None:
+            try:
+                def persist(path: Path) -> None:
+                    settings = QSettings("RyuBlanc", "Ryu's Audiobook")
+                    settings.setValue(key, str(path))
+                    settings.sync()
+                    if settings.status() != QSettings.Status.NoError or str(settings.value(key, "")) != str(path):
+                        raise RuntimeError("Windows did not confirm the storage setting write.")
+                def busy(_path: Path) -> bool:
+                    with self._jobs_lock:
+                        return any(other_id != job_id and
+                                   str(job.get("state") or "").casefold() in {"queued", "running"}
+                                   for other_id, job in self._jobs.items())
+                plan = migrate_storage_root(
+                    source, destination, persist_root=persist,
+                    validate_root=lambda path: bool(inventory_storage_root(path).get("available")),
+                    is_busy=busy, journal_dir=app_root() / "Settings" / "Storage Migrations",
+                    settings_key=key,
+                    progress=lambda stage, done, total: self._job_update(
+                        job_id, state="running", progress=max(1, min(98, int(done * 95 / max(1, total)))),
+                        stage=stage.title() + ": " + str(done) + "/" + str(total) + " files",
+                        message="Verified " + str(done) + " of " + str(total) + " files"),
+                )
+                self._job_update(job_id, state="completed", progress=100, stage="Migration complete",
+                    message="New storage root verified. Original source retained for explicit cleanup.",
+                    result={"source": str(plan.source), "destination": str(plan.destination),
+                            "file_count": plan.file_count, "total_bytes": plan.total_bytes,
+                            "settings_key": key, "restart_required": True}, error=None, recoverable=False)
+            except Exception as exc:
+                log.exception("Premium V2 storage migration failed for %s", kind)
+                self._job_update(job_id, state="failed", stage="Migration failed",
+                    message="Storage migration failed safely; original data was retained.",
+                    error={"code": "storage_migration_failed", "message": str(exc)}, recoverable=True)
+        threading.Thread(target=worker, daemon=True, name="RyuStorageMigration").start()
+        return {"job_id": job_id, "state": "running", "migration": True}
+
+    def _storage_open_root(self, payload: dict[str, Any]) -> dict[str, Any]:
+        kind = str(payload.get("kind") or "").strip().casefold()
+        roots = self._storage_root_map()
+        if kind not in roots:
+            raise ValueError("Choose a supported storage location.")
+        path = Path(roots[kind][1]).expanduser()
+        if not path.is_dir():
+            raise FileNotFoundError("Storage location unavailable: " + str(path))
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+        return {"opened": True, "path": str(path)}
+
+    def _storage_copy_root(self, payload: dict[str, Any]) -> dict[str, Any]:
+        kind = str(payload.get("kind") or "").strip().casefold()
+        roots = self._storage_root_map()
+        if kind not in roots:
+            raise ValueError("Choose a supported storage location.")
+        path = str(Path(roots[kind][1]).expanduser())
+        app = QApplication.instance()
+        if app is None:
+            raise RuntimeError("The desktop clipboard is unavailable.")
+        app.clipboard().setText(path)
+        return {"copied": True, "path": path}
 
     def _settings_get(self, _payload: dict[str, Any]) -> dict[str, Any]:
         self.settings.sync()

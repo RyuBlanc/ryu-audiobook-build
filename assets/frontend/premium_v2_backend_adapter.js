@@ -8234,8 +8234,73 @@
     renderModelInventory();
     return rows;
   }
+  async function refreshStorageRoots() {
+    const result = await call('storage.get');
+    const rows = Array.isArray(result?.roots) ? result.roots : [];
+    for (const row of rows) {
+      const path = $('storagePath_' + row.kind);
+      const capacity = $('storageCapacity_' + row.kind);
+      if (path) path.textContent = row.path || 'Path unavailable';
+      if (capacity) {
+        const format = value => formatModelBytes(Math.max(0, Number(value || 0)));
+        capacity.textContent = row.available
+          ? Number(row.file_count || 0).toLocaleString() + ' files · ' + format(row.component_bytes) +
+            ' component data · ' + format(row.used_bytes) + ' used · ' + format(row.free_bytes) +
+            ' free · ' + format(row.total_bytes) + ' total'
+          : 'Location unavailable · configured path preserved; reconnect the drive to restore access.';
+      }
+    }
+    const status = $('storageStatus');
+    if (status) status.textContent = result?.restart_required
+      ? 'Storage status refreshed from the local filesystem. Root changes require an application restart.'
+      : 'Storage status refreshed.';
+    return result;
+  }
+  function wireStorageControls() {
+    document.querySelectorAll('[data-storage-action][data-storage-kind]').forEach(button => {
+      if (button.dataset.ryuStorageBound === 'true') return;
+      button.dataset.ryuStorageBound = 'true';
+      button.addEventListener('click', async event => {
+        event.preventDefault(); event.stopPropagation();
+        const action = button.dataset.storageAction;
+        const kind = button.dataset.storageKind;
+        const prior = button.textContent;
+        button.disabled = true;
+        button.textContent = action === 'choose' ? 'Choose…' : action === 'default' ? 'Applying…' : action === 'open' ? 'Opening…' : 'Copying…';
+        try {
+          if (action === 'choose' || action === 'default') {
+            const result = await call('storage.choose_root', {kind, use_default:action === 'default'});
+            if (result?.cancelled) return;
+            if (result?.job_id) {
+              message('Verified storage migration started. Track its progress in Background Jobs.');
+              await refreshJobs();
+              await monitorJob(result.job_id, null, async () => {
+                await refreshStorageRoots();
+                message('Storage migration finished. The original source remains until you explicitly clean it up.');
+              });
+            } else {
+              await refreshStorageRoots();
+              message('Storage location saved. Restart Ryu’s Audiobook to apply the new root.');
+            }
+          } else if (action === 'open') {
+            await call('storage.open_root', {kind});
+            message('Opened the selected storage folder.');
+          } else if (action === 'copy') {
+            await call('storage.copy_root', {kind});
+            message('Storage path copied to the clipboard.');
+          }
+        } catch (error) {
+          message(error?.message || String(error), true);
+        } finally {
+          button.disabled = false; button.textContent = prior;
+        }
+      });
+    });
+  }
   async function loadSettings() {
     const settings = await call('settings.get');
+    wireStorageControls();
+    await refreshStorageRoots();
     if ($('themeSelectAdvanced') && settings.theme) $('themeSelectAdvanced').value = settings.theme;
     if ($('effectsModeAdvanced') && settings.effects) $('effectsModeAdvanced').value = settings.effects;
     if ($('uiTextScale')) $('uiTextScale').value = String(settings.text_scale || 100);
