@@ -133,13 +133,13 @@ class StorageRootSelectionTests(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             letter = next(
                 (value for value in "ZYXWVUTSRQPONMLKJIHGFED"
-                 if not Path(value + ":\\\\").exists()),
+                 if not Path(value + ":\\").exists()),
                 None,
             )
             if letter is None:
                 self.skipTest("No unused drive letter is available for the Windows disconnect simulation.")
             drive = letter + ":"
-            root = Path(drive + "\\\\Models")
+            root = Path(drive + "\\Models")
             mapped = False
             try:
                 try:
