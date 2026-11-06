@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from app.core.storage_migration import (
     StorageMigrationError, migrate_storage_root, prepare_migration,
-    read_migration_journal, recover_migration_journal, safe_cleanup,
+    read_migration_journal, recover_migration_journal, safe_cleanup, cleanup_migrated_source,
 )
 
 
@@ -92,6 +92,40 @@ class StorageMigrationTests(unittest.TestCase):
                 prepare_migration(source, base / "target", reserve_bytes=0)
 
 
+
+    def test_source_cleanup_requires_completed_verified_migration(self):
+        with TemporaryDirectory() as temp:
+            base = Path(temp)
+            source = base / "source"
+            destination = base / "target"
+            source.mkdir()
+            (source / "weights.bin").write_bytes(b"verified weights")
+            plan = migrate_storage_root(
+                source, destination, persist_root=lambda _path: None,
+                validate_root=lambda path: path.joinpath("weights.bin").is_file(),
+                reserve_bytes=0, journal_dir=base,
+            )
+            result = cleanup_migrated_source(plan.journal)
+            self.assertTrue(result["deleted"])
+            self.assertFalse(source.exists())
+            self.assertTrue(destination.joinpath("weights.bin").is_file())
+            self.assertEqual(read_migration_journal(plan.journal)["state"], "source_cleanup_confirmed")
+
+    def test_source_cleanup_refuses_protected_active_root(self):
+        with TemporaryDirectory() as temp:
+            base = Path(temp)
+            source = base / "source"
+            destination = base / "target"
+            source.mkdir()
+            (source / "model.bin").write_bytes(b"model")
+            plan = migrate_storage_root(
+                source, destination, persist_root=lambda _path: None,
+                validate_root=lambda path: path.joinpath("model.bin").is_file(),
+                reserve_bytes=0, journal_dir=base,
+            )
+            with self.assertRaisesRegex(StorageMigrationError, "protected root"):
+                cleanup_migrated_source(plan.journal, protected_roots=(source,))
+            self.assertTrue(source.joinpath("model.bin").is_file())
 
     def test_recovery_restores_source_and_removes_only_staging(self):
         with TemporaryDirectory() as temp:
