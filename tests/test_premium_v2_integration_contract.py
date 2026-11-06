@@ -464,8 +464,15 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("CPU telemetry unavailable", adapter)
         self.assertIn("GPU / VRAM telemetry unavailable", adapter)
         self.assertIn("runHardwareBenchmark", adapter)
-        self.assertIn("call('performance.info',{refresh:true})", adapter)
-        self.assertIn("await refreshPerformance()", adapter)
+        refresh_start = adapter.index("async function refreshPerformance()")
+        refresh_end = adapter.index("async function runHardwareBenchmark()", refresh_start)
+        refresh_contract = adapter[refresh_start:refresh_end]
+        self.assertIn("call('performance.info', {refresh:false})", refresh_contract)
+        benchmark_start = refresh_end
+        benchmark_end = adapter.index("const benchmarkButton", benchmark_start) if "const benchmarkButton" in adapter[benchmark_start:] else benchmark_start + 2500
+        benchmark_contract = adapter[benchmark_start:benchmark_end]
+        self.assertIn("call('performance.info', {refresh:true})", benchmark_contract)
+        self.assertIn("await refreshPerformance()", benchmark_contract)
         self.assertIn('"performance.info": True', (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8"))
 
     def test_cue_feedback_matches_current_three_slot_assignment_contract(self):
