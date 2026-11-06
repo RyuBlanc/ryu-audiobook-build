@@ -64,3 +64,21 @@ Do not reuse #2625 package artifacts as matching-head acceptance for the later w
 A green source regression run, a hosted CPU benchmark, a queued self-hosted job, or an earlier packaged checkpoint is not a substitute for the exact evidence required above.
 
 **Status: IN PROGRESS — 1,258-test regression is green; Qwen hardware runs are queued; matching-head Windows packaging and installed-device acceptance remain open.**
+
+## 2026-11-06 — exact matching-head package closeout #2641
+
+- Candidate commit: `b1da6a8d4aee39e83ca9f781e22b92d26bb4859f`.
+- GitHub Actions #2641 completed successfully: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42248725120
+- Full Windows regression: **1,258 tests passed** (66.317 seconds).
+- Focused Stage 6 History/Task Manager preflight and isolated native Qt lifecycle regression passed.
+- Frontend and installer JavaScript syntax checks passed.
+- Frozen application verification, bundled voice/critical module checks and the packaged Sound Design/Music Library acceptance (including Stage 5.3 generation UI and responsive viewport suite) passed.
+- Inno Setup installer and functional HTML installer packaging passed.
+- SHA-256 manifest generation and Microsoft Defender scan passed.
+- Installer, portable package and real Piper benchmark JSON artifacts uploaded successfully.
+- Artifacts: installer #2641 (884,310,710 bytes); portable #2641 (1,368,242,573 bytes); SHA-256 manifest (777 bytes); Piper benchmark evidence (806 bytes).
+- Publish verified installer release step was skipped by workflow policy; uploaded verified artifacts remain available from the Actions run.
+- User-directed physical installation checks remain WAIVED / NOT RUN. No claim is made of manual install or post-install destructive model checks.
+
+**Disposition:** EXACT-HEAD REGRESSION AND PACKAGED WINDOWS ACCEPTANCE PASS on #2641. Step 7 software/package gate is current through #2641; physical accelerator acceptance remains separate and open.
+
