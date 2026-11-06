@@ -8159,6 +8159,51 @@ class PremiumV2Bridge(QObject):
                     })
         return {"roots": rows, "pending_cleanup": pending_cleanup, "restart_required": True}
 
+    def _validate_storage_root_separation(
+        self, kind: str, destination: Path,
+        roots: dict[str, tuple[str, Path, Path]],
+    ) -> None:
+        def overlaps(left: Path, right: Path) -> bool:
+            try:
+                a = left.resolve()
+                b = right.resolve()
+            except OSError:
+                a = left.absolute()
+                b = right.absolute()
+            return a == b or a in b.parents or b in a.parents
+
+        protected_by_kind = {
+            "temporary": {"library", "audio_assets", "models", "runtime", "model_cache"},
+            "library": {"audio_assets", "models", "runtime", "model_cache", "temporary"},
+            "audio_assets": {"library", "models", "runtime", "model_cache", "temporary"},
+            # Model cache may be nested inside Models, but never overlap Runtime.
+            "models": {"library", "audio_assets", "runtime", "temporary"},
+            "runtime": {"library", "audio_assets", "models", "model_cache", "temporary"},
+            "model_cache": {"library", "audio_assets", "runtime", "temporary"},
+        }
+        conflicts = [
+            other for other in protected_by_kind.get(kind, set())
+            if overlaps(destination, Path(roots[other][1]))
+        ]
+        if conflicts:
+            raise ValueError(
+                "Storage roots must remain separate; conflicting roots: "
+                + ", ".join(sorted(conflicts))
+            )
+        if kind == "model_cache":
+            model_root = Path(roots["models"][1]).expanduser()
+            selected_cache = destination.expanduser()
+            try:
+                model_root = model_root.resolve()
+                selected_cache = selected_cache.resolve()
+            except OSError:
+                model_root = model_root.absolute()
+                selected_cache = selected_cache.absolute()
+            if selected_cache == model_root or selected_cache in model_root.parents:
+                raise ValueError(
+                    "Model Cache may be located inside Models, but cannot replace or contain the Models root."
+                )
+
     def _storage_choose_root(self, payload: dict[str, Any]) -> dict[str, Any]:
         from app.core.storage_migration import migrate_storage_root, inventory_storage_root
         from app.core.paths import app_root
@@ -8194,29 +8239,7 @@ class PremiumV2Bridge(QObject):
                 a = left.absolute()
                 b = right.absolute()
             return a == b or a in b.parents or b in a.parents
-        if kind == "temporary":
-            protected_kinds = {"library", "audio_assets", "models", "runtime", "model_cache"}
-            conflicts = [other for other in protected_kinds
-                         if overlaps(destination, Path(roots[other][1]))]
-            if conflicts:
-                raise ValueError("Temporary storage must be separate from project, export, model, runtime and model-cache roots. Conflicting roots: " + ", ".join(sorted(conflicts)))
-        if kind in {"library", "audio_assets"}:
-            protected_kinds = {"models", "runtime", "model_cache", "temporary"} | ({"audio_assets"} if kind == "library" else {"library"})
-            conflicts = [other for other in protected_kinds
-                         if overlaps(destination, Path(roots[other][1]))]
-            if conflicts:
-                raise ValueError("Project and export storage must remain separate from model, runtime, cache and temporary roots. Conflicting roots: " + ", ".join(sorted(conflicts)))
-        if kind in {"models", "runtime", "model_cache"}:
-            protected_kinds = {"library", "audio_assets", "temporary"}
-            conflicts = [other for other in protected_kinds
-                         if overlaps(destination, Path(roots[other][1]))]
-            if conflicts:
-                raise ValueError("Model, runtime and cache storage must remain separate from project, export and temporary roots. Conflicting roots: " + ", ".join(sorted(conflicts)))
-        if kind == "model_cache":
-            model_root = Path(roots["models"][1]).resolve()
-            selected_cache = destination.resolve()
-            if selected_cache == model_root or selected_cache in model_root.parents:
-                raise ValueError("Model Cache may be located inside Models, but cannot replace or contain the Models root.")
+        self._validate_storage_root_separation(kind, destination, roots)
         if not source.is_dir():
             raise RuntimeError("The current storage location is unavailable. Reconnect its drive before changing the configured path; existing inventory must not be silently orphaned.")
         try:
