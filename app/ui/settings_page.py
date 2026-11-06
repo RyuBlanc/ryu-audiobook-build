@@ -631,7 +631,7 @@ class SettingsPage(QWidget):
         self.status.setText(
             "Settings saved locally. New imports use Project Library and new exports use Audio Assets. "
             "Model/runtime/cache/temporary roots are saved for the next app launch; restart Ryu's Audiobook to apply them. "
-            "Existing projects remain visible in their original folders, and saved output destinations stay in place."
+            "existing projects remain visible in their original folders. Saved output destinations stay in place."
         )
 
     @staticmethod
