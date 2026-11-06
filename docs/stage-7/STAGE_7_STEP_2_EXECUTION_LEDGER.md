@@ -151,3 +151,12 @@ Step 2 is not complete until all acceptance-matrix items are either passed with 
 - CI for the exact wording correction is running as #2420; migration engine/test commits are running as #2421–#2424. Do not infer pass status until each matching-head run completes.
 
 **Updated disposition:** migration engine and initial safety tests added; UI/runtime integration and end-to-end acceptance remain open. Step 2 remains IN PROGRESS.
+
+
+### CI failure investigation — 2026-11-06
+
+The migration-engine source commit #2421 passed the test job. The following commits #2422–#2425 failed the full regression step because two newly added migration tests compared Windows paths using their original short-name spelling (for example `RUNNER~1`) against the canonical long-name spelling returned by `Path.resolve()` (for example `runneradmin`). This is a test assertion portability defect, not a storage-copy or hash-verification failure.
+
+- Corrected the two assertions to compare canonical resolved paths in `tests/test_storage_migration.py`.
+- The correction is committed as `8e83fdc049308baf5dbcfd3b27df62cba181870d`; its matching CI run is pending.
+- Prior failed runs remain failed historical records; they are not relabeled as passing. The corrected head must pass the complete suite before the migration test gate is considered green.
