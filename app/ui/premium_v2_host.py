@@ -7285,10 +7285,17 @@ class PremiumV2Bridge(QObject):
                 target = Path(raw_target)
                 if not target.exists() and not target.is_symlink():
                     continue
+                if target.is_symlink():
+                    raise RuntimeError("Refusing to uninstall a Qwen runtime symbolic link: " + str(target))
                 resolved = target.resolve()
                 if resolved == runtime_root or runtime_root not in resolved.parents:
                     raise RuntimeError("Refusing Qwen runtime removal because an owned path resolves outside its runtime root: " + str(target))
-                self._models_remove_path(resolved, runtime_root)
+            # Validate the entire owned set before deleting any file. Never leave a
+            # half-uninstalled runtime because a later path failed validation.
+            for raw_target in owned:
+                target = Path(raw_target)
+                if target.exists():
+                    self._models_remove_path(target, runtime_root)
             return "Removed the Qwen runtime. Downloaded model weights and saved voice profiles were preserved."
 
         if requested == "audiobook-ai":
