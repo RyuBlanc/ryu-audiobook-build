@@ -631,6 +631,8 @@ class PremiumV2Bridge(QObject):
             "models.verify": True,
             "performance.info": True,
             "performance.benchmark": True,
+            "performance.history.clear": True,
+            "performance.history.export": True,
             "diagnostics.check": True,
             "diagnostics.export_logs": True,
             "system.open_output": True,
@@ -643,7 +645,7 @@ class PremiumV2Bridge(QObject):
             "sound.cues.clear": True,
             "sound.chapter_bgm.get": True,
             "sound.chapter_bgm.save": True,
-            "reason": "Local import, chapter editing, saved voice selection and preview, character analysis and editing, pronunciation rules, audiobook generation, background jobs, history, playback metadata, local model installation, and settings are connected. Live hardware telemetry remains unavailable.",
+            "reason": "Local import, chapter editing, saved voice selection and preview, character analysis and editing, pronunciation rules, audiobook generation, background jobs, history, playback metadata, local model installation, settings, live hardware telemetry, TTS benchmarks, and persistent benchmark history are connected.",
         }
 
     def _project_summary(self, project) -> dict[str, Any]:

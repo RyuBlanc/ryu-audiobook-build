@@ -818,6 +818,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             "True",
             "Live host telemetry is connected and must remain advertised.",
         )
+        self.assertEqual(capabilities.get("performance.history.clear"), "True")
+        self.assertEqual(capabilities.get("performance.history.export"), "True")
 
 
     def test_dashboard_recent_project_cards_open_real_local_project(self):
