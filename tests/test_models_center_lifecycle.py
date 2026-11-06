@@ -50,6 +50,12 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
         ):
             self.assertIn(f'"{command}": self.{handler}', source)
             self.assertIn(f'"{command}": True', source)
+        uninstall_start = source.index("    def _models_uninstall(")
+        uninstall_handler = source[uninstall_start:source.index("    @staticmethod", uninstall_start)]
+        install_start = source.index("    def _models_install(")
+        install_handler = source[install_start:source.index("    def _models_repair(", install_start)]
+        self.assertIn('"chatterbox-model-assets"', uninstall_handler)
+        self.assertNotIn('"chatterbox-model-assets"', install_handler)
 
     def test_inventory_counts_nested_runtime_files_without_double_counting_qwen_weights(self):
         with tempfile.TemporaryDirectory() as temporary:
