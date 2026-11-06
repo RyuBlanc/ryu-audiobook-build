@@ -52,7 +52,7 @@ CI does not replace interactive Windows acceptance. The following remain pending
 - The current branch implements `models.list/install/verify/repair/uninstall` for supported managed components. Lifecycle operations run as background jobs, prevent conflicting model/audio operations, and refresh the inventory and relevant Voice Studio catalogues when they finish.
 - Storage accounting now includes nested Chatterbox files and the Qwen isolated Python runtime/metadata while keeping each Qwen model-weight directory separately counted. Build #1162 passed 530 automated tests for this change; its package job was superseded by the follow-up job-monitor fix, so its artifact is not the final acceptance candidate.
 - A regression guard was added for the race where a background job is already terminal during the first poll. The current branch workflow must validate this follow-up before that latest package can be considered passed.
-- Still unsupported: true live CPU/GPU/VRAM telemetry. Still requiring target-PC acceptance: install/repair/remove models; provider selector refresh; real preview, audiobook narration and playback; installer and portable first-run.
+- Live CPU/RAM and accelerator inventory is connected in Premium V2; GPU utilization/VRAM are exposed only by supported active backends. Repeatable audio benchmarking and target-PC acceptance remain separate open gates. Still requiring target-PC acceptance: install/repair/remove models; provider selector refresh; real preview, audiobook narration and playback; installer and portable first-run.
 
 
 ## 2026-10-24 validation boundary
