@@ -7051,8 +7051,11 @@ class PremiumV2Bridge(QObject):
 
     def _models_uninstall_preflight(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Explain exact targets and shared dependencies before the UI asks to uninstall."""
-        from app.tts.model_registry import build_inventory, component_file_inventory
-        from app.tts.qwen_character_runtime import MODEL_DIRS, VENV_ROOT
+        from app.core.paths import models_root
+        from app.tts.model_registry import build_inventory
+        from app.tts.qwen_character_runtime import (
+            MODEL_DIRS, RUNTIME_ROOT, VENV_ROOT, PYTHON_ROOT, MARKER, INSTALLER_PATH, INSTALLER_LOG,
+        )
         from app.tts.chatterbox_runtime import RUNTIME_DIR
         requested = str(payload.get("model_id") or "").strip().casefold()
         if not requested:
