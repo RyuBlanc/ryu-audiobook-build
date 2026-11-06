@@ -49,7 +49,6 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
         from app.tts.benchmark import BenchmarkResult
 
         bridge = self.make_bridge()
-        voice = Path("Models/piper/en_US-test-medium.onnx")
         result = BenchmarkResult(
             provider="PiperProvider", backend="automatic", seconds=1.25,
             audio_seconds=2.5, realtime_factor=0.5, success=True,
@@ -63,6 +62,9 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)
+            voice = base / "Models" / "piper" / "en_US-test-medium.onnx"
+            voice.parent.mkdir(parents=True)
+            voice.write_bytes(b"test model")
             with (
                 patch.object(bridge, "_jobs_path", return_value=base / "jobs.json"),
                 patch.object(bridge, "_history_path", return_value=base / "history.json"),
