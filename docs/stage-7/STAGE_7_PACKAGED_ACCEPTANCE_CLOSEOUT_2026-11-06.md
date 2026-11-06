@@ -99,3 +99,18 @@ All seven execution ledgers, the master requirement/bug/change register and this
 - Companion hosted Windows CPU Qwen acceptance workflow [run #1](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42301856102) passed its real inference flow and uploaded audio/diagnostics. Actual output was valid 30.000-second mono 24 kHz PCM; warmed synthesis took 268.184 seconds, so under-60-second target was not met on CPU.
 - Source CI [#2662](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42301856057) passed 38 focused tests and 1,258 full regression tests.
 - Real NVIDIA/AMD/Intel hardware acceptance remains queued and is not represented as passed. Physical installed-app checks remain user-waived/not run.
+
+
+## User decision — accelerator and physical testing deferred (7 November 2026)
+
+The user confirms the necessary hardware is not currently available and directs that the physical accelerator checks be performed later. This is **DEFERRED / NOT RUN**, not a pass and not a permanent waiver.
+
+- NVIDIA CUDA Qwen 1.7B under-60-second preview: deferred until suitable NVIDIA hardware is available.
+- AMD ROCm Qwen 1.7B under-60-second preview: deferred until suitable AMD hardware is available.
+- Intel XPU Qwen 1.7B under-60-second preview: deferred until suitable Intel hardware is available.
+- Physical installed-Windows acceptance: deferred for the user's later hands-on test.
+- Hosted CPU real Qwen evidence remains 30.000s output at 268.184s warmed synthesis; it does not meet the performance target.
+
+The exact-head #2672 checkpoint is still running at the time of this ledger update. Its regression job passed; frozen-app verification, bundled-module verification and packaged Sound Design/Music Library acceptance passed; functional HTML installer packaging and remaining release-artifact gates are still running/pending.
+
+**Disposition:** pending successful #2672, Stage 7 may be closed for software implementation, regression and packaged acceptance, with GPU performance and physical installed-app checks clearly carried forward as deferred acceptance. No GPU performance pass is claimed. Stage 8 may start on that basis.
