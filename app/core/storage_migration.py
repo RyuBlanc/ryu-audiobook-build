@@ -273,6 +273,7 @@ def safe_cleanup(
     temporary_roots: tuple[Path, ...] = (),
     dry_run: bool = True,
     protected_paths: tuple[Path, ...] = (),
+    allowed_names: tuple[str, ...] = ("staging", "downloads", "temporary", "tmp", "cache"),
 ) -> dict:
     """Clean only app-owned cache/temp contents; never traverse protected paths.
 
@@ -287,7 +288,10 @@ def safe_cleanup(
     for root in allowed_roots:
         if not root.exists() or not root.is_dir() or root.is_symlink():
             continue
+        allowed = {name.casefold() for name in allowed_names}
         for child in root.iterdir():
+            if child.name.casefold() not in allowed:
+                continue
             resolved = child.resolve()
             if resolved == root or not _inside(resolved, root):
                 continue
