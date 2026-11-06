@@ -140,3 +140,17 @@ Physical installed-app acceptance remains user-waived/not run. Real NVIDIA/AMD/I
 ## Latest-records package gate
 
 This commit requests a fresh matching-head full regression and Windows installer/portable package checkpoint after the Qwen CPU benchmark result was reconciled into the Stage 7 records.
+
+
+## User decision — accelerator and physical acceptance deferred for later hardware access (7 November 2026)
+
+The user confirms the required GPU hardware is not currently available and explicitly directs that physical accelerator testing be deferred until they obtain hands-on access. This is a scheduling deferral, not a pass or a waiver of the performance requirement.
+
+- HW-02 NVIDIA CUDA Qwen 1.7B under-60-second preview: **DEFERRED — NOT RUN; hardware unavailable**.
+- HW-03 AMD ROCm Qwen 1.7B under-60-second preview: **DEFERRED — NOT RUN; hardware unavailable**.
+- HW-04 Intel XPU Qwen 1.7B under-60-second preview: **DEFERRED — NOT RUN; hardware unavailable**.
+- QWEN-02 under-60-second 30-second preview: **OPEN / DEFERRED**. Hosted CPU evidence is real, but measured 268.184 seconds and does not meet the target.
+- REL-03 physical installed-Windows acceptance remains **USER-DEFERRED / NOT RUN** as previously agreed.
+- GitHub-hosted CPU testing and current software regression/package gates remain valid evidence for the parts they actually exercise; they do not substitute for GPU backend or physical-device acceptance.
+
+**Stage 7 disposition:** software implementation, automated regression and packaged acceptance are eligible for closeout once the current exact-head package run #2672 finishes successfully. GPU performance and physical installed-device checks are explicitly carried forward as deferred acceptance items. Stage 8 may begin with these items recorded as carry-forward validation; Stage 7 must not be described as having passed GPU performance acceptance.
