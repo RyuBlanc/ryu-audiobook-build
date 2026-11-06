@@ -590,7 +590,7 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
             bridge = self.make_bridge()
 
             with (
-                patch("app.ui.premium_v2_host.models_root", return_value=models),
+                patch("app.core.paths.models_root", return_value=models),
                 patch("app.tts.qwen_character_runtime.MODEL_DIRS", {
                     "custom-0.6b": selected,
                     "base-0.6b": sibling,
