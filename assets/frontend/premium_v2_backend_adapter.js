@@ -7865,9 +7865,9 @@
   async function refreshPerformance() {
     let result;
     try {
-      result = await call('performance.info');
+      result = await call('performance.info', {refresh:false});
     } catch (error) {
-      result = {available:false, reason:error?.message || 'Live hardware telemetry is unavailable in this build.'};
+      result = {available:false, reason:error?.message || 'Live hardware telemetry is unavailable.'};
     }
     const section = $('performance');
     if (!result?.available) {
@@ -7876,45 +7876,44 @@
         ['Unavailable', 'CPU telemetry unavailable'],
         ['Unavailable', 'GPU / VRAM telemetry unavailable'],
         ['Not tested', 'Generation performance'],
-        ['Unavailable', 'Recommended backend']
+        ['Unavailable', 'Backend recommendation']
       ];
-      metrics?.forEach((metric, index) => {
-        const strong = metric.querySelector('strong');
-        const detail = metric.querySelector('span');
-        if (strong && labels[index]) strong.textContent = labels[index][0];
-        if (detail && labels[index]) detail.textContent = labels[index][1];
+      metrics?.forEach((metric,index)=>{
+        const strong=metric.querySelector('strong'),detail=metric.querySelector('span');
+        if(strong&&labels[index])strong.textContent=labels[index][0];
+        if(detail&&labels[index])detail.textContent=labels[index][1];
       });
-      section?.querySelectorAll('.ready-list .ready b').forEach(node => { node.textContent = 'Not measured'; });
-      if ($('benchmarkResult')) $('benchmarkResult').textContent = 'Unavailable';
-      const note = $('benchmarkResult')?.parentElement?.querySelector('p.muted');
-      if (note) note.textContent = result?.reason || 'Live hardware telemetry and benchmark results are not connected in this build.';
-      return {...(result || {}), available:false};
+      if($('benchmarkResult'))$('benchmarkResult').textContent='Not tested';
+      const note=$('benchmarkResult')?.parentElement?.querySelector('p.muted');
+      if(note)note.textContent=result?.reason||'Host telemetry is unavailable on this device.';
+      return {...(result||{}),available:false};
     }
-
-    // Only render actual backend measurements. If a field is missing or invalid,
-    // overwrite any legacy sample value rather than leaving it on screen.
-    const metrics = section?.querySelectorAll('.grid.metrics .metric');
-    const numeric = value => value !== null && value !== undefined && value !== '' &&
-      Number.isFinite(Number(value)) ? Number(value) : null;
-    const cpu = numeric(result.cpu_percent);
-    const gpu = numeric(result.gpu_percent);
-    const vram = numeric(result.vram_used_mb);
-    const duration = numeric(result.generation_seconds);
-    const values = [
-      [cpu === null ? 'Unavailable' : cpu.toFixed(1) + '%', 'CPU usage'],
-      [gpu === null ? 'Unavailable' : gpu.toFixed(1) + '%',
-        vram === null ? 'VRAM unavailable' : Math.round(vram) + ' MB VRAM'],
-      [duration === null ? 'Not tested' : duration.toFixed(1) + ' s', 'Measured generation time'],
-      [String(result.recommended_backend || 'Unavailable'), 'Backend recommendation']
+    const metrics=section?.querySelectorAll('.grid.metrics .metric');
+    const fmt=value=>value!==null&&value!==undefined&&Number.isFinite(Number(value))?Number(value):null;
+    const cpu=fmt(result.cpu_percent),gpu=fmt(result.gpu_percent),vram=fmt(result.vram_used_mb),
+      totalVram=fmt(result.vram_total_mb),duration=fmt(result.generation_seconds);
+    const ram=fmt(result.memory_total_bytes),free=fmt(result.memory_available_bytes);
+    const values=[
+      [cpu===null?'Unavailable':cpu.toFixed(1)+'%','CPU usage'],
+      [gpu===null?'Detected':gpu.toFixed(1)+'%',result.gpu_name?
+        result.gpu_name+' · '+(vram===null?'VRAM telemetry unavailable':Math.round(vram)+' / '+Math.round(totalVram||0)+' MB VRAM'):'GPU telemetry'],
+      [duration===null?'Not tested':duration.toFixed(1)+' s','Measured generation time'],
+      [String(result.recommended_backend||'Unavailable'),result.backend_active?'Runtime active':'Detected / runtime status']
     ];
-    metrics?.forEach((metric, index) => {
-      const strong = metric.querySelector('strong');
-      const detail = metric.querySelector('span');
-      if (strong && values[index]) strong.textContent = values[index][0];
-      if (detail && values[index]) detail.textContent = values[index][1];
+    metrics?.forEach((metric,index)=>{
+      const strong=metric.querySelector('strong'),detail=metric.querySelector('span');
+      if(strong&&values[index])strong.textContent=values[index][0];
+      if(detail&&values[index])detail.textContent=values[index][1];
     });
-    if ($('benchmarkResult')) $('benchmarkResult').textContent =
-      duration === null ? 'Not tested' : duration.toFixed(1) + ' s';
+    const ready=section?.querySelectorAll('.ready-list .ready b');
+    if(ready?.length){
+      ready[0].textContent=ram===null?'Unavailable':(ram/1024**3).toFixed(1)+' GB total RAM';
+      if(ready[1])ready[1].textContent=free===null?'Unavailable':(free/1024**3).toFixed(1)+' GB available RAM';
+      if(ready[2])ready[2].textContent=result.backend_active?'GPU runtime active':'No active GPU runtime';
+    }
+    const note=$('benchmarkResult')?.parentElement?.querySelector('p.muted');
+    if(note)note.textContent=(result.reason||'Live host telemetry connected.')+' · '+(result.platform||'')+' · '+(result.processor||'');
+    if($('benchmarkResult'))$('benchmarkResult').textContent=duration===null?'Not tested':duration.toFixed(1)+' s';
     return result;
   }
   function requestModelActionDialog(options = {}) {
@@ -8401,7 +8400,12 @@
         disable(element, 'Changing the application storage root is not implemented. Existing project and asset paths remain unchanged.');
       }
     });
-    disable($('runBenchmark'), 'Live hardware telemetry and repeatable benchmark execution are not implemented in this build; performance is intentionally marked Not tested.');
+    const benchmarkButton = $('runBenchmark');
+    if (benchmarkButton) {
+      benchmarkButton.disabled = false;
+      benchmarkButton.removeAttribute('aria-disabled');
+      benchmarkButton.title = 'Refresh CPU, memory, GPU and accelerator runtime information.';
+    }
   }
 
   function wireModelDetails() {
@@ -8736,8 +8740,15 @@
     if ($('clearModelQueue')) $('clearModelQueue').onclick=act(async()=>{await call('job.clear_completed');await refreshJobs();await refreshHistory();message('Completed background jobs cleared from the active queue.');});
     if ($('runIntegrityCheck')) $('runIntegrityCheck').onclick=act(runDiagnostics);
     if ($('runBenchmark')) $('runBenchmark').onclick=act(async()=>{
-      const result=await refreshPerformance();
-      message(result.reason||'Hardware benchmark is not available in this build.',!result.available);
+      const button=$('runBenchmark'),prior=button?.textContent;
+      if(button){button.disabled=true;button.textContent='Scanning…';}
+      try{
+        const result=await call('performance.info',{refresh:true});
+        await refreshPerformance();
+        const devices=(result.accelerators||[]).map(x=>x.name+' ['+x.backend+']').join(', ')||'No GPU detected';
+        message('Hardware scan complete: '+(result.recommended_backend||'Unavailable')+' · '+devices);
+      }catch(error){message(error?.message||String(error),true);}
+      finally{if(button){button.disabled=false;button.textContent=prior||'Run benchmark';}}
     });
     if ($('chapterSearch')) $('chapterSearch').oninput=()=>{
       const q=$('chapterSearch').value.trim().toLowerCase();
