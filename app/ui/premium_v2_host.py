@@ -7182,17 +7182,19 @@ class PremiumV2Bridge(QObject):
         }
 
     def _models_uninstall_component(self, model_id: str, payload: dict[str, Any], progress) -> str:
-        # Preflight and execution use one shared impact contract. Recompute on the
-        # worker immediately before deletion so a stale UI preview can never
-        # authorize a newly unsafe operation.
-        impact = self._models_uninstall_preflight({**dict(payload or {}), "model_id": model_id})
+        """Remove only the selected app-owned component after a fresh safety preflight."""
+        payload = dict(payload or {})
+        payload["model_id"] = model_id
+        impact = self._models_uninstall_preflight(payload)
         if impact.get("blocked"):
             raise RuntimeError(str(impact.get("block_reason") or "Uninstall is blocked by installed dependents."))
+
         from app.core.paths import models_root
         from app.tts.model_registry import mark_installed
-        root = models_root().resolve()
-        requested = model_id.casefold()
+        root = Path(models_root()).resolve()
+        requested = str(model_id).strip().casefold()
 
+        # Recheck application activity immediately before touching any files.
         with self._jobs_lock:
             blocking = [
                 job for job in self._jobs.values()
@@ -7205,111 +7207,104 @@ class PremiumV2Bridge(QObject):
                 )
             ]
         if blocking:
-            raise RuntimeError("Uninstall is blocked while a preview, generation, import, analysis or model lifecycle job is active. Stop or finish that job, then retry.")
+            raise RuntimeError(
+                "Uninstall is blocked while a preview, generation, import, analysis or model lifecycle "
+                "job is active. Stop or finish that job, then retry."
+            )
 
-        def report(text: str) -> None:
+        def report(message: str) -> None:
             if progress:
-                progress(text)
+                progress(message)
 
         if requested == "piper":
             from app.tts.providers.piper import PiperProvider
             voice_name = str(payload.get("voice_name") or "").strip()
             if not voice_name:
                 raise ValueError("Choose the exact user-installed Piper voice to uninstall.")
-            piper_root = (root / "piper").resolve()
-            voice = next((item.resolve() for item in PiperProvider.model_paths()
-                          if item.stem.casefold() == voice_name.casefold()
-                          and piper_root in item.resolve().parents), None)
-            if voice is None or voice.suffix.casefold() != ".onnx":
+            piper_root = root / "piper"
+            if piper_root.is_symlink():
+                raise RuntimeError("Refusing to uninstall through a symbolic-link Piper model root.")
+            piper_root = piper_root.resolve()
+            voice = next((
+                Path(item) for item in PiperProvider.model_paths()
+                if Path(item).stem.casefold() == voice_name.casefold()
+                and Path(item).suffix.casefold() == ".onnx"
+                and not Path(item).is_symlink()
+                and piper_root in Path(item).resolve().parents
+            ), None)
+            if voice is None:
                 raise ValueError("That Piper voice is not a user-installed removable model.")
+            voice = voice.resolve()
             report(f"Removing Piper voice {voice.stem}…")
             self._models_remove_path(voice, piper_root)
             sidecar = voice.with_suffix(voice.suffix + ".json")
-            if sidecar.exists():
+            if sidecar.exists() or sidecar.is_symlink():
                 self._models_remove_path(sidecar, piper_root)
-            mark_installed("piper", bool(piper_root.exists() and any(piper_root.rglob("*.onnx"))))
-            return f"Removed Piper voice model {voice.stem}; other voice models and profiles were kept."
+            remaining = piper_root.exists() and any(
+                item.is_file() and not item.is_symlink() for item in piper_root.rglob("*.onnx")
+            )
+            mark_installed("piper", bool(remaining))
+            return f"Removed Piper voice model {voice.stem}; other voices, saved profiles and books were kept."
 
         if requested == "kokoro":
             target = root / "kokoro"
-            if not target.is_dir() or not any(p.is_file() for p in target.rglob("*")):
+            if not target.exists():
                 raise ValueError("There are no user-installed Kokoro files to remove.")
+            if target.is_symlink():
+                raise RuntimeError("Refusing to uninstall a symbolic-link Kokoro model directory.")
             report("Removing user-installed Kokoro model and voice pack…")
             self._models_remove_path(target, root)
             mark_installed("kokoro", False)
-            return "Removed the user-installed Kokoro model and voice pack. Bundled files are untouched."
+            return "Removed the user-installed Kokoro model and voice pack. Bundled files, profiles and projects were kept."
 
         if requested in {"chatterbox", "chatterbox-multilingual", "chatterbox-runtime"}:
-        if requested == "chatterbox-runtime":
-            from app.tts.chatterbox_runtime import RUNTIME_DIR, runtime_python
-            runtime_path = str(RUNTIME_DIR.resolve())
-            owned_paths.append(RUNTIME_DIR)
-            python_executable = runtime_python()
-            python_path = str(python_executable.resolve()) if python_executable else str((RUNTIME_DIR / "Scripts" / "python.exe").resolve())
-
             from app.tts.chatterbox_runtime import RUNTIME_DIR
-            runtime_root = Path(RUNTIME_DIR).resolve()
-            from app.tts.model_registry import build_inventory
-            dependencies = [
-                row for row in build_inventory()
-                if row.get("component_type") != "provider"
-                and row.get("model_id") != "chatterbox-runtime"
-                and str(row.get("runtime_path") or "")
-                and Path(str(row["runtime_path"])).expanduser().resolve() == runtime_root
-                and row.get("installed")
-            ]
-            if dependencies:
-                names = ", ".join(str(row.get("name") or row.get("model_id")) for row in dependencies)
-                raise RuntimeError("Chatterbox runtime is shared by installed components: " + names + ". Remove or relocate those dependent components first.")
+            raw_runtime = Path(RUNTIME_DIR)
+            if raw_runtime.is_symlink():
+                raise RuntimeError("Refusing to uninstall a Chatterbox runtime symbolic link.")
+            runtime_root = raw_runtime.resolve()
             if runtime_root.exists():
-                runtime_allowed_root = runtime_root.parent
-                report("Removing the shared Chatterbox runtime…")
-                self._models_remove_path(runtime_root, runtime_allowed_root)
+                # The Chatterbox environment is stored under the independently
+                # configured Provider Runtime root, not necessarily Models.
+                allowed_root = runtime_root.parent
+                report("Removing the shared Chatterbox provider runtime…")
+                self._models_remove_path(runtime_root, allowed_root)
             mark_installed("chatterbox", False)
             mark_installed("chatterbox-multilingual", False)
-            return "Removed the shared Chatterbox runtime. Saved profiles and books were kept."
+            return "Removed the Chatterbox provider runtime. Cached model assets, saved voice profiles, assignments and projects were kept."
 
-        if requested == "qwen-model" or requested in {"custom-0.6b", "custom-1.7b", "design-1.7b", "base-0.6b", "base-1.7b"}:
+        if requested == "qwen-model" or requested in {
+            "custom-0.6b", "custom-1.7b", "design-1.7b", "base-0.6b", "base-1.7b"
+        }:
             from app.tts.qwen_character_runtime import MODEL_DIRS, MODEL_IDS
             kind = str(payload.get("model_kind") or requested).strip().casefold()
             if kind not in MODEL_DIRS or kind not in MODEL_IDS:
                 raise ValueError("Choose the exact installed Qwen model to uninstall.")
-            target = Path(MODEL_DIRS[kind])
-            resolved = target.resolve()
+            raw_target = Path(MODEL_DIRS[kind])
             model_base = Path(models_root()).resolve()
-            if target.is_symlink() or resolved == model_base or model_base not in resolved.parents:
-                raise RuntimeError("The selected Qwen model path is outside the configured Models root or is a symbolic link.")
-            if resolved.name.casefold() != kind or not resolved.is_dir():
-                raise RuntimeError("The selected Qwen model path failed exact component ownership validation.")
-            # Qwen model weights belong under Models/qwen3-tts/{model-id}.
-            expected_parent = (model_base / "qwen3-tts").resolve()
-            if resolved.parent != expected_parent:
-                raise RuntimeError("The selected Qwen model is not in its expected app-managed model directory.")
-            if not any(path.is_file() for path in resolved.rglob("*") if not path.is_symlink()):
+            expected_parent = model_base / "qwen3-tts"
+            if raw_target.is_symlink() or expected_parent.is_symlink():
+                raise RuntimeError("The selected Qwen model path contains a symbolic link.")
+            target = raw_target.resolve()
+            if target.parent != expected_parent.resolve() or target.name.casefold() != kind or not target.is_dir():
+                raise RuntimeError("The selected Qwen model failed exact Models component ownership validation.")
+            if not any(path.is_file() and not path.is_symlink() for path in target.rglob("*")):
                 raise ValueError(f"Qwen model {kind} contains no installed model files.")
             report(f"Removing Qwen model {kind}…")
-            self._models_remove_path(resolved, expected_parent)
-            return f"Removed Qwen model {kind}. The Qwen runtime, other model folders and saved voice profiles were kept."
+            self._models_remove_path(target, expected_parent)
+            return f"Removed Qwen model {kind}. The shared runtime, other Qwen models, saved voice profiles and projects were kept."
 
         if requested == "qwen-runtime":
             from app.tts.qwen_character_runtime import (
                 RUNTIME_ROOT, VENV_ROOT, PYTHON_ROOT, MARKER, INSTALLER_PATH, INSTALLER_LOG,
             )
-            runtime_root = Path(RUNTIME_ROOT).resolve()
-            from app.tts.model_registry import build_inventory
-            dependents = [
-                row for row in build_inventory()
-                if row.get("component_type") != "provider"
-                and row.get("model_id") not in {"qwen-runtime"}
-                and row.get("installed")
-                and str(row.get("runtime_path") or "")
-                and Path(str(row["runtime_path"])).expanduser().resolve() == Path(VENV_ROOT).resolve()
-            ]
-            if dependents:
-                names = ", ".join(str(row.get("name") or row.get("model_id")) for row in dependents)
-                raise RuntimeError("Qwen runtime is required by installed components: " + names + ". Remove or relocate dependent features first.")
-            report("Removing the Qwen Python runtime only; downloaded model weights are preserved…")
+            runtime_root = Path(RUNTIME_ROOT)
+            if runtime_root.is_symlink():
+                raise RuntimeError("Refusing to uninstall a Qwen runtime symbolic link.")
+            runtime_root = runtime_root.resolve()
             owned = (VENV_ROOT, PYTHON_ROOT, MARKER, INSTALLER_PATH, INSTALLER_LOG)
+            # Validate every target and every nested path before deleting any of
+            # them, so a bad later target cannot cause a partial uninstall.
             for raw_target in owned:
                 target = Path(raw_target)
                 if not target.exists() and not target.is_symlink():
@@ -7319,16 +7314,22 @@ class PremiumV2Bridge(QObject):
                 resolved = target.resolve()
                 if resolved == runtime_root or runtime_root not in resolved.parents:
                     raise RuntimeError("Refusing Qwen runtime removal because an owned path resolves outside its runtime root: " + str(target))
-            # Validate the entire owned set before deleting any file. Never leave a
-            # half-uninstalled runtime because a later path failed validation.
+                current = runtime_root
+                for part in resolved.relative_to(runtime_root).parts:
+                    current = current / part
+                    if current.is_symlink():
+                        raise RuntimeError("Refusing to uninstall through a Qwen runtime symbolic link: " + str(current))
+            report("Removing the Qwen Python runtime only; downloaded model weights and Hugging Face cache are preserved…")
             for raw_target in owned:
                 target = Path(raw_target)
                 if target.exists():
                     self._models_remove_path(target, runtime_root)
-            return "Removed the Qwen runtime. Downloaded model weights and saved voice profiles were preserved."
+            return "Removed the Qwen runtime. Downloaded model weights, cache, saved voice profiles and projects were preserved."
 
         if requested == "audiobook-ai":
-            target = (root / "audiobook-ai").resolve()
+            target = root / "audiobook-ai"
+            if target.is_symlink():
+                raise RuntimeError("Refusing to uninstall an Audiobook AI symbolic link.")
             if target.exists():
                 report("Removing the local Audiobook AI runtime and model…")
                 self._models_remove_path(target, root)
