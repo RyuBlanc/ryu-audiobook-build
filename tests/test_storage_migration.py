@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from app.core.storage_migration import (
     StorageMigrationError, migrate_storage_root, prepare_migration,
-    read_migration_journal,
+    read_migration_journal, recover_migration_journal, safe_cleanup,
 )
 
 
