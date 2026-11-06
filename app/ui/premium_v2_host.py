@@ -8172,6 +8172,22 @@ class PremiumV2Bridge(QObject):
                 b = right.absolute()
             return a == b or a in b.parents or b in a.parents
 
+        # Validate this first so a cache selected as a parent of Models gets
+        # the precise safety error rather than a generic Runtime overlap.
+        if kind == "model_cache":
+            model_root = Path(roots["models"][1]).expanduser()
+            selected_cache = destination.expanduser()
+            try:
+                model_root = model_root.resolve()
+                selected_cache = selected_cache.resolve()
+            except OSError:
+                model_root = model_root.absolute()
+                selected_cache = selected_cache.absolute()
+            if selected_cache == model_root or selected_cache in model_root.parents:
+                raise ValueError(
+                    "Model Cache may be located inside Models, but cannot replace or contain the Models root."
+                )
+
         protected_by_kind = {
             "temporary": {"library", "audio_assets", "models", "runtime", "model_cache"},
             "library": {"audio_assets", "models", "runtime", "model_cache", "temporary"},
@@ -8186,21 +8202,19 @@ class PremiumV2Bridge(QObject):
             other_path = Path(roots[other][1]).expanduser()
             try:
                 same_root = destination.expanduser().resolve() == other_path.resolve()
-            except OSError:
-                same_root = destination.expanduser().absolute() == other_path.absolute()
-            # Legacy installs intentionally share the Models base directory
-            # for weights and provider runtime; their actual components live
-            # in separate named subdirectories beneath that base.
-            try:
                 configured_models = Path(roots["models"][1]).expanduser().resolve()
                 configured_runtime = Path(roots["runtime"][1]).expanduser().resolve()
                 selected_path = destination.expanduser().resolve()
                 other_resolved = other_path.resolve()
             except OSError:
+                same_root = destination.expanduser().absolute() == other_path.absolute()
                 configured_models = Path(roots["models"][1]).expanduser().absolute()
                 configured_runtime = Path(roots["runtime"][1]).expanduser().absolute()
                 selected_path = destination.expanduser().absolute()
                 other_resolved = other_path.absolute()
+
+            # Legacy installs share the Models base directory for separate
+            # weight/runtime subdirectories, with HF cache nested under it.
             legacy_shared_base = (
                 {kind, other} == {"models", "runtime"}
                 and same_root
@@ -8219,24 +8233,12 @@ class PremiumV2Bridge(QObject):
             )
             if not (legacy_shared_base or legacy_shared_cache) and overlaps(destination, other_path):
                 conflicts.append(other)
+
         if conflicts:
             raise ValueError(
                 "Storage roots must remain separate; conflicting roots: "
                 + ", ".join(sorted(conflicts))
             )
-        if kind == "model_cache":
-            model_root = Path(roots["models"][1]).expanduser()
-            selected_cache = destination.expanduser()
-            try:
-                model_root = model_root.resolve()
-                selected_cache = selected_cache.resolve()
-            except OSError:
-                model_root = model_root.absolute()
-                selected_cache = selected_cache.absolute()
-            if selected_cache == model_root or selected_cache in model_root.parents:
-                raise ValueError(
-                    "Model Cache may be located inside Models, but cannot replace or contain the Models root."
-                )
 
     def _storage_choose_root(self, payload: dict[str, Any]) -> dict[str, Any]:
         from app.core.storage_migration import migrate_storage_root, inventory_storage_root
