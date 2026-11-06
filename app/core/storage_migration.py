@@ -171,10 +171,19 @@ def migrate_storage_root(
             _write_journal(plan.journal, payload)
             if progress:
                 progress("copying", index, len(rows))
-        if len(_walk_files(plan.staging)) != plan.file_count:
-            raise StorageMigrationError("Staged file count does not match the source.")
-        if sum(row[2] for row in _walk_files(plan.staging)) != plan.total_bytes:
+        source_after_copy = _walk_files(plan.source)
+        staged_after_copy = _walk_files(plan.staging)
+        if len(source_after_copy) != plan.file_count or len(staged_after_copy) != plan.file_count:
+            raise StorageMigrationError("Source or staged file count changed during migration.")
+        if sum(row[2] for row in source_after_copy) != plan.total_bytes:
+            raise StorageMigrationError("Source files changed size during migration.")
+        if sum(row[2] for row in staged_after_copy) != plan.total_bytes:
             raise StorageMigrationError("Staged byte count does not match the source.")
+        for (source_file, source_relative, source_size), (staged_file, staged_relative, staged_size) in zip(source_after_copy, staged_after_copy):
+            if source_relative != staged_relative or source_size != staged_size:
+                raise StorageMigrationError(f"Source and staged paths differ: {source_relative}")
+            if _sha256(source_file) != _sha256(staged_file):
+                raise StorageMigrationError(f"Source changed during migration: {source_relative}")
         if is_busy and is_busy(plan.source):
             raise StorageMigrationError("An active job started during migration.")
         payload["state"] = "switching"
