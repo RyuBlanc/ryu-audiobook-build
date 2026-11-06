@@ -106,6 +106,53 @@ class StorageRootSelectionTests(unittest.TestCase):
         self.assertIn("for root in project_library_roots()", project_source)
         self.assertIn("allowed_roots", project_source)
 
+    def test_model_runtime_cache_and_temporary_roots_are_independently_configurable(self):
+        with TemporaryDirectory() as temp:
+            base = Path(temp)
+            app_data = base / "Ryu's Audiobook"
+            selected = {
+                "storage/models_root": str(base / "drive-a" / "Models"),
+                "storage/runtime_root": str(base / "drive-b" / "Runtimes"),
+                "storage/model_cache_root": str(base / "drive-c" / "ModelCache"),
+                "storage/temporary_root": str(base / "drive-d" / "Temp"),
+            }
+            with patch("app.core.paths.app_root", return_value=app_data), patch(
+                "app.core.paths._setting_value", side_effect=lambda key: selected.get(key, "")
+            ):
+                self.assertEqual(paths.models_root(), Path(selected["storage/models_root"]))
+                self.assertEqual(paths.runtimes_root(), Path(selected["storage/runtime_root"]))
+                self.assertEqual(paths.model_cache_root(), Path(selected["storage/model_cache_root"]))
+                self.assertEqual(paths.temporary_root(), Path(selected["storage/temporary_root"]))
+
+    def test_model_related_defaults_preserve_existing_installation_layout(self):
+        with TemporaryDirectory() as temp:
+            app_data = Path(temp) / "Ryu's Audiobook"
+            with patch("app.core.paths.app_root", return_value=app_data), patch(
+                "app.core.paths._setting_value", return_value=""
+            ):
+                legacy_models = app_data / "Models"
+                self.assertEqual(paths.models_root(), legacy_models)
+                self.assertEqual(paths.runtimes_root(), legacy_models)
+                self.assertEqual(paths.model_cache_root(), legacy_models / "huggingface")
+                self.assertEqual(paths.temporary_root(), app_data / "Temp")
+
+    def test_relative_model_related_roots_fall_back_to_legacy_defaults(self):
+        with TemporaryDirectory() as temp:
+            app_data = Path(temp) / "Ryu's Audiobook"
+            values = {
+                "storage/models_root": "relative/models",
+                "storage/runtime_root": "relative/runtime",
+                "storage/model_cache_root": "relative/cache",
+                "storage/temporary_root": "relative/temp",
+            }
+            with patch("app.core.paths.app_root", return_value=app_data), patch(
+                "app.core.paths._setting_value", side_effect=lambda key: values.get(key, "")
+            ):
+                self.assertEqual(paths.models_root(), app_data / "Models")
+                self.assertEqual(paths.runtimes_root(), app_data / "Models")
+                self.assertEqual(paths.model_cache_root(), app_data / "Models" / "huggingface")
+                self.assertEqual(paths.temporary_root(), app_data / "Temp")
+
 
 if __name__ == "__main__":
     unittest.main()
