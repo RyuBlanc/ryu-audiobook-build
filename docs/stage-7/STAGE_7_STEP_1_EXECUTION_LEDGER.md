@@ -167,16 +167,15 @@ This alias was used historically because the earlier workflow did not include a 
 - `d153751c7763e409cc84192b9b470f8b0faae379` isolates the Chatterbox test's registry mutation so the test does not touch the real user settings manifest.
 - These newly added tests have not yet been confirmed by a matching-head CI result. They use temporary fixtures; no real installed model files were used or removed.
 
-### Remaining closure gates — Step 1 stays OPEN
+### Closure assessment after Run #2400
 
-1. Full regression suite must pass on the latest candidate (including the new shared-runtime and post-uninstall refresh tests).
-2. Windows installer/portable packaging must pass on the exact same final candidate SHA; artifact metadata and SHA-256 manifest must identify that SHA.
-3. Installed Windows application acceptance is still pending. Verify actual detected model and runtime paths, actual file inventory and per-file/aggregate sizes, one individual model uninstall, one shared runtime uninstall while preserving unrelated model weights, and Refresh Status showing the removed component as Missing/not installed.
-4. Verify saved voice profiles, character assignments, project files and unrelated models remain intact after the actual uninstall operations.
-5. Record the final run URL, artifact names/IDs, artifact checksums and exact commit SHA after the run completes.
+The exact candidate `89ce5762a1194d8860e72d1cf4fb3b3b586d1ccc` completed successfully in [Actions run #2400](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42146555980). The run completed both CI jobs successfully, executed 1,199 regression tests with `OK`, and built the Windows application and release artifacts. All three uploaded artifacts are attached to that exact HEAD SHA and remain unexpired.
 
-**Current status: IN PROGRESS / RUNTIME ACCEPTANCE PENDING. Do not proceed to Step 2.**
+**The automated regression and matching-head package gates are PASSED.** Do not rerun or reopen those gates absent a new regression or code change.
 
+The remaining Step 1 gate is actual installed-Windows-app Models Center acceptance. Verify actual model/runtime/Python paths, per-file and aggregate inventory sizes, an individual model uninstall, a shared-runtime uninstall while preserving model weights/cache, post-removal inventory refresh, and preservation of saved voice profiles, character assignments and project data.
+
+**Current status: AUTOMATED CI + PACKAGE PASSED / INSTALLED-APP MODEL LIFECYCLE ACCEPTANCE PENDING. Do not proceed to Step 2 until this final gate is accepted.**
 ## 11. 2026-11-06 — Run #2400 matching-head regression and package acceptance
 
 **Workflow:** [#2400 — Stage 7 Step 1 artifact checkpoint](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42146555980)  
