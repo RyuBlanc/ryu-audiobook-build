@@ -65,3 +65,15 @@ The user asked to complete Stage 7 except physical installation. Hands-on instal
 - Companion hosted Windows CPU Qwen acceptance workflow [run #1](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42301856102) passed its real inference flow and uploaded audio/diagnostics. Actual output was valid 30.000-second mono 24 kHz PCM; warmed synthesis took 268.184 seconds, so under-60-second target was not met on CPU.
 - Source CI [#2662](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42301856057) passed 38 focused tests and 1,258 full regression tests.
 - Real NVIDIA/AMD/Intel hardware acceptance remains queued and is not represented as passed. Physical installed-app checks remain user-waived/not run.
+
+
+## User decision — hardware acceptance carry-forward (7 November 2026)
+
+The user explicitly defers real GPU and installed-device checks until the required hardware is available. Record these as **DEFERRED / NOT RUN**, never as passed:
+
+- NVIDIA CUDA, AMD ROCm and Intel XPU Qwen 1.7B performance acceptance (under-60-second warmed 30-second preview).
+- Hands-on installed-Windows first-launch, uninstall and storage/migration interaction checks previously excluded by the user.
+
+Automated source regression and Windows packaged acceptance remain independently verifiable. Final exact-head package run #2672 is currently in progress; its regression job passed, and its packaging job has passed frozen-app verification and packaged Sound Design/Music Library acceptance and is completing installer packaging/upload gates.
+
+**Closeout rule:** Stage 7 software/package closeout can be signed off after #2672 succeeds. GPU performance and physical installed-app validation remain named carry-forward checks for the later hardware session. Stage 8 can proceed without falsely claiming those checks passed.
