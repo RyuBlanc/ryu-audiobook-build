@@ -541,14 +541,16 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
             self.assertEqual(project_file.read_text(encoding="utf-8"), '{"project":"preserve"}')
             self.assertIn("model weights", message)
 
-    def test_chatterbox_shared_runtime_uninstall_preserves_cached_model_assets(self):
+    def test_chatterbox_shared_runtime_uninstall_uses_provider_runtime_root_and_preserves_cache(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary) / "Models"
-            runtime_root = root / "chatterbox-runtime"
+            base = Path(temporary)
+            root = base / "Models"
+            provider_root = base / "Provider Runtime"
+            runtime_root = provider_root / "chatterbox-runtime"
             runtime_file = runtime_root / "Lib" / "site-packages" / "chatterbox.py"
             runtime_file.parent.mkdir(parents=True)
             runtime_file.write_text("runtime", encoding="utf-8")
-            cache_root = root / "huggingface" / "hub" / "models--resemble-ai--chatterbox"
+            cache_root = base / "Model Cache" / "huggingface" / "hub" / "models--resemble-ai--chatterbox"
             cache_file = cache_root / "snapshots" / "abc" / "model.safetensors"
             cache_file.parent.mkdir(parents=True)
             cache_file.write_bytes(b"model weights")
@@ -556,6 +558,7 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
 
             with (
                 patch("app.core.paths.models_root", return_value=root),
+                patch("app.core.paths.runtimes_root", return_value=provider_root),
                 patch("app.tts.chatterbox_runtime.RUNTIME_DIR", runtime_root),
                 patch("app.tts.model_registry.mark_installed"),
             ):
@@ -567,6 +570,39 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
             self.assertTrue(cache_file.is_file())
             self.assertEqual(cache_file.read_bytes(), b"model weights")
             self.assertIn("Saved profiles and books were kept", message)
+
+    def test_qwen_model_uninstall_uses_models_root_not_provider_runtime_root(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            models = base / "Models"
+            provider_runtime = base / "Provider Runtime"
+            qwen_models_root = models / "qwen3-tts"
+            selected = qwen_models_root / "custom-0.6b"
+            sibling = qwen_models_root / "base-0.6b"
+            selected.mkdir(parents=True)
+            sibling.mkdir(parents=True)
+            (selected / "model.safetensors").write_bytes(b"selected weights")
+            (sibling / "model.safetensors").write_bytes(b"sibling weights")
+            qwen_runtime = provider_runtime / "qwen3-tts"
+            (qwen_runtime / "runtime").mkdir(parents=True)
+            bridge = self.make_bridge()
+
+            with (
+                patch("app.core.paths.models_root", return_value=models),
+                patch("app.tts.qwen_character_runtime.MODEL_DIRS", {
+                    "custom-0.6b": selected,
+                    "base-0.6b": sibling,
+                }),
+                patch("app.tts.qwen_character_runtime.RUNTIME_ROOT", qwen_runtime),
+            ):
+                message = bridge._models_uninstall_component(
+                    "custom-0.6b", {}, lambda _message: None
+                )
+
+            self.assertFalse(selected.exists())
+            self.assertTrue((sibling / "model.safetensors").is_file())
+            self.assertTrue((qwen_runtime / "runtime").is_dir())
+            self.assertIn("other model folders", message)
 
     def test_individual_qwen_uninstall_refresh_reports_removed_model_as_missing(self):
         from app.tts.model_registry import build_inventory
