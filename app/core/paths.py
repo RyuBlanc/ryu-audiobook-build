@@ -1,4 +1,5 @@
 from pathlib import Path
+import tempfile
 
 
 _SETTINGS_ORGANIZATION = "RyuBlanc"
@@ -211,3 +212,8 @@ def ensure_roots() -> None:
             path.mkdir(parents=True, exist_ok=True)
         except OSError:
             pass
+
+    # Route app-owned temporary/staging writes to the selected root. If a
+    # removable drive is configured but disconnected, keep that exact target
+    # rather than silently falling back to the system temp directory.
+    tempfile.tempdir = str(temporary_root())
