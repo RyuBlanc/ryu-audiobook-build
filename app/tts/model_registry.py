@@ -12,7 +12,7 @@ import os
 import shutil
 import threading
 
-from app.core.paths import models_root, settings_root
+from app.core.paths import model_cache_root, models_root, settings_root
 
 
 @dataclass(frozen=True)
@@ -280,7 +280,7 @@ def _chatterbox_cache_root(root: Path) -> Path:
     hf_home = os.environ.get("HF_HOME")
     if hf_home:
         return Path(hf_home).expanduser() / "hub"
-    return root / "huggingface" / "hub"
+    return model_cache_root() / "hub"
 
 def component_paths(model_id: str) -> dict[str, Any]:
     """Resolve actual model/runtime/Python locations and exact component-owned paths."""
