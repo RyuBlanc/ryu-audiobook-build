@@ -8149,6 +8149,8 @@ class PremiumV2Bridge(QObject):
         finally:
             probe.unlink(missing_ok=True)
         source = Path(current).expanduser()
+        if not source.is_dir():
+            raise RuntimeError("The current storage location is unavailable. Reconnect its drive before changing the configured path; existing inventory must not be silently orphaned.")
         try:
             if source.resolve() == destination.resolve():
                 return {"saved": True, "path": str(source), "unchanged": True}
