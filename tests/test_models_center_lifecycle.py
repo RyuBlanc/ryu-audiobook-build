@@ -278,6 +278,13 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
                 ):
                     invoke()
 
+    def test_premium_v2_storage_root_change_refuses_to_replace_a_disconnected_location(self):
+        source = (Path(__file__).resolve().parents[1] / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        handler = source.split("def _storage_choose_root", 1)[1].split("def _storage_open_root", 1)[0]
+        self.assertIn("if not source.is_dir()", handler)
+        self.assertIn("Reconnect its drive before changing the configured path", handler)
+        self.assertIn("existing inventory must not be silently orphaned", handler)
+
     def test_starting_second_model_operation_is_blocked_while_one_is_running(self):
         bridge = self.make_bridge()
         bridge._jobs["active-model-job"] = {"state": "running", "type": "model-install"}
