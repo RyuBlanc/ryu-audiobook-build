@@ -8206,6 +8206,17 @@ class PremiumV2Bridge(QObject):
                          if overlaps(destination, Path(roots[other][1]))]
             if conflicts:
                 raise ValueError("Project and export storage must remain separate from model, runtime, cache and temporary roots. Conflicting roots: " + ", ".join(sorted(conflicts)))
+        if kind in {"models", "runtime", "model_cache"}:
+            protected_kinds = {"library", "audio_assets", "temporary"}
+            conflicts = [other for other in protected_kinds
+                         if overlaps(destination, Path(roots[other][1]))]
+            if conflicts:
+                raise ValueError("Model, runtime and cache storage must remain separate from project, export and temporary roots. Conflicting roots: " + ", ".join(sorted(conflicts)))
+        if kind == "model_cache":
+            model_root = Path(roots["models"][1]).resolve()
+            selected_cache = destination.resolve()
+            if selected_cache == model_root or model_root in selected_cache.parents is False and selected_cache in model_root.parents:
+                raise ValueError("Model Cache may be located inside Models, but cannot replace or contain the Models root.")
         if not source.is_dir():
             raise RuntimeError("The current storage location is unavailable. Reconnect its drive before changing the configured path; existing inventory must not be silently orphaned.")
         try:
@@ -8354,7 +8365,8 @@ class PremiumV2Bridge(QObject):
     def _storage_cleanup_temp(self, _payload: dict[str, Any]) -> dict[str, Any]:
         from app.core.storage_migration import safe_cleanup
         from app.core.paths import (
-            model_cache_root, temporary_root, runtimes_root, library_root, audiobooks_root,
+            models_root, model_cache_root, temporary_root, runtimes_root,
+            library_root, audiobooks_root,
         )
         from PySide6.QtWidgets import QMessageBox
         with self._jobs_lock:
@@ -8364,20 +8376,33 @@ class PremiumV2Bridge(QObject):
             raise RuntimeError("Temporary/cache cleanup is blocked while application jobs are active.")
         cache = model_cache_root()
         temporary = temporary_root()
-        protected = (runtimes_root(), library_root(), audiobooks_root())
-        preview = safe_cleanup(
-            cache_roots=(cache,), temporary_roots=(temporary,),
-            dry_run=True, protected_paths=protected,
+        library = library_root()
+        exports = audiobooks_root()
+        # The cache is intentionally nested under Models in the legacy layout.
+        # Do not protect its parent Models/Runtime root while cleaning the
+        # explicitly configured cache root; allowlist and root boundaries still
+        # keep model weights outside the cache untouched.
+        cache_preview = safe_cleanup(
+            cache_roots=(cache,), dry_run=True,
+            protected_paths=(temporary, library, exports),
         )
-        if not preview["candidate_count"]:
+        temporary_preview = safe_cleanup(
+            temporary_roots=(temporary,), dry_run=True,
+            protected_paths=(models_root(), runtimes_root(), cache, library, exports),
+        )
+        candidates = list(dict.fromkeys(
+            list(cache_preview["candidates"]) + list(temporary_preview["candidates"])
+        ))
+        candidate_bytes = int(cache_preview["candidate_bytes"]) + int(temporary_preview["candidate_bytes"])
+        if not candidates:
             return {"cleaned": False, "candidate_count": 0, "candidate_bytes": 0,
                     "candidates": [], "removed": []}
         gib = 1024 ** 3
-        target_lines = "\n".join(str(path) for path in preview["candidates"])
+        target_lines = "\n".join(str(path) for path in candidates)
         answer = QMessageBox.question(
             None, "Review safe cache and temporary cleanup",
-            "Dry-run estimate: " + str(preview["candidate_count"]) + " eligible app-owned entries · "
-            + f"{int(preview['candidate_bytes']) / gib:.2f} GB"
+            "Dry-run estimate: " + str(len(candidates)) + " eligible app-owned entries · "
+            + f"{candidate_bytes / gib:.2f} GB"
             + "\n\nExact targets:\n" + target_lines
             + "\n\nOnly immediate staging/downloads/temporary/tmp entries under the configured cache and temporary roots are eligible. "
             "Model weights, provider runtimes, projects, source books, exports and voice data are not cleanup targets. Continue?",
@@ -8385,12 +8410,21 @@ class PremiumV2Bridge(QObject):
             QMessageBox.StandardButton.No,
         )
         if answer != QMessageBox.StandardButton.Yes:
-            return {"cancelled": True, **preview}
-        result = safe_cleanup(
-            cache_roots=(cache,), temporary_roots=(temporary,),
-            dry_run=False, protected_paths=protected,
+            return {"cancelled": True, "candidate_count": len(candidates),
+                    "candidate_bytes": candidate_bytes, "candidates": candidates, "removed": []}
+        cache_result = safe_cleanup(
+            cache_roots=(cache,), dry_run=False,
+            protected_paths=(temporary, library, exports),
         )
-        return {"cleaned": True, **result}
+        temporary_result = safe_cleanup(
+            temporary_roots=(temporary,), dry_run=False,
+            protected_paths=(models_root(), runtimes_root(), cache, library, exports),
+        )
+        removed = list(dict.fromkeys(
+            list(cache_result["removed"]) + list(temporary_result["removed"])
+        ))
+        return {"cleaned": True, "candidate_count": len(candidates),
+                "candidate_bytes": candidate_bytes, "candidates": candidates, "removed": removed}
 
     def _settings_get(self, _payload: dict[str, Any]) -> dict[str, Any]:
         self.settings.sync()
