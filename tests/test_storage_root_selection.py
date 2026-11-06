@@ -178,7 +178,12 @@ class StorageRootSelectionTests(unittest.TestCase):
                     self.assertEqual(os.environ["TMPDIR"], str(selected))
                     from app.tts.qwen_character_runtime import runtime_environment as qwen_environment
                     from app.tts.chatterbox_runtime import runtime_environment as chatterbox_environment
-                    with patch("app.tts.qwen_character_runtime.model_cache_root", return_value=Path(temporary) / "cache"), patch("app.tts.chatterbox_runtime.model_cache_root", return_value=Path(temporary) / "cache"):
+                    with (
+                        patch("app.tts.qwen_character_runtime.model_cache_root", return_value=Path(temporary) / "cache"),
+                        patch("app.tts.chatterbox_runtime.model_cache_root", return_value=Path(temporary) / "cache"),
+                        patch("app.tts.qwen_character_runtime.temporary_root", return_value=selected),
+                        patch("app.tts.chatterbox_runtime.temporary_root", return_value=selected),
+                    ):
                         for environment in (qwen_environment(), chatterbox_environment()):
                             self.assertEqual(environment["TEMP"], str(selected))
                             self.assertEqual(environment["TMP"], str(selected))
