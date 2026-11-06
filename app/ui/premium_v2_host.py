@@ -7116,7 +7116,7 @@ class PremiumV2Bridge(QObject):
                 and row.get("model_id") != "chatterbox-runtime"
                 and row.get("installed")
                 and str(row.get("runtime_path") or "")
-                and Path(str(row["runtime_path"])).expanduser().resolve() == runtime
+                and Path(str(row["runtime_path"])).expanduser().resolve() == runtime.resolve()
             ]
             preservation.append("Chatterbox Hugging Face model cache and voice profiles remain installed.")
         elif requested in {"qwen-model", "custom-0.6b", "custom-1.7b", "design-1.7b", "base-0.6b", "base-1.7b"}:
