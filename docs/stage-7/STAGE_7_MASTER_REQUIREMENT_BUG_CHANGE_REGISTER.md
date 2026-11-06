@@ -117,3 +117,14 @@ Physical installed-app acceptance remains user-waived/not run. Real NVIDIA/AMD/I
 - Exact run: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42248725120
 - Manual installed-Windows acceptance remains user-waived/not run.
 - Real GPU acceptance remains pending: NVIDIA run #1 and AMD/Intel run #9 have not started because their self-hosted jobs are queued. No GPU target or under-60-second Qwen performance result is claimed.
+
+## Real hosted Qwen CPU benchmark evidence — 7 November 2026
+
+- Actual official Qwen 1.7B VoiceDesign model executed through the production provider/worker on GitHub-hosted Windows CPU in workflow [run #1](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42301856102), commit `97e6bb4240d51def6d4a5d1fc7d86c070c522a21`.
+- Output verified as 30.000 seconds mono 24 kHz PCM; measured warmed preview latency **268.184 seconds** (5 segments, worker reused). Under-60-second target is not met on CPU.
+- Real warm/angry expression audio and Japanese pronunciation pipeline passed; Japanese source `リムルが来た。` and single-rule application independently checked.
+- Artifact: `Ryu-Stage7-Qwen-Real-CPU-Preview-1`, ID `13544458572`, 1,566,779 bytes.
+- Source CI #2662 passed 38 focused Stage 6 tests and the full 1,258-test regression suite.
+- NVIDIA / AMD ROCm / Intel XPU real GPU runs remain queued; this CPU result cannot substitute for those hardware checks.
+
+**Updated QWEN-02 status:** OPEN / CPU target missed (268.184s). GPU target not yet measured. CPU result is now measured instead of inferred.
