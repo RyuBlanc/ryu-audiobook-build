@@ -92,3 +92,12 @@
 - Added `test_task_manager_dialog_is_bounded_and_reflows_at_small_viewports` in `tests/test_stage6_history_task_manager.py` to guard the base and mobile CSS rules and responsive row/action behaviour.
 - Corrected UI change commit: `c16420452c41e5bb196e332a982258149bc6aa12`. Regression test commit: `0958b1afb5ed0285143c6899442d7bda2ee41ca6`.
 - Runs #2548 and #2549 are the isolated and combined regression workflows for this fix. Do not close the responsive gate until both finish successfully and the full matching-head artifact checkpoint reruns.
+
+## 2026-11-06 — matching-head packaged acceptance closeout
+
+- The final combined Stage 7 candidate `0fc9d8189311419414746ffb23d89df9c65d116c` passed Windows Actions #2628.
+- Full regression: **1,258 tests passed**.
+- The same run passed frozen Windows application verification, packaged Sound Design/Music Library acceptance, installer and portable packaging, SHA-256 manifest generation, Defender checks and artifact uploads.
+- The suite includes split-root Qwen and Chatterbox worker tests, individual Piper/Kokoro/Qwen/Audiobook AI removal boundaries, Chatterbox cache isolation, shared-runtime preservation, active-job blocking, operation serialization, inventory refresh and Premium V2 destructive-action wiring.
+
+**Current disposition:** STEP 3 ACCEPTED FOR AUTOMATED / PACKAGED PROGRESSION. Actual installed-app destructive uninstall checks and confirmation that user profiles/projects remain intact on the user's machine are USER-WAIVED / NOT RUN. This is not a claim of physical installation acceptance.
