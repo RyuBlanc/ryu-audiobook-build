@@ -8197,10 +8197,10 @@ class PremiumV2Bridge(QObject):
         gib = 1024 ** 3
         question = (
             "A verified migration will copy " + str(preflight.file_count) + " files ("
-            + f"{preflight.total_bytes / gib:.2f} GB) from:\\n" + str(source)
-            + "\\n\\nto:\\n" + str(destination)
-            + f"\\n\\nDestination free space: {preflight.free_bytes / gib:.2f} GB"
-            + "\\nA 512 MB safety reserve is required. The original source will be retained after migration.\\n\\nStart migration?"
+            + f"{preflight.total_bytes / gib:.2f} GB) from:\n" + str(source)
+            + "\n\nto:\n" + str(destination)
+            + f"\n\nDestination free space: {preflight.free_bytes / gib:.2f} GB"
+            + "\nA 512 MB safety reserve is required. The original source will be retained after migration.\n\nStart migration?"
         )
         answer = QMessageBox.question(
             None, "Confirm verified storage migration", question,
