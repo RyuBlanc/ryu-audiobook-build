@@ -197,7 +197,7 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
     def test_individual_qwen_model_uninstall_preserves_other_model_folders(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "Models"
-            runtime_root = root / "qwen-runtime"
+            runtime_root = root / "qwen3-tts"
             remove = runtime_root / "custom-0.6b"
             preserve = runtime_root / "base-0.6b"
             (remove / "weights").mkdir(parents=True)
