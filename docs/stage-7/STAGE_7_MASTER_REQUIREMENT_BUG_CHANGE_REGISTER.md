@@ -128,3 +128,15 @@ Physical installed-app acceptance remains user-waived/not run. Real NVIDIA/AMD/I
 - NVIDIA / AMD ROCm / Intel XPU real GPU runs remain queued; this CPU result cannot substitute for those hardware checks.
 
 **Updated QWEN-02 status:** OPEN / CPU target missed (268.184s). GPU target not yet measured. CPU result is now measured instead of inferred.
+
+## Final Stage 7 CPU-side acceptance checkpoint — 7 November 2026
+
+- #2662 source CI: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42301856057 — full regression **1,258 passed**; focused 38-test Stage 6 preflight passed. The Windows artifact job was skipped because #2662 was a normal test commit, not an artifact-checkpoint message.
+- Real Qwen CPU workflow: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42301856102 — successful real Qwen 1.7B VoiceDesign inference; 30.000s WAV output; warmed preview took 268.184s; worker reused; warm/angry and Japanese pronunciation checks passed. The under-60s target is NOT MET on hosted CPU.
+- Real inference evidence artifact: `Ryu-Stage7-Qwen-Real-CPU-Preview-1` (ID 13544458572).
+- NVIDIA, AMD ROCm and Intel XPU GPU-specific workflows remain queued on self-hosted runners. Their benchmark targets are not met/verified until real GPU evidence exists.
+- Actual installed-app / physical installation tests on the user's PC remain excluded and are to be completed by the user later.
+
+## Latest-records package gate
+
+This commit requests a fresh matching-head full regression and Windows installer/portable package checkpoint after the Qwen CPU benchmark result was reconciled into the Stage 7 records.
