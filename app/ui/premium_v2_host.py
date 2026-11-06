@@ -1803,6 +1803,18 @@ class PremiumV2Bridge(QObject):
         job_id = uuid.uuid4().hex
         now = self._now()
         with self._jobs_lock:
+            active_storage_migrations = [
+                job for job in self._jobs.values()
+                if str(job.get("type") or "").casefold() == "storage-migration"
+                and str(job.get("state") or "").casefold() in {"queued", "running"}
+            ]
+            if active_storage_migrations:
+                raise RuntimeError("A verified storage migration is running. Wait for it to finish before starting another application job.")
+            if str(job_type).casefold() == "storage-migration":
+                active_jobs = [job for job in self._jobs.values()
+                               if str(job.get("state") or "").casefold() in {"queued", "running"}]
+                if active_jobs:
+                    raise RuntimeError("Storage migration is blocked while another application job is active.")
             self._jobs[job_id] = {
                 "job_id": job_id, "id": job_id, "type": job_type, "title": title,
                 "description": description, "project_title": project.title if project else "",
