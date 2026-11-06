@@ -6706,6 +6706,7 @@ class PremiumV2Bridge(QObject):
         def worker() -> None:
             try:
                 if action == "uninstall":
+                    details["_operation_job_id"] = job_id
                     outcome = self._models_uninstall_component(model_id, details, report_progress)
                 else:
                     outcome = self._models_install_component(model_id, details, report_progress, force_repair=action == "repair")
@@ -7055,13 +7056,19 @@ class PremiumV2Bridge(QObject):
 
         with self._jobs_lock:
             blocking = [
-                job for job in self._jobs.values()
-                if str(job.get("state") or "").casefold() in {"queued", "running"}
-                and any(token in str(job.get("type") or "").casefold()
-                        for token in ("voice-preview", "production", "generation", "character-analyze", "model-install", "model-repair"))
+                (job_id, job) for job_id, job in self._jobs.items()
+                if job_id != str(payload.get("_operation_job_id") or "")
+                and str(job.get("state") or "").casefold() in {"queued", "running"}
             ]
         if blocking:
-            raise RuntimeError("Uninstall is blocked while a voice preview, audiobook generation, analysis, or model installation/repair job is active. Stop or finish that job, then retry.")
+            labels = ", ".join(
+                str(job.get("title") or job.get("type") or job_id)
+                for job_id, job in blocking[:5]
+            )
+            raise RuntimeError(
+                "Uninstall is blocked while application work is active. Finish or cancel these jobs first: "
+                + labels
+            )
 
         def report(text: str) -> None:
             if progress:
