@@ -19,8 +19,9 @@ from PySide6.QtWidgets import (
     QInputDialog, QComboBox
 )
 
-from app.core.paths import models_root, ensure_roots
+from app.core.paths import models_root, ensure_roots, runtimes_root, model_cache_root, temporary_root
 from app.tts.chatterbox_runtime import install_runtime, runtime_status, RUNTIME_DIR as CHATTERBOX_RUNTIME_DIR
+from app.core.storage_migration import inventory_storage_root, safe_cleanup
 from app.tts.model_registry import BUILTIN_CATALOG, installed_models, mark_installed
 from app.tts.providers.piper import PiperProvider
 from app.tts.providers.kokoro import (
@@ -413,6 +414,23 @@ class ModelsPage(QWidget):
         intro.setWordWrap(True)
         layout.addWidget(intro)
 
+        storage_group = QGroupBox("Storage locations & maintenance")
+        storage_layout = QVBoxLayout(storage_group)
+        self.storage_summary = QLabel()
+        self.storage_summary.setWordWrap(True)
+        self.storage_summary.setObjectName("muted")
+        storage_layout.addWidget(self.storage_summary)
+        storage_actions = QHBoxLayout()
+        inspect_storage = QPushButton("Inspect files & checksums")
+        inspect_storage.clicked.connect(self.inspect_storage_inventory)
+        storage_actions.addWidget(inspect_storage)
+        cleanup_storage = QPushButton("Preview temporary cleanup")
+        cleanup_storage.clicked.connect(self.preview_temporary_cleanup)
+        storage_actions.addWidget(cleanup_storage)
+        storage_layout.addLayout(storage_actions)
+        layout.addWidget(storage_group)
+        self.refresh_storage_summary()
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -565,6 +583,76 @@ class ModelsPage(QWidget):
         self.qwen_model_preference_status.setText(message)
 
     @stable_view_refresh
+
+    def refresh_storage_summary(self) -> None:
+        roots = (
+            ("Model weights", models_root()),
+            ("Provider runtimes", runtimes_root()),
+            ("Model cache / downloads", model_cache_root()),
+            ("Temporary / staging", temporary_root()),
+        )
+        lines = []
+        for label, root in roots:
+            info = inventory_storage_root(root, include_hashes=False)
+            if not info["available"]:
+                lines.append(f"{label}: Location unavailable — {info.get('error', 'drive disconnected')}\\n{root}")
+            else:
+                gib = 1024 ** 3
+                lines.append(f"{label}: {info['file_count']:,} files · {info['total_bytes'] / gib:.2f} GB\\n{info['path']}")
+        self.storage_summary.setText("\\n\\n".join(lines))
+
+    def inspect_storage_inventory(self) -> None:
+        roots = (
+            ("Model weights", models_root()),
+            ("Provider runtimes", runtimes_root()),
+            ("Model cache / downloads", model_cache_root()),
+            ("Temporary / staging", temporary_root()),
+        )
+        lines = []
+        for label, root in roots:
+            info = inventory_storage_root(root, include_hashes=True)
+            lines.append(f"[{label}]\\nPath: {info['path']}")
+            if not info["available"]:
+                lines.append(f"Status: {info.get('error', 'Location unavailable')}\\n")
+                continue
+            lines.append(f"Files: {info['file_count']} · Total: {info['total_bytes']:,} bytes")
+            for item in info["files"]:
+                lines.append(f"  {item['relative_path']} · {item['size_bytes']:,} bytes · SHA-256 {item['sha256']}")
+            lines.append("")
+        QInputDialog.getMultiLineText(
+            self, "Storage inventory and SHA-256 checksums",
+            "Read-only inventory. No files are changed.", "\\n".join(lines)
+        )
+
+    def preview_temporary_cleanup(self) -> None:
+        if self._active_operation is not None:
+            QMessageBox.warning(self, "Storage In Use", f"Cannot clean temporary data while {self._active_operation} is running.")
+            return
+        temp_root = temporary_root()
+        preview = safe_cleanup(
+            temporary_roots=(temp_root,), dry_run=True,
+            protected_paths=(models_root(), runtimes_root(), model_cache_root()),
+        )
+        if not preview["candidate_count"]:
+            QMessageBox.information(self, "Temporary Cleanup", "No eligible app-owned temporary folders were found. Unknown folders and all model, runtime and cache roots are preserved.")
+            return
+        gib = 1024 ** 3
+        answer = QMessageBox.question(
+            self, "Confirm Temporary Cleanup",
+            f"Eligible app-owned temporary entries: {preview['candidate_count']}\\n"
+            f"Estimated reclaimable size: {preview['candidate_bytes'] / gib:.2f} GB\\n\\n"
+            "Only the explicit staging/downloads/temporary/tmp/cache allowlist is eligible. "
+            "Model weights, provider runtimes, model cache, projects, source books, exports and voice data are protected. Continue?"
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        result = safe_cleanup(
+            temporary_roots=(temp_root,), dry_run=False,
+            protected_paths=(models_root(), runtimes_root(), model_cache_root()),
+        )
+        QMessageBox.information(self, "Temporary Cleanup Complete", f"Removed {len(result['removed'])} eligible entries.")
+        self.refresh_storage_summary()
+
     def refresh(self) -> None:
         selected = self.list.currentItem()
         selected_label = selected.text() if selected else None
