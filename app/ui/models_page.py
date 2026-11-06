@@ -361,7 +361,10 @@ class UninstallComponentWorker(QThread):
                 kind = component_id.split(":", 1)[1]
                 if kind not in QWEN_MODEL_DIRS:
                     raise RuntimeError("Unknown Qwen model selection.")
-                self._remove_path(QWEN_MODEL_DIRS[kind], QWEN_RUNTIME_ROOT)
+                # Qwen model weights live under Models; only the isolated
+                # Python environment belongs to Provider Runtime. Validate the
+                # uninstall against the model-weight root, not the runtime root.
+                self._remove_path(QWEN_MODEL_DIRS[kind], models_root() / "qwen3-tts")
 
             elif component_id == "qwen-runtime":
                 # Preserve downloaded model folders, Hugging Face cache and
