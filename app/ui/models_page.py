@@ -654,7 +654,7 @@ class ModelsPage(QWidget):
         self.refresh_storage_summary()
 
     def refresh(self) -> None:
-        selected = self.list.currentItem()
+        self.refresh_storage_summary()\n        selected = self.list.currentItem()
         selected_label = selected.text() if selected else None
         selected_id = selected.data(Qt.ItemDataRole.UserRole) if selected else None
         scroll = self.list.verticalScrollBar()
