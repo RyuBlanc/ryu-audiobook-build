@@ -1,0 +1,101 @@
+name: Stage 7 Qwen Real CPU Preview and Accelerator Contract Acceptance
+
+on:
+  push:
+    branches:
+      - 'stage-7/**'
+    paths:
+      - app/tts/preview.py
+      - app/tts/qwen_accelerator.py
+      - app/tts/qwen_character_runtime.py
+      - app/tts/qwen_character_worker.py
+      - app/tts/providers/qwen_character.py
+      - tests/smoke_qwen_real_preview.py
+      - tests/smoke_qwen_protocol.py
+      - tests/test_qwen_runtime_safety.py
+      - tests/test_qwen_preview_performance_policy.py
+      - tests/test_qwen_global_model_preference.py
+      - .github/workflows/qwen-cpu-contract-acceptance.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ryu-audiobook-stage7-qwen-cpu-contract
+  cancel-in-progress: false
+
+jobs:
+  qwen-real-cpu-preview:
+    name: Real Qwen 1.7B VoiceDesign preview on hosted CPU (comparison baseline)
+    runs-on: windows-latest
+    timeout-minutes: 240
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install application dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -m pip install --disable-pip-version-check --timeout 60 --retries 2 --upgrade pip
+          if ($LASTEXITCODE -ne 0) { throw 'pip upgrade failed.' }
+          python -m pip install --disable-pip-version-check --timeout 60 --retries 2 -r requirements.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Application dependency installation failed.' }
+
+      - name: Install pinned CPU PyTorch and Qwen TTS runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -m pip install --disable-pip-version-check --timeout 60 --retries 2 --index-url https://download.pytorch.org/whl/cpu torch==2.9.1 torchaudio==2.9.1
+          if ($LASTEXITCODE -ne 0) { throw 'CPU PyTorch installation failed.' }
+          python -m pip install --disable-pip-version-check --timeout 60 --retries 2 qwen-tts==0.1.1
+          if ($LASTEXITCODE -ne 0) { throw 'Qwen TTS installation failed.' }
+          python -c "import torch; print('torch=' + torch.__version__); print('cuda_available=' + str(torch.cuda.is_available())); print('xpu_available=' + str(bool(getattr(torch, 'xpu', None) and torch.xpu.is_available()))); assert not torch.cuda.is_available(), 'This comparison job must remain CPU-only.'"
+
+      - name: Run focused accelerator selection, fallback and preview policy tests
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -B -m unittest -v tests.test_qwen_runtime_safety tests.test_qwen_preview_performance_policy tests.test_qwen_global_model_preference tests.test_p0_hardware_fallback
+          if ($LASTEXITCODE -ne 0) { throw "Qwen accelerator contract tests failed with exit code $LASTEXITCODE." }
+
+      - name: Run Qwen expression protocol smoke
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -B tests/smoke_qwen_protocol.py
+          if ($LASTEXITCODE -ne 0) { throw "Qwen protocol smoke failed with exit code $LASTEXITCODE." }
+
+      - name: Run real Qwen 1.7B VoiceDesign 30-second CPU preview
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          HF_HOME: ${{ runner.temp }}\ryu-qwen-hf
+          RYU_QWEN_MODEL_ROOT: ${{ runner.temp }}\ryu-qwen-models
+          RYU_QWEN_ACCEPTANCE_OUTPUT: ${{ github.workspace }}\qwen-cpu-acceptance
+          PYTHONWARNINGS: ignore
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path $env:RYU_QWEN_ACCEPTANCE_OUTPUT | Out-Null
+          python -B tests/smoke_qwen_real_preview.py 2>&1 | Tee-Object -FilePath (Join-Path $env:RYU_QWEN_ACCEPTANCE_OUTPUT 'qwen-cpu-acceptance.log')
+          if ($LASTEXITCODE -ne 0) { throw "Real Qwen CPU preview acceptance failed with exit code $LASTEXITCODE." }
+
+      - name: Upload real Qwen CPU preview audio and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ryu-Stage7-Qwen-Real-CPU-Preview-${{ github.run_number }}
+          path: qwen-cpu-acceptance/
+          if-no-files-found: warn
+          retention-days: 30
