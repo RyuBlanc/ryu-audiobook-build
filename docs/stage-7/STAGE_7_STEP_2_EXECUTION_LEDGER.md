@@ -263,3 +263,21 @@ The migration-engine source commit #2421 passed the test job. The following comm
 - Configurable roots, split model/runtime/cache ownership, migration journaling/recovery, interrupted migration handling, active-job protection and cleanup safeguards remain covered by the Stage 7 regression suite.
 
 **Current disposition:** STEP 2 CLOSED FOR PROGRESSION. Physical removable-drive unplug/replug remains waived/not run; the simulated disconnect/reconnect and automated recovery tests are not represented as physical-drive evidence.
+
+## 2026-11-06 — exact matching-head package closeout #2641
+
+- Candidate commit: `b1da6a8d4aee39e83ca9f781e22b92d26bb4859f`.
+- GitHub Actions #2641 completed successfully: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42248725120
+- Full Windows regression: **1,258 tests passed** (66.317 seconds).
+- Focused Stage 6 History/Task Manager preflight and isolated native Qt lifecycle regression passed.
+- Frontend and installer JavaScript syntax checks passed.
+- Frozen application verification, bundled voice/critical module checks and the packaged Sound Design/Music Library acceptance (including Stage 5.3 generation UI and responsive viewport suite) passed.
+- Inno Setup installer and functional HTML installer packaging passed.
+- SHA-256 manifest generation and Microsoft Defender scan passed.
+- Installer, portable package and real Piper benchmark JSON artifacts uploaded successfully.
+- Artifacts: installer #2641 (884,310,710 bytes); portable #2641 (1,368,242,573 bytes); SHA-256 manifest (777 bytes); Piper benchmark evidence (806 bytes).
+- Publish verified installer release step was skipped by workflow policy; uploaded verified artifacts remain available from the Actions run.
+- User-directed physical installation checks remain WAIVED / NOT RUN. No claim is made of manual install or post-install destructive model checks.
+
+**Disposition:** EXACT-HEAD REGRESSION AND PACKAGED WINDOWS ACCEPTANCE PASS on #2641. Step 7 software/package gate is current through #2641; physical accelerator acceptance remains separate and open.
+
