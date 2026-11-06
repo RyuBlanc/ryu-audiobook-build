@@ -161,6 +161,25 @@ class StorageRootSelectionTests(unittest.TestCase):
                 self.assertEqual(_storage_capacity_summary(Path(temp)), "50.0 GB used · 50.0 GB free · 100.0 GB total")
             self.assertIn("Unavailable", _storage_capacity_summary(Path(temp) / "missing"))
 
+    def test_nonempty_storage_root_cannot_be_switched_without_migration(self):
+        from app.ui.settings_page import _storage_root_change_error
+        with TemporaryDirectory() as temp:
+            source = Path(temp) / "Models"
+            destination = Path(temp) / "NewModels"
+            source.mkdir()
+            destination.mkdir()
+            (source / "weights.bin").write_bytes(b"model weights")
+            self.assertIn("verified copy", _storage_root_change_error(source, destination))
+            self.assertEqual(_storage_root_change_error(source, source), "")
+
+    def test_unavailable_storage_root_cannot_be_silently_replaced(self):
+        from app.ui.settings_page import _storage_root_change_error
+        with TemporaryDirectory() as temp:
+            source = Path(temp) / "disconnected-drive" / "Models"
+            destination = Path(temp) / "NewModels"
+            destination.mkdir()
+            self.assertIn("Reconnect its drive", _storage_root_change_error(source, destination))
+
 
 if __name__ == "__main__":
     unittest.main()
