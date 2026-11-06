@@ -140,3 +140,14 @@ Step 2 is not complete until all acceptance-matrix items are either passed with 
 - Run focused storage/migration tests, full regression and matching-head packaged acceptance; audit and fix every failure.
 
 **Current status: INITIAL ROOT-CONFIGURATION SLICE IMPLEMENTED; MIGRATION AND FULL ACCEPTANCE OPEN. Do not treat Step 2 as complete or proceed to Step 3.**
+
+
+### Verified migration engine implementation — 2026-11-06
+
+- Added `app/core/storage_migration.py` with path-overlap checks, source/destination validation, active-job callback gate, destination free-space reserve, app-owned staging directory, per-file SHA-256 verification, source-stability re-verification before switching, journal state updates, settings callback, post-switch validation and rollback callback.
+- The source tree is retained after successful migration. A failed post-switch validation restores the configured source root and removes only the destination copy created by that migration; source data is not deleted.
+- Added `tests/test_storage_migration.py` covering successful copy/source retention, non-empty destination and overlap rejection, active-job and low-space rejection, post-switch validation rollback and symlink rejection.
+- This is the engine/test slice only. It is **not yet wired into the Settings or Models Center UI**, and journal restart recovery, all-provider writer routing, full job-path conflict detection, removable-drive reconciliation and safe cleanup remain open.
+- CI for the exact wording correction is running as #2420; migration engine/test commits are running as #2421–#2424. Do not infer pass status until each matching-head run completes.
+
+**Updated disposition:** migration engine and initial safety tests added; UI/runtime integration and end-to-end acceptance remain open. Step 2 remains IN PROGRESS.
