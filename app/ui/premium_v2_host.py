@@ -7241,23 +7241,25 @@ class PremiumV2Bridge(QObject):
             return "Removed the shared Chatterbox runtime. Saved profiles and books were kept."
 
         if requested == "qwen-model" or requested in {"custom-0.6b", "custom-1.7b", "design-1.7b", "base-0.6b", "base-1.7b"}:
-            from app.tts.qwen_character_runtime import MODEL_DIRS, RUNTIME_ROOT
+            from app.tts.qwen_character_runtime import MODEL_DIRS, MODEL_IDS
             kind = str(payload.get("model_kind") or requested).strip().casefold()
-            if kind not in MODEL_DIRS:
+            if kind not in MODEL_DIRS or kind not in MODEL_IDS:
                 raise ValueError("Choose the exact installed Qwen model to uninstall.")
-            target = Path(MODEL_DIRS[kind]).resolve()
-            runtime_root = Path(RUNTIME_ROOT).resolve()
-            if not target.exists():
-                raise ValueError(f"Qwen model {kind} is not installed.")
-            # Model weights may be stored beside, not necessarily inside, the
-            # provider runtime root after a user selects independent storage roots.
-            expected_parent = target.parent
-            if target == expected_parent or target.parent != expected_parent:
-                raise RuntimeError("The Qwen model path failed component ownership validation.")
-            if target.name.casefold() != kind or target.is_symlink():
-                raise RuntimeError("The selected Qwen model path is not a safe component-owned directory.")
+            target = Path(MODEL_DIRS[kind])
+            resolved = target.resolve()
+            model_base = Path(models_root()).resolve()
+            if target.is_symlink() or resolved == model_base or model_base not in resolved.parents:
+                raise RuntimeError("The selected Qwen model path is outside the configured Models root or is a symbolic link.")
+            if resolved.name.casefold() != kind or not resolved.is_dir():
+                raise RuntimeError("The selected Qwen model path failed exact component ownership validation.")
+            # Qwen model weights belong under Models/qwen3-tts/{model-id}.
+            expected_parent = (model_base / "qwen3-tts").resolve()
+            if resolved.parent != expected_parent:
+                raise RuntimeError("The selected Qwen model is not in its expected app-managed model directory.")
+            if not any(path.is_file() for path in resolved.rglob("*") if not path.is_symlink()):
+                raise ValueError(f"Qwen model {kind} contains no installed model files.")
             report(f"Removing Qwen model {kind}…")
-            self._models_remove_path(target, expected_parent)
+            self._models_remove_path(resolved, expected_parent)
             return f"Removed Qwen model {kind}. The Qwen runtime, other model folders and saved voice profiles were kept."
 
         if requested == "qwen-runtime":
