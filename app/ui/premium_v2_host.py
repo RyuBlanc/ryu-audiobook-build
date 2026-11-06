@@ -8192,7 +8192,28 @@ class PremiumV2Bridge(QObject):
             # for weights and provider runtime; their actual components live
             # in separate named subdirectories beneath that base.
             legacy_shared_base = {kind, other} == {"models", "runtime"} and same_root
-            if not legacy_shared_base and overlaps(destination, other_path):
+            try:
+                configured_models = Path(roots["models"][1]).expanduser().resolve()
+                configured_runtime = Path(roots["runtime"][1]).expanduser().resolve()
+                selected_path = destination.expanduser().resolve()
+                other_resolved = other_path.resolve()
+            except OSError:
+                configured_models = Path(roots["models"][1]).expanduser().absolute()
+                configured_runtime = Path(roots["runtime"][1]).expanduser().absolute()
+                selected_path = destination.expanduser().absolute()
+                other_resolved = other_path.absolute()
+            legacy_shared_cache = (
+                configured_models == configured_runtime
+                and (
+                    (kind == "model_cache" and other == "runtime"
+                     and selected_path != configured_models and configured_models in selected_path.parents)
+                    or
+                    (kind == "runtime" and other == "model_cache"
+                     and selected_path == configured_models and other_resolved != configured_models
+                     and configured_models in other_resolved.parents)
+                )
+            )
+            if not (legacy_shared_base or legacy_shared_cache) and overlaps(destination, other_path):
                 conflicts.append(other)
         if conflicts:
             raise ValueError(
