@@ -237,6 +237,40 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
             self.assertFalse(selected.exists())
             self.assertTrue((sibling / "config.json").is_file())
 
+    def test_model_uninstall_refuses_symbolic_link_targets_and_nested_links(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            owned_root = base / "Models" / "qwen3-tts"
+            outside = base / "Projects" / "keep.json"
+            owned_root.mkdir(parents=True)
+            outside.parent.mkdir(parents=True)
+            outside.write_text("preserve", encoding="utf-8")
+            link = owned_root / "linked-model"
+            try:
+                link.symlink_to(outside.parent, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("The current test account cannot create symbolic links.")
+            with self.assertRaisesRegex(RuntimeError, "symbolic-link target"):
+                PremiumV2Bridge._models_remove_path(link, owned_root)
+            self.assertTrue(outside.is_file())
+            self.assertEqual(outside.read_text(encoding="utf-8"), "preserve")
+
+    def test_models_remove_path_rejects_symlinked_component_root(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            actual = base / "actual"
+            actual.mkdir()
+            link = base / "linked-root"
+            try:
+                link.symlink_to(actual, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("The current test account cannot create symbolic links.")
+            target = actual / "child"
+            target.mkdir()
+            with self.assertRaisesRegex(RuntimeError, "symbolic-link component root"):
+                PremiumV2Bridge._models_remove_path(target, link)
+            self.assertTrue(target.is_dir())
+
     def test_model_uninstall_refuses_component_paths_outside_owned_root(self):
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)
