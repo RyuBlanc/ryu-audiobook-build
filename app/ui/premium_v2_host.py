@@ -7417,7 +7417,9 @@ class PremiumV2Bridge(QObject):
             )
             result_data = {
                 "provider": result.provider, "backend": result.backend,
-                "requested_backend": "automatic", "voice": voice,
+                "requested_backend": result.requested_backend or "automatic",
+                "execution_providers": list(result.execution_providers),
+                "backend_verified": bool(result.backend_verified), "voice": voice,
                 "seconds": float(result.seconds), "audio_seconds": float(result.audio_seconds),
                 "realtime_factor": float(result.realtime_factor), "success": bool(result.success),
                 "error": str(result.error or ""),

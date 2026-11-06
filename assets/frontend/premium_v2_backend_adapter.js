@@ -7894,15 +7894,18 @@
       const cpu = Number.isFinite(Number(resources.cpu_percent)) ? Number(resources.cpu_percent).toFixed(1) + '%' : 'Unavailable';
       const ram = Number.isFinite(Number(resources.memory_available_bytes)) ? (Number(resources.memory_available_bytes) / 1024 ** 3).toFixed(1) + ' GB free' : 'Unavailable';
       const gpu = hardware.gpu_name || 'No GPU reported';
-      const backend = hardware.backend || data.backend || 'Unverified';
+      const backend = data.backend_verified === true
+        ? String(data.backend || 'unknown').toUpperCase() + ' · verified'
+        : 'Unverified · requested ' + String(data.requested_backend || 'automatic');
       return '<article class="performance-history-row" style="padding:12px 0;border-top:1px solid var(--border-subtle,rgba(255,255,255,.10))">' +
         '<div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center">' +
           '<strong>' + esc(String(data.voice || 'Piper')) + '</strong>' +
           '<span class="muted">' + esc(status) + ' · ' + esc(measuredAt) + '</span>' +
         '</div>' +
         '<div class="muted" style="margin-top:5px;font-size:12px">' +
-          'Backend: ' + esc(String(backend)) + ' · GPU: ' + esc(String(gpu)) +
+          'Actual inference backend: ' + esc(String(backend)) + ' · GPU: ' + esc(String(gpu)) +
         '</div>' +
+        (hardware.recommended_backend ? '<div class="muted" style="margin-top:4px;font-size:11px">Host recommendation: ' + esc(String(hardware.recommended_backend)) + '</div>' : '') +
         '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:6px;font-size:12px">' +
           '<span>Synthesis: ' + esc(duration) + '</span><span>Audio: ' + esc(audio) +
           '</span><span>RTF: ' + esc(rtf) + '</span><span>CPU: ' + esc(cpu) +

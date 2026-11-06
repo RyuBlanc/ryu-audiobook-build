@@ -17,6 +17,8 @@ class PiperProvider(TTSProvider):
         self.backend = backend
         self._voice = None
         self._loaded_path: Path | None = None
+        self._execution_providers: tuple[str, ...] = ()
+        self._execution_backend = "unverified"
         self._narration_speed = 1.0
         self._pacing_profile = "natural"
 
@@ -91,6 +93,35 @@ class PiperProvider(TTSProvider):
         except TypeError:
             self._voice = PiperVoice.load(str(path))
         self._loaded_path = path
+        session = getattr(self._voice, "session", None)
+        if session is None:
+            session = getattr(self._voice, "_session", None)
+        get_providers = getattr(session, "get_providers", None)
+        if callable(get_providers):
+            try:
+                self._execution_providers = tuple(str(item) for item in get_providers())
+            except Exception:
+                self._execution_providers = ()
+        if "CUDAExecutionProvider" in self._execution_providers:
+            self._execution_backend = "cuda"
+        elif "DmlExecutionProvider" in self._execution_providers:
+            self._execution_backend = "directml"
+        elif "CPUExecutionProvider" in self._execution_providers:
+            self._execution_backend = "cpu"
+        elif self._execution_providers:
+            self._execution_backend = "other"
+
+    @property
+    def execution_providers(self) -> tuple[str, ...]:
+        return self._execution_providers
+
+    @property
+    def execution_backend(self) -> str:
+        return self._execution_backend
+
+    @property
+    def execution_backend_verified(self) -> bool:
+        return bool(self._execution_providers)
 
     def configure_narration(self, speed: float = 1.0, pacing_profile: str = "natural") -> None:
         """Configure native Piper pacing so speed changes happen during synthesis."""
