@@ -83,3 +83,18 @@ Earlier hosted Qwen 1.7B CPU preview measurements were approximately 298–305 s
 - CPU artifact is genuine end-to-end Qwen inference. It validates worker reuse, duration control, expression output and pronunciation integration; it does not prove GPU speed, GPU backend selection or target-device voice quality.
 - Companion source/regression run [#2662](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42301856057) passed: focused 38 tests and full 1,258-test suite. Build job was skipped because this was not an artifact-checkpoint commit.
 - Real NVIDIA and AMD/Intel smoke workflows remain queued on their self-hosted runner labels. The real under-60-second GPU requirement remains an open hardware-only acceptance gate.
+
+
+## User decision — physical accelerator testing deferred (7 November 2026)
+
+The user does not currently have access to the required GPU hardware and has directed that hardware testing be completed later when hardware is available. This is **DEFERRED / NOT RUN**, not a pass and not a deletion of the acceptance criteria.
+
+| Target | Status | Later acceptance evidence required |
+|---|---|---|
+| NVIDIA CUDA Qwen 1.7B | DEFERRED — hardware unavailable | Real 27–33s preview, active CUDA proof, warmed synthesis under 60s, audio/benchmark artifact and quality review |
+| AMD ROCm Qwen 1.7B | DEFERRED — hardware unavailable | Real 27–33s preview, active ROCm proof, warmed synthesis under 60s, audio/benchmark artifact and quality review |
+| Intel XPU Qwen 1.7B | DEFERRED — hardware unavailable | Real 27–33s preview, active XPU proof, warmed synthesis under 60s, audio/benchmark artifact and quality review |
+
+The hosted Windows CPU run remains genuine end-to-end inference evidence: 30.000s output in 268.184s warmed synthesis. It confirms that the CPU path works but misses the under-60s target and proves no GPU performance. Keep all accelerator scripts and gates intact for later execution; do not convert queued jobs to passes.
+
+**Step 6 disposition:** software runtime-selection, fallback, telemetry and test implementation are complete; physical accelerator performance acceptance is deferred and remains open for later hardware access.
