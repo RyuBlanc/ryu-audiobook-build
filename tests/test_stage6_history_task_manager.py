@@ -144,11 +144,16 @@ class Stage6HistoryTaskManagerTests(unittest.TestCase):
         for marker in (
             "stage6_responsive_viewport_matrix_41_resolutions",
             "stage6_responsive_window_and_scale_emulation",
+        ):
+            self.assertIn(marker, packaged)
+            self.assertIn(marker, runner)
+        # CSS media-query synchronization is implemented in the browser-side
+        # acceptance script, not in the Python frozen-app process launcher.
+        for marker in (
             'matchMedia("(max-width: 800px)")',
             'matchMedia("(max-width: 1250px)")',
         ):
             self.assertIn(marker, packaged)
-            self.assertIn(marker, runner)
 
 
     def test_packaged_acceptance_requires_stage6_cross_module_ownership_integration(self) -> None:
