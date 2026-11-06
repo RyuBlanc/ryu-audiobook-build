@@ -8257,6 +8257,13 @@
     return result;
   }
   function wireStorageControls() {
+    const storageTab = document.querySelector('[data-settings-tab="storage"]');
+    if (storageTab && storageTab.dataset.ryuStorageRefreshBound !== 'true') {
+      storageTab.dataset.ryuStorageRefreshBound = 'true';
+      storageTab.addEventListener('click', () => {
+        void refreshStorageRoots().catch(error => message(error?.message || String(error), true));
+      });
+    }
     document.querySelectorAll('[data-storage-action][data-storage-kind]').forEach(button => {
       if (button.dataset.ryuStorageBound === 'true') return;
       button.dataset.ryuStorageBound = 'true';
@@ -8300,7 +8307,6 @@
   async function loadSettings() {
     const settings = await call('settings.get');
     wireStorageControls();
-    await refreshStorageRoots();
     if ($('themeSelectAdvanced') && settings.theme) $('themeSelectAdvanced').value = settings.theme;
     if ($('effectsModeAdvanced') && settings.effects) $('effectsModeAdvanced').value = settings.effects;
     if ($('uiTextScale')) $('uiTextScale').value = String(settings.text_scale || 100);
