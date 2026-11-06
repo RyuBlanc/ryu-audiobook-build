@@ -8408,6 +8408,33 @@
     }
   }
 
+  async function runHardwareBenchmark() {
+    const button = $('runBenchmark');
+    const prior = button?.textContent;
+    if (button) { button.disabled = true; button.textContent = 'Checking hardware…'; }
+    try {
+      const hardware = await call('performance.info', {refresh:true});
+      await refreshPerformance();
+      const runtime = hardware.backend_active
+        ? hardware.backend.toUpperCase() + ' runtime is active'
+        : (hardware.recommended_backend || 'CPU') + ' is the selected backend';
+      const summary = [
+        'Hardware scan complete.',
+        hardware.cpu_percent === null || hardware.cpu_percent === undefined ? 'CPU: unavailable' : 'CPU: ' + Number(hardware.cpu_percent).toFixed(1) + '%',
+        hardware.memory_total_bytes ? 'RAM: ' + (hardware.memory_available_bytes/1024**3).toFixed(1) + ' / ' + (hardware.memory_total_bytes/1024**3).toFixed(1) + ' GB available/total' : 'RAM: unavailable',
+        hardware.gpu_name ? 'GPU: ' + hardware.gpu_name : 'GPU: not detected',
+        runtime,
+        hardware.reason || ''
+      ].filter(Boolean).join(' · ');
+      message(summary);
+      return hardware;
+    } catch (error) {
+      message(error?.message || String(error), true);
+      throw error;
+    } finally {
+      if (button) { button.disabled = false; button.textContent = prior || 'Run benchmark'; }
+    }
+  }
   function wireModelDetails() {
     if (document.body.dataset.ryuModelDetailsBound === 'true') return;
     document.body.dataset.ryuModelDetailsBound = 'true';
@@ -8739,17 +8766,7 @@
     document.querySelectorAll('[data-close-qwen]').forEach(b=>b.addEventListener('click',()=>$('qwenInstallModal')?.classList.remove('show')));
     if ($('clearModelQueue')) $('clearModelQueue').onclick=act(async()=>{await call('job.clear_completed');await refreshJobs();await refreshHistory();message('Completed background jobs cleared from the active queue.');});
     if ($('runIntegrityCheck')) $('runIntegrityCheck').onclick=act(runDiagnostics);
-    if ($('runBenchmark')) $('runBenchmark').onclick=act(async()=>{
-      const button=$('runBenchmark'),prior=button?.textContent;
-      if(button){button.disabled=true;button.textContent='Scanning…';}
-      try{
-        const result=await call('performance.info',{refresh:true});
-        await refreshPerformance();
-        const devices=(result.accelerators||[]).map(x=>x.name+' ['+x.backend+']').join(', ')||'No GPU detected';
-        message('Hardware scan complete: '+(result.recommended_backend||'Unavailable')+' · '+devices);
-      }catch(error){message(error?.message||String(error),true);}
-      finally{if(button){button.disabled=false;button.textContent=prior||'Run benchmark';}}
-    });
+    if ($('runBenchmark')) $('runBenchmark').onclick=act(runHardwareBenchmark);
     if ($('chapterSearch')) $('chapterSearch').oninput=()=>{
       const q=$('chapterSearch').value.trim().toLowerCase();
       $('chapterList')?.querySelectorAll('[data-chapter-number]').forEach(el=>el.hidden=!el.textContent.toLowerCase().includes(q));
