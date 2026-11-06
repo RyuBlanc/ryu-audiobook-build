@@ -494,19 +494,21 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
 
     def test_qwen_shared_runtime_uninstall_preserves_all_model_weights_and_project_data(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary) / "Models"
-            runtime_root = root / "qwen3-tts"
+            base = Path(temporary)
+            root = base / "Models"
+            runtime_root = base / "Provider Runtime" / "qwen3-tts"
+            model_root = root / "qwen3-tts"
             venv_root = runtime_root / "runtime"
             python_root = runtime_root / "python312"
             marker = runtime_root / "runtime.json"
             installer = runtime_root / "python-installer.exe"
             installer_log = runtime_root / "python-install.log"
             model_dirs = {
-                "custom-0.6b": runtime_root / "custom-0.6b",
-                "custom-1.7b": runtime_root / "custom-1.7b",
-                "design-1.7b": runtime_root / "design-1.7b",
-                "base-0.6b": runtime_root / "base-0.6b",
-                "base-1.7b": runtime_root / "base-1.7b",
+                "custom-0.6b": model_root / "custom-0.6b",
+                "custom-1.7b": model_root / "custom-1.7b",
+                "design-1.7b": model_root / "design-1.7b",
+                "base-0.6b": model_root / "base-0.6b",
+                "base-1.7b": model_root / "base-1.7b",
             }
             for directory in (venv_root, python_root, *model_dirs.values()):
                 directory.mkdir(parents=True, exist_ok=True)
@@ -603,6 +605,70 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
             self.assertTrue((sibling / "model.safetensors").is_file())
             self.assertTrue((qwen_runtime / "runtime").is_dir())
             self.assertIn("other model folders", message)
+
+    def test_piper_uninstall_removes_only_selected_local_voice_and_sidecar(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "Models"
+            piper_root = root / "piper"
+            selected = piper_root / "en_US-lessac-medium.onnx"
+            sibling = piper_root / "en_US-amy-medium.onnx"
+            piper_root.mkdir(parents=True)
+            selected.write_bytes(b"selected")
+            selected.with_suffix(".onnx.json").write_text("{}", encoding="utf-8")
+            sibling.write_bytes(b"sibling")
+            sibling.with_suffix(".onnx.json").write_text("{}", encoding="utf-8")
+            bridge = self.make_bridge()
+            with (
+                patch("app.core.paths.models_root", return_value=root),
+                patch("app.tts.providers.piper.PiperProvider.model_paths", return_value=[selected, sibling]),
+                patch("app.tts.model_registry.mark_installed") as mark,
+            ):
+                bridge._models_uninstall_component("piper", {"voice_name": "en_US-lessac-medium"}, None)
+            self.assertFalse(selected.exists())
+            self.assertFalse(selected.with_suffix(".onnx.json").exists())
+            self.assertTrue(sibling.is_file())
+            self.assertTrue(sibling.with_suffix(".onnx.json").is_file())
+            mark.assert_called_once_with("piper", True)
+
+    def test_kokoro_uninstall_removes_only_user_model_folder(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            root = base / "Models"
+            target = root / "kokoro"
+            target.mkdir(parents=True)
+            (target / "kokoro-v1.0.onnx").write_bytes(b"model")
+            preserved = base / "Projects" / "book.json"
+            preserved.parent.mkdir()
+            preserved.write_text("project", encoding="utf-8")
+            bridge = self.make_bridge()
+            with (
+                patch("app.core.paths.models_root", return_value=root),
+                patch("app.tts.model_registry.mark_installed") as mark,
+            ):
+                bridge._models_uninstall_component("kokoro", {}, None)
+            self.assertFalse(target.exists())
+            self.assertEqual(preserved.read_text(encoding="utf-8"), "project")
+            mark.assert_called_once_with("kokoro", False)
+
+    def test_audiobook_ai_uninstall_keeps_projects_and_other_model_roots(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            root = base / "Models"
+            target = root / "audiobook-ai"
+            target.mkdir(parents=True)
+            (target / "llama-server.exe").write_bytes(b"runtime")
+            project = base / "Projects" / "book.json"
+            project.parent.mkdir()
+            project.write_text("project", encoding="utf-8")
+            other_model = root / "qwen3-tts" / "custom-0.6b" / "model.safetensors"
+            other_model.parent.mkdir(parents=True)
+            other_model.write_bytes(b"qwen")
+            bridge = self.make_bridge()
+            with patch("app.core.paths.models_root", return_value=root):
+                bridge._models_uninstall_component("audiobook-ai", {}, None)
+            self.assertFalse(target.exists())
+            self.assertEqual(project.read_text(encoding="utf-8"), "project")
+            self.assertTrue(other_model.is_file())
 
     def test_individual_qwen_uninstall_refresh_reports_removed_model_as_missing(self):
         from app.tts.model_registry import build_inventory
