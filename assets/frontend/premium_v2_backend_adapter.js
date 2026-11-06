@@ -10730,15 +10730,36 @@
             return;
           } else {
             const displayName = String(model.name || operationId);
-            const details = action === 'uninstall'
-              ? 'Only the selected app-managed files will be removed. Projects, source books, generated audiobooks and saved voice profiles will be retained. Uninstall is blocked while a voice preview, generation, analysis or model lifecycle job is running.'
+            let details = action === 'uninstall'
+              ? 'Checking exact files, sizes, component ownership and shared-runtime dependencies…'
               : action === 'repair'
                 ? 'This may re-download model files and can take time or use several GB of network data. Saved projects and voice profiles are kept.'
                 : String(model.requirements || model.notes || 'The local installer will check the required files and dependencies before reporting success.');
+            if (action === 'uninstall') {
+              const preflightPayload = {...payload, model_id:operationId};
+              if (operationId === 'qwen-model') preflightPayload.model_kind = button.dataset.modelKind || visibleModelId;
+              if (operationId === 'piper') preflightPayload.voice_name = String(voiceSelect?.value || '').trim();
+              const impact = await call('models.uninstall_preflight', preflightPayload);
+              if (impact.blocked) {
+                message(impact.block_reason || 'This component is required by other installed components. Remove its dependents first.', true);
+                return;
+              }
+              const bytes = formatModelBytes(impact.total_bytes || 0);
+              const targets = (impact.targets || []).map(path => '<code style="display:block;overflow-wrap:anywhere">' + esc(path) + '</code>').join('');
+              const dependents = (impact.dependencies || []).length
+                ? '<p><b>Installed dependents:</b> ' + esc(impact.dependencies.join(', ')) + '</p>'
+                : '<p><b>Installed dependents:</b> None detected.</p>';
+              const preserved = (impact.preserved || []).map(item => '<li>' + esc(item) + '</li>').join('');
+              details = '<div style="display:grid;gap:8px"><p><b>Exact removal impact</b>: ' +
+                esc(Number(impact.file_count || 0).toLocaleString()) + ' files · ' + esc(bytes) + '</p>' +
+                dependents + '<div><b>Removal targets</b>' + targets + '</div>' +
+                '<div><b>Data guaranteed outside these targets</b><ul>' + preserved + '</ul></div>' +
+                '<p class="muted">A failed preflight blocks deletion. Uninstall removes only the listed app-managed component files.</p></div>';
+            }
             const approved = await requestModelActionDialog({
-              title:action === 'uninstall' ? 'Uninstall ' + displayName : action === 'repair' ? 'Repair ' + displayName : 'Install ' + displayName,
+              title:action === 'uninstall' ? 'Review uninstall · ' + displayName : action === 'repair' ? 'Repair ' + displayName : 'Install ' + displayName,
               description:details,
-              confirmLabel:action === 'uninstall' ? 'Uninstall component' : action === 'repair' ? 'Repair component' : 'Start installation',
+              confirmLabel:action === 'uninstall' ? 'Confirm exact uninstall' : action === 'repair' ? 'Repair component' : 'Start installation',
               danger:action === 'uninstall'
             });
             if (!approved) return;
