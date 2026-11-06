@@ -39,6 +39,51 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
         ):
             return PremiumV2Bridge()
 
+    def test_performance_info_reports_real_cpu_memory_and_gpu_device_inventory(self):
+        bridge = self.make_bridge()
+        device = type("Device", (), {
+            "backend":"cuda", "device":"cuda:0", "name":"RTX Test",
+            "memory_gb":8.0, "supported":True, "reason":"CUDA runtime active"
+        })()
+        with (
+            patch("psutil.cpu_percent", return_value=37.5),
+            patch("psutil.virtual_memory", return_value=type("VM", (), {
+                "total":16*1024**3, "available":6*1024**3, "percent":62.5
+            })()),
+            patch("app.tts.qwen_accelerator.detect_accelerators", return_value=(device,)),
+            patch("app.tts.qwen_accelerator.best_accelerator", return_value=device),
+        ):
+            result = bridge._performance_info({"refresh":True})
+        self.assertTrue(result["available"])
+        self.assertEqual(result["cpu_percent"],37.5)
+        self.assertEqual(result["memory_total_bytes"],16*1024**3)
+        self.assertEqual(result["memory_available_bytes"],6*1024**3)
+        self.assertEqual(result["gpu_name"],"RTX Test")
+        self.assertEqual(result["backend"],"cuda")
+        self.assertTrue(result["backend_active"])
+        self.assertIsNone(result["generation_seconds"])
+
+    def test_performance_info_distinguishes_gpu_candidate_from_active_runtime(self):
+        bridge = self.make_bridge()
+        candidate = type("Device", (), {
+            "backend":"cuda-candidate", "device":"cpu", "name":"RTX Test",
+            "memory_gb":8.0, "supported":False, "reason":"CUDA runtime not active"
+        })()
+        with (
+            patch("psutil.cpu_percent", return_value=11.0),
+            patch("psutil.virtual_memory", return_value=type("VM", (), {
+                "total":8, "available":4, "percent":50.0
+            })()),
+            patch("app.tts.qwen_accelerator.detect_accelerators", return_value=(candidate,)),
+            patch("app.tts.qwen_accelerator.best_accelerator", return_value=candidate),
+        ):
+            result = bridge._performance_info({})
+        self.assertEqual(result["backend"],"cuda-candidate")
+        self.assertFalse(result["backend_active"])
+        self.assertIn("runtime not active",result["recommended_backend"])
+        self.assertIsNone(result["gpu_percent"])
+        self.assertIsNone(result["vram_used_mb"])
+
     def test_models_bridge_exposes_install_repair_uninstall_and_verify(self):
         source = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         for command, handler in (
