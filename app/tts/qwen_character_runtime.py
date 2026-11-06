@@ -12,7 +12,7 @@ import time
 import urllib.request
 from functools import lru_cache
 
-from app.core.paths import models_root
+from app.core.paths import models_root, runtimes_root
 from app.version import APP_VERSION
 from app.tts.qwen_accelerator import (
     accelerator_report,
@@ -34,7 +34,7 @@ PYTHON_INSTALLER_URL = (
     f"python-{PYTHON_VERSION}-amd64.exe"
 )
 
-RUNTIME_ROOT = models_root() / "qwen3-tts"
+RUNTIME_ROOT = runtimes_root() / "qwen3-tts"
 PYTHON_ROOT = RUNTIME_ROOT / "python312"
 PYTHON = PYTHON_ROOT / "python.exe"
 VENV_ROOT = RUNTIME_ROOT / "runtime"
@@ -50,7 +50,7 @@ MODEL_IDS = {
     "base-0.6b": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
     "base-1.7b": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
 }
-MODEL_DIRS = {key: RUNTIME_ROOT / key for key in MODEL_IDS}
+MODEL_DIRS = {key: models_root() / "qwen3-tts" / key for key in MODEL_IDS}
 TOKENIZER_ID = "Qwen/Qwen3-TTS-Tokenizer-12Hz"
 
 CUSTOM_SPEAKERS = (
