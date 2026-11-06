@@ -285,6 +285,14 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
         self.assertIn("Reconnect its drive before changing the configured path", handler)
         self.assertIn("existing inventory must not be silently orphaned", handler)
 
+    def test_storage_migration_excludes_new_application_jobs(self):
+        bridge = self.make_bridge()
+        bridge._jobs["active-storage-migration"] = {
+            "state": "running", "type": "storage-migration"
+        }
+        with self.assertRaisesRegex(RuntimeError, "verified storage migration is running"):
+            bridge._new_job("voice-preview", "Preview", "Must wait for storage migration")
+
     def test_starting_second_model_operation_is_blocked_while_one_is_running(self):
         bridge = self.make_bridge()
         bridge._jobs["active-model-job"] = {"state": "running", "type": "model-install"}
