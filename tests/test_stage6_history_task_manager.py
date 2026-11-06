@@ -78,6 +78,16 @@ class Stage6HistoryTaskManagerTests(unittest.TestCase):
         self.assertIn("data-job-view", self.adapter)
         self.assertIn("data-job-detail-field", self.adapter)
 
+    def test_task_manager_dialog_is_bounded_and_reflows_at_small_viewports(self) -> None:
+        html = (ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
+        base = ".modal-back>.jobs-modal{box-sizing:border-box;width:min(780px,calc(100vw - 40px));min-width:0;max-width:100%;max-height:calc(100dvh - 40px);overflow-x:hidden;overflow-y:auto}"
+        mobile = "@media(max-width:800px){.modal-back{padding:10px}.modal-back>.jobs-modal{width:calc(100vw - 20px);max-width:calc(100vw - 20px);max-height:calc(100dvh - 20px);padding:14px"
+        self.assertIn(base, html)
+        self.assertIn(mobile, html)
+        self.assertIn(".jobs-modal .job-row{grid-template-columns:32px minmax(0,1fr)", html)
+        self.assertIn(".jobs-modal .job-actions{grid-column:1/-1", html)
+        self.assertIn(".jobs-modal .job-main{min-width:0;max-width:100%", html)
+
     def test_task_manager_rows_match_responsive_three_column_css_contract(self) -> None:
         self.assertIn('class="job-type-icon"', self.adapter)
         self.assertIn('class="job-main"', self.adapter)
