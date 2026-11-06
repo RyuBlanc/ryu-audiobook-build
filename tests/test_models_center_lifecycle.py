@@ -210,6 +210,10 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
                 patch("app.tts.qwen_character_runtime.MODEL_DIRS",
                       {"custom-0.6b": remove, "base-0.6b": preserve}),
                 patch("app.tts.qwen_character_runtime.RUNTIME_ROOT", runtime_root),
+                patch("app.tts.model_registry.build_inventory", return_value=[
+                    {"model_id": "custom-0.6b", "name": "Qwen CustomVoice 0.6B",
+                     "component_type": "model", "installed": True}
+                ]),
             ):
                 message = bridge._models_uninstall_component("custom-0.6b", {}, lambda _message: None)
 
@@ -353,7 +357,11 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
             with (
                 patch("app.core.paths.models_root", return_value=models),
                 patch("app.tts.chatterbox_runtime.RUNTIME_DIR", runtime),
-                patch("app.tts.model_registry.build_inventory", return_value=[row]),
+                patch("app.tts.model_registry.build_inventory", return_value=[
+                    {"model_id": "chatterbox-runtime", "name": "Chatterbox Runtime",
+                     "component_type": "provider", "installed": True},
+                    row,
+                ]),
             ):
                 with self.assertRaisesRegex(RuntimeError, "shared by installed components"):
                     bridge._models_uninstall_component("chatterbox-runtime", {}, lambda _message: None)
@@ -385,7 +393,10 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
                 patch("app.tts.qwen_character_runtime.MARKER", marker),
                 patch("app.tts.qwen_character_runtime.INSTALLER_PATH", installer),
                 patch("app.tts.qwen_character_runtime.INSTALLER_LOG", install_log),
-                patch("app.tts.model_registry.build_inventory", return_value=[]),
+                patch("app.tts.model_registry.build_inventory", return_value=[
+                    {"model_id": "qwen-runtime", "name": "Qwen3-TTS Runtime",
+                     "component_type": "provider", "installed": True}
+                ]),
             ):
                 outcome = bridge._models_uninstall_component("qwen-runtime", {}, lambda _message: None)
             self.assertFalse(venv.exists())
