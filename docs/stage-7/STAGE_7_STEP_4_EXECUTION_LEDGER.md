@@ -27,3 +27,13 @@ Updated: 6 November 2026
 - Do not infer that an installed GPU runtime is active until the provider's real runtime and synthesis check passes.
 
 **Step 4 disposition:** automated implementation and regression PASS; physical device-matrix acceptance remains explicitly open. Continue to Step 5 without representing the manual device matrix as passed.
+
+## 2026-11-06 — latest combined-head CI and accelerator workflow status
+
+- Matching-head Actions #2628 on `0fc9d8189311419414746ffb23d89df9c65d116c` passed full regression: **1,258 tests**, and Windows build/package acceptance passed.
+- Stage 7 Qwen accelerator workflows were wired to the canonical `stage-7/**` branch:
+  - NVIDIA source CI #2627 passed; real GPU run #1 is queued.
+  - AMD/Intel source CI #2626 passed; real ROCm/XPU run #9 is queued.
+- Queued self-hosted jobs are not physical hardware results. No NVIDIA, AMD ROCm, or Intel XPU performance pass is claimed from those jobs until they execute and upload real inference evidence.
+
+**Current disposition:** software detection/runtime policy regression PASS; physical NVIDIA/AMD/Intel device matrix remains pending or unavailable. The target 30-second Qwen preview performance gate is tracked separately in Step 6.
