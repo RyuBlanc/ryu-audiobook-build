@@ -31,6 +31,55 @@ class AudiobookBrainTests(unittest.TestCase):
         self.assertIn("HF_HOME", env)
         self.assertTrue(env["HF_HOME"])
 
+    def test_offline_understanding_model_is_hardware_aware_qwen3_gguf(self):
+        from unittest.mock import patch
+        from app.ai import model_runtime
+
+        with (
+            patch.object(model_runtime, "detect_nvidia_vram_gb", return_value=0.0),
+            patch.object(model_runtime, "brain_root", return_value=Path("Models") / "audiobook-ai"),
+        ):
+            self.assertEqual(
+                model_runtime.recommended_model(),
+                ("qwen3-1.7b-q5", "Qwen3-1.7B-Q5_K_M.gguf", 1_260_000_000),
+            )
+            self.assertEqual(model_runtime.model_path().name, "Qwen3-1.7B-Q5_K_M.gguf")
+
+        with (
+            patch.object(model_runtime, "detect_nvidia_vram_gb", return_value=8.0),
+            patch.object(model_runtime, "brain_root", return_value=Path("Models") / "audiobook-ai"),
+        ):
+            self.assertEqual(
+                model_runtime.recommended_model(),
+                ("qwen3-4b-q4", "Qwen3-4B-Q4_K_M.gguf", 2_500_000_000),
+            )
+            self.assertEqual(model_runtime.model_path().name, "Qwen3-4B-Q4_K_M.gguf")
+
+    def test_offline_understanding_keeps_model_weights_and_llama_runtime_in_separate_roots(self):
+        from unittest.mock import patch
+        from app.ai import model_runtime
+
+        with (
+            patch.object(model_runtime, "models_root", return_value=Path("X:/Models")),
+            patch.object(model_runtime, "runtimes_root", return_value=Path("X:/Runtime")),
+        ):
+            self.assertEqual(model_runtime.brain_root(), Path("X:/Models/audiobook-ai"))
+            self.assertEqual(model_runtime.brain_runtime_root(), Path("X:/Runtime/audiobook-ai"))
+
+    def test_offline_understanding_recommends_cpu_or_cuda_llama_runtime_from_detected_hardware(self):
+        from unittest.mock import patch
+        from app.ai import model_runtime
+
+        with (
+            patch.object(model_runtime, "detect_nvidia_vram_gb", return_value=8.0),
+            patch.object(model_runtime, "shutil.which", return_value=None),
+        ):
+            self.assertEqual(model_runtime.recommended_model()[0], "qwen3-4b-q4")
+            self.assertIn("cuda-12.4", model_runtime.LLAMA_CUDA12_URL)
+
+        with patch.object(model_runtime, "detect_nvidia_vram_gb", return_value=0.0):
+            self.assertIn("cpu-x64", model_runtime.LLAMA_CPU_URL)
+
     def test_release_version_is_current_bugfix_line(self):
         from app.version import APP_VERSION
         self.assertEqual(APP_VERSION, "1.1.1")
