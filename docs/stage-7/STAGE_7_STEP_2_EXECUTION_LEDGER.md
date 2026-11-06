@@ -117,3 +117,26 @@ This step is storage/location management. The full uninstall/lifecycle closure r
 Step 2 is not complete until all acceptance-matrix items are either passed with test evidence or explicitly documented as a user-approved waiver. A passing unit test alone does not prove installed-Windows behavior. Do not mark a migration successful before post-switch inventory verification. Do not begin Step 3 uninstall-safety work until Step 2 storage and relocation gates are closed.
 
 **Current disposition:** Step 2 branch established; baseline audit and acceptance contract documented. Implementation has not yet begun; all Step 2 acceptance items remain open.
+
+
+## 8. Implementation progress — 2026-11-06
+
+### Completed in the initial implementation slice
+
+- Added independent configured roots for model weights, provider runtimes, model cache/downloads and temporary/staging files while retaining the legacy default layout.
+- Routed Qwen model weights separately from its configurable runtime/Python root; default paths remain the existing `Models/qwen3-tts` layout.
+- Routed Chatterbox runtime and Hugging Face cache through the managed runtime/cache roots; default paths remain compatible with existing installations.
+- Added Settings → Local storage rows for Models, Provider Runtime, Model Cache / Downloads and Temporary / Staging, including Choose, Use default, Open, Copy Path and actual used/free/total filesystem capacity.
+- Added a safety guard: changing a non-empty managed root or replacing an unavailable configured root is refused until the verified migration workflow exists. This prevents a settings-only path change from making installed models appear missing. Project Library and Audio Assets selection remain unchanged.
+- Added regression coverage for independent root configuration, legacy defaults, relative-path fallback, capacity reporting, and refusal to orphan data or silently replace an unavailable root.
+
+### Remaining before Step 2 closure
+
+- Implement the verified staging-copy, content-hash verification, atomic switch, journal/recovery and rollback migration engine.
+- Integrate all model/runtime/cache/temp writers and readers, including temporary download/bootstrap staging, without moving user-owned previews or source/output files.
+- Add active-job/download/inference guards, external-drive disconnect/reconnect reconciliation and duplicate-download prevention.
+- Implement safe cache/temp cleanup dry-run and protected-data tests.
+- Complete Models Center storage summary/relocation UI and responsive background progress/recovery.
+- Run focused storage/migration tests, full regression and matching-head packaged acceptance; audit and fix every failure.
+
+**Current status: INITIAL ROOT-CONFIGURATION SLICE IMPLEMENTED; MIGRATION AND FULL ACCEPTANCE OPEN. Do not treat Step 2 as complete or proceed to Step 3.**
