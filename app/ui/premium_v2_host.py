@@ -623,7 +623,7 @@ class PremiumV2Bridge(QObject):
             "models.repair": True,
             "models.uninstall": True,
             "models.verify": True,
-            "performance.info": False,
+            "performance.info": True,
             "diagnostics.check": True,
             "diagnostics.export_logs": True,
             "system.open_output": True,
@@ -7296,8 +7296,131 @@ class PremiumV2Bridge(QObject):
         return {"model_id": requested, "available": available, "detail": detail, "path": path,
                 "status": status, "model": item}
 
-    def _performance_info(self, _payload: dict[str, Any]) -> dict[str, Any]:
-        return {"available": False, "reason": "Live CPU, GPU and VRAM telemetry is not connected to Premium V2 yet."}
+    @staticmethod
+    def _safe_command_output(command: list[str], timeout: float = 3.0) -> str:
+        try:
+            result = subprocess.run(
+                command, capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=timeout,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
+            )
+            return result.stdout.strip() if result.returncode == 0 else ""
+        except (OSError, subprocess.SubprocessError):
+            return ""
+
+    def _performance_info(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return live host telemetry and Qwen backend discovery without inventing measurements."""
+        import platform
+        payload = payload or {}
+        refresh = bool(payload.get("refresh"))
+        cpu_percent = None
+        memory_total = memory_available = memory_percent = None
+        try:
+            import psutil
+            cpu_percent = float(psutil.cpu_percent(interval=0.15))
+            vm = psutil.virtual_memory()
+            memory_total = int(vm.total)
+            memory_available = int(vm.available)
+            memory_percent = float(vm.percent)
+        except Exception:
+            if os.name == "nt":
+                raw = self._safe_command_output([
+                    "powershell", "-NoProfile", "-NonInteractive", "-Command",
+                    "$cpu=(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average; "
+                    "$os=Get-CimInstance Win32_OperatingSystem; "
+                    "[pscustomobject]@{cpu=$cpu;total=$os.TotalVisibleMemorySize;free=$os.FreePhysicalMemory}|ConvertTo-Json -Compress"
+                ], timeout=5.0)
+                try:
+                    snapshot = json.loads(raw) if raw else {}
+                    cpu_percent = float(snapshot["cpu"]) if snapshot.get("cpu") is not None else None
+                    memory_total = int(snapshot["total"]) * 1024 if snapshot.get("total") else None
+                    memory_available = int(snapshot["free"]) * 1024 if snapshot.get("free") else None
+                    if memory_total and memory_available is not None:
+                        memory_percent = max(0.0, min(100.0, (memory_total-memory_available)*100/memory_total))
+                except (ValueError, TypeError, KeyError):
+                    pass
+        gpu_percent = vram_used_mb = vram_total_mb = gpu_temperature_c = None
+        gpu_name = ""
+        devices = []
+        recommended = None
+        accelerator_error = ""
+        try:
+            from app.tts.qwen_accelerator import detect_accelerators, best_accelerator
+            accelerators = detect_accelerators(refresh=refresh)
+            recommended = best_accelerator()
+            devices = [{
+                "backend": item.backend, "device": item.device, "name": item.name,
+                "memory_gb": round(float(item.memory_gb), 2),
+                "supported": bool(item.supported), "reason": item.reason,
+            } for item in accelerators]
+            active = next((item for item in accelerators
+                           if item.supported and item.backend in {"cuda", "rocm", "xpu"}), None)
+            candidate = next((item for item in accelerators
+                              if item.backend.endswith("-candidate") or item.backend.endswith("-unsupported")), None)
+            chosen = active or candidate
+            if chosen:
+                gpu_name = chosen.name
+            if active and active.backend == "cuda":
+                metrics = self._safe_command_output([
+                    "nvidia-smi", "--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu",
+                    "--format=csv,noheader,nounits"
+                ], timeout=2.0)
+                if metrics:
+                    try:
+                        vals=[part.strip() for part in metrics.splitlines()[0].split(",")]
+                        gpu_percent=float(vals[0]) if vals[0] not in {"[N/A]",""} else None
+                        vram_used_mb=float(vals[1]) if vals[1] not in {"[N/A]",""} else None
+                        vram_total_mb=float(vals[2]) if vals[2] not in {"[N/A]",""} else None
+                        gpu_temperature_c=float(vals[3]) if len(vals)>3 and vals[3] not in {"[N/A]",""} else None
+                    except (ValueError,IndexError):
+                        pass
+            elif active and active.backend == "xpu":
+                try:
+                    import torch
+                    if hasattr(torch, "xpu") and torch.xpu.is_available():
+                        stats=torch.xpu.memory_stats(0)
+                        vram_used_mb=float(stats.get("allocated_bytes.all.current",0))/(1024**2)
+                        total=float(getattr(torch.xpu.get_device_properties(0),"total_memory",0))
+                        vram_total_mb=total/(1024**2) if total else None
+                except Exception:
+                    pass
+            elif active and active.backend == "rocm":
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        vram_used_mb=float(torch.cuda.memory_allocated(0))/(1024**2)
+                        vram_total_mb=float(torch.cuda.get_device_properties(0).total_memory)/(1024**2)
+                except Exception:
+                    pass
+        except Exception as exc:
+            accelerator_error = str(exc)
+        backend = recommended.backend if recommended else "unavailable"
+        backend_active = bool(recommended and recommended.supported and backend in {"cuda","rocm","xpu"})
+        reason = recommended.reason if recommended else accelerator_error or "No accelerator discovery result is available."
+        if backend == "cpu":
+            recommendation = "CPU"
+        elif backend_active:
+            recommendation = backend.upper()
+        elif backend.endswith("-candidate"):
+            recommendation = backend.replace("-candidate","").upper() + " candidate — runtime not active"
+        elif backend.endswith("-unsupported"):
+            recommendation = backend.replace("-unsupported","").upper() + " detected — unsupported runtime"
+        else:
+            recommendation = "Unavailable"
+        return {
+            "available": cpu_percent is not None or memory_total is not None or bool(devices),
+            "cpu_percent": cpu_percent, "memory_total_bytes": memory_total,
+            "memory_available_bytes": memory_available, "memory_percent": memory_percent,
+            "gpu_percent": gpu_percent, "vram_used_mb": vram_used_mb,
+            "vram_total_mb": vram_total_mb, "gpu_temperature_c": gpu_temperature_c,
+            "gpu_name": gpu_name, "accelerators": devices,
+            "recommended_backend": recommendation, "backend_active": backend_active,
+            "backend": backend, "reason": reason,
+            "platform": platform.platform(), "processor": platform.processor() or "Not reported",
+            "generation_seconds": None, "measured_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+
 
     def _diagnostics_check(self, _payload: dict[str, Any]) -> dict[str, Any]:
         checks = []
