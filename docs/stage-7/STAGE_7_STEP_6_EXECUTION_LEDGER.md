@@ -68,3 +68,18 @@ Earlier hosted Qwen 1.7B CPU preview measurements were approximately 298–305 s
 - Exact run: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42248725120
 - Manual installed-Windows acceptance remains user-waived/not run.
 - Real GPU acceptance remains pending: NVIDIA run #1 and AMD/Intel run #9 have not started because their self-hosted jobs are queued. No GPU target or under-60-second Qwen performance result is claimed.
+
+
+## Hosted real Qwen acceptance — 7 November 2026
+
+- Workflow: [Stage 7 Qwen Real CPU Preview and Accelerator Contract Acceptance](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42301856102), commit `97e6bb4240d51def6d4a5d1fc7d86c070c522a21`.
+- Hosted Windows CPU run completed successfully and uploaded artifact `Ryu-Stage7-Qwen-Real-CPU-Preview-1` (artifact ID `13544458572`, 1,566,779 bytes).
+- Real Qwen model: `Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign`.
+- Warmed 30-second preview: **30.000 seconds output**, **268.184 seconds synthesis elapsed**, 5 segments, same persistent worker reused. The under-60-second target is **NOT MET on hosted CPU**.
+- Cold start + warmup sample: 56.588 seconds (4.400-second sample); this is reported separately and is not the preview latency.
+- Real warm and angry expression audio generated successfully.
+- Japanese pronunciation preview generated: 1.040 seconds; normalized source matched `リムルが来た。`; saved Rimuru rule applied exactly once.
+- Actual WAV inspection: preview is valid mono 24 kHz PCM with 720,000 frames = 30.000 seconds. The warmup, warm/angry expression and Japanese WAVs are non-empty and have valid headers.
+- CPU artifact is genuine end-to-end Qwen inference. It validates worker reuse, duration control, expression output and pronunciation integration; it does not prove GPU speed, GPU backend selection or target-device voice quality.
+- Companion source/regression run [#2662](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42301856057) passed: focused 38 tests and full 1,258-test suite. Build job was skipped because this was not an artifact-checkpoint commit.
+- Real NVIDIA and AMD/Intel smoke workflows remain queued on their self-hosted runner labels. The real under-60-second GPU requirement remains an open hardware-only acceptance gate.
