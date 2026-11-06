@@ -172,3 +172,18 @@ The migration-engine source commit #2421 passed the test job. The following comm
 - Added tests for interrupted migration recovery, cleanup dry-run/protected paths and unknown-entry exclusion, plus rollback preservation if the settings backend cannot restore the source.
 - Failed historical CI runs #2422–#2425 and #2429–#2445 are retained as failures. Identified causes include Windows path normalization in assertions, missing test imports, a test setup comparing canonical paths incorrectly, a startup-call newline syntax defect, and accidentally moving the stable Models Center refresh decorator. Fixes are present in later commits; the current matching-head run must prove them.
 - Current UI/recovery/cleanup implementation is still awaiting full regression. Build/packaged acceptance, external-drive unplug/replug, provider-by-provider download routing, no-duplicate-download behavior, and cleanup under active generation remain open.
+
+
+### Final integration checkpoint before packaged acceptance — 2026-11-06
+
+- Qwen3-TTS Hugging Face metadata/cache now uses the independently selected `model_cache_root()`; its runtime remains under `runtimes_root()` and its model weights remain under `models_root()`.
+- Chatterbox uses the selected model cache for HF_HOME and selected provider runtime root for its isolated Python environment.
+- Audiobook AI stores GGUF weights under Models and llama.cpp executable/DLLs/logs under Provider Runtime.
+- The application configures Python's temporary directory to the selected Temporary/Staging root from `app/main.py` at startup. It is deliberately not changed from `ensure_roots()`, avoiding global tempfile side effects during tests and non-application initialization.
+- Models Center now surfaces unresolved/recovered migration journal states. Completed source cleanup and recovered journals are terminal and are not replayed at startup.
+- Added exact storage inventory coverage (per-file hashes, file count, byte totals and unavailable-root status), user-confirmed source cleanup verification, and Qwen cache-root routing coverage.
+- Root-cause fixes are present for the recent CI iterations: the cleanup test now matches the explicit temp allowlist; the AI runtime tests use separate runtime/model roots; Qwen cache-path syntax was corrected; and startup/Models Center guards are preserved.
+- **Run #2477** on source SHA `d48b8f2730e8cafa32974e384c6e48b137a601bb` completed the full regression suite successfully, including frontend syntax, native Qt lifecycle, Stage 6 preflight and remaining regression tests. The Windows package job was skipped because this commit was not an artifact checkpoint.
+- The next `[artifact-checkpoint]` commit is intended to run the Windows frozen-app/installer/portable build and packaged gates against the integrated Step 2 implementation.
+
+**Still required before Step 2 closure:** matching-head Windows package/build and artifact acceptance; audit its build logs and artifacts; verify no failed gates remain. Physical removable-drive disconnect/reconnect acceptance cannot be physically simulated by the hosted runner; automated missing-root/no-fallback/re-discovery logic is covered, but actual external-drive unplug/replug remains a manual installed-app check. Do not close Step 2 or begin Step 3 until packaged acceptance is green and this limitation is explicitly recorded.
