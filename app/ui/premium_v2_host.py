@@ -6735,7 +6735,7 @@ class PremiumV2Bridge(QObject):
                 "all": "qwen-all",
             }
             model_id = legacy.get(selection, "")
-        allowed = {"piper", "kokoro", "chatterbox", "chatterbox-multilingual", "chatterbox-runtime",
+        allowed = {"piper", "kokoro", "chatterbox", "chatterbox-multilingual", "chatterbox-runtime", "chatterbox-model-assets",
                    "qwen-runtime", "qwen-customvoice", "qwen-voicedesign", "qwen-clone", "qwen-all",
                    "custom-0.6b", "custom-1.7b", "design-1.7b", "base-0.6b", "base-1.7b", "audiobook-ai"}
         if model_id not in allowed:
@@ -7095,11 +7095,23 @@ class PremiumV2Bridge(QObject):
             mark_installed("kokoro", False)
             return "Removed the user-installed Kokoro model and voice pack. Bundled files are untouched."
 
+        if requested == "chatterbox-model-assets":
+            from app.tts.model_registry import _chatterbox_cache_root
+            cache_root = _chatterbox_cache_root(root).resolve()
+            cached_models = [
+                path for path in cache_root.glob("models--*")
+                if path.is_dir() and "chatterbox" in path.name.casefold()
+            ] if cache_root.is_dir() else []
+            if not cached_models:
+                raise ValueError("No downloaded Chatterbox model assets were found in the configured Model Cache.")
+            report("Removing only Chatterbox-owned Hugging Face model cache folders…")
+            for target in cached_models:
+                self._models_remove_path(target, cache_root)
+            return f"Removed {len(cached_models)} Chatterbox model cache folder(s). Other provider caches, the Chatterbox runtime, projects and saved profiles were kept."
+
         if requested in {"chatterbox", "chatterbox-multilingual", "chatterbox-runtime"}:
             from app.tts.chatterbox_runtime import RUNTIME_DIR
-            # Chatterbox's isolated Python environment lives under Provider Runtime,
-            # not Models. Validate deletion against that independently configurable
-            # root so the safety guard protects the correct ownership boundary.
+            # Chatterbox runtime belongs to the independently configured Provider Runtime root.
             provider_runtime_root = runtimes_root().resolve()
             if RUNTIME_DIR.exists():
                 report("Removing the shared Chatterbox runtime…")
