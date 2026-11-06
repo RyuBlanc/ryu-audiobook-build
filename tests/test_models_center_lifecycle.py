@@ -166,6 +166,45 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
             self.assertIn("installed and verified", result)
             mark_installed.assert_called_once_with("piper", True)
 
+    def test_qwen_model_install_routes_to_selected_model_and_preserves_runtime_separation(self):
+        from app.tts.qwen_character_runtime import MODEL_DIRS
+
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            models = base / "Models"
+            runtimes = base / "Provider Runtime"
+            model_root = models / "qwen3-tts"
+            runtime_root = runtimes / "qwen3-tts"
+            target = model_root / "custom-0.6b"
+            bridge = self.make_bridge()
+            with (
+                patch("app.core.paths.models_root", return_value=models),
+                patch("app.tts.qwen_character_runtime.MODEL_DIRS", {
+                    **MODEL_DIRS, "custom-0.6b": target,
+                }),
+                patch("app.tts.qwen_character_runtime.RUNTIME_ROOT", runtime_root),
+                patch("app.tts.qwen_character_runtime.install_model") as install_model,
+            ):
+                result = bridge._models_install_component("custom-0.6b", {}, None)
+
+            install_model.assert_called_once_with("custom-0.6b", None, force_repair=False)
+            self.assertIn("installed and file-verified", result)
+            self.assertEqual(target, model_root / "custom-0.6b")
+            self.assertNotEqual(target.parent, runtime_root)
+
+    def test_audiobook_ai_install_runs_runtime_install_and_real_inference_self_test(self):
+        bridge = self.make_bridge()
+        with (
+            patch("app.ai.model_runtime.install_runtime") as install_runtime,
+            patch("app.ai.model_runtime.self_test", return_value="CPU inference ready") as self_test,
+        ):
+            result = bridge._models_install_component("audiobook-ai", {}, None)
+
+        install_runtime.assert_called_once_with(None)
+        self_test.assert_called_once_with()
+        self.assertIn("CPU inference ready", result)
+        self.assertIn("self-tested", result)
+
     def test_invalid_piper_voice_id_is_rejected_before_network_access(self):
         bridge = self.make_bridge()
         with tempfile.TemporaryDirectory() as temporary:
