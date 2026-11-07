@@ -1,8 +1,7 @@
 # Known Limitations — Ryu's Audiobook Dragon Studio
 
-**Audited:** 24 October 2026 (Models Center/job-monitor follow-up)
-**Current code baseline:** `eca9cf1a8330e2dcfce697f66233a73740e25ae0` on `fix/import-qa-speaker-hover-hardware`
-**Open PR:** [#15](https://github.com/RyuBlanc/ryu-audiobook-build/pull/15), open and unmerged.
+**Audited:** 7 November 2026 (Stage 8 regression and UI capability audit)
+**Current code baseline:** Stage 8 candidate branch `stage-7/step-6-safe-auto-fallback`; use the live branch HEAD and matching Actions run as the exact revision authority.
 
 This document records actual source-level limitations. A supported bridge handler does not imply all related UI controls have passed runtime acceptance.
 
@@ -17,7 +16,7 @@ This document records actual source-level limitations. A supported bridge handle
 | Chapter review and generation inclusion | Review status is persisted in `chapters.json`; older chapter records default to `needs_review`. A separate `skip_for_generation` flag defaults to false and is persisted per chapter. The Review filter uses review state; the contextual chapter action can toggle review or skip state. Generation excludes flagged chapters while preserving their text. Project state, job result data and progress messages distinguish empty chapters from intentionally excluded chapters. | Backend plumbing and regression contract are in place; interactive Windows save/reload and generated-output acceptance remain pending. Review status never implicitly skips a chapter. |
 | Automatic per-line AI speaker suggestions | Automatic per-line AI speaker suggestions remain prototype-only; confidence labels and bulk acceptance are not treated as verified evidence. | Do not treat an AI suggestion as a confirmed speaker assignment. |
 | Manual dialogue-line speaker assignment | Manual source-backed dialogue speaker assignments are persisted after exact passage validation against saved chapter text. | Assignments require an unambiguous source passage and saved character; synthesis integration and interactive Windows acceptance remain to be verified. |
-| Custom storage roots | Custom project-library and audio-assets root selection is not implemented. | Current roots remain the configured local storage locations. |
+| Configurable storage roots | Settings > Storage supports choosing, resetting to default, opening and migrating supported project-library, audio-asset and model roots. Migration uses journaled progress, checksum verification and interrupted-migration recovery. | Keep external drives connected until migration and verification complete. Physical Windows drive migration/reconnect acceptance remains pending; CI does not replace interactive Windows acceptance. |
 | Per-model actions | Inventory, install, verify, repair and uninstall are connected for supported app-managed local components. Install/repair/uninstall use real background jobs and refresh model/voice catalogues at completion. Remote model update checks, universal default-selection and model test-generation are not established as connected; the Check Updates button only refreshes the local catalogue. | Do not show remote-update success or fake test-generation; complete actual Windows model/voice/narration acceptance. |
 | SQLite | `docs/PREMIUM_V2_DATABASE_SCHEMA.md` describes a target schema, not a deployed migration. Project data/state and Premium V2 job records currently use existing project/state files, QSettings and `premium_v2_jobs.json`. | Do not claim SQLite persistence or migrations are complete. |
 | Durable jobs/history | Job rows persist and unfinished rows are marked recoverable/failed on restart. `history.list` currently reads the same job rows, not a separate immutable history store. | Restart recovery, checkpoint reuse and history independence still require test coverage. |
