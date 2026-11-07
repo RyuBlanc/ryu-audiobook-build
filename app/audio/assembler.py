@@ -915,10 +915,15 @@ def assemble_m4b(
                 duration_ms = _duration_ms(current_audio)
                 duration_seconds = max(0.1, duration_ms / 1000.0)
                 music_gain = max(0.0, min(0.50, float(background_audio_volume)))
-                music_path = resolve_music_track(
-                    mood, selected_track=auto_music_variation,
-                    seed_text=f"{chapter_title}|{narration_text}|{index}",
-                )
+                # Chapter-Based BGM is explicit-only: automatic mood
+                # selection must never become a hidden fallback track for an
+                # unassigned chapter or layer beneath a selected chapter track.
+                music_path = None
+                if effective_bgm_strategy != "chapter-based":
+                    music_path = resolve_music_track(
+                        mood, selected_track=auto_music_variation,
+                        seed_text=f"{chapter_title}|{narration_text}|{index}",
+                    )
                 if music_path is not None and music_gain > 0.0:
                     fade_in = min(max(0.0, float(background_audio_fade_in)), duration_seconds)
                     fade_out = min(max(0.0, float(background_audio_fade_out)), duration_seconds)
@@ -1153,7 +1158,7 @@ def assemble_m4b(
         effective_overrides = chapter_bgm_overrides if isinstance(chapter_bgm_overrides, dict) else {}
         chapter_scoped_bgm = (
             effective_bgm_strategy == "chapter-based"
-            and effective_audio_mode == "manual"
+            and effective_audio_mode != "off"
         )
         if chapter_scoped_bgm:
             chapter_music_files: list[Path] = []
