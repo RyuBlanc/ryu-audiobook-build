@@ -8730,6 +8730,7 @@
           'Review each model/runtime status, version, install location, checksum or health result before using it.',
           'Install missing components, Repair unhealthy installations, Verify files or Uninstall unused models from the model action menu.',
           'Active generation or preview jobs protect models they are using. Wait for those jobs to finish before uninstalling or moving a model.',
+          'For Qwen, set the global Base model size preference to 0.6B or 1.7B in Models & Voice Engines. VoiceDesign itself uses its 1.7B model and also requires a compatible Base model for long-form voice identity consistency.',
           'Uninstalling a model must not delete projects, saved voice profiles or user audio. Check the displayed path before removing files.',
           'Use Settings > Storage to choose supported model, project-library and audio-asset roots. Keep external drives connected during migration and verification.'
         ]
