@@ -3785,7 +3785,7 @@ Rias Gremory
                 _write_wav(output_path, 0.20)
 
         captured = {}
-        def capture_units(text, provider, voice, pronunciation_dictionary, max_chars, dialogue_assignments=None):
+        def capture_units(text, provider, voice, pronunciation_dictionary, max_chars, dialogue_assignments=None, preserve_paragraph_boundaries=False):
             captured["max_chars"] = max_chars
             return [("A complete preview sentence.", voice)]
 

@@ -691,7 +691,7 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
                 "_preview_chapter_is_first": True,
                 "_preview_chapter_is_last": True,
                 "_preview_chapter_title": "Opening",
-                "_preview_chapter_text": "First paragraph.\\n\\nSecond paragraph.",
+                "_preview_chapter_text": "First paragraph.\n\nSecond paragraph.",
                 "_preview_first_paragraph_offset_ms": 4200,
             }
             with (
@@ -804,7 +804,7 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
 
         text = (
             "The first paragraph has a complete first sentence. "
-            "It has a second sentence too.\\n\\n"
+            "It has a second sentence too.\n\n"
             "The second paragraph should not be merged into the first preview unit."
         )
         units = _preview_units(
@@ -813,7 +813,7 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
         )
 
         self.assertEqual(len(units), 2)
-        self.assertTrue(units[0][0].endswith("\\n\\n"))
+        self.assertTrue(units[0][0].endswith("\n\n"))
         self.assertTrue(units[1][0].startswith("The second paragraph"))
 
 
