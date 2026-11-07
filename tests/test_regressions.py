@@ -2221,6 +2221,69 @@ class RegressionTests(unittest.TestCase):
             with self.assertRaisesRegex(FileNotFoundError, "custom BGM for chapter 2"):
                 validate_saved_audio_paths(state)
 
+    def test_same_bgm_manual_mode_does_not_layer_legacy_ambience(self):
+        from unittest.mock import patch
+        from app.audio.assembler import _duration_ms, _run
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            chapter_dir = root / "001_Chapter"
+            _write_wav(chapter_dir / "chunks" / "00001.wav", 2.2)
+            book_track = root / "book-default.wav"
+            legacy_ambience = root / "legacy-ambience.wav"
+            _write_wav(book_track, 1.0)
+            _write_wav(legacy_ambience, 1.0)
+            output = root / "single-book-bgm.m4b"
+
+            with patch("app.audio.assembler._run", wraps=_run) as ffmpeg_run:
+                assemble_m4b(
+                    [chapter_dir],
+                    output,
+                    "Single BGM layer regression",
+                    chapter_titles=["Chapter"],
+                    background_audio_mode="manual",
+                    background_audio_path=book_track,
+                    background_audio_volume=0.18,
+                    ambience_audio_path=legacy_ambience,
+                    ambience_audio_volume=0.15,
+                    chapter_transition_sound=False,
+                    chapter_bgm_strategy="same",
+                )
+
+            mix_commands = [
+                call.args[0] for call in ffmpeg_run.call_args_list
+                if call.args and "-filter_complex" in call.args[0]
+                and "bedraw" in call.args[0][call.args[0].index("-filter_complex") + 1]
+            ]
+            self.assertEqual(len(mix_commands), 1)
+            filter_complex = mix_commands[0][mix_commands[0].index("-filter_complex") + 1]
+            self.assertIn("amix=inputs=2", filter_complex)
+            self.assertIn("bedraw1", filter_complex)
+            self.assertNotIn("bedraw2", filter_complex)
+            self.assertTrue(output.is_file())
+            self.assertGreater(output.stat().st_size, 1024)
+            self.assertGreaterEqual(_duration_ms(output), 2000)
+
+    def test_same_bgm_validation_ignores_unused_legacy_ambience_path(self):
+        from app.audio.library import validate_saved_audio_paths
+
+        with tempfile.TemporaryDirectory() as temp:
+            book_track = Path(temp) / "book-default.wav"
+            missing_legacy_ambience = Path(temp) / "removed-legacy-ambience.wav"
+            _write_wav(book_track, 1.0)
+            state = {
+                "background_audio_mode": "manual",
+                "background_audio_enabled": True,
+                "chapter_bgm_strategy": "same",
+                "background_audio_path": str(book_track),
+                "ambience_audio_path": str(missing_legacy_ambience),
+                "chapter_transition_sound": False,
+            }
+
+            # A single book-default BGM is authoritative. A stale legacy
+            # ambience path is neither layered nor allowed to block generation.
+            validate_saved_audio_paths(state)
+
     def test_pause_profiles_keep_sentence_and_dialogue_turns_natural(self):
         from app.tts.pacing import pause_after_ms
         self.assertGreaterEqual(pause_after_ms("That is the end.", "natural"), 280)
