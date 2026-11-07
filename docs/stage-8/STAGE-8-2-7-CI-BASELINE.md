@@ -189,3 +189,26 @@ This request intentionally adds an `[artifact-checkpoint]` documentation commit 
 - Packaged acceptance and artifact verification: pending.
 
 After GitHub Actions completes, replace the pending statuses with the exact run URL, run number, resulting HEAD SHA, test totals, every job/step conclusion, artifact names/sizes/digests/expiry and any failures. Do not infer completion from the workflow's overall label alone.
+
+
+## Build #2804 failure analysis and narrow Sound-page correction — 7 November 2026
+
+- Workflow: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42381481432
+- Exact checkpoint commit: `8870c6d44ab122d86a344b95507061ca79f991ea`.
+- Regression job passed: **1,319 tests**.
+- Frozen EXE self-test and three Premium V2 startup launches passed. Bundled offline Piper/Kokoro assets and 26 real starter BGM tracks were verified. The packaged workflow generated real M4B/M4A outputs and passed the restart/persistence, playback, project identity, History and Task Manager checks reported before the responsive failure.
+- Packaged acceptance then failed on the Sound page at **600x800**: page scrollWidth **666 px**, available workspace width **590 px** (76 px overflow). Generate at 1280x720 passed: 994 px against 1004 px available.
+- The 41-resolution Stage 7 matrix remains preserved. The earlier Stage 7 fixture covered the shared shell, Player, Library, Mini-player, History, Task Manager and job details; it did **not** activate every destination at every viewport. Stage 8's expanded all-15-destination loop exposed the previously untested Sound-page case.
+- The failure occurred before installer packaging; downstream installer/portable build, Defender scan and uploads were skipped. #2804 produced no artifacts.
+- Root-cause correction committed in source commit `238b7875cb6edbeeec40969054ed59da7b44e9b2`: narrow Sound-page grid now uses `minmax(0,1fr)`, its grid children are shrinkable, and the Sound toolbar/selection controls are constrained within the viewport. The existing all-destination responsive assertion was not weakened or removed.
+- This is a targeted CSS correction, not a restart of Stage 7's responsive work. Matching-head packaged verification is still required.
+
+## Matching-head checkpoint after Sound-page correction — 7 November 2026
+
+- Source correction commit: `238b7875cb6edbeeec40969054ed59da7b44e9b2`.
+- Source branch: `stage-7/step-6-safe-auto-fallback`.
+- This documentation-only `[artifact-checkpoint]` commit requests a regression + Windows package run on the exact resulting HEAD, with the CSS fix as its parent.
+- Regression: pending.
+- Packaged Sound Design/Music Library acceptance: pending.
+- Installer/portable packaging and uploads: pending.
+- No Stage 8 package is marked complete by this checkpoint request alone. The six approved packages 8.2.7–8.2.12 still require their own requirement-level and release-gate evidence. The Version 1.2.0 release remains gated; #2804's frozen EXE was v1.1.1.
