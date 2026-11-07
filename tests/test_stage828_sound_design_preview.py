@@ -854,5 +854,113 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
         self.assertTrue(_preview_requires_paragraph_boundary(legacy_number_fallback))
 
 
+    def test_full_book_mix_preview_audio_matches_final_assembly_for_saved_chapter_bgm(self):
+        import json
+        import math
+        import struct
+        import subprocess
+        import wave
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from app.audio.assembler import assemble_m4b, ffmpeg_path
+        from app.ui.full_book_preview import _render_full_book_preview
+
+        def write_tone(path, frequency, seconds):
+            sample_rate = 24000
+            frames = int(sample_rate * seconds)
+            samples = b"".join(
+                struct.pack("<h", int(9000 * math.sin(2 * math.pi * frequency * index / sample_rate)))
+                for index in range(frames)
+            )
+            with wave.open(str(path), "wb") as output:
+                output.setnchannels(1)
+                output.setsampwidth(2)
+                output.setframerate(sample_rate)
+                output.writeframes(samples)
+
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            chapter_dir = root / "001_Opening"
+            chunk_dir = chapter_dir / "chunks"
+            chunk_dir.mkdir(parents=True)
+            first_chunk = chunk_dir / "00001.wav"
+            second_chunk = chunk_dir / "00002.wav"
+            music = root / "chapter-music.wav"
+            write_tone(first_chunk, 330, 1.0)
+            write_tone(second_chunk, 440, 1.0)
+            write_tone(music, 220, 3.0)
+            (chapter_dir / "narration.json").write_text(
+                json.dumps({"narration_text":"First paragraph ends here.\\n\\nSecond paragraph follows."}),
+                encoding="utf-8",
+            )
+            (chapter_dir / "chunk_manifest.json").write_text(json.dumps({"chunks":[
+                {"file":first_chunk.name,"text":"First paragraph ends here.\\n\\n"},
+                {"file":second_chunk.name,"text":"Second paragraph follows."},
+            ]}), encoding="utf-8")
+            music.with_name(music.name + ".license.json").write_text(
+                json.dumps({"role":"music","category":"calm"}), encoding="utf-8"
+            )
+            overrides = {
+                "1": {
+                    "rule":"custom", "path":str(music), "volume":0.30,
+                    "start_offset":"after_first_paragraph", "end_behavior":"stop_immediately",
+                }
+            }
+            state = {
+                "background_audio_mode":"manual", "background_audio_enabled":True,
+                "background_audio_volume":0.30, "narration_audio_volume":1.0,
+                "sound_cue_volume":0.25, "background_audio_fade_in":0.0,
+                "background_audio_fade_out":0.0, "chapter_transition_sound":False,
+                "chapter_bgm_strategy":"custom", "chapter_bgm_overrides":overrides,
+                "audio_bitrate":128, "narration_speed":1.0,
+            }
+            metadata = {
+                "title":"Parity Book", "author":"Author", "narrator":"Narrator",
+                "publisher":"Publisher", "language":"en", "genre":"Audiobook",
+            }
+            preview_output = root / "preview.m4b"
+            final_output = root / "final.m4b"
+
+            class Host:
+                def __init__(self):
+                    self.updates = []
+
+                def _job_update(self, job_id, **changes):
+                    self.updates.append((job_id, changes))
+
+            host = Host()
+            _render_full_book_preview(
+                host, "preview-job", object(), [chapter_dir], ["Opening"],
+                preview_output, "Parity Book", "Author", metadata, 128, state,
+            )
+            self.assertEqual(host.updates[-1][1]["state"], "completed")
+            self.assertTrue(preview_output.is_file())
+
+            assemble_m4b(
+                [chapter_dir], final_output, "Parity Book", "Author", None, ["Opening"],
+                metadata=metadata, bitrate=128, narration_speed=1.0,
+                background_audio_path=None, background_audio_volume=0.30,
+                narration_volume=1.0, cue_audio_volume=0.25,
+                background_audio_fade_in=0.0, background_audio_fade_out=0.0,
+                ambience_audio_path=None, ambience_audio_volume=0.10,
+                background_audio_mode="manual", auto_music_style="auto",
+                auto_music_variation=None, chapter_transition_sound=False,
+                story_effects_enabled=False, story_effect_volume=0.22,
+                sound_cue_style="classic-book", opening_cue_path=None,
+                page_turn_cue_path=None, ending_cue_path=None,
+                chapter_bgm_overrides=overrides, chapter_bgm_strategy="custom",
+            )
+
+            def decode(path):
+                result = subprocess.run(
+                    [ffmpeg_path(), "-v", "error", "-i", str(path), "-vn",
+                     "-ac", "1", "-ar", "24000", "-f", "s16le", "-"],
+                    capture_output=True, check=True,
+                )
+                return result.stdout
+
+            self.assertEqual(decode(preview_output), decode(final_output))
+
+
 if __name__ == "__main__":
     unittest.main()
