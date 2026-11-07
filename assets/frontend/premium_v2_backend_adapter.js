@@ -10743,13 +10743,8 @@
         }
         return;
       }
-      if (button.id === 'acceptHighConfidence' || button.id === 'skipAiSuggestion' ||
-          button.matches('#aiQueue [data-ai-line]:not([data-dialogue-id])') || button.id === 'aiUseLibrary' ||
-          button.id === 'aiCreateNew' || button.id === 'createCharacterQuick') {
-        stop();
-        message('Bulk acceptance and queue predictions are not connected to verified source passages. Select an individual dialogue passage and explicitly assign a saved character instead.', true);
-        return;
-      }
+      // Source-less queue placeholders are hidden during initialization. Real
+      // Character Studio controls are handled by their dedicated backend actions above.
       if (button.closest('#settings') && label === 'choose folder') {
         stop();
         const storageTab = document.querySelector('[data-settings-tab="storage"]');
