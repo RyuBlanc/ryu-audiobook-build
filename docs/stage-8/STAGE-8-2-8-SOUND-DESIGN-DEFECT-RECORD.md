@@ -68,3 +68,12 @@ The separate Production chapter sound preview path in `PremiumV2Bridge._render_s
 - Both the full M4B assembler and the Production chapter-preview path now have test-first regression coverage and source fixes.
 - Neither new test batch has a confirmed passing matching-head CI result in this record.
 - Actual listening tests for an assigned chapter, an unassigned chapter, Same BGM and Voice Only remain required.
+
+
+## Full-book mix preview regression coverage
+
+- Test commit: `bc5429e72e8d8d4857aa91f10925e6cc37d2cc36`.
+- Added `test_full_book_sound_preview_reuses_only_saved_eligible_chapter_audio`.
+- The test confirms the full-book preview start path uses stable chapter IDs to locate saved narration, excludes empty/skipped chapters, does not re-synthesize narration, queues the preview worker, and reports the expected included chapter set.
+- The worker's disposable-copy safety, actual M4B render and cancellation behavior still require matching-head tests and runtime acceptance.
+
