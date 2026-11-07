@@ -792,5 +792,30 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
             mixer.assert_not_called()
 
 
+    def test_production_preview_can_force_exact_paragraph_boundaries_in_tts_units(self):
+        from app.tts.preview import _preview_units
+
+        class PreviewProvider:
+            recommended_preview_chunk_chars = 1200
+            recommended_preview_chunk_sentences = 12
+
+            def split_for_cast(self, text, voice, dialogue_assignments=None):
+                return [(text, voice)]
+
+        text = (
+            "The first paragraph has a complete first sentence. "
+            "It has a second sentence too.\\n\\n"
+            "The second paragraph should not be merged into the first preview unit."
+        )
+        units = _preview_units(
+            text, PreviewProvider(), "Narrator", None, max_chars=1200,
+            preserve_paragraph_boundaries=True,
+        )
+
+        self.assertEqual(len(units), 2)
+        self.assertTrue(units[0][0].endswith("\\n\\n"))
+        self.assertTrue(units[1][0].startswith("The second paragraph"))
+
+
 if __name__ == "__main__":
     unittest.main()
