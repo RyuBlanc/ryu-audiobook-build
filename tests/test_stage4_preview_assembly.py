@@ -400,7 +400,7 @@ class PreviewAssemblyTests(unittest.TestCase):
                  patch("app.audio.library.validate_saved_audio_paths"), \
                  patch("app.audio.assembler._concat_audio_files", side_effect=fake_concat), \
                  patch("app.audio.assembler._run", side_effect=fake_run), \
-                 patch("app.audio.assembler._duration_ms", side_effect=[10_000, 10_700, 10_700]):
+                 patch("app.audio.assembler._duration_ms", side_effect=[10_000, 700, 10_700, 10_700]):
                 premium_v2_host.PremiumV2Bridge._preview_worker(
                     updates_host, "mix-cleanup", profile, "Mira spoke.", 10, state, threading.Event()
                 )
