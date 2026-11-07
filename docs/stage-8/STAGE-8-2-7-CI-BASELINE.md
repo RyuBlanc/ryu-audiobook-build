@@ -150,3 +150,42 @@ Build #2765 closes the package-report regression assertions introduced during St
 
 The current commit includes the `[artifact-checkpoint]` marker so the workflow should run both regression and Windows packaging on the exact new HEAD. Record the new run, test total, package artifacts, checksums, sizes and expiry here only after the workflow completes. No public release/tag is being created by this checkpoint.
 
+
+
+## Final exact-head Windows package checkpoint request — 7 November 2026
+
+The previous #2681 package is retained as historical Stage 8.2.7 evidence, but it is not the latest source candidate. Do not rebuild #2672 or #2681. The branch was rechecked immediately before this checkpoint request:
+
+- Working branch: `stage-7/step-6-safe-auto-fallback`.
+- Exact pre-checkpoint branch HEAD: `8774de2caf80068f1ef2bde27c88a0b8ec6c2776`.
+- Latest source regression run: Build #2803, workflow https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42378185367 — tests passed; Windows build job skipped because this was not an artifact-checkpoint commit.
+- #2803 source correction: Generate page grid sizing for available workspace width; packaged acceptance contract asserts the responsive 1280x720 overflow condition.
+- Prior packaged failure #2799/#2800: packaged acceptance raised `ReferenceError: stage8ResponsiveDestinations is not defined`. These failures had successful test jobs but failed the packaged UI acceptance step, so no installer/portable artifacts were produced.
+- Prior packaged failure #2801: the Generate page overflowed at 1280x720 (scrollWidth 1058, available width 1004). This is the responsive defect addressed by the #2803 source correction; packaged confirmation is still required.
+- Build #2802 also passed its regression job but skipped Windows packaging.
+- The branch had no commits newer than `8774de2caf80068f1ef2bde27c88a0b8ec6c2776` at the pre-check.
+
+This request intentionally adds an `[artifact-checkpoint]` documentation commit on top of the exact source HEAD above. Its purpose is to trigger the existing `.github/workflows/build-windows.yml` package gate without changing application source. The resulting workflow must run the tests and Windows build jobs on the same resulting HEAD.
+
+### Required outcome for this checkpoint
+
+1. Full regression suite and focused Stage 6 History/Task Manager preflight pass on the exact checkpoint commit.
+2. Packaged Sound Design/Music Library acceptance passes, including the corrected responsive Generate page at 1280x720 and the existing restart/persistence checks.
+3. Frozen application validation, bundled voice/model assets and critical modules pass.
+4. Functional HTML installer is built and its UI/native bridge startup is verified.
+5. Core Windows installer install/upgrade/launch/uninstall checks pass where present in the current workflow; user data preservation is verified.
+6. Installer and portable artifacts are uploaded from the same exact commit.
+7. Release SHA-256 manifest, package-size report and Microsoft Defender results are uploaded/recorded.
+8. Stage 7 Qwen CPU/Piper evidence is retained. NVIDIA, AMD ROCm, Intel XPU and hands-on physical target-PC acceptance remain DEFERRED / NOT RUN, not passed.
+9. The package size target below 500 MB remains an audit target; report actual sizes and do not remove required offline assets to force compliance.
+10. The public Version 1.2.0 release/tag remains gated by complete release acceptance. This artifact checkpoint does not publish a release.
+
+### Execution status
+
+- Source HEAD verified before checkpoint commit: `8774de2caf80068f1ef2bde27c88a0b8ec6c2776`.
+- Documentation marker commit: pending.
+- Matching-head regression: pending.
+- Matching-head Windows package: pending.
+- Packaged acceptance and artifact verification: pending.
+
+After GitHub Actions completes, replace the pending statuses with the exact run URL, run number, resulting HEAD SHA, test totals, every job/step conclusion, artifact names/sizes/digests/expiry and any failures. Do not infer completion from the workflow's overall label alone.
