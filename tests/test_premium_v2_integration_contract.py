@@ -1351,6 +1351,20 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("writeStyleIfChanged(progress, 'width', pct + '%')", refresh_jobs)
 
 
+    def test_release_artifact_includes_package_size_breakdown_without_pruning_assets(self):
+        workflow = (ROOT / ".github" / "workflows" / "build-windows.yml").read_text(encoding="utf-8")
+        reporter = (ROOT / "package_size_report.py").read_text(encoding="utf-8")
+        self.assertIn("Generate package size breakdown", workflow)
+        self.assertIn("package_size_report.py", workflow)
+        self.assertIn("package-size-report.json", workflow)
+        self.assertIn("release-sha256-manifest.json", workflow)
+        self.assertIn('"piper_models"', reporter)
+        self.assertIn('"kokoro_models"', reporter)
+        self.assertIn('"starter_audio"', reporter)
+        self.assertIn("No assets are removed or excluded by this report.", reporter)
+        self.assertIn("html_wrapper_overhead_bytes", reporter)
+        self.assertIn("largest_files", reporter)
+
     def test_help_guide_covers_stage8_workflows_and_current_limitations(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("function renderHelpGuide()", adapter)
