@@ -39,7 +39,7 @@ class Stage8UIPackagedAcceptanceContractTests(unittest.TestCase):
     def test_sound_import_controls_stack_at_narrow_viewports(self):
         html = (ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
         mobile_start = html.index("@media(max-width:760px){.sound-master")
-        mobile_end = html.index("}", mobile_start)
+        mobile_end = html.index("/* PRONUNCIATION, MODELS & SETTINGS CONNECTED FLOW */", mobile_start)
         mobile = html[mobile_start:mobile_end]
         self.assertIn(".sound-import-box{display:grid;grid-template-columns:minmax(0,1fr)", mobile)
         self.assertIn(".sound-import-box>*{min-width:0;max-width:100%}", mobile)
