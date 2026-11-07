@@ -834,6 +834,19 @@ jobs:
           $manifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath 'release-sha256-manifest.json' -Encoding utf8
           if (-not (Test-Path -LiteralPath 'release-sha256-manifest.json' -PathType Leaf)) { throw 'Release SHA-256 manifest was not created.' }
 
+      - name: Generate package size breakdown
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = Join-Path $env:RUNNER_TEMP 'ryu-qwen-python-bootstrap\python312\python.exe'
+          if (-not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "Verified private Python for package size reporting is missing: $pythonExe"
+          }
+          & $pythonExe -B 'package_size_report.py' --output 'package-size-report.json' --target-mb 500
+          if ($LASTEXITCODE -ne 0) { throw "Package size report generation failed with exit code $LASTEXITCODE." }
+          if (-not (Test-Path -LiteralPath 'package-size-report.json' -PathType Leaf)) { throw 'Package size report was not created.' }
+          Get-Content -LiteralPath 'package-size-report.json' -Raw | Write-Host
+
       - name: Scan release executables with Microsoft Defender
         shell: pwsh
         run: |
@@ -883,7 +896,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Ryu-Audiobook-Release-SHA256-${{ github.run_number }}
-          path: release-sha256-manifest.json
+          path: |
+            release-sha256-manifest.json
+            package-size-report.json
           if-no-files-found: error
           retention-days: 30
 
