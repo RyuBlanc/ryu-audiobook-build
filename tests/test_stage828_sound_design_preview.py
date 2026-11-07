@@ -652,5 +652,145 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
             })
 
 
+    def test_production_chapter_preview_applies_measured_first_paragraph_boundary(self):
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.ui.premium_v2_host import PremiumV2Bridge
+
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "chapter-preview.wav"
+            track = root / "chapter-music.wav"
+            source.write_bytes(b"narration" * 256)
+            track.write_bytes(b"music" * 256)
+            captured = {}
+
+            def mix_chapter(_source, _track, output, _volume, **kwargs):
+                captured["offset_ms"] = kwargs["start_offset_ms"]
+                Path(output).write_bytes(b"mixed audio" * 256)
+                return Path(output)
+
+            bridge = SimpleNamespace(_preview_cancel_events={})
+            state = {
+                "background_audio_mode": "manual",
+                "background_audio_enabled": True,
+                "background_audio_volume": 0.25,
+                "chapter_bgm_strategy": "custom",
+                "chapter_bgm_overrides": {
+                    "1": {
+                        "rule": "custom",
+                        "path": str(track),
+                        "volume": 0.25,
+                        "start_offset": "after_first_paragraph",
+                        "end_behavior": "continue_to_transition",
+                    }
+                },
+                "_preview_chapter_number": 1,
+                "_preview_chapter_index": 1,
+                "_preview_chapter_is_first": True,
+                "_preview_chapter_is_last": True,
+                "_preview_chapter_title": "Opening",
+                "_preview_chapter_text": "First paragraph.\\n\\nSecond paragraph.",
+                "_preview_first_paragraph_offset_ms": 4200,
+            }
+            with (
+                patch("app.ui.premium_v2_host.app_root", return_value=root),
+                patch("app.audio.library.validate_saved_audio_paths"),
+                patch("app.audio.assembler._duration_ms", return_value=20_000),
+                patch("app.audio.assembler._mix_chapter_bgm", side_effect=mix_chapter),
+            ):
+                output = PremiumV2Bridge._render_sound_design_preview(
+                    bridge, source, "paragraph-boundary-preview", state
+                )
+
+            self.assertTrue(output.is_file())
+            self.assertGreater(output.stat().st_size, 1024)
+            self.assertEqual(captured["offset_ms"], 4200)
+            self.assertEqual(
+                state["_preview_sound_configuration"]["bgm_enabled"], True
+            )
+
+    def test_production_chapter_preview_fails_closed_without_measured_paragraph_boundary(self):
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.ui.premium_v2_host import PremiumV2Bridge
+
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "chapter-preview.wav"
+            track = root / "chapter-music.wav"
+            source.write_bytes(b"narration" * 256)
+            track.write_bytes(b"music" * 256)
+            bridge = SimpleNamespace(_preview_cancel_events={})
+            state = {
+                "background_audio_mode": "manual",
+                "background_audio_enabled": True,
+                "chapter_bgm_strategy": "custom",
+                "chapter_bgm_overrides": {
+                    "1": {
+                        "rule": "custom", "path": str(track),
+                        "start_offset": "after_first_paragraph",
+                    }
+                },
+                "_preview_chapter_number": 1,
+                "_preview_chapter_index": 1,
+                "_preview_chapter_title": "Opening",
+                "_preview_first_paragraph_offset_ms": None,
+            }
+            with (
+                patch("app.ui.premium_v2_host.app_root", return_value=root),
+                patch("app.audio.library.validate_saved_audio_paths"),
+                patch("app.audio.assembler._duration_ms", return_value=20_000),
+                patch("app.audio.assembler._mix_chapter_bgm") as mixer,
+            ):
+                with self.assertRaisesRegex(ValueError, "could not verify an exact audio boundary"):
+                    PremiumV2Bridge._render_sound_design_preview(
+                        bridge, source, "missing-paragraph-boundary", state
+                    )
+            mixer.assert_not_called()
+
+    def test_production_chapter_preview_rejects_paragraph_boundary_after_preview_end(self):
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.ui.premium_v2_host import PremiumV2Bridge
+
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "chapter-preview.wav"
+            track = root / "chapter-music.wav"
+            source.write_bytes(b"narration" * 256)
+            track.write_bytes(b"music" * 256)
+            bridge = SimpleNamespace(_preview_cancel_events={})
+            state = {
+                "background_audio_mode": "manual",
+                "background_audio_enabled": True,
+                "chapter_bgm_strategy": "custom",
+                "chapter_bgm_overrides": {
+                    "1": {
+                        "rule": "custom", "path": str(track),
+                        "start_offset": "after_first_paragraph",
+                    }
+                },
+                "_preview_chapter_number": 1,
+                "_preview_chapter_index": 1,
+                "_preview_chapter_title": "Opening",
+                "_preview_first_paragraph_offset_ms": 20_000,
+            }
+            with (
+                patch("app.ui.premium_v2_host.app_root", return_value=root),
+                patch("app.audio.library.validate_saved_audio_paths"),
+                patch("app.audio.assembler._duration_ms", return_value=20_000),
+                patch("app.audio.assembler._mix_chapter_bgm") as mixer,
+            ):
+                with self.assertRaisesRegex(ValueError, "ends before the first-paragraph boundary"):
+                    PremiumV2Bridge._render_sound_design_preview(
+                        bridge, source, "late-paragraph-boundary", state
+                    )
+            mixer.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
