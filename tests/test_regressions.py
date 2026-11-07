@@ -1899,6 +1899,56 @@ class RegressionTests(unittest.TestCase):
             self.assertGreaterEqual(_duration_ms(output), 4000)
             self.assertLessEqual(_duration_ms(output), 5500)
 
+    def test_chapter_based_bgm_never_falls_back_to_auto_music(self):
+        from unittest.mock import patch
+        from app.audio.assembler import _duration_ms, _mix_chapter_bgm
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            chapters = []
+            for number, title in ((1, "First"), (2, "Second")):
+                chapter_dir = root / f"{number:03d}_{title}"
+                _write_wav(chapter_dir / "chunks" / "00001.wav", 2.2)
+                chapters.append(chapter_dir)
+
+            default_music = root / "default.wav"
+            chapter_music = root / "chapter-one.wav"
+            _write_wav(default_music, 1.0)
+            _write_wav(chapter_music, 1.0)
+            output = root / "chapter-based-auto-mode.m4b"
+
+            # Chapter-Based BGM must ignore both the book default and automatic
+            # mood-selected music. Only the explicitly saved chapter track may
+            # be mixed; an unassigned chapter must remain narration-only.
+            with (
+                patch("app.audio.library.resolve_music_track", return_value=default_music) as auto_music,
+                patch("app.audio.assembler._mix_chapter_bgm", wraps=_mix_chapter_bgm) as chapter_mix,
+            ):
+                assemble_m4b(
+                    chapters,
+                    output,
+                    "Chapter-Based BGM auto-mode regression",
+                    chapter_titles=["First", "Second"],
+                    background_audio_path=default_music,
+                    background_audio_volume=0.18,
+                    background_audio_mode="auto",
+                    chapter_transition_sound=False,
+                    chapter_bgm_strategy="chapter-based",
+                    chapter_bgm_overrides={
+                        "1": {"rule": "custom", "path": str(chapter_music), "volume": 0.22},
+                        "2": {"rule": "none", "volume": 0.18},
+                    },
+                )
+
+                auto_music.assert_not_called()
+                self.assertEqual(chapter_mix.call_count, 1)
+                self.assertEqual(Path(chapter_mix.call_args.args[1]), chapter_music)
+
+            self.assertTrue(output.is_file())
+            self.assertGreater(output.stat().st_size, 1024)
+            self.assertGreaterEqual(_duration_ms(output), 4000)
+            self.assertLessEqual(_duration_ms(output), 5500)
+
     def test_pause_profiles_keep_sentence_and_dialogue_turns_natural(self):
         from app.tts.pacing import pause_after_ms
         self.assertGreaterEqual(pause_after_ms("That is the end.", "natural"), 280)
