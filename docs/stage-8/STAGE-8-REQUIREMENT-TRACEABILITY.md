@@ -185,3 +185,11 @@ This inventory extracts all stable requirement IDs from the Master Bug & Change 
 6. **8.2.12 Final acceptance/release:** not started; v1.2.0 remains gated.
 
 **Inventory count:** 128 stable requirement IDs. This matrix is a tracking index, not proof of implementation. Update each row only when matching evidence exists.
+
+## 8.2.8 test-first fix checkpoint
+
+- Regression test commit: `ef8044248daf2f109025861d231831f54cd19ca4`.
+- Source fix commit: `cb25247c4dc95ff9f8ae518fe40dd7a52e17d583`.
+- Defect record commit: `025a467112e60244bec541b5943283b838119ed5`.
+- This checkpoint requests the Windows workflow's full artifact-checkpoint gate on the current candidate. Record the resulting run and artifact hashes only after verifying the Actions result.
+- Until matching-head tests pass, SD-02 remains CODE CHANGED — NOT VERIFIED. Real Windows audio acceptance remains pending even after CI passes.
