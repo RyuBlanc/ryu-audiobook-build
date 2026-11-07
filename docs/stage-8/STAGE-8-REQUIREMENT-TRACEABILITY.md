@@ -197,7 +197,7 @@ This inventory extracts all stable requirement IDs from the Master Bug & Change 
 
 ## REL-01 — Live branch and pull-request dependency audit
 
-**PR dependency graph and file comparisons were audited at working HEAD `811822a0497b6943ba61b85105b797a9409b2a18`; the branch has since advanced with Sound Design tests/fixes and preview coverage through `b8d7b11699535438b44cb32491af5382a7f7ae09`. The recorded branch-divergence conclusions remain to be rechecked before any PR merge.
+**PR dependency graph and file comparisons were audited at working HEAD `811822a0497b6943ba61b85105b797a9409b2a18`; the branch has since advanced with Sound Design tests/fixes through `998320c29046d6b84b82d578d12704ebcdc93eb6`. The recorded branch-divergence conclusions remain to be rechecked before any PR merge.
 
 | PR | Current state | Head / base | Comparison with working branch | Integration decision |
 |---|---|---|---|---|
@@ -237,3 +237,12 @@ The most recent commits on this branch include the test-first BGM regression, as
 - Full-book preview regression test commit: `bc5429e72e8d8d4857aa91f10925e6cc37d2cc36`.
 - Sound Design defect record updated at `b8d7b11699535438b44cb32491af5382a7f7ae09`.
 - The latest candidate checkpoint includes all three regression additions and both source fixes. Matching-head CI remains unverified; do not infer success from the older 1,258-test Build #2680.
+
+
+## Additional Sound Design requirements and current gaps
+
+- Chapter-Based validation test/fix: `9c456dbb18498ec0461ce0391b20045092bcb7c4` / `5b31851b663a9ccadebe3fb36d89e972d067bfd1`.
+- Same BGM single-track regression/fix: `ef431137c5850bbae9f88d9f99cec641a6a579c1` / `24cf31f0f6b76ea8e700e0c60ee99bd04835b241`.
+- Defect record updated at `998320c29046d6b84b82d578d12704ebcdc93eb6`.
+- Open gap: Production chapter preview still rejects `after_first_paragraph` BGM offset because the preview does not currently carry paragraph timing boundaries. The final full-book assembler has a boundary-aware implementation; preview/final parity remains incomplete.
+- Seven regression tests have been added across the Sound Design test commits. None is marked passed until a matching-head run is inspected.
