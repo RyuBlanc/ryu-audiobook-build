@@ -48,7 +48,7 @@ class ActiveProjectLookupPerformanceTests(unittest.TestCase):
                     [Chapter(1, "Chapter 1", "A real chapter body.")],
                 )
 
-            bridge = object.__new__(PremiumV2Bridge)
+            bridge = PremiumV2Bridge.__new__(PremiumV2Bridge)
             bridge.settings = _Settings({"project/active_folder": str(created.folder)})
             bridge._active_project_cache_lock = threading.RLock()
             bridge._active_project_cache = None
@@ -80,7 +80,7 @@ class ActiveProjectLookupPerformanceTests(unittest.TestCase):
                     "Changed Book", source, [Chapter(1, "Chapter 1", "First body.")],
                 )
 
-            bridge = object.__new__(PremiumV2Bridge)
+            bridge = PremiumV2Bridge.__new__(PremiumV2Bridge)
             bridge.settings = _Settings({"project/active_folder": str(created.folder)})
             bridge._active_project_cache_lock = threading.RLock()
             bridge._active_project_cache = None
@@ -107,7 +107,7 @@ class ActiveProjectLookupPerformanceTests(unittest.TestCase):
         with TemporaryDirectory() as temp:
             missing_root = Path(temp) / "disconnected-library"
             folder = missing_root / "Existing Book"
-            bridge = object.__new__(PremiumV2Bridge)
+            bridge = PremiumV2Bridge.__new__(PremiumV2Bridge)
             bridge.settings = _Settings({"project/active_folder": str(folder)})
             bridge._active_project_cache_lock = threading.RLock()
             bridge._active_project_cache = None
