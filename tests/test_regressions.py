@@ -2264,6 +2264,46 @@ class RegressionTests(unittest.TestCase):
             self.assertGreater(output.stat().st_size, 1024)
             self.assertGreaterEqual(_duration_ms(output), 2000)
 
+    def test_chapter_based_no_bgm_ignores_legacy_book_ambience(self):
+        from unittest.mock import patch
+        from app.audio.assembler import _duration_ms, _run
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            chapter_dir = root / "001_Chapter"
+            _write_wav(chapter_dir / "chunks" / "00001.wav", 2.2)
+            book_default = root / "legacy-book-default.wav"
+            legacy_ambience = root / "legacy-ambience.wav"
+            _write_wav(book_default, 1.0)
+            _write_wav(legacy_ambience, 1.0)
+            output = root / "chapter-no-bgm.m4b"
+
+            with patch("app.audio.assembler._run", wraps=_run) as ffmpeg_run:
+                assemble_m4b(
+                    [chapter_dir],
+                    output,
+                    "Chapter-Based No BGM regression",
+                    chapter_titles=["Chapter"],
+                    background_audio_mode="manual",
+                    background_audio_path=book_default,
+                    background_audio_volume=0.18,
+                    ambience_audio_path=legacy_ambience,
+                    ambience_audio_volume=0.15,
+                    chapter_transition_sound=False,
+                    chapter_bgm_strategy="chapter-based",
+                    chapter_bgm_overrides={"1": {"rule": "none"}},
+                )
+
+            bed_commands = [
+                call.args[0] for call in ffmpeg_run.call_args_list
+                if call.args and "-filter_complex" in call.args[0]
+                and "bedraw" in call.args[0][call.args[0].index("-filter_complex") + 1]
+            ]
+            self.assertEqual(bed_commands, [])
+            self.assertTrue(output.is_file())
+            self.assertGreater(output.stat().st_size, 1024)
+            self.assertGreaterEqual(_duration_ms(output), 2000)
+
     def test_same_bgm_validation_ignores_unused_legacy_ambience_path(self):
         from app.audio.library import validate_saved_audio_paths
 
