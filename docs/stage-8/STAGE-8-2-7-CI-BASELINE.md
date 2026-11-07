@@ -82,3 +82,17 @@ The Stage 8 source branch has since advanced beyond the original `b9ae3e8` basel
 - Responsiveness: the full aspect-ratio, portrait, window-state, split-screen, mixed-monitor and 100/125/150/200% scaling matrix is recorded for manual execution.
 
 The latest marker checkpoint must be validated by the exact branch's push-triggered Windows workflow. The connected GitHub status interface currently returns no combined status and no PR-triggered workflow run for the latest push candidate; this does not prove that a push workflow passed or failed. Record its actual Actions run, tests, build job, artifact hashes and expiry once visible. Until then, matching-head CI remains **PENDING / UNVERIFIED**.
+
+
+## Exact-HEAD regression checkpoint — Build #2765
+
+| Gate | Status | Evidence |
+|---|---|---|
+| Regression workflow | Passed | Build #2765; run 42358327101 |
+| Exact tested commit | Verified | 65b6a8773e6bcd10e31041dfa2924fc3f07b9d92 |
+| Windows package job | Skipped | Workflow condition requires [artifact-checkpoint], main, or manual dispatch |
+| Installer / portable artifacts | Pending | No artifacts were produced by #2765 |
+| SHA-256 manifest | Pending | Must be generated from the exact artifact-checkpoint commit |
+| Packaged Windows acceptance | Pending | Must follow the exact-head package build |
+
+Build #2765 closes the package-report regression assertions introduced during Stage 8 package optimization. It is a regression-only success, not a release package checkpoint. The next commit is intentionally an artifact-checkpoint documentation commit so the workflow runs both tests and the Windows packaging job against the same exact HEAD. No requirement is marked verified complete solely from this workflow.
