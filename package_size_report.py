@@ -137,7 +137,7 @@ def build_report(
         "notes": [
             "No assets are removed or excluded by this report.",
             "The dist total is the installed portable payload before GitHub artifact ZIP compression.",
-            "The HTML setup wrapper embeds the core installer; wrapper overhead is shown separately.",
+            "The HTML setup wrapper embeds the core installer; HTML-minus-core is a size-delta estimate, not a per-file runtime attribution.",
             "Use largest_files and runtime_components to identify candidates for optional packaging, not as permission to remove required offline assets.",
         ],
     }
