@@ -1293,13 +1293,17 @@ def assemble_m4b(
         if progress:
             progress(len(chapters), len(chapters), "joined-audio")
 
-        # Stage 1 audio beds: independently mix optional user-owned/licensed
-        # music and ambience only after narration has been assembled. Tracks
-        # therefore remain continuous across chapter boundaries. FFmpeg/CPU
-        # does the work; no GPU memory is needed.
+        # Version 1 permits one book-level BGM bed. Preserve legacy ambience
+        # projects by treating ambience as the old alternate default only when
+        # no book-default track is selected. Chapter-Based suppresses both.
+        legacy_book_bgm_path = (
+            None if chapter_scoped_bgm else (background_audio_path or ambience_audio_path)
+        )
+        legacy_book_bgm_volume = (
+            background_audio_volume if background_audio_path else ambience_audio_volume
+        )
         audio_layers: list[tuple[str, Path | str | None, float]] = [
-            ("music", None if chapter_scoped_bgm else background_audio_path, background_audio_volume),
-            ("ambience", ambience_audio_path, ambience_audio_volume),
+            ("music", legacy_book_bgm_path, legacy_book_bgm_volume),
         ]
         active_layers = [
             (name, Path(path).expanduser(), max(0.0, min(1.0, float(volume))))
