@@ -1949,6 +1949,57 @@ class RegressionTests(unittest.TestCase):
             self.assertGreaterEqual(_duration_ms(output), 4000)
             self.assertLessEqual(_duration_ms(output), 5500)
 
+    def test_same_bgm_auto_mode_uses_one_track_for_every_chapter(self):
+        from unittest.mock import patch
+        from app.audio.assembler import _duration_ms, _mix_chapter_bgm
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            chapters = []
+            for number, title in ((1, "First"), (2, "Second")):
+                chapter_dir = root / f"{number:03d}_{title}"
+                _write_wav(chapter_dir / "chunks" / "00001.wav", 2.2)
+                chapters.append(chapter_dir)
+
+            first_track = root / "book-default-first.wav"
+            alternate_track = root / "book-default-alternate.wav"
+            _write_wav(first_track, 1.0)
+            _write_wav(alternate_track, 1.0)
+            output = root / "same-bgm-auto-mode.m4b"
+
+            # Even when a legacy project still records auto source mode, the
+            # Same BGM strategy must resolve one book-level track, not choose
+            # a different mood track independently for each chapter.
+            with (
+                patch(
+                    "app.audio.library.resolve_music_track",
+                    side_effect=[first_track, alternate_track],
+                ) as automatic_music,
+                patch("app.audio.assembler._mix_chapter_bgm", wraps=_mix_chapter_bgm) as chapter_mix,
+            ):
+                assemble_m4b(
+                    chapters,
+                    output,
+                    "Same BGM auto-mode regression",
+                    chapter_titles=["First", "Second"],
+                    background_audio_volume=0.18,
+                    background_audio_mode="auto",
+                    auto_music_style="auto",
+                    auto_music_variation=None,
+                    chapter_transition_sound=False,
+                    chapter_bgm_strategy="same",
+                )
+
+                self.assertEqual(automatic_music.call_count, 1)
+                self.assertEqual(chapter_mix.call_count, 2)
+                mixed_tracks = [Path(call.args[1]) for call in chapter_mix.call_args_list]
+                self.assertEqual(mixed_tracks, [first_track, first_track])
+
+            self.assertTrue(output.is_file())
+            self.assertGreater(output.stat().st_size, 1024)
+            self.assertGreaterEqual(_duration_ms(output), 4000)
+            self.assertLessEqual(_duration_ms(output), 5500)
+
     def test_chapter_based_sound_design_preview_ignores_auto_bgm_for_unassigned_chapter(self):
         from types import SimpleNamespace
         from unittest.mock import patch
