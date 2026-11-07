@@ -2464,6 +2464,50 @@ class RegressionTests(unittest.TestCase):
             self.assertEqual(host._job_update.call_args.kwargs["state"], "cancelled")
             self.assertNotIn("preview-job", host._preview_cancel_events)
 
+    def test_package_size_report_breaks_down_offline_runtime_and_installer_overhead(self):
+        import json
+        from package_size_report import build_report
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            dist = root / "dist" / "Ryu's Audiobook"
+            files = {
+                dist / "bundled_models" / "piper" / "voice.onnx": 10,
+                dist / "bundled_models" / "kokoro" / "model.onnx": 20,
+                dist / "assets" / "starter_audio" / "music" / "track.mp3": 30,
+                dist / "_internal" / "PySide6" / "QtWebEngineCore.dll": 40,
+                dist / "_internal" / "onnxruntime" / "capi" / "onnxruntime.dll": 50,
+                dist / "Ryu's Audiobook.exe": 60,
+            }
+            for path, size in files.items():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"x" * size)
+
+            installer_dir = root / "installer" / "installer-output"
+            installer_dir.mkdir(parents=True)
+            (installer_dir / "Ryu's Audiobook Setup.exe").write_bytes(b"h" * 150)
+            (installer_dir / "Ryu's Audiobook Core Setup.exe").write_bytes(b"c" * 100)
+            (installer_dir / "payload_info.generated.json").write_text(
+                json.dumps({"version": "1.2.0+build.test", "installed_size_bytes": 210, "file_count": 6}),
+                encoding="utf-8",
+            )
+
+            report = build_report(root, dist, target_bytes=200)
+
+            self.assertEqual(report["dist"]["total_bytes"], 210)
+            self.assertEqual(report["dist"]["file_count"], 6)
+            self.assertFalse(report["dist"]["target_met"])
+            self.assertEqual(report["offline_assets"]["piper_models"]["size_bytes"], 10)
+            self.assertEqual(report["offline_assets"]["kokoro_models"]["size_bytes"], 20)
+            self.assertEqual(report["offline_assets"]["starter_audio"]["size_bytes"], 30)
+            self.assertEqual(report["runtime_components"]["PySide6"]["total_bytes"], 40)
+            self.assertEqual(report["runtime_components"]["onnxruntime"]["total_bytes"], 50)
+            self.assertEqual(report["installers"]["html_setup_bytes"], 150)
+            self.assertEqual(report["installers"]["core_setup_bytes"], 100)
+            self.assertEqual(report["installers"]["html_wrapper_overhead_bytes"], 50)
+            self.assertEqual(report["payload_info"]["version"], "1.2.0+build.test")
+            self.assertIn("No assets are removed or excluded by this report.", report["notes"])
+
     def test_pause_profiles_keep_sentence_and_dialogue_turns_natural(self):
         from app.tts.pacing import pause_after_ms
         self.assertGreaterEqual(pause_after_ms("That is the end.", "natural"), 280)
