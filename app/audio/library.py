@@ -356,12 +356,15 @@ def validate_saved_audio_paths(state):
     raise ValueError(f"Chapter {chapter} uses custom BGM but no track is saved. Reassign it in Sound Design.")
    fields.append((raw,"custom BGM for chapter "+str(chapter),None,"music"))
  elif audio_mode=="manual":
-  book_path=state.get("background_audio_path") or state.get("background_audio_preferred_path")
+  # A legacy ambience bed is an alternate book-level track, never a second
+  # simultaneous layer. Prefer the explicit book-default path when present.
+  book_path=(
+   state.get("background_audio_path")
+   or state.get("background_audio_preferred_path")
+   or state.get("ambience_audio_path")
+  )
   if book_path:
    fields.append((book_path,"book background music",None,"music"))
-  ambience=state.get("ambience_audio_path")
-  if ambience:
-   fields.append((ambience,"book ambience",None,"music"))
  elif audio_mode=="auto":
   auto_path=state.get("auto_music_track_path")
   if auto_path:
