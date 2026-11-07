@@ -2300,9 +2300,44 @@ class PremiumV2Bridge(QObject):
         if not title_value:
             raise ValueError("Chapter title cannot be empty.")
         chapter.title = title_value
+        original_text = str(chapter.text or "")
+        saved_assignments = list(getattr(chapter, "dialogue_assignments", []) or [])
         chapter.text = left
         new_title = str(payload.get("new_title") or f"{title_value} (continued)").strip()[:500]
-        new_chapter = Chapter(number + 1, new_title, right)
+
+        # Assignment offsets belong to the exact source text. Preserve and rebase
+        # only spans wholly contained on one side of the split. If the editor has
+        # changed the source, or a span crosses the split/trimmed whitespace,
+        # discard that span rather than attach it to the wrong passage.
+        left_assignments = []
+        right_assignments = []
+        if text_value == original_text:
+            right_source = text_value[split_at:]
+            removed_right_prefix = len(right_source) - len(right_source.lstrip())
+            right_boundary = split_at + removed_right_prefix
+            for assignment in saved_assignments:
+                if not isinstance(assignment, dict):
+                    continue
+                start, end = assignment.get("start"), assignment.get("end")
+                if (isinstance(start, bool) or not isinstance(start, int)
+                        or isinstance(end, bool) or not isinstance(end, int)
+                        or start < 0 or end <= start or end > len(text_value)):
+                    continue
+                assignment_text = str(assignment.get("text") or "")
+                if not assignment_text or text_value[start:end] != assignment_text:
+                    continue
+                if end <= split_at:
+                    left_assignments.append(dict(assignment))
+                elif start >= right_boundary:
+                    shifted = dict(assignment)
+                    shifted["start"] = start - right_boundary
+                    shifted["end"] = end - right_boundary
+                    right_assignments.append(shifted)
+                # A crossing span or a span in trimmed whitespace is invalidated.
+        chapter.dialogue_assignments = left_assignments
+        new_chapter = Chapter(
+            number + 1, new_title, right, dialogue_assignments=right_assignments
+        )
         project.chapters.insert(index + 1, new_chapter)
         for i, item in enumerate(project.chapters, 1):
             item.number = i
