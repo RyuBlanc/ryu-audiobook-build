@@ -104,3 +104,21 @@ Build #2765 closes the package-report regression assertions introduced during St
 - Result: regression `tests` job passed; Windows `build` job was skipped because this commit did not request an artifact checkpoint.
 - Correction: packaged Production Preview selector acceptance now resolves the live option node on each poll and records selector diagnostics on timeout. A dedicated source-contract test protects this behavior.
 - Boundary: this is regression evidence only. It does not supersede failed packaged acceptance in #2766 and does not establish frozen-app, installer, portable-package, or runtime acceptance.
+
+
+## Stage 8 accumulated checkpoint evidence — Build #2758
+
+- Exact source commit: `48436fa0f84e3d011cfe93dc6154d10fbe65ab11`.
+- Workflow: [Build #2758](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42355220964) — both `tests` and `build` jobs succeeded.
+- Regression suite: 1,280 tests passed.
+- Windows package: HTML installer and portable artifacts created from the exact tested source.
+- HTML installer artifact: `Ryu-Audiobook-Installer-2758`, 884,188,623 bytes.
+- HTML installer SHA-256: `C60FC64DF84AB13F89F3D237F41A5AA4E44229C2AA71F9C1284ACA82A1F62C72`.
+- Portable artifact: `Ryu-Audiobook-Portable-2758`, 1,368,264,705 bytes.
+- Portable ZIP SHA-256: `6dfa47e6bfef788118bc854568284f331df323783e16a9c98dc7892e8428bc3d`.
+- Release SHA manifest artifact: `Ryu-Audiobook-Release-SHA256-2758`; its archive SHA-256 is `3d16ceff0a3ea690803d37736ab3c16610f3247d9e7d8ec01d78eaa49c0bb797`.
+- Packaged acceptance exercised Premium V2/native bridge startup, real frozen-app Music Library imports/filters/audio preview, chapter BGM rules and persistence, full-book mix preview, selected Production chapter preview, generation, embedded M4B chapters, playback/player, job retry/recovery, History/Task Manager and the automated 41-viewport responsiveness matrix.
+- Windows installer integration installed, upgraded, launched the offline self-test/Premium V2 app, uninstalled and preserved user data.
+- Package reporter recorded a 500,000,000-byte target miss. Package-size optimization remains deferred; do not remove offline assets to chase the target.
+- **Release boundary:** build used `RYU_APP_VERSION=1.1.1`. This is a successful Stage 8 candidate package, not a Version 1.2.0 installer/release. Physical target-PC, actual listening, monitor/DPI and GPU-vendor checks remain separate.
+
