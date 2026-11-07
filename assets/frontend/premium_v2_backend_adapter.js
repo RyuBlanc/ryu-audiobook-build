@@ -8612,7 +8612,7 @@
           'Supported source formats are TXT, EPUB, searchable PDF and DOCX. Unsupported or corrupt files should show a clear error.',
           'Use Browse or drag and drop to select a file. Wait for extraction to finish and inspect the text preview, title, author and cover metadata.',
           'Check the extracted chapter and word coverage before continuing. Cancel a long import if the wrong file was selected.',
-          'Scanned or image-only PDFs do not currently have OCR support. Use a searchable PDF or convert the source to DOCX or TXT first.'
+          'Scanned/image-only PDF OCR is not supported. Use a searchable PDF or convert the source to DOCX or TXT first.'
         ]
       },
       {
@@ -8772,7 +8772,7 @@
         title: 'Known limitations',
         summary: 'Features that should not be mistaken for supported behavior.',
         items: [
-          'Scanned or image-only PDF OCR is not supported; use searchable PDFs or another supported text format.',
+          'Scanned/image-only PDF OCR is not supported; use searchable PDFs or another supported text format.',
           'M4B is the supported final audiobook container. M4A and MP3 export are not currently supported as final output formats.',
           'The short Production chapter preview cannot currently demonstrate the After first paragraph BGM offset because it does not carry saved full-chapter paragraph timing. Use the full-book mix preview of saved narration to verify that offset.',
           'GPU acceleration depends on the detected hardware, drivers and installed runtime. A device should be treated as supported only when the app reports it and a real benchmark/preview succeeds.',
