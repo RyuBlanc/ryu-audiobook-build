@@ -365,6 +365,25 @@ class Stage8JobRetryRecoveryTests(unittest.TestCase):
                     harness._job_recover({"job_id": "failed-job"})
             self.assertFalse(harness._production_generate_book.called)
 
+    def test_retry_rejects_a_job_when_a_newer_generation_owns_the_project(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            source = {
+                "job_id": "older-failed-job", "project_folder": str(folder),
+                "type": "audiobook-generation", "state": "failed", "recoverable": True,
+            }
+            harness, project = self._harness(folder, source)
+            with (
+                patch("app.ui.premium_v2_host.list_projects", return_value=[project]),
+                patch("app.ui.premium_v2_host.load_state", return_value={
+                    "generation_job_id": "newer-generation-job",
+                    "generation_recovery_required": False,
+                }),
+            ):
+                with self.assertRaisesRegex(ValueError, "A newer generation job now owns this project"):
+                    harness._job_retry({"job_id": "older-failed-job"})
+            self.assertFalse(harness._production_generate_book.called)
+
     def test_retry_blocks_a_second_active_generation_for_the_same_project(self):
         with tempfile.TemporaryDirectory() as temp:
             folder = Path(temp)
