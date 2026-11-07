@@ -265,3 +265,27 @@ The most recent commits on this branch include the test-first BGM regression, as
 - Cancellation and partial-output deletion test: `a58d9674e7315381a858b643b45b7e578aa6b4ef`.
 - Defect/evidence record updated at `36c1dbede72ba52bcf20d95197086020a3a3fedc`.
 - These tests cover saved-narration immutability, temporary staging cleanup, cancellation state and partial preview removal. They still require execution in CI.
+
+
+## Stage 8.2.9 — Premium V2 frontend/backend parity audit
+
+**Source/test head before this checkpoint:** `10d2a0b1b794f3e2f53914d1d358f0b6de2cf136`.
+
+### Static command parity
+
+- Audited the Premium V2 backend adapter against `app/ui/premium_v2_host.py`.
+- 108 distinct direct adapter `call(...)` command names were found; all 108 have a matching host handler. No missing direct command names were found in this scan.
+- Existing contract tests include adapter/dispatcher command parity, all 15 navigation destinations, production preview integration, storage controls, and performance benchmark separation.
+- This is static command/contract evidence only; it does not prove each rendered button works at runtime.
+
+### Dead-end controls and blocked Character Studio actions fixed
+
+- Legacy Settings `Choose Folder` no longer remains disabled with an unsupported-action message. It is relabeled **Manage storage locations** and navigates to the working Settings > Storage tab, where the supported project, audio asset and model roots can be selected.
+- The document-level click guard no longer blocks functional Character Studio actions: Accept High Confidence, Skip Suggestion, Use Library, Create New and Quick Create.
+- Stale AI queue prototype rows without an exact `data-dialogue-id` are hidden rather than displayed as inert disabled actions. Real source-backed dialogue rows retain their navigation/action path.
+- Source commits include `47ec2d2`, `dfc231d` and `2e66456`; the updated contract test is in `10d2a0b`.
+
+**Requirements touched:** CS dialogue review/assignment and manual character actions; MOD storage-root navigation; UI parity and no-placeholder-control acceptance.
+
+**Status:** CODE CHANGED — NOT VERIFIED. The updated contract test and full regression suite must pass on the exact candidate; interactive Windows acceptance must confirm the Settings > Storage navigation and each Character Studio action.
+
