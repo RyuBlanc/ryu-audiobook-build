@@ -1901,7 +1901,7 @@ class RegressionTests(unittest.TestCase):
 
     def test_chapter_based_bgm_never_falls_back_to_auto_music(self):
         from unittest.mock import patch
-        from app.audio.assembler import _duration_ms, _run
+        from app.audio.assembler import _duration_ms, _mix_chapter_bgm
 
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -1922,7 +1922,7 @@ class RegressionTests(unittest.TestCase):
             # be mixed; an unassigned chapter must remain narration-only.
             with (
                 patch("app.audio.library.resolve_music_track", return_value=default_music) as auto_music,
-                patch("app.audio.assembler._run", wraps=_run) as ffmpeg_run,
+                patch("app.audio.assembler._mix_chapter_bgm", wraps=_mix_chapter_bgm) as chapter_mix,
             ):
                 assemble_m4b(
                     chapters,
@@ -1951,7 +1951,7 @@ class RegressionTests(unittest.TestCase):
 
     def test_same_bgm_auto_mode_uses_one_track_for_every_chapter(self):
         from unittest.mock import patch
-        from app.audio.assembler import _duration_ms, _mix_chapter_bgm
+        from app.audio.assembler import _duration_ms, _run
 
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -1975,7 +1975,7 @@ class RegressionTests(unittest.TestCase):
                     "app.audio.library.resolve_music_track",
                     side_effect=[first_track, alternate_track],
                 ) as automatic_music,
-                patch("app.audio.assembler._mix_chapter_bgm", wraps=_mix_chapter_bgm) as chapter_mix,
+                patch("app.audio.assembler._run", wraps=_run) as ffmpeg_run,
             ):
                 assemble_m4b(
                     chapters,
@@ -2369,8 +2369,13 @@ class RegressionTests(unittest.TestCase):
 
             self.assertEqual(result, output.resolve())
             self.assertEqual(captured["args"].count("-i"), 2)
-            self.assertIn(str(book_track), captured["args"])
-            self.assertNotIn(str(legacy_ambience), captured["args"])
+            input_paths = [
+                captured["args"][index + 1]
+                for index, argument in enumerate(captured["args"][:-1])
+                if argument == "-i"
+            ]
+            self.assertTrue(any(Path(path).samefile(book_track) for path in input_paths))
+            self.assertFalse(any(Path(path).samefile(legacy_ambience) for path in input_paths))
             self.assertTrue(output.is_file())
 
     def test_full_book_preview_mixes_disposable_copies_without_mutating_saved_narration(self):
