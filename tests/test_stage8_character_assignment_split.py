@@ -93,8 +93,13 @@ class CharacterAssignmentDeleteTests(unittest.TestCase):
         def _active_project(self):
             return self.project
 
-    def test_delete_removes_single_speaker_and_cleans_multi_speaker_and_voice_cast(self):
-        import json
+        def _project_series_name(self, project, state):
+            return project.title
+
+        def _now(self):
+            return "2026-11-07T12:00:00+00:00"
+
+    def test_delete_refuses_to_orphan_saved_single_or_multi_speaker_assignments(self):
         from app.core.state import load_state, save_state
 
         source = "Mira speaks. Both characters answer."
@@ -109,26 +114,40 @@ class CharacterAssignmentDeleteTests(unittest.TestCase):
                 Chapter(1,"Chapter 1",source,dialogue_assignments=assignments)
             ])
             project.save()
-            save_state(root,{
+            original_state = {
                 "characters":[
-                    {"name":"Mira","aliases":["Miri","Ren"],"voice_profile":"Voice A"},
+                    {"name":"Mira","aliases":["Miri"],"voice_profile":"Voice A"},
                     {"name":"Ren","aliases":["Ren Two"],"voice_profile":"Voice B"},
                 ],
-                "voice_cast":{"Mira":"Voice A","Miri":"Voice A","Ren":"Voice B"},
-            })
+                "voice_cast":{"Mira":"Voice A","Ren":"Voice B"},
+            }
+            save_state(root,original_state)
+            bridge = self.BridgeHarness(project)
+
+            with self.assertRaisesRegex(ValueError,"Cannot delete.*saved dialogue assignments"):
+                PremiumV2Bridge._character_delete(bridge,{"name":"Mira"})
+
+            self.assertEqual(project.chapters[0].dialogue_assignments,assignments)
+            saved = load_state(root)
+            self.assertEqual(saved["characters"],original_state["characters"])
+            self.assertEqual(saved["voice_cast"],original_state["voice_cast"])
+
+    def test_delete_succeeds_after_character_has_no_saved_dialogue_references(self):
+        from app.core.state import load_state, save_state
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = Project("Delete Cast Book",root,chapters=[
+                Chapter(1,"Chapter 1","Narration only.",dialogue_assignments=[])
+            ])
+            project.save()
+            save_state(root,{"characters":[{"name":"Mira"},{"name":"Ren"}]})
             bridge = self.BridgeHarness(project)
 
             result = PremiumV2Bridge._character_delete(bridge,{"name":"Mira"})
 
-            saved = load_state(root)
             self.assertTrue(result["deleted"])
-            self.assertEqual([row["name"] for row in saved["characters"]],["Ren"])
-            self.assertEqual(saved["voice_cast"],{"Ren":"Voice B"})
-            self.assertEqual(len(project.chapters[0].dialogue_assignments),1)
-            remaining = project.chapters[0].dialogue_assignments[0]
-            self.assertEqual(remaining["speaker"],"Ren")
-            self.assertEqual(remaining["speakers"],["Ren"])
-            self.assertNotIn("multi_speaker_mode",remaining)
+            self.assertEqual([row["name"] for row in load_state(root)["characters"]],["Ren"])
 
     def test_delete_rejects_unknown_character_without_mutating_project(self):
         from app.core.state import load_state, save_state
@@ -144,7 +163,7 @@ class CharacterAssignmentDeleteTests(unittest.TestCase):
             save_state(root,{"characters":[{"name":"Mira"}]})
             bridge = self.BridgeHarness(project)
 
-            with self.assertRaisesRegex(ValueError,"no longer in the saved cast"):
+            with self.assertRaisesRegex(ValueError,"no longer in the saved cast for that series"):
                 PremiumV2Bridge._character_delete(bridge,{"name":"Missing"})
             self.assertEqual(len(project.chapters[0].dialogue_assignments),1)
             self.assertEqual(load_state(root)["characters"],[{"name":"Mira"}])
