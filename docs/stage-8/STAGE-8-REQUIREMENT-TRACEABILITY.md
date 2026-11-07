@@ -193,3 +193,30 @@ This inventory extracts all stable requirement IDs from the Master Bug & Change 
 - Defect record commit: `025a467112e60244bec541b5943283b838119ed5`.
 - This checkpoint requests the Windows workflow's full artifact-checkpoint gate on the current candidate. Record the resulting run and artifact hashes only after verifying the Actions result.
 - Until matching-head tests pass, SD-02 remains CODE CHANGED — NOT VERIFIED. Real Windows audio acceptance remains pending even after CI passes.
+
+
+## REL-01 — Live branch and pull-request dependency audit
+
+**Audited against current Stage 8 working HEAD:** `811822a0497b6943ba61b85105b797a9409b2a18`.
+
+| PR | Current state | Head / base | Comparison with working branch | Integration decision |
+|---|---|---|---|---|
+| #15 | Open, draft, not mergeable | `fix/import-qa-speaker-hover-hardware` → `main`; head `9aa1ba5` | Its head is an ancestor of the working branch. | Do not merge a duplicate stack. Verify its relevant import, UI, hardware and model fixes remain present in current code. |
+| #18 | Open, ready, mergeable | `stage-3/voice-studio-character-assignment` → `fix/import-qa-speaker-hover-hardware`; head `47db24f` | Diverged; 27 commits unique to PR #18 are not in current branch. Changed files include Character Inspector backend/tests, Character/Voice host and frontend adapter. | Outstanding integration dependency. Do not merge blindly: current branch has a substantially evolved Premium V2 host/adapter and already contains frontend-derived inspector UI. Compare behavior and selectively port missing verified capabilities. |
+| #19 | Open, draft, not mergeable | `stage-4-pronunciation-sound-design` → Stage 3; head `c33479c` | PR head is an ancestor of the working branch. | Stage 4 stack is already in current lineage; do not duplicate-merge. Verify its required behavior against the current register. |
+| #20 | Open, draft, mergeable | `fix/installer-branding-accessibility` → Stage 4; head `05c4efb` | PR head is an ancestor of the working branch. | Branding changes are already in current lineage; retain runtime wizard visual acceptance as pending. |
+| #26 | Open, ready, mergeable | `fix/library-delete-recovery-live-character-data` → `main`; head `80b53bb` | Diverged; 43 commits unique to PR #26 are not in current branch. | Do not merge blindly. `app/core/project_trash.py` is byte-identical in current branch; current host/adapter already expose Character Library bridge/UI behavior and current `app/core/character_library.py` is newer/different. PR #26's separate page and import-status module are absent; audit whether the current integrated UI provides equivalent functionality before porting anything. |
+| #4 | Open, ready, not mergeable | `fix/qwen-preset-selection-and-audio-stage` → `main`; head `60d4285` | Diverged; 2 commits unique to PR #4 are not in current branch. | The preset-change behavior is already present in current `app/ui/voice_page.py` with equivalent draft/selection reset logic but different status wording. Verify regression coverage before deciding whether the PR can be closed as superseded. |
+
+### Specific parity observations from source inspection
+
+- Current `app/ui/premium_v2_host.py` exposes Character Library list/save/delete/import/restore bridge actions and persists project/series metadata.
+- Current `assets/frontend/premium_v2_backend_adapter.js` renders an Assigned Cast inspector, saved-profile selector, dialogue rows, line count, unique chapter count, AI-assigned percentage and AI/manual row styling. This is a different implementation from PR #18's new Python `character_inspector.py`; confirm the percentage/source calculation and selected-dialogue playback with behavioral tests rather than importing duplicate implementations.
+- Current `app/core/project_trash.py` matches PR #26's file exactly, so that portion is already integrated.
+- Current `app/ui/voice_page.py` already clears a saved profile when a Qwen VoiceDesign preset changes and labels the result as an unsaved draft. PR #4's behavior is present in evolved form; its test coverage still needs confirmation.
+
+**REL-01 status:** IN PROGRESS. The branch graph is now recorded; functional equivalence and selective integration are not yet accepted.
+
+## Exact-candidate verification boundary
+
+The most recent commits on this branch include the test-first BGM regression, assembler fix, evidence record, 128-ID traceability matrix and this PR audit. Build #2680's 1,258 passing tests predate these source changes. No matching-head passing CI result or real Windows audio acceptance is recorded here. The current candidate must pass the full regression suite and a Windows artifact-checkpoint build before any affected requirement can advance beyond CODE CHANGED — NOT VERIFIED.
