@@ -5,10 +5,10 @@ from app.version import APP_NAME, APP_VERSION, RELEASE_LABEL, full_version
 
 
 class ApplicationVersionContractTests(unittest.TestCase):
-    def test_application_uses_requested_stable_baseline(self):
+    def test_application_uses_requested_release_version(self):
         self.assertEqual(APP_NAME, "Ryu's Audiobook")
-        self.assertEqual(APP_VERSION, "1.1.1")
-        self.assertTrue(RELEASE_LABEL.startswith("v1.1.1 • Build "))
+        self.assertEqual(APP_VERSION, "1.2.0")
+        self.assertTrue(RELEASE_LABEL.startswith("v1.2.0 • Build "))
         self.assertEqual(full_version(), RELEASE_LABEL)
 
     def test_version_has_three_numeric_components(self):
