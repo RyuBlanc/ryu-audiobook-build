@@ -83,6 +83,12 @@ class Stage8UIPackagedAcceptanceContractTests(unittest.TestCase):
         self.assertIn(".character-library-toolbar>.segmented{grid-column:1/-1", html)
         self.assertIn(".character-library-toolbar>.segmented button{flex:1;min-width:0;white-space:nowrap}", html)
 
+    def test_character_library_toolbar_mobile_breakpoint_is_a_real_css_at_rule(self):
+        html = (ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
+        self.assertIn("}\n@media(max-width:760px){", html)
+        self.assertNotIn(r"}\n@media(max-width:760px){", html)
+        self.assertIn(".character-library-toolbar{grid-template-columns:1fr}", html)
+
     def test_help_guide_badge_does_not_claim_release_version_before_version_bump(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("Stage 8 acceptance candidate", adapter)
