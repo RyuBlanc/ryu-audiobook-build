@@ -141,14 +141,15 @@ def mix_voice_preview(
             if music is not None:
                 layers.append((music, music_volume, "music"))
         elif background_enabled and mode == "manual":
-            for layer_path, gain, label in (
-                (background_audio_path, music_volume, "music"),
-                (ambience_audio_path, ambience_volume, "ambience"),
-            ):
-                if layer_path and gain > 0:
-                    candidate = Path(layer_path).expanduser()
-                    if candidate.is_file():
-                        layers.append((candidate.resolve(), gain, label))
+            # Match production's Version 1 single-book-BGM policy. Older
+            # projects may still carry an ambience path; use it only as the
+            # alternate default when no explicit book track is selected.
+            layer_path = background_audio_path or ambience_audio_path
+            gain = music_volume if background_audio_path else ambience_volume
+            if layer_path and gain > 0:
+                candidate = Path(layer_path).expanduser()
+                if candidate.is_file():
+                    layers.append((candidate.resolve(), gain, "music"))
 
         effect_entries: list[tuple[int, str, int]] = []
         if story_effects_enabled and text and story_effect_volume > 0:
