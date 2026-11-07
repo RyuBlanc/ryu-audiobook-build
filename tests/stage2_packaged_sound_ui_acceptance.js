@@ -765,10 +765,11 @@
       const stage6ResponsiveApp = document.querySelector("#app")?.outerHTML || "";
       const stage6ResponsiveJobs = jobsModal?.outerHTML || "";
       const stage6ResponsiveDetails = document.querySelector("#jobDetailsModal")?.outerHTML || "";
-      const stage6ResponsiveSound = document.querySelector("#sound")?.outerHTML || "";
+      const stage6ResponsiveSoundCount = (stage6ResponsiveApp.match(/id="sound"/g) || []).length;
       must(stage6ResponsiveCss.length > 10000 &&
         stage6ResponsiveApp.includes('id="sound"') &&
-        stage6ResponsiveSound.includes('id="soundTrackGrid"') &&
+        stage6ResponsiveApp.includes('id="soundTrackGrid"') &&
+        stage6ResponsiveSoundCount === 1 &&
         stage6ResponsiveApp.includes('id="player"') &&
         stage6ResponsiveApp.includes('id="history"') &&
         stage6ResponsiveApp.includes('id="miniPlayer"') &&
@@ -795,8 +796,7 @@
         '" data-effects="' + stage6ResponsiveEffects + '"><head><meta charset="utf-8">' +
         '<meta name="viewport" content="width=device-width, initial-scale=1">' +
         '<style>' + stage6ResponsiveStyle + '</style></head><body>' +
-        stage6ResponsiveApp.replace(/<section class="page" id="sound">[\\s\\S]*?(?=<section class="page")/, "") +
-        stage6ResponsiveSound + stage6ResponsiveJobs + stage6ResponsiveDetails + '</body></html>';
+        stage6ResponsiveApp + stage6ResponsiveJobs + stage6ResponsiveDetails + '</body></html>';
       await waitFor("responsive CSS fixture loads",() => {
         const frameDoc = stage6ResponsiveFrame.contentDocument;
         return Boolean(frameDoc && frameDoc.readyState === "complete" &&
@@ -948,9 +948,29 @@
             pageRect.left >= -2 && pageRect.right <= width + 2,
             destination + " page container exceeds the responsive workspace at " + label + ": " +
               JSON.stringify({left:pageRect.left,right:pageRect.right,width:pageRect.width,available:availablePageWidth}));
-          must(page.scrollWidth <= availablePageWidth + 2,
+          const pageOverflow = page.scrollWidth > availablePageWidth + 2;
+          const overflowElements = pageOverflow ? Array.from(page.querySelectorAll("*")).map(element => {
+            const rect = element.getBoundingClientRect();
+            const style = getComputedStyle(element);
+            const rightOverflow = Math.max(0, rect.right - pageRect.right);
+            const internalOverflow = (!["auto","scroll"].includes(style.overflowX) &&
+              !["hidden","clip"].includes(style.overflowX))
+              ? Math.max(0, element.scrollWidth - element.clientWidth) : 0;
+            return {
+              tag: element.tagName.toLowerCase(), id: element.id || "",
+              className: String(element.className || "").slice(0,120),
+              left: Math.round(rect.left), right: Math.round(rect.right),
+              width: Math.round(rect.width), clientWidth: element.clientWidth,
+              scrollWidth: element.scrollWidth, rightOverflow: Math.round(rightOverflow),
+              internalOverflow, display: style.display, minWidth: style.minWidth,
+              gridColumns: style.gridTemplateColumns, overflowX: style.overflowX
+            };
+          }).filter(item => item.width > 0 && (item.rightOverflow > 1 || item.internalOverflow > 2))
+            .sort((a,b) => Math.max(b.rightOverflow,b.internalOverflow) - Math.max(a.rightOverflow,a.internalOverflow))
+            .slice(0,12) : [];
+          must(!pageOverflow,
             destination + " page has horizontal overflow at " + label + ": " +
-              JSON.stringify({scrollWidth:page.scrollWidth,available:availablePageWidth}));
+              JSON.stringify({scrollWidth:page.scrollWidth,available:availablePageWidth,overflowElements}));
           if (label === "1280x720" && destination === "generate") {
             record("stage8_generate_page_1280x720_no_horizontal_overflow",
               page.scrollWidth <= availablePageWidth + 2,
