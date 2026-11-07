@@ -289,3 +289,21 @@ The most recent commits on this branch include the test-first BGM regression, as
 
 **Status:** CODE CHANGED — NOT VERIFIED. The updated contract test and full regression suite must pass on the exact candidate; interactive Windows acceptance must confirm the Settings > Storage navigation and each Character Studio action.
 
+
+
+## Stage 8.2.9 — In-app Help & Guide update
+
+**Source/test head before this checkpoint:** `77d35bef5500493cfd1ee35519087ac08e8e9339`.
+
+- Added a task-based in-app Help & Guide renderer to the Premium V2 `#help` destination.
+- The guide has searchable, expandable/collapsible topic cards covering Getting Started; Dashboard and Library; Import; Chapters; Voice Studio; Character Studio and Character Library; Pronunciation; Sound Design; Music Library; Production; Audiobooks; History and Background Jobs; Models; Performance; Settings and Storage; Troubleshooting; and Known Limitations.
+- It explains the current Same BGM / Chapter-Based / No BGM / Voice Only rules, one-track policy, cue limits, preview durations, Qwen 0.6B/1.7B selection and VoiceDesign model requirement, storage migration, generation recovery, playback and actual benchmark interpretation.
+- It explicitly documents scanned/image-only PDF OCR and M4A/MP3 limitations, hardware-dependent acceleration, and the current short chapter-preview limitation for After first paragraph BGM offset.
+- Help contract test: `cb2e6f2c24ec9144966732183c244837ca8f27cb`; Qwen setup coverage test: `f2b65cc750d10d6902dc2faa5cdb68cb0b0d794b`.
+- Help implementation/content commits: `7e9bcf19ca002af1817cc7c3269767066fcce3d5`, `68c8940d0601630fc1dc021da3ebd59eb8349c70`, `77d35bef5500493cfd1ee35519087ac08e8e9339`.
+
+### Frontend/backend static parity result
+
+At the same source head, a static scan found 108 distinct direct backend command calls in the Premium V2 adapter and 132 host handler keys; all 108 direct command names had a matching handler (zero missing). This is a source-level contract result, not proof of runtime click behavior.
+
+**Status:** HELP-01..03 and the touched UI parity controls are CODE CHANGED — NOT VERIFIED. The Help page must be opened and searched on the packaged Windows app, and each described workflow must be checked against the actual controls before the guide is accepted.
