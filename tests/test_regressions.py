@@ -2420,6 +2420,50 @@ class RegressionTests(unittest.TestCase):
             self.assertEqual(host._job_update.call_args.kwargs["state"], "completed")
             self.assertNotIn("preview-job", host._preview_cancel_events)
 
+    def test_full_book_preview_cancel_discards_partial_mix_output(self):
+        import threading
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+        from app.ui.full_book_preview import _render_full_book_preview
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source_dir = root / "project" / "working_audio" / "001_Chapter"
+            _write_wav(source_dir / "chunks" / "00001.wav", 1.0)
+            output = root / "Previews" / "cancelled-mix-preview.m4b"
+            output.parent.mkdir(parents=True)
+            cancel_event = threading.Event()
+
+            def cancel_during_mix(_chapter_dirs, output_path, *args, **kwargs):
+                Path(output_path).write_bytes(b"partial mix output" * 200)
+                cancel_event.set()
+                kwargs["progress"](1, 1, "mixing")
+
+            host = SimpleNamespace(
+                _job_update=Mock(),
+                _jobs_lock=threading.RLock(),
+                _preview_cancel_events={"preview-job": cancel_event},
+            )
+            state = {
+                "background_audio_mode": "off",
+                "background_audio_enabled": False,
+                "chapter_transition_sound": False,
+            }
+
+            with (
+                patch("app.audio.assembler.assemble_m4b", side_effect=cancel_during_mix),
+                patch("app.audio.assembler._duration_ms", return_value=1000),
+            ):
+                _render_full_book_preview(
+                    host, "preview-job", SimpleNamespace(), [source_dir], ["Chapter"],
+                    output, "Preview Book", "Author", {"title": "Preview Book"}, 256,
+                    state, cancel_event,
+                )
+
+            self.assertFalse(output.exists())
+            self.assertEqual(host._job_update.call_args.kwargs["state"], "cancelled")
+            self.assertNotIn("preview-job", host._preview_cancel_events)
+
     def test_pause_profiles_keep_sentence_and_dialogue_turns_natural(self):
         from app.tts.pacing import pause_after_ms
         self.assertGreaterEqual(pause_after_ms("That is the end.", "natural"), 280)
