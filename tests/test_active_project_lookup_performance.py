@@ -157,7 +157,7 @@ class ActiveProjectLookupPerformanceTests(unittest.TestCase):
                 patch.object(Path, "iterdir", side_effect=AssertionError(
                     "non-migrating project reload must not enumerate narration folders"
                 )),
-                patch("app.core.project.save_state", side_effect=AssertionError(
+                patch("app.core.state.save_state", side_effect=AssertionError(
                     "non-migrating project reload must not rewrite legacy BGM state"
                 )),
             ):
