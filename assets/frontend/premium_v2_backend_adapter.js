@@ -8578,6 +8578,258 @@
     }
     return result;
   }
+  function renderHelpGuide() {
+    const root = document.getElementById('help');
+    if (!root || root.dataset.ryuHelpGuideRendered === 'true') return;
+    root.dataset.ryuHelpGuideRendered = 'true';
+
+    const topics = [
+      {
+        title: 'Getting started',
+        summary: 'A safe path from an imported book to a finished audiobook.',
+        items: [
+          'Open Library to continue an existing project, or use Import Book to create a project from a supported source file.',
+          'Review the extracted text and chapter boundaries before configuring voices. Save edits before moving to another screen.',
+          'Choose a narrator voice, review detected characters, set pronunciation and sound preferences, then complete Input Project Details.',
+          'Use the chapter preview to check the selected chapter and settings before starting full-book generation.',
+          'After generation, open Audiobooks to listen to the M4B output and use History or Background Jobs if a task needs attention.'
+        ]
+      },
+      {
+        title: 'Dashboard and Library',
+        summary: 'Find projects, check their status and recover work safely.',
+        items: [
+          'Dashboard counts and recent-project cards reflect local project data. Select a card to reopen that exact project.',
+          'In Library, search by project metadata and filter by status. Open a project to restore its saved book and metadata.',
+          'Use the project delete and recovery controls carefully. Review Trash before permanent purge; deleting a project must not erase its completed History records.',
+          'If a project is missing or interrupted, use the available recovery guidance rather than creating a duplicate project immediately.'
+        ]
+      },
+      {
+        title: 'Import Studio',
+        summary: 'Bring in book text without silently losing content.',
+        items: [
+          'Supported source formats are TXT, EPUB, searchable PDF and DOCX. Unsupported or corrupt files should show a clear error.',
+          'Use Browse or drag and drop to select a file. Wait for extraction to finish and inspect the text preview, title, author and cover metadata.',
+          'Check the extracted chapter and word coverage before continuing. Cancel a long import if the wrong file was selected.',
+          'Scanned or image-only PDFs do not currently have OCR support. Use a searchable PDF or convert the source to DOCX or TXT first.'
+        ]
+      },
+      {
+        title: 'Chapter Studio',
+        summary: 'Review, edit and organize the book before narration.',
+        items: [
+          'Run chapter detection, then review every heading and boundary. Detection should not silently replace your manual edits.',
+          'Rename, reorder, split, edit or delete chapters using the available controls. Save changes and wait for the Saved status before leaving.',
+          'Use search and Find & Replace to locate text. Review punctuation, paragraph breaks, dialogue and multilingual names after cleanup.',
+          'Empty or whitespace-only chapters are identified separately. Valid chapters can continue; an all-empty book must be repaired before generation.',
+          'If a save is still in progress, wait for it to finish before splitting or changing chapters again.'
+        ]
+      },
+      {
+        title: 'Voice Studio',
+        summary: 'Choose a provider, configure a voice, save a profile and preview it.',
+        items: [
+          'Follow Voice Library → Configure → Voice Profile → Preview & Assign. Guided mode and Show All Steps should preserve the current selection.',
+          'Provider readiness is based on the actual runtime, model, network or API configuration. A catalogue entry alone does not mean the provider is ready.',
+          'Save Profile Only stores the profile without changing the narrator. Save and Use as Narrator changes the active project narrator; Assign to Character opens the character selector.',
+          'Preview targets include 10, 30, 60 or 90 seconds. Check the requested and actual duration, listen in the in-app player, and wait for successful preview completion before assigning.',
+          'Changing provider, voice, profile, model, prompt or preview text invalidates an older preview. Generate a fresh preview before assignment.',
+          'For voice cloning or custom reference audio, use only voices and recordings you are authorized to use. Online providers require network access; local providers depend on installed models and supported hardware.'
+        ]
+      },
+      {
+        title: 'Character Studio',
+        summary: 'Review the cast and make sure each dialogue line uses the intended voice.',
+        items: [
+          'Run Analyze after importing or substantially editing the book. Review character candidates, confidence and dialogue examples before accepting suggestions.',
+          'Use Assigned Cast to review the character, series, dialogue-line count and chapter count. Assigned Voice and AI-assignment percentages should reflect saved project data.',
+          'Manual assignments are shown separately from AI suggestions. Review low-confidence matches and correct aliases or speaker names when needed.',
+          'Use the selected dialogue and selected saved profile to Test Voice. Stop, resume or replay the test from the in-app controls.',
+          'Create or edit a character when the speaker is missing. Unassigned narration follows the project Narrator fallback; confirm the default narrator voice before full generation.'
+        ]
+      },
+      {
+        title: 'Character Library',
+        summary: 'Reuse characters and series information across projects.',
+        items: [
+          'Create or select a series, then add a character with a canonical name, aliases and a representative dialogue sample.',
+          'Choose a saved voice profile when one is appropriate. A library entry is reusable reference data; confirm the assignment in the current project.',
+          'Review series volume and project metadata before generation. Do not assume a character-library voice has been assigned until the project shows the saved assignment.'
+        ]
+      },
+      {
+        title: 'Pronunciation Studio',
+        summary: 'Control how names and uncommon words are spoken.',
+        items: [
+          'Add a written form and the exact pronunciation you want spoken. Use the preview to hear the result with the selected voice profile.',
+          'Use Current Book for project-specific overrides and Global Library for reusable entries. A book-specific entry takes precedence over a global entry for the same written form.',
+          'AI-suggested and manually entered terms are identified separately. Edit, delete or multi-delete entries after reviewing them.',
+          'Use the Enable control and the studio-wide pronunciation toggle to control whether saved rules are applied. The Generate toggle must stay synchronized with this setting.',
+          'For Japanese names or foreign words, enter the intended English-letter pronunciation explicitly when the automatic pronunciation is not correct. Check common-word suggestions before accepting them.'
+        ]
+      },
+      {
+        title: 'Sound Design Studio',
+        summary: 'Choose one background-music strategy and review cues before production.',
+        items: [
+          'Same BGM uses one book-default track throughout the book. Chapter-Based BGM uses only the explicit track saved for each chapter; an unassigned chapter means No BGM and must not fall back to the book default.',
+          'Version 1 uses one BGM bed at a time. Do not layer a second legacy ambience track under the selected BGM. Chapter BGM volume is limited to 50%; the book default starts at 18% and is limited to 50%.',
+          'Set the chapter track start offset and end/fade behavior where available. Immediate and After 10 seconds are available in the short chapter preview; After first paragraph is verified through the saved full-book mix preview when paragraph timing boundaries exist.',
+          'The supported cue slots are Opening, Next Chapter and Closing. Keep cue files short (up to five seconds), preview them, and use Save Cue Changes. Do not expect a separate Scene Transition slot in Version 1.',
+          'Voice Only disables all BGM and cues while preserving saved selections for later. Confirm the live mix summary and levels before opening Production Studio.',
+          'Use the full-book mix preview to hear the saved narration with the current BGM strategy and cues. It uses temporary copies of saved narration and must not modify the source chapter audio.'
+        ]
+      },
+      {
+        title: 'Music Library',
+        summary: 'Import, categorize and audition background tracks.',
+        items: [
+          'Browse All, Fantasy adventure, Battle & warfare, Mystery, Horror, Romance, Sci-fi, Calm narration or Others.',
+          'Use search and category filters to find an installed or imported track. Select a track and use Play/Pause to preview it.',
+          'Import a supported audio file, choose its category and wait for validation and metadata saving. The track should remain available after leaving the page or restarting the app.',
+          'The master BGM default is 18% and the maximum is 50%. Chapter volume is a separate setting, also limited to 50%.'
+        ]
+      },
+      {
+        title: 'Production Studio',
+        summary: 'Check metadata, preview a chapter and generate the complete book.',
+        items: [
+          'Open Input Project Details near the output-folder and job controls. Review title, author, narrator, publisher, series, volume, language, release year, genre and cover image.',
+          'Complete the required metadata before full-book generation. Incomplete details are highlighted and block full generation; a short preview remains available.',
+          'Select a saved chapter in the chapter-preview selector. Preview Audio should render only that chapter, show the selected chapter and actual duration, and keep the full-book generation action separate.',
+          'Choose 10, 30, 60 or 90 seconds for preview (30 seconds by default). Listen to the result and download it only after the preview has completed successfully.',
+          'During full generation, monitor the current chapter/stage, progress, elapsed time, remaining-time estimate and any error details. Use Pause, Resume, Cancel, Retry or Recover when the job state offers that action.',
+          'Preview and final generation should use the same saved pronunciation, voice assignments, BGM strategy, cues and output settings. Save changes in their studio before starting production.'
+        ]
+      },
+      {
+        title: 'Audiobooks',
+        summary: 'Listen to completed output and navigate by chapter.',
+        items: [
+          'Open a completed audiobook and use Play/Pause, the timeline, volume and speed controls.',
+          'Use the 15-second forward/back controls and the chapter list to navigate. Selecting a chapter should move the playhead to that chapter.',
+          'The mini-player remains available while navigating to other screens. Close it when you no longer need playback.',
+          'Check the title, author, narrator, cover and chapter list against the project metadata. If playback or chapter navigation fails, keep the output and record the issue before regenerating.'
+        ]
+      },
+      {
+        title: 'History and Background Jobs',
+        summary: 'Understand completed work and manage active tasks.',
+        items: [
+          'History is the durable record of terminal operations, including completed, failed and cancelled tasks. Use date filters and search to locate an operation.',
+          'Background Jobs shows active and queued work. Open job details to inspect progress, logs, error messages and the project or chapter involved.',
+          'Use View, Cancel, Retry or Recover only when the job state offers that action. A retry should preserve valid completed work and report what will be regenerated.',
+          'History and Background Jobs should agree about the final state of an operation. If a job disappears from the active queue, check History for its terminal result.'
+        ]
+      },
+      {
+        title: 'Models Center',
+        summary: 'Manage installed voice models and their storage safely.',
+        items: [
+          'Review each model/runtime status, version, install location, checksum or health result before using it.',
+          'Install missing components, Repair unhealthy installations, Verify files or Uninstall unused models from the model action menu.',
+          'Active generation or preview jobs protect models they are using. Wait for those jobs to finish before uninstalling or moving a model.',
+          'Uninstalling a model must not delete projects, saved voice profiles or user audio. Check the displayed path before removing files.',
+          'Use Settings > Storage to choose supported model, project-library and audio-asset roots. Keep external drives connected during migration and verification.'
+        ]
+      },
+      {
+        title: 'Performance Center',
+        summary: 'Check hardware and measure actual synthesis performance.',
+        items: [
+          'Refresh the hardware snapshot to inspect CPU, RAM, GPU, VRAM, CUDA/accelerator availability, operating system, disk and model information.',
+          'Run the TTS benchmark separately from the hardware refresh. Review synthesis time, generated audio duration, real-time factor (RTF), throughput, resource use and errors.',
+          'Repeat and export benchmark records. Compare results only when hardware, model, provider, settings and test text are comparable.',
+          'A 30-second preview under 60 seconds is a performance target, not a guarantee on every CPU, GPU or provider. Use the recorded benchmark and actual preview time to assess the machine.'
+        ]
+      },
+      {
+        title: 'Settings and Storage',
+        summary: 'Configure paths, appearance and local storage locations.',
+        items: [
+          'Open Settings > Storage to manage supported project-library, audio-asset and model roots. Review the current and target paths before migration.',
+          'Wait for copy/migration, checksum verification and completion status before closing the app or disconnecting an external drive. Keep the source until verification succeeds.',
+          'Set the output folder and confirm it is writable before generation. The output path shown in Production Studio should match Settings.',
+          'Use the appearance and accessibility controls for theme, text scale, window size and reduced motion where available.',
+          'Book text and custom reference audio are stored locally for supported local workflows. Online providers require network access and should be clearly identified.'
+        ]
+      },
+      {
+        title: 'Troubleshooting',
+        summary: 'Practical checks for common problems.',
+        items: [
+          'Preview fails or no sound plays: confirm the selected provider/model is ready, check the output device and volume, inspect the job error, then retry a short preview.',
+          'Wrong voice is heard: confirm the saved profile, provider voice ID, narrator/character assignment and preview validity. Generate a fresh preview after changing any of them.',
+          'No BGM on a chapter: in Chapter-Based mode, assign one explicit track to that chapter. No BGM is intentional when no track is saved; the book default is not a fallback.',
+          'Generation cannot start: review empty chapters, missing voices, metadata completeness, output-folder permissions and missing model assets.',
+          'A storage migration is interrupted: keep the source drive connected, reopen Settings > Storage and use the displayed recovery/verification status before retrying.',
+          'An import looks incomplete: compare extracted text and chapter/word coverage with the source. Scanned PDFs need OCR outside this app before import.',
+          'A job fails: open its details in Background Jobs or History, read the actual error, then use Retry or Recover only when offered.'
+        ]
+      },
+      {
+        title: 'Known limitations',
+        summary: 'Features that should not be mistaken for supported behavior.',
+        items: [
+          'Scanned or image-only PDF OCR is not supported; use searchable PDFs or another supported text format.',
+          'M4B is the supported final audiobook container. M4A and MP3 export are not currently supported as final output formats.',
+          'The short Production chapter preview cannot currently demonstrate the After first paragraph BGM offset because it does not carry saved full-chapter paragraph timing. Use the full-book mix preview of saved narration to verify that offset.',
+          'GPU acceleration depends on the detected hardware, drivers and installed runtime. A device should be treated as supported only when the app reports it and a real benchmark/preview succeeds.',
+          'The installed music catalogue and any imported track must have verified source and licensing information. Do not assume a large track count or a licence that is not displayed.'
+        ]
+      }
+    ];
+
+    const cards = topics.map((topic, index) => (
+      '<details class="panel help-guide-card" data-help-guide-card style="padding:14px 16px;border:1px solid var(--border,rgba(127,127,127,.25));border-radius:12px;background:var(--panel,var(--surface,transparent))"' +
+      (index === 0 ? ' open' : '') + '>' +
+      '<summary style="cursor:pointer;display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;font-weight:650">' +
+      esc(topic.title) + '<span style="font-weight:400;color:var(--muted,#888);font-size:12px">' + esc(topic.summary) + '</span></summary>' +
+      '<ul style="margin:12px 0 0;padding-left:20px;display:grid;gap:8px;line-height:1.55">' +
+      topic.items.map(item => '<li>' + esc(item) + '</li>').join('') +
+      '</ul></details>'
+    )).join('');
+
+    root.innerHTML =
+      '<div class="help-guide-shell" style="display:grid;gap:14px;padding-bottom:24px">' +
+        '<header style="display:grid;gap:6px">' +
+          '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+            '<h1 style="margin:0">Help &amp; Guide</h1>' +
+            '<span class="badge" style="font-size:11px">Version 1.2.0 release candidate</span>' +
+          '</div>' +
+          '<p class="muted" style="margin:0;line-height:1.5">Task-based instructions for importing a book, preparing voices, configuring sound, generating an audiobook and recovering work. This guide describes the current candidate and calls out known limitations.</p>' +
+        '</header>' +
+        '<div class="help-guide-toolbar" role="search" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+          '<input id="helpGuideSearch" type="search" aria-label="Search Help and Guide" placeholder="Search a screen, task or setting" style="flex:1;min-width:220px" />' +
+          '<button type="button" class="btn small secondary" id="helpGuideExpandAll">Expand all</button>' +
+          '<button type="button" class="btn small secondary" id="helpGuideCollapseAll">Collapse all</button>' +
+        '</div>' +
+        '<div id="helpGuideSections" style="display:grid;gap:10px">' + cards + '</div>' +
+        '<p id="helpGuideNoResults" class="muted" hidden>No guide topics match that search. Try a screen name or a shorter phrase.</p>' +
+      '</div>';
+
+    const cardsInPage = Array.from(root.querySelectorAll('[data-help-guide-card]'));
+    const search = root.querySelector('#helpGuideSearch');
+    const noResults = root.querySelector('#helpGuideNoResults');
+    search?.addEventListener('input', () => {
+      const query = String(search.value || '').trim().toLowerCase();
+      let visible = 0;
+      cardsInPage.forEach(card => {
+        const match = !query || card.textContent.toLowerCase().includes(query);
+        card.hidden = !match;
+        if (match) visible += 1;
+      });
+      if (noResults) noResults.hidden = visible > 0;
+    });
+    root.querySelector('#helpGuideExpandAll')?.addEventListener('click', () => {
+      cardsInPage.filter(card => !card.hidden).forEach(card => { card.open = true; });
+    });
+    root.querySelector('#helpGuideCollapseAll')?.addEventListener('click', () => {
+      cardsInPage.forEach(card => { card.open = false; });
+    });
+  }
+
   function wireStorageControls() {
     const cleanupButton = $('storageCleanupTemp');
     if (cleanupButton && cleanupButton.dataset.ryuCleanupBound !== 'true') {
@@ -8856,6 +9108,7 @@
       progress:null
     });
     installUiTextScaleRuntime();
+    renderHelpGuide();
     wireModelDetails();
     installCharacterStudioHandlers();
     // Remove the prototype's same-element click handlers synchronously, before
