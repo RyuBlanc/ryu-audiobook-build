@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-DEFAULT_TARGET_BYTES = 500 * 1024 * 1024
+DEFAULT_TARGET_BYTES = 500_000_000  # 500 MB (decimal)
 
 
 def _file_size(path: Path) -> int:
@@ -151,7 +151,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=Path("package-size-report.json"))
     parser.add_argument("--target-mb", type=int, default=500)
     args = parser.parse_args()
-    report = build_report(Path(__file__).resolve().parent, args.dist, args.target_mb * 1024 * 1024)
+    report = build_report(Path(__file__).resolve().parent, args.dist, args.target_mb * 1_000_000)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(
         "Package size report created: "
