@@ -31,6 +31,10 @@ class Stage8UIPackagedAcceptanceContractTests(unittest.TestCase):
         )
         self.assertIn('page.scrollWidth <= availablePageWidth + 2', source)
         self.assertIn('destination + " page has horizontal overflow at " + label', source)
+        html = (ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
+        self.assertIn(".generate-layout{grid-template-columns:minmax(0,.95fr) minmax(0,1.3fr) minmax(0,1fr)}", html)
+        self.assertIn(".generate-layout>.card{min-width:0}", html)
+        self.assertIn('stage8_generate_page_1280x720_no_horizontal_overflow', source)
 
     def test_help_guide_badge_does_not_claim_release_version_before_version_bump(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")

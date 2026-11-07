@@ -947,6 +947,11 @@
           must(page.scrollWidth <= availablePageWidth + 2,
             destination + " page has horizontal overflow at " + label + ": " +
               JSON.stringify({scrollWidth:page.scrollWidth,available:availablePageWidth}));
+          if (label === "1280x720" && destination === "generate") {
+            record("stage8_generate_page_1280x720_no_horizontal_overflow",
+              page.scrollWidth <= availablePageWidth + 2,
+              JSON.stringify({scrollWidth:page.scrollWidth,available:availablePageWidth}));
+          }
         }
         for (const candidate of pageContainers) candidate.classList.remove("active");
         playerPage.classList.add("active");
