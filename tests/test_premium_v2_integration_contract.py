@@ -1351,6 +1351,28 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("writeStyleIfChanged(progress, 'width', pct + '%')", refresh_jobs)
 
 
+    def test_help_guide_covers_stage8_workflows_and_current_limitations(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("function renderHelpGuide()", adapter)
+        self.assertIn("renderHelpGuide();", adapter)
+        self.assertIn("helpGuideSearch", adapter)
+        for topic in (
+            "Getting started", "Dashboard and Library", "Import Studio", "Chapter Studio",
+            "Voice Studio", "Character Studio", "Character Library", "Pronunciation Studio",
+            "Sound Design Studio", "Music Library", "Production Studio", "Audiobooks",
+            "History and Background Jobs", "Models Center", "Performance Center",
+            "Settings and Storage", "Troubleshooting",
+        ):
+            self.assertIn(topic, adapter)
+        for current_rule in (
+            "Same BGM", "Chapter-Based", "No BGM", "Voice Only",
+            "10, 30, 60 or 90 seconds", "M4B", "Scanned/image-only PDF",
+            "Settings > Storage", "After first paragraph",
+        ):
+            self.assertIn(current_rule, adapter)
+        self.assertIn("Known limitations", adapter)
+        self.assertIn("Do not unplug", adapter)
+
     def test_source_less_queue_placeholders_are_hidden_and_storage_is_navigable(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
