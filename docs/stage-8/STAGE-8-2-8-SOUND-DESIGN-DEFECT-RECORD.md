@@ -45,3 +45,26 @@ The assembler's automatic-audio branch resolved and mixed a mood-selected music 
 6. Compare Book Mix Preview and final M4B using the same saved strategy and assignments.
 
 Do not mark SD-02, SD-05, SD-06, SD-07, SD-12, SD-13, SD-14, GEN-06 or PROD-15 complete from this source fix alone. Each still requires its own relevant tests and audio/runtime evidence.
+
+
+## Second defect found: Production chapter preview used automatic fallback
+
+The separate Production chapter sound preview path in `PremiumV2Bridge._render_sound_design_preview` had the same policy leak. It entered the explicit chapter-assignment branch only when `background_audio_mode == "manual"`; with a legacy/stale `auto` mode it selected automatic mood music even when the saved BGM strategy was Chapter-Based.
+
+### Test-first change
+
+- Regression test commit: `fb82fe037296c6cdfd330f921fef3d500d4abbab`.
+- Added two behavioral routing tests:
+  - Chapter-Based + auto mode + No BGM must not call automatic music resolution or chapter mixer.
+  - Chapter-Based + auto mode + explicit chapter track must call the chapter mixer with that exact track and must not resolve automatic music.
+
+### Root-cause fix
+
+- Source fix commit: `37d30f94a8244d0eac87dc6b4601195cf5ff9030`.
+- The chapter preview now enters the explicit chapter assignment branch whenever the strategy is Chapter-Based, regardless of the legacy audio source mode. Same BGM continues through the existing manual/automatic source-mode handling.
+
+### Updated verification boundary
+
+- Both the full M4B assembler and the Production chapter-preview path now have test-first regression coverage and source fixes.
+- Neither new test batch has a confirmed passing matching-head CI result in this record.
+- Actual listening tests for an assigned chapter, an unassigned chapter, Same BGM and Voice Only remain required.
