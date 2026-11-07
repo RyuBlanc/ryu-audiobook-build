@@ -85,5 +85,70 @@ class CharacterAssignmentChapterSplitTests(unittest.TestCase):
             self.assertEqual(project.chapters[1].dialogue_assignments, [])
 
 
+class CharacterAssignmentDeleteTests(unittest.TestCase):
+    class BridgeHarness:
+        def __init__(self, project):
+            self.project = project
+
+        def _active_project(self):
+            return self.project
+
+    def test_delete_removes_single_speaker_and_cleans_multi_speaker_and_voice_cast(self):
+        import json
+        from app.core.state import load_state, save_state
+
+        source = "Mira speaks. Both characters answer."
+        assignments = [
+            {"start":0,"end":12,"text":"Mira speaks","speaker":"Mira","source":"manual"},
+            {"start":14,"end":source.index(" answer"),"text":"Both characters","speaker":"Mira",
+             "speakers":["Mira","Ren"],"multi_speaker_mode":"chorus","source":"ai"},
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = Project("Delete Cast Book", root, chapters=[
+                Chapter(1,"Chapter 1",source,dialogue_assignments=assignments)
+            ])
+            project.save()
+            save_state(root,{
+                "characters":[
+                    {"name":"Mira","aliases":["Miri","Ren"],"voice_profile":"Voice A"},
+                    {"name":"Ren","aliases":["Ren Two"],"voice_profile":"Voice B"},
+                ],
+                "voice_cast":{"Mira":"Voice A","Miri":"Voice A","Ren":"Voice B"},
+            })
+            bridge = self.BridgeHarness(project)
+
+            result = PremiumV2Bridge._character_delete(bridge,{"name":"Mira"})
+
+            saved = load_state(root)
+            self.assertTrue(result["deleted"])
+            self.assertEqual([row["name"] for row in saved["characters"]],["Ren"])
+            self.assertEqual(saved["voice_cast"],{"Ren":"Voice B"})
+            self.assertEqual(len(project.chapters[0].dialogue_assignments),1)
+            remaining = project.chapters[0].dialogue_assignments[0]
+            self.assertEqual(remaining["speaker"],"Ren")
+            self.assertEqual(remaining["speakers"],["Ren"])
+            self.assertNotIn("multi_speaker_mode",remaining)
+
+    def test_delete_rejects_unknown_character_without_mutating_project(self):
+        from app.core.state import load_state, save_state
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = Project("Delete Cast Book",root,chapters=[
+                Chapter(1,"Chapter 1","Mira speaks.",dialogue_assignments=[
+                    {"start":0,"end":12,"text":"Mira speaks","speaker":"Mira"}
+                ])
+            ])
+            project.save()
+            save_state(root,{"characters":[{"name":"Mira"}]})
+            bridge = self.BridgeHarness(project)
+
+            with self.assertRaisesRegex(ValueError,"no longer in the saved cast"):
+                PremiumV2Bridge._character_delete(bridge,{"name":"Missing"})
+            self.assertEqual(len(project.chapters[0].dialogue_assignments),1)
+            self.assertEqual(load_state(root)["characters"],[{"name":"Mira"}])
+
+
 if __name__ == "__main__":
     unittest.main()
