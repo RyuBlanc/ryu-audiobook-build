@@ -113,3 +113,30 @@ The individual Production chapter sound preview currently rejects the `after_fir
 ### Updated verification boundary
 
 These are source/test commits only. Matching-head CI, packaged Windows audio listening and final preview-vs-M4B comparison remain pending.
+
+
+## Fourth defect: legacy ambience could create a second BGM layer
+
+Source inspection found that legacy `ambience_audio_path` was still mixed as a second continuous bed beside the book-default BGM. In Chapter-Based mode, the book-default track was suppressed but the legacy ambience bed could still play in chapters explicitly set to No BGM. The voice-preview mixer also layered both paths.
+
+### Test-first coverage
+
+- Test commit `a50a5397c691d1c871c49b3c7257d0b56dd3fbec`:
+  - Same BGM uses the selected book-default track only when a legacy ambience path is also present.
+  - A stale unused ambience path does not block validation when the book-default track is selected.
+- Test commit `6fd085416ab410f0ea27233a45c4dc1be836c33b`:
+  - Chapter-Based + No BGM suppresses both book-default and legacy ambience beds.
+- Test commit `aac289f9f17c4ccdea876b716a6637a50621da19`:
+  - Manual voice preview uses only one book-level BGM input.
+
+### Root-cause fixes
+
+- `fa339850428e16d61d0d028f365d4e0355035c9b`: final assembly now uses at most one book-level BGM bed; Chapter-Based suppresses both book-default and legacy ambience.
+- `22fc0238e4ac153e028f843316799a32c3d9f9e7`: saved-asset validation checks only the effective single book-level track, or explicit chapter tracks under Chapter-Based.
+- `b7a4f366887f68c13ef7f7f1177a6150ae6719a1`: voice preview uses the same single-track rule.
+
+Legacy ambience remains a compatibility alternate only when no explicit book-default track is selected; it is never layered with the selected BGM and is never applied under Chapter-Based.
+
+### Verification boundary
+
+These test and source changes are committed but not yet verified by matching-head CI. Real listening checks must confirm Same BGM is one continuous bed, Chapter-Based No BGM is narration-only, and Voice Only excludes all BGM/cues.
