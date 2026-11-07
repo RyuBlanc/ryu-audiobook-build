@@ -2050,6 +2050,87 @@ class RegressionTests(unittest.TestCase):
             automatic_music.assert_not_called()
             chapter_mix.assert_called_once()
 
+    def test_full_book_sound_preview_reuses_only_saved_eligible_chapter_audio(self):
+        import threading
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+        from app.ui.full_book_preview import start_full_book_preview
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            project_folder = root / "project"
+            audio_root = project_folder / "working_audio"
+            audio_root.mkdir(parents=True)
+            chapters = [
+                SimpleNamespace(number=1, title="Opening", chapter_id="chapter-opening",
+                                 text="Opening text.", skip_for_generation=False),
+                SimpleNamespace(number=2, title="Empty chapter", chapter_id="chapter-empty",
+                                 text="   ", skip_for_generation=False),
+                SimpleNamespace(number=3, title="Excluded", chapter_id="chapter-excluded",
+                                 text="Excluded text.", skip_for_generation=True),
+                SimpleNamespace(number=4, title="Finale", chapter_id="chapter-finale",
+                                 text="Finale text.", skip_for_generation=False),
+            ]
+            saved_dirs = []
+            for folder_name, chapter in (("old-opening-folder", chapters[0]), ("renamed-finale-folder", chapters[3])):
+                folder = audio_root / folder_name
+                _write_wav(folder / "chunks" / "00001.wav", 1.0)
+                (folder / "narration.json").write_text(
+                    json.dumps({
+                        "chapter_id": chapter.chapter_id,
+                        "chapter": chapter.number,
+                        "title": chapter.title,
+                    }),
+                    encoding="utf-8",
+                )
+                saved_dirs.append(folder)
+
+            project = SimpleNamespace(folder=project_folder, title="Preview Book", chapters=chapters)
+            state = {
+                "title": "Preview Book",
+                "author": "Test Author",
+                "audio_bitrate": 256,
+                "chapter_bgm_strategy": "same",
+            }
+            captured = {}
+
+            class DeferredThread:
+                def __init__(self, target, args, daemon, name):
+                    captured["target"] = target
+                    captured["args"] = args
+                    captured["daemon"] = daemon
+                    captured["name"] = name
+
+                def start(self):
+                    captured["started"] = True
+
+            host = SimpleNamespace(
+                _active_project=lambda: project,
+                _new_job=Mock(return_value="preview-job"),
+                _job_update=Mock(),
+                _jobs_lock=threading.RLock(),
+                _preview_cancel_events={},
+                _now=lambda: "2026-11-07T00:00:00+05:30",
+            )
+
+            with (
+                patch("app.core.state.load_state", return_value=state),
+                patch("app.audio.library.validate_saved_audio_paths"),
+                patch("app.core.paths.app_root", return_value=root),
+                patch("app.ui.full_book_preview.threading.Thread", DeferredThread),
+            ):
+                result = start_full_book_preview(host)
+
+            self.assertTrue(captured.get("started"))
+            self.assertEqual(result["job_id"], "preview-job")
+            self.assertEqual(result["chapter_count"], 2)
+            self.assertTrue(result["reuses_saved_narration"])
+            self.assertEqual(captured["args"][3], saved_dirs)
+            self.assertEqual(captured["args"][4], ["Opening", "Finale"])
+            self.assertTrue(Path(result["output_path"]).parent.is_dir())
+            host._job_update.assert_called_once()
+            self.assertEqual(host._job_update.call_args.kwargs["state"], "running")
+
     def test_pause_profiles_keep_sentence_and_dialogue_turns_natural(self):
         from app.tts.pacing import pause_after_ms
         self.assertGreaterEqual(pause_after_ms("That is the end.", "natural"), 280)
