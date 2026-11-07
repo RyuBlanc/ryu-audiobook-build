@@ -352,3 +352,32 @@ Use representative native resolutions for each ratio, including narrow and high-
 - Verify repeated navigation and resize cycles, not just a single screenshot.
 
 **Acceptance evidence:** record OS version, display resolution, aspect ratio, scaling percentage, monitor arrangement, window state, screen/module tested, observed result and any defect ID. Any untested combination remains OPEN; do not claim universal responsiveness from one PC or one monitor.
+
+
+## Stage 8.2.10 — Generation reliability and chapter-preview audit
+
+The current source and contract tests already cover the core PROD/GEN preview and generation flows; no duplicate implementation was added during this audit.
+
+### Production chapter preview behavior traced
+
+- The backend resolves the active project and selected saved chapter, rejects missing/empty chapters and validates the requested chapter ID against the saved chapter identity.
+- It uses the project's saved narrator profile, assigned character voices, pronunciation rules and saved Sound Design state; arbitrary transient Voice Studio provider/voice/text overrides are stripped from the Production preview request.
+- Preview jobs have a distinct `production-preview` type and independent monitor from full-book generation.
+- The chapter selector records chapter number, stable ID and chapter signature. A changed selection invalidates the old preview and requires a new preview for the selected chapter.
+- Completion checks the active project folder and requested/returned chapter identity before attaching audio to the player.
+- The UI reports real progress, elapsed/ETA data and measured audio duration; the preview is playable and has a separate Save/Download action.
+- The backend Save handler accepts only a completed Production preview belonging to the same project and chapter, verifies the exact output path under the preview directory, and opens a native Save As dialog.
+
+### Existing automated coverage
+
+- `test_production_generation_and_preview_use_independent_job_monitors`
+- `test_production_preview_uses_saved_sound_design_and_reports_selected_mix_configuration`
+- `test_production_preview_reports_real_progress_timing_and_measured_duration`
+- `test_production_preview_is_a_typed_cancellable_job_with_real_chapter_identity`
+- `test_production_preview_selector_creates_status_and_keeps_selected_chapter_before_job`
+- `test_production_preview_completion_uses_native_project_and_optional_chapter_id_identity`
+- `test_production_preview_save_is_separate_from_voice_studio_save_and_validates_job_scope`
+- `test_production_pronunciation_and_sound_design_state_are_saved_before_preview_and_full_generation`
+- Existing regression coverage also includes generation cancel, pause/resume at safe chapter boundaries, atomic resume state, completed-chunk reuse, empty-chapter handling and M4B packaging/progress.
+
+**Status:** source/contract coverage present for PROD-05..09, PROD-15 and the related GEN requirements. Matching-head CI and packaged Windows execution remain UNVERIFIED. Real audio must still confirm selected-chapter-only preview, playback, save/download, chapter/project switching, and preview/final parity. The short-preview After first paragraph offset remains an explicitly documented limitation; full-book mix preview uses saved chapter timing boundaries.
