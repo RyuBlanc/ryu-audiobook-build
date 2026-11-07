@@ -70,6 +70,9 @@ def _preview_requires_paragraph_boundary(state: dict[str, Any]) -> bool:
     """Keep the selected Production preview paragraph-aligned only when its saved BGM needs it."""
     if not isinstance(state, dict) or not state.get("_include_sound_design_preview"):
         return False
+    from app.audio.library import effective_background_audio_mode
+    if effective_background_audio_mode(state) == "off":
+        return False
     overrides = state.get("chapter_bgm_overrides")
     if not isinstance(overrides, dict):
         return False

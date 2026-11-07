@@ -836,8 +836,14 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
         self.assertFalse(_preview_requires_paragraph_boundary(no_bgm))
         same_bgm = {**base, "chapter_bgm_strategy": "same"}
         self.assertFalse(_preview_requires_paragraph_boundary(same_bgm))
-        voice_only = {**base, "_include_sound_design_preview": False}
+        voice_only = {
+            **base,
+            "background_audio_mode": "off",
+            "background_audio_enabled": False,
+        }
         self.assertFalse(_preview_requires_paragraph_boundary(voice_only))
+        no_sound_preview = {**base, "_include_sound_design_preview": False}
+        self.assertFalse(_preview_requires_paragraph_boundary(no_sound_preview))
         legacy_number_fallback = {
             **base,
             "_preview_chapter_id": "missing-id",
