@@ -103,6 +103,7 @@ def _preview_units(
     pronunciation_dictionary: list[dict] | None,
     max_chars: int,
     dialogue_assignments=None,
+    preserve_paragraph_boundaries: bool = False,
 ) -> list[tuple[str, str | list[str] | None]]:
     narration = prepare_for_narration(text).narration_text
 
@@ -142,6 +143,7 @@ def _preview_units(
             max_chars=preview_unit_chars,
             max_sentences=preview_unit_sentences,
             split_on_expression_change=split_preview_on_expression_change,
+            force_paragraph_boundaries=preserve_paragraph_boundaries,
         ):
             unit, rule_counts = apply_pronunciation_dictionary_with_counts(unit, pronunciation_dictionary)
             if used_chars >= max_chars:
@@ -211,6 +213,7 @@ def build_voice_preview(
     progress_callback=None,
     target_seconds: float | None = None,
     cancel_check=None,
+    preserve_paragraph_boundaries: bool = False,
 ) -> PreviewResult:
     if target_seconds is not None and float(target_seconds) > 0:
         # A character estimate is only a safety budget, not the preview's
@@ -235,6 +238,7 @@ def build_voice_preview(
         pronunciation_dictionary,
         max_chars=effective_max_chars,
         dialogue_assignments=dialogue_assignments,
+        preserve_paragraph_boundaries=preserve_paragraph_boundaries,
     )
     unit_rule_counts = getattr(units, "rule_counts", [])
     if not units:

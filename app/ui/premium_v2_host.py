@@ -66,6 +66,29 @@ from app.version import APP_NAME, full_version
 
 log = logging.getLogger(__name__)
 
+def _preview_requires_paragraph_boundary(state: dict[str, Any]) -> bool:
+    """Keep the selected Production preview paragraph-aligned only when its saved BGM needs it."""
+    if not isinstance(state, dict) or not state.get("_include_sound_design_preview"):
+        return False
+    overrides = state.get("chapter_bgm_overrides")
+    if not isinstance(overrides, dict):
+        return False
+    strategy = str(state.get("chapter_bgm_strategy") or ("custom" if overrides else "same")).strip().casefold()
+    if strategy not in {"custom", "chapter-based", "chapter_based", "chapter"}:
+        return False
+    chapter_id = str(state.get("_preview_chapter_id") or "").strip()
+    selected = overrides.get(chapter_id) if chapter_id else None
+    if not isinstance(selected, dict):
+        number = str(state.get("_preview_chapter_number") or "").strip()
+        selected = overrides.get(number, {}) if number else {}
+    if not isinstance(selected, dict):
+        return False
+    rule = str(selected.get("rule") or "none").strip().casefold()
+    offset = str(selected.get("start_offset") or "immediate").strip().casefold()
+    return rule == "custom" and offset == "after_first_paragraph"
+
+
+
 
 def _generation_worker_is_alive(manager: Any) -> bool:
     thread = getattr(manager, "_thread", None)
@@ -3876,6 +3899,7 @@ class PremiumV2Bridge(QObject):
                 max_chars=max(1400, seconds * 240), progress_callback=progress,
                 target_seconds=seconds,
                 cancel_check=cancel_event.is_set if cancel_event is not None else None,
+                preserve_paragraph_boundaries=_preview_requires_paragraph_boundary(state),
             )
             synthesis_finished_at = time.monotonic()
             measured_paragraph_boundary = getattr(result, "first_paragraph_end_ms", None)

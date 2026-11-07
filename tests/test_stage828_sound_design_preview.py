@@ -817,5 +817,36 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
         self.assertTrue(units[1][0].startswith("The second paragraph"))
 
 
+    def test_preview_boundary_preservation_is_scoped_to_selected_chapter_based_assignment(self):
+        from app.ui.premium_v2_host import _preview_requires_paragraph_boundary
+
+        base = {
+            "_include_sound_design_preview": True,
+            "_preview_chapter_number": 2,
+            "_preview_chapter_id": "chapter-two",
+            "chapter_bgm_strategy": "custom",
+            "chapter_bgm_overrides": {
+                "chapter-two": {"rule": "custom", "start_offset": "after_first_paragraph"},
+                "1": {"rule": "custom", "start_offset": "immediate"},
+            },
+        }
+        self.assertTrue(_preview_requires_paragraph_boundary(base))
+
+        no_bgm = {**base, "chapter_bgm_overrides": {"chapter-two": {"rule": "none"}}}
+        self.assertFalse(_preview_requires_paragraph_boundary(no_bgm))
+        same_bgm = {**base, "chapter_bgm_strategy": "same"}
+        self.assertFalse(_preview_requires_paragraph_boundary(same_bgm))
+        voice_only = {**base, "_include_sound_design_preview": False}
+        self.assertFalse(_preview_requires_paragraph_boundary(voice_only))
+        legacy_number_fallback = {
+            **base,
+            "_preview_chapter_id": "missing-id",
+            "chapter_bgm_overrides": {
+                "2": {"rule": "custom", "start_offset": "after_first_paragraph"}
+            },
+        }
+        self.assertTrue(_preview_requires_paragraph_boundary(legacy_number_fallback))
+
+
 if __name__ == "__main__":
     unittest.main()
