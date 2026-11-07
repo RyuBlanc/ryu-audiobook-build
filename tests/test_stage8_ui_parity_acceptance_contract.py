@@ -26,6 +26,21 @@ class Stage8UIPackagedAcceptanceContractTests(unittest.TestCase):
         self.assertIn('page.scrollWidth <= availablePageWidth + 2', source)
         self.assertIn('destination + " page has horizontal overflow at " + label', source)
 
+    def test_help_guide_badge_does_not_claim_release_version_before_version_bump(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("Stage 8 acceptance candidate", adapter)
+        self.assertNotIn("Version 1.2.0 release candidate", adapter)
+        self.assertIn("preserves paragraph boundaries when the selected Chapter-Based track uses After first paragraph", adapter)
+
+    def test_packaged_acceptance_exercises_help_guide_search_and_disclosure_controls(self):
+        source = (ROOT / "tests" / "stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
+        self.assertIn('helpSearch.value = "After first paragraph"', source)
+        self.assertIn('helpNoResults.hidden === false', source)
+        self.assertIn('helpGuideExpandAll', source)
+        self.assertIn('helpGuideCollapseAll', source)
+        self.assertIn('stage829_help_guide_search_empty_expand_collapse', source)
+
+
 
 if __name__ == "__main__":
     unittest.main()

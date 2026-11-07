@@ -8788,7 +8788,7 @@
         items: [
           'Scanned/image-only PDF OCR is not supported; use searchable PDFs or another supported text format.',
           'M4B is the supported final audiobook container. M4A and MP3 export are not currently supported as final output formats.',
-          'The short Production chapter preview can demonstrate After first paragraph BGM only when its generated audio contains a verified paragraph boundary. If the selected preview window ends too early or the boundary cannot be measured exactly, the app explains how to increase the duration or choose another offset. The full-book mix preview remains available for checking the saved narration mix.',
+          'The Production chapter preview preserves paragraph boundaries when the selected Chapter-Based track uses After first paragraph. It can demonstrate that offset only when the generated preview contains the complete first paragraph and its exact measured audio boundary. If the selected preview window ends too early or the boundary cannot be measured exactly, the app explains how to increase the duration or choose another offset. The full-book mix preview remains available for checking the saved narration mix.',
           'GPU acceleration depends on the detected hardware, drivers and installed runtime. A device should be treated as supported only when the app reports it and a real benchmark/preview succeeds.',
           'The installed music catalogue and any imported track must have verified source and licensing information. Do not assume a large track count or a licence that is not displayed.'
         ]
@@ -8810,7 +8810,7 @@
         '<header style="display:grid;gap:6px">' +
           '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
             '<h1 style="margin:0">Help &amp; Guide</h1>' +
-            '<span class="badge" style="font-size:11px">Version 1.2.0 release candidate</span>' +
+            '<span class="badge" style="font-size:11px">Stage 8 acceptance candidate</span>' +
           '</div>' +
           '<p class="muted" style="margin:0;line-height:1.5">Task-based instructions for importing a book, preparing voices, configuring sound, generating an audiobook and recovering work. This guide describes the current candidate and calls out known limitations.</p>' +
         '</header>' +
