@@ -244,3 +244,14 @@ After GitHub Actions completes, replace the pending statuses with the exact run 
 
 The following `[artifact-checkpoint]` commit is documentation-only and requests the Windows package on the exact source HEAD above. The packaged Sound Design acceptance must pass the actual Sound page through the full 41-viewport/all-15-destination matrix. Only then can the workflow continue to installer/portable packaging, Defender, manifests and uploads. If responsive acceptance still fails, use its new element-level diagnostics and do not weaken the assertion.
 
+
+
+## Sound track-grid overflow correction and matching-head preflight — 7 November 2026
+
+- Build #2811 failed packaged responsive acceptance with a precise actual-Sound-page diagnostic at 600x800: page scrollWidth 668 versus available 590.
+- The element-level evidence identified `#soundTrackGrid` as a two-column grid with computed columns `257px 257px` and scrollWidth 636. Each `.sound-track-info` descendant also had internal scroll widths up to 350px in a 218px-wide content box. The previous mobile import-panel override did not change this grid.
+- Source correction commit `c7b79a4f1efb6f186d0b01e1c7a36f3b61fbc35f`: at max-width 760px, Sound track grid becomes a single `minmax(0,1fr)` column; grid children/cards/info are constrained to available width and track text may wrap. No responsive assertion was weakened.
+- Regression contract tests now require the single-column grid and constrained track content.
+- Build #2812: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42391383182 — exact source commit `c7b79a4f1efb6f186d0b01e1c7a36f3b61fbc35f`; full regression **1,321 tests passed**. Windows packaging was skipped by design.
+- The all-destination responsive overflow test remains enabled. Matching-head Windows acceptance is the next gate; if any further overflow remains, element diagnostics will identify the actual descendant.
+
