@@ -212,3 +212,14 @@ After GitHub Actions completes, replace the pending statuses with the exact run 
 - Packaged Sound Design/Music Library acceptance: pending.
 - Installer/portable packaging and uploads: pending.
 - No Stage 8 package is marked complete by this checkpoint request alone. The six approved packages 8.2.7–8.2.12 still require their own requirement-level and release-gate evidence. The Version 1.2.0 release remains gated; #2804's frozen EXE was v1.1.1.
+
+
+## Responsive fixture correction — 7 November 2026
+
+- Builds #2804 and #2806 both passed regression and frozen startup but failed the Stage 8 responsive acceptance with the same 600x800 diagnostic (scrollWidth 666, available 590).
+- Investigation of the actual acceptance harness found that the responsive iframe cloned the live app, Player, History, mini-player, Task Manager and details surfaces, but did not separately include the actual Sound page element. The loop nevertheless activated a page with id="sound" in the cloned app. This means the reported 666px Sound-page measurement was not a grounded measurement of the actual Sound-page markup.
+- The mobile CSS attempt in source commit `238b7875cb6edbeeec40969054ed59da7b44e9b2` did not change the repeated diagnostic. Do not claim it fixed the issue.
+- Test correction commit: `02d5efd035ac90987321063730c4dc7043032e44`. The responsive iframe now captures the live `#sound` page and includes it in the actual CSS/viewport fixture, while removing the original duplicate before insertion. The fixture also requires `#soundTrackGrid` to exist before proceeding.
+- The all-15-destination/41-viewport assertions remain unchanged and are not weakened. The next run must tell us whether the real Sound page overflows and supply a trustworthy measurement. Fix production CSS only if that corrected test proves a real defect.
+- Matching-head regression and Windows package verification: pending.
+
