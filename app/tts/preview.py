@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import wave
@@ -32,6 +33,9 @@ class PreviewResult:
     # Exact text represented by synthesized segments; used to align preview SFX.
     source_text: str = ""
     applied_rule_counts: dict[str, int] | None = None
+    # Measured end of paragraph one in the synthesized preview, or None when
+    # the preview did not contain an exact paragraph-aligned audio boundary.
+    first_paragraph_end_ms: int | None = None
 
 
 def _run_ffmpeg(args: list[str]) -> None:
@@ -253,6 +257,13 @@ def build_voice_preview(
     report("preparing", 0, total_units)
     target = max(0.0, float(target_seconds or 0.0))
     accumulated_seconds = 0.0
+    first_paragraph_end_ms: int | None = None
+    first_paragraph_boundary_seen = False
+    narration_text = prepare_for_narration(text).narration_text
+    paragraphs = [
+        part for part in re.split(r"\r?\n[ \t]*\r?\n+", narration_text)
+        if part.strip()
+    ]
     output_path.parent.mkdir(parents=True, exist_ok=True)
     configure_narration = getattr(provider, "configure_narration", None)
     if callable(configure_narration):
@@ -357,6 +368,14 @@ def build_voice_preview(
                     accumulated_seconds += frames / float(rate)
             except (OSError, wave.Error):
                 pass
+            if not first_paragraph_boundary_seen:
+                paragraph_marker = re.search(r"\r?\n[ \t]*\r?\n", unit)
+                if paragraph_marker:
+                    first_paragraph_boundary_seen = True
+                    # A paragraph boundary inside a synthesized unit has no
+                    # exact audio timestamp. Fail closed rather than estimating.
+                    if re.search(r"\r?\n[ \t]*\r?\n[ \t]*$", unit):
+                        first_paragraph_end_ms = int(round(accumulated_seconds * 1000.0))
             report("synthesizing", index + 1, total_units)
             if target > 0 and accumulated_seconds >= target:
                 break
@@ -373,6 +392,18 @@ def build_voice_preview(
         check_cancelled()
         report("finalizing", 1, 1)
 
+    if (
+        first_paragraph_end_ms is None
+        and not first_paragraph_boundary_seen
+        and len(paragraphs) <= 1
+        and generated_segments == len(units)
+        and re.sub(r"\s+", " ", " ".join(generated_text)).strip()
+        == re.sub(r"\s+", " ", narration_text).strip()
+    ):
+        # A single-paragraph chapter ends at its only paragraph boundary, but
+        # only when the complete source paragraph was synthesized into preview.
+        first_paragraph_end_ms = int(round(accumulated_seconds * 1000.0))
+
     if not output_path.exists() or output_path.stat().st_size < 1024:
         raise RuntimeError("The voice preview was not created correctly.")
 
@@ -382,4 +413,5 @@ def build_voice_preview(
         voices_used=tuple(dict.fromkeys(voices_used)),
         source_text="\n".join(generated_text),
         applied_rule_counts=applied_rule_counts,
+        first_paragraph_end_ms=first_paragraph_end_ms,
     )

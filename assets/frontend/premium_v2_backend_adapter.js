@@ -8675,7 +8675,7 @@
         items: [
           'Same BGM uses one book-default track throughout the book. Chapter-Based BGM uses only the explicit track saved for each chapter; an unassigned chapter means No BGM and must not fall back to the book default.',
           'Version 1 uses one BGM bed at a time. Do not layer a second legacy ambience track under the selected BGM. Chapter BGM volume is limited to 50%; the book default starts at 18% and is limited to 50%.',
-          'Set the chapter track start offset and end/fade behavior where available. Immediate and After 10 seconds are available in the short chapter preview; After first paragraph is verified through the saved full-book mix preview when paragraph timing boundaries exist.',
+          'Set the chapter track start offset and end/fade behavior where available. The short chapter preview uses the measured audio boundary after paragraph one when the complete first paragraph is included; if the preview is too short or the boundary is ambiguous, increase the duration or choose Immediate / After 10 seconds.',
           'The supported cue slots are Opening, Next Chapter and Closing. Keep cue files short (up to five seconds), preview them, and use Save Cue Changes. Do not expect a separate Scene Transition slot in Version 1.',
           'Voice Only disables all BGM and cues while preserving saved selections for later. Confirm the live mix summary and levels before opening Production Studio.',
           'Use the full-book mix preview to hear the saved narration with the current BGM strategy and cues. It uses temporary copies of saved narration and must not modify the source chapter audio.'
@@ -8775,7 +8775,7 @@
         items: [
           'Scanned/image-only PDF OCR is not supported; use searchable PDFs or another supported text format.',
           'M4B is the supported final audiobook container. M4A and MP3 export are not currently supported as final output formats.',
-          'The short Production chapter preview cannot currently demonstrate the After first paragraph BGM offset because it does not carry saved full-chapter paragraph timing. Use the full-book mix preview of saved narration to verify that offset.',
+          'The short Production chapter preview can demonstrate After first paragraph BGM only when its generated audio contains a verified paragraph boundary. If the selected preview window ends too early or the boundary cannot be measured exactly, the app explains how to increase the duration or choose another offset. The full-book mix preview remains available for checking the saved narration mix.',
           'GPU acceleration depends on the detected hardware, drivers and installed runtime. A device should be treated as supported only when the app reports it and a real benchmark/preview succeeds.',
           'The installed music catalogue and any imported track must have verified source and licensing information. Do not assume a large track count or a licence that is not displayed.'
         ]

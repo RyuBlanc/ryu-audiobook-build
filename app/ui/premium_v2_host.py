@@ -3539,6 +3539,7 @@ class PremiumV2Bridge(QObject):
                 chapter_title, chapter_text, str(state.get("auto_music_style") or "auto"), None
             )
             cues_mixed = False
+            cue_prefix_duration_ms = 0
             if transition_enabled and selected_index:
                 cue_kind = "opening" if is_first_chapter else "page"
                 cue_value = state.get("opening_cue_path") if cue_kind == "opening" else state.get("page_turn_cue_path")
@@ -3552,6 +3553,7 @@ class PremiumV2Bridge(QObject):
                             cue, preview_root / f"sound-preview-{job_id}-{cue_kind}-level.m4a",
                             cue_volume, "192k"
                         )
+                        cue_prefix_duration_ms = max(0, int(_duration_ms(leveled)))
                         prefixed = preview_root / f"sound-preview-{job_id}-{cue_kind}.m4a"
                         _concat_audio_files(leveled, audio_source, prefixed, "192k")
                         audio_source = prefixed
@@ -3598,10 +3600,22 @@ class PremiumV2Bridge(QObject):
                         if start_offset == "after_10_seconds":
                             offset_ms = 10_000
                         elif start_offset == "after_first_paragraph":
-                            raise ValueError(
-                                "After first paragraph BGM requires saved chapter audio boundaries. "
-                                "Generate the chapter first or choose Immediate / After 10 seconds."
-                            )
+                            try:
+                                paragraph_offset_ms = int(state.get("_preview_first_paragraph_offset_ms") or 0)
+                            except (TypeError, ValueError, OverflowError):
+                                paragraph_offset_ms = 0
+                            if paragraph_offset_ms <= 0:
+                                raise ValueError(
+                                    "The preview could not verify an exact audio boundary after paragraph one. "
+                                    "Increase the preview duration so the complete first paragraph is included, "
+                                    "or choose Immediate / After 10 seconds."
+                                )
+                            if paragraph_offset_ms >= source_duration_ms:
+                                raise ValueError(
+                                    "The selected preview ends before the first-paragraph boundary. "
+                                    "Choose a longer preview duration or use Immediate / After 10 seconds."
+                                )
+                            offset_ms = cue_prefix_duration_ms + paragraph_offset_ms
                         fade_out = _chapter_bgm_fade_out(
                             str(override.get("end_behavior") or "fade_before_end"), fade_out
                         )
@@ -3864,6 +3878,12 @@ class PremiumV2Bridge(QObject):
                 cancel_check=cancel_event.is_set if cancel_event is not None else None,
             )
             synthesis_finished_at = time.monotonic()
+            measured_paragraph_boundary = getattr(result, "first_paragraph_end_ms", None)
+            state["_preview_first_paragraph_offset_ms"] = (
+                int(measured_paragraph_boundary)
+                if measured_paragraph_boundary is not None and int(measured_paragraph_boundary) > 0
+                else None
+            )
             if cancel_event is not None and cancel_event.is_set():
                 raise PreviewCancelledError("Preview cancelled by user.")
             voice_preview_path = Path(result.output_path)
