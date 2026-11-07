@@ -8750,7 +8750,7 @@
         summary: 'Configure paths, appearance and local storage locations.',
         items: [
           'Open Settings > Storage to manage supported project-library, audio-asset and model roots. Review the current and target paths before migration.',
-          'Wait for copy/migration, checksum verification and completion status before closing the app or disconnecting an external drive. Keep the source until verification succeeds.',
+          'Do not unplug an external drive while a storage migration, copy or verification is in progress. Keep it connected until the app confirms completion; if interrupted, reconnect the same drive and use the displayed recovery status before retrying. Keep the source until verification succeeds.',
           'Set the output folder and confirm it is writable before generation. The output path shown in Production Studio should match Settings.',
           'Use the appearance and accessibility controls for theme, text scale, window size and reduced motion where available.',
           'Book text and custom reference audio are stored locally for supported local workflows. Online providers require network access and should be clearly identified.'
