@@ -23,6 +23,12 @@ class Stage8UIPackagedAcceptanceContractTests(unittest.TestCase):
         self.assertIn('page.classList.contains("active")', source)
         self.assertIn('page.getClientRects().length > 0', source)
         self.assertIn("const stage8ResponsiveDestinations = [", source)
+        self.assertEqual(source.count("const stage8ResponsiveDestinations = ["), 1)
+        self.assertLess(
+            source.index("const stage8ResponsiveDestinations = ["),
+            source.index("async function runStage53JobUiAcceptance"),
+            "The shared destination list must be declared in the outer acceptance IIFE, not inside the responsive helper.",
+        )
         self.assertIn('page.scrollWidth <= availablePageWidth + 2', source)
         self.assertIn('destination + " page has horizontal overflow at " + label', source)
 

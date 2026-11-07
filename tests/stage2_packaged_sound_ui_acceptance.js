@@ -2,6 +2,12 @@
   const config = window.__RYU_SOUND_UI_ACCEPTANCE_CONFIG__ || {};
   const checks = {};
   const errors = [];
+  const stage8ResponsiveDestinations = [
+    "dashboard", "library", "import", "chapters", "voices",
+    "characters", "pronunciation", "sound", "generate", "player",
+    "history", "models", "performance", "settings", "help"
+  ];
+
   const pauseLabel = "Pause selected track";
   const NativeAudio = window.Audio;
   window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__ = [];
@@ -847,11 +853,7 @@
         ["900x1440",900,1440],["1080x1920",1080,1920],["1440x2560",1440,2560],
         ["2160x3840",2160,3840]
       ];
-      const stage8ResponsiveDestinations = [
-        "dashboard", "library", "import", "chapters", "voices",
-        "characters", "pronunciation", "sound", "generate", "player",
-        "history", "models", "performance", "settings", "help"
-      ];
+
       const stage6CheckResponsiveViewport = async (label,width,height) => {
         // Change both the iframe browsing-context attributes and its CSS size.
         // Wait for the real iframe viewport resize; a synthetic resize event
