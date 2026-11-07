@@ -256,4 +256,12 @@ The most recent commits on this branch include the test-first BGM regression, as
 - Source fixes: assembler `fa339850428e16d61d0d028f365d4e0355035c9b`, validation `22fc0238e4ac153e028f843316799a32c3d9f9e7`, voice preview `b7a4f366887f68c13ef7f7f1177a6150ae6719a1`.
 - Defect record updated at `dfacf903df912539d44025bddb1a95c8e15d873e`.
 - Remaining known preview parity limitation: `after_first_paragraph` is still rejected by the individual Production chapter preview because that preview has no saved paragraph-boundary timing metadata. Full-book preview/final assembly use the saved chunk manifest boundary path.
-- Eleven Sound Design regression tests have been added across the test commits listed in this matrix. No passing matching-head CI result is yet recorded.
+- Thirteen Sound Design regression tests have been added across the test commits listed in this matrix. No passing matching-head CI result is yet recorded.
+
+
+## Full-book preview safety gates
+
+- Disposable-copy preservation test: `acc3296f9812692792b976dc3a29b7d7a3db69aa`.
+- Cancellation and partial-output deletion test: `a58d9674e7315381a858b643b45b7e578aa6b4ef`.
+- Defect/evidence record updated at `36c1dbede72ba52bcf20d95197086020a3a3fedc`.
+- These tests cover saved-narration immutability, temporary staging cleanup, cancellation state and partial preview removal. They still require execution in CI.
