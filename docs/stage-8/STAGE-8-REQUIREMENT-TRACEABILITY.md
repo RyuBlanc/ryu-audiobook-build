@@ -58,7 +58,7 @@ This inventory extracts all stable requirement IDs from the Master Bug & Change 
 | PS-10 | P1 | Differentiate AI and manual rows. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | PS-11 | P1 | Test pronunciation behaviour in real audio. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | SD-01 | P1 | Remove specified top-right actions. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| SD-02 | P1 | Connect Same BGM/Chapter-Based BGM. | CODE CHANGED — NOT VERIFIED | Regression test test_chapter_based_bgm_never_falls_back_to_auto_music; source fix cb25247c. Matching-head execution pending. |
+| SD-02 | P1 | Connect Same BGM/Chapter-Based BGM. | CODE CHANGED — NOT VERIFIED | Assembler regression test test_chapter_based_bgm_never_falls_back_to_auto_music (ef804424); preview regressions for No BGM and explicit-track-only routing (fb82fe0); assembler fix cb25247c; chapter-preview fix 37d30f9. Matching-head execution pending. |
 | SD-03 | P1 | Chapter BGM filters. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | SD-04 | P1 | Chapter track selection. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | SD-05 | P1 | Chapter volume. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
@@ -197,7 +197,7 @@ This inventory extracts all stable requirement IDs from the Master Bug & Change 
 
 ## REL-01 — Live branch and pull-request dependency audit
 
-**Audited against current Stage 8 working HEAD:** `811822a0497b6943ba61b85105b797a9409b2a18`.
+**Audited against Stage 8 working HEAD `811822a0497b6943ba61b85105b797a9409b2a18`; the branch has since advanced with test-first Sound Design changes through `709b9a708687ba6b7ea7e0723be9212c9e2174aa`.
 
 | PR | Current state | Head / base | Comparison with working branch | Integration decision |
 |---|---|---|---|---|
@@ -220,3 +220,13 @@ This inventory extracts all stable requirement IDs from the Master Bug & Change 
 ## Exact-candidate verification boundary
 
 The most recent commits on this branch include the test-first BGM regression, assembler fix, evidence record, 128-ID traceability matrix and this PR audit. Build #2680's 1,258 passing tests predate these source changes. No matching-head passing CI result or real Windows audio acceptance is recorded here. The current candidate must pass the full regression suite and a Windows artifact-checkpoint build before any affected requirement can advance beyond CODE CHANGED — NOT VERIFIED.
+
+
+## Updated Sound Design test-first checkpoint
+
+- Assembler regression test: `ef8044248daf2f109025861d231831f54cd19ca4`.
+- Assembler root-cause fix: `cb25247c4dc95ff9f8ae518fe40dd7a52e17d583`.
+- Production chapter-preview regression tests: `fb82fe037296c6cdfd330f921fef3d500d4abbab`.
+- Production chapter-preview root-cause fix: `37d30f94a8244d0eac87dc6b4601195cf5ff9030`.
+- Defect record update: `709b9a708687ba6b7ea7e0723be9212c9e2174aa`.
+- Exact matching-head tests and Windows packaging are still unverified. The next candidate checkpoint must use a commit message containing `[artifact-checkpoint]` so the Windows build job is eligible to run.
