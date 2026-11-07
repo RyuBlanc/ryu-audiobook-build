@@ -2466,7 +2466,7 @@ class RegressionTests(unittest.TestCase):
 
     def test_package_size_report_breaks_down_offline_runtime_and_installer_overhead(self):
         import json
-        from package_size_report import build_report
+        from package_size_report import DEFAULT_TARGET_BYTES, build_report
 
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -2494,6 +2494,7 @@ class RegressionTests(unittest.TestCase):
 
             report = build_report(root, dist, target_bytes=200)
 
+            self.assertEqual(DEFAULT_TARGET_BYTES, 500_000_000)
             self.assertEqual(report["dist"]["total_bytes"], 210)
             self.assertEqual(report["dist"]["file_count"], 6)
             self.assertFalse(report["dist"]["target_met"])
