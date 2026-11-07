@@ -1381,7 +1381,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("storageTab.click()", storage)
         self.assertIn("button.dataset.ryuStorageNavigationBound", storage)
         self.assertIn("storage.choose_root", storage)
-        self.assertIn("button.matches('#aiQueue [data-ai-line]:not([data-dialogue-id])')", adapter)
+        self.assertIn("document.querySelectorAll('#aiQueue [data-ai-line]:not([data-dialogue-id])')", adapter)
         self.assertNotIn("button.matches('[data-ai-line]')", adapter)
         self.assertNotIn("Bulk acceptance and queue predictions are not connected", adapter)
         self.assertIn("if (button.id === 'acceptHighConfidence') { handle(() => acceptHighConfidenceDialogues()); return; }", adapter)
