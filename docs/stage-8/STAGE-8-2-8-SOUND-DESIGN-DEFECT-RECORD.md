@@ -31,7 +31,7 @@ The assembler's automatic-audio branch resolved and mixed a mood-selected music 
 
 - Source change: committed.
 - Regression test: committed.
-- Local test execution: not available in this session; do not mark the regression passed until CI reports it.
+- Matching-head regression execution: Build #2798 passed the full 1,314-test suite, including the Chapter-Based assembler regression. Packaged audio listening remains a separate pending gate.
 - Exact candidate commit for this checkpoint: this documentation commit's HEAD.
 - Windows packaging and runtime audio acceptance: pending CI and target-Windows verification.
 
@@ -66,7 +66,7 @@ The separate Production chapter sound preview path in `PremiumV2Bridge._render_s
 ### Updated verification boundary
 
 - Both the full M4B assembler and the Production chapter-preview path now have test-first regression coverage and source fixes.
-- Neither new test batch has a confirmed passing matching-head CI result in this record.
+- The current matching-head regression run #2798 passed the full 1,314-test suite, including these test batches. Packaged frozen-app listening remains pending.
 - Actual listening tests for an assigned chapter, an unassigned chapter, Same BGM and Voice Only remain required.
 
 
@@ -108,11 +108,11 @@ Two further edge cases were found by tracing saved-state validation and the asse
 
 ### Remaining preview limitation to resolve
 
-The individual Production chapter sound preview currently rejects the `after_first_paragraph` BGM start offset because its temporary preview audio does not carry saved full-chapter paragraph timing boundaries. Final full-book assembly has a boundary-aware path. This is an open preview/final parity gap; do not mark the start-offset preview requirement complete until it is implemented and tested.
+The Production chapter preview now supports `after_first_paragraph` when the selected preview includes the complete first paragraph. The preview worker requests paragraph-preserving TTS units, records the measured `first_paragraph_end_ms` from synthesized audio, and passes that exact offset into the chapter mixer. It fails closed when the boundary cannot be measured or lies beyond the preview. This source-level gap is resolved and covered by regression tests; actual packaged audio listening remains pending.
 
 ### Updated verification boundary
 
-These are source/test commits only. Matching-head CI, packaged Windows audio listening and final preview-vs-M4B comparison remain pending.
+These are source/test commits. Build #2798 passed the matching-head full regression suite (1,314 tests), including the Sound Design preview tests and full-book preview/final M4B audio comparison test. The current candidate still requires its exact-head Windows package run and human listening acceptance.
 
 
 ## Fourth defect: legacy ambience could create a second BGM layer
@@ -148,4 +148,17 @@ These test and source changes are committed but not yet verified by matching-hea
 - Cancellation/partial-output cleanup test commit: `a58d9674e7315381a858b643b45b7e578aa6b4ef`.
 - The tests exercise the actual `_render_full_book_preview` worker with a controlled assembler: it mutates only the staged copy, proves the saved narration chunk remains byte-identical, verifies the staged copy is removed, and confirms cancellation deletes partial output and records a cancelled job.
 - These are regression tests for existing disposable-copy/cancellation logic; no new source change was needed for these two cases.
-- Matching-head CI and actual M4B listening remain pending.
+- Matching-head regression CI passed on #2798. Exact-head packaged Windows execution and actual human listening remain pending.
+
+
+## Current verification update — Build #2798 (7 November 2026)
+
+- Current source branch: `stage-7/step-6-safe-auto-fallback`, HEAD `7e8a20fdc9d812f558060f30b31faee49305f6a0`.
+- Run: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42372464405 — **1,314 regression tests passed**.
+- The 34-test `tests/test_stage828_sound_design_preview.py` module is included in that suite.
+- Production chapter-preview paragraph-offset tests now cover: measured offset application, fail-closed behavior when the boundary is missing, rejection when the boundary lies after the preview end, paragraph-preserving preview units, and scope limited to the selected Chapter-Based assignment.
+- The suite also includes a real FFmpeg-based full-book mix-preview versus final M4B audio comparison using the same saved chapter BGM assignment.
+- The Build #2798 Windows package job was skipped by workflow policy. Do not claim that the current candidate has passed packaged audio acceptance yet.
+- Build #2768 previously passed packaged Sound Design, cue, Production Preview, full generation, playback and 41-viewport acceptance on its older 1.1.1 commit. It remains historical package evidence only.
+- **Current disposition:** Source implementation and matching-head regression are passed. Exact-head frozen-app acceptance and human listening for Same BGM, Chapter-Based custom/No BGM, offsets, fades/ducking, cues, Voice Only, and preview/final parity remain pending.
+

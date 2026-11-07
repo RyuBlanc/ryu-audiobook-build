@@ -177,14 +177,15 @@ This inventory extracts all stable requirement IDs from the Master Bug & Change 
 
 ## Current Stage 8 package status
 
-1. **8.2.7 CI stabilization:** baseline audited; #2680 passed 1,258 tests on the prior documentation-only HEAD; #2677 packaged successfully on an older commit. A new exact-candidate package run still needs confirmation.
-2. **8.2.8 Sound Design completion:** first Chapter-Based BGM auto-mode fallback defect found; test and source fix committed; matching-head CI/audio validation pending.
-3. **8.2.9 Frontend/backend parity + Help & Guide:** not started.
-4. **8.2.10 Generation reliability:** not started.
-5. **8.2.11 Windows release validation:** not started for final candidate.
-6. **8.2.12 Final acceptance/release:** not started; v1.2.0 remains gated.
+1. **8.2.7 CI stabilization:** current source HEAD `7e8a20fdc9d812f558060f30b31faee49305f6a0` passed Build #2798 with **1,314 tests**. The Windows package job was skipped because this commit did not contain `[artifact-checkpoint]`. The prior exact package is #2768 at `9ff9bc05d70444c375c692839d2e8346d34b70cf`; it is not the current source candidate.
+2. **8.2.8 Sound Design completion:** Chapter-Based explicit-only routing, Same BGM single-track behavior, single-bed legacy ambience, active-asset validation, full-book preview safety/cancellation, and measured Production chapter-preview paragraph offsets are implemented. The current 1,314-test suite passed on #2798, including the 34-test Stage 8.2.8 test module. Exact-head packaged audio acceptance and human listening remain pending.
+3. **8.2.9 Frontend/backend parity + Help & Guide:** the current Premium V2 source contains 15 sidebar destinations (14 application destinations plus Help), the searchable Help & Guide, and the packaged acceptance script for destination navigation, Help search/empty results/expand/collapse and responsive viewport checks. Static adapter audit recorded 108 direct command names matched to 132 host handlers. #2798 source regression passed; the updated packaged acceptance script still needs execution on the current candidate. Physical mixed-monitor/DPI/minimized-window acceptance remains pending.
+4. **8.2.10 Generation reliability:** current source and regression coverage include selected-chapter preview identity, measured duration, independent preview/full-generation job state, cancellation, pause/resume, retry/recovery, output integrity and M4B preview/final audio comparison. The matching-head #2798 regression suite passed. Exact-head frozen-app execution and user listening remain pending.
+5. **8.2.11 Windows release validation:** #2768 is the latest verified package before the current source updates. It produced installer artifact 846,239,172 bytes and portable artifact 1,183,224,790 bytes from version 1.1.1. The current #2798 source has no matching-head installer/portable artifacts yet. The 500,000,000-byte size target remains unmet and optimization stays deferred; do not remove offline assets.
+6. **8.2.12 Final acceptance/release:** the current source reports application version 1.2.0, but no public release/tag has been created. This next package is a test candidate, not proof of final release acceptance. Final release remains gated by exact-head package evidence, current packaged acceptance, friend/target-Windows feedback, and explicit documentation of deferred hardware checks.
 
-**Inventory count:** 128 stable requirement IDs. This matrix is a tracking index, not proof of implementation. Update each row only when matching evidence exists.
+**Inventory count:** 128 stable requirement IDs. The matrix remains a requirement ledger, not a count of completed tests. Only rows with direct, matching-head evidence should advance; no bulk completion is inferred from the green suite.
+
 
 ## 8.2.8 test-first fix checkpoint
 
@@ -244,7 +245,7 @@ The most recent commits on this branch include the test-first BGM regression, as
 - Chapter-Based validation test/fix: `9c456dbb18498ec0461ce0391b20045092bcb7c4` / `5b31851b663a9ccadebe3fb36d89e972d067bfd1`.
 - Same BGM single-track regression/fix: `ef431137c5850bbae9f88d9f99cec641a6a579c1` / `24cf31f0f6b76ea8e700e0c60ee99bd04835b241`.
 - Defect record updated at `998320c29046d6b84b82d578d12704ebcdc93eb6`.
-- Open gap: Production chapter preview still rejects `after_first_paragraph` BGM offset because the preview does not currently carry paragraph timing boundaries. The final full-book assembler has a boundary-aware implementation; preview/final parity remains incomplete.
+- **Source-level correction verified on #2798:** Production chapter preview now preserves paragraph boundaries when the selected saved Chapter-Based assignment uses `after_first_paragraph`. `build_voice_preview` returns the measured `first_paragraph_end_ms` from actual synthesized preview units; the bridge passes that measured boundary into the chapter BGM mixer. It fails closed if the exact boundary is unavailable or falls after the preview end. This is no longer an unimplemented source gap. Exact-head packaged audio/listening acceptance remains pending.
 - Seven regression tests have been added across the Sound Design test commits. None is marked passed until a matching-head run is inspected.
 
 
@@ -255,7 +256,7 @@ The most recent commits on this branch include the test-first BGM regression, as
 - Voice-preview single-track regression: `aac289f9f17c4ccdea876b716a6637a50621da19`.
 - Source fixes: assembler `fa339850428e16d61d0d028f365d4e0355035c9b`, validation `22fc0238e4ac153e028f843316799a32c3d9f9e7`, voice preview `b7a4f366887f68c13ef7f7f1177a6150ae6719a1`.
 - Defect record updated at `dfacf903df912539d44025bddb1a95c8e15d873e`.
-- Remaining known preview parity limitation: `after_first_paragraph` is still rejected by the individual Production chapter preview because that preview has no saved paragraph-boundary timing metadata. Full-book preview/final assembly use the saved chunk manifest boundary path.
+- **Updated #2798 status:** individual Production chapter preview now carries a measured paragraph boundary from the generated preview audio and applies it to the chapter BGM mix. The preview intentionally fails closed if the first paragraph is not fully represented or an exact boundary cannot be measured. Regression tests passed on #2798; packaged real-audio listening remains pending.
 - Thirteen Sound Design regression tests have been added across the test commits listed in this matrix. No passing matching-head CI result is yet recorded.
 
 
@@ -380,7 +381,7 @@ The current source and contract tests already cover the core PROD/GEN preview an
 - `test_production_pronunciation_and_sound_design_state_are_saved_before_preview_and_full_generation`
 - Existing regression coverage also includes generation cancel, pause/resume at safe chapter boundaries, atomic resume state, completed-chunk reuse, empty-chapter handling and M4B packaging/progress.
 
-**Status:** source/contract coverage present for PROD-05..09, PROD-15 and the related GEN requirements. Matching-head CI and packaged Windows execution remain UNVERIFIED. Real audio must still confirm selected-chapter-only preview, playback, save/download, chapter/project switching, and preview/final parity. The short-preview After first paragraph offset remains an explicitly documented limitation; full-book mix preview uses saved chapter timing boundaries.
+**Status:** source/contract coverage for PROD-05..09, PROD-15 and related GEN requirements passed the matching-head Build #2798 regression suite (1,314 tests). The previous #2768 frozen-app run also passed real selected-chapter preview, playback, Save As, 30/60/90-second measured audio, cancellation, full-book generation, M4B chapter metadata, playback, pause/resume/retry/recovery and 41-viewport emulation on its older commit. The current #2798 candidate still needs its own packaged run. Human listening, actual After first paragraph BGM audio, and target-device behavior remain pending.
 
 
 ### Generation retry/recovery safety tests added
@@ -450,4 +451,61 @@ The 128-row requirement inventory is a requirement ledger, not a count of tests.
 4. Record run number, commit, gate, observed result and remaining gate in the row.
 
 The #2758 run supports automated/package evidence for the Sound Design, Music Library, Production, Generation, Player, History/Task Manager, installer and responsive-emulation requirements exercised by that run. It does not prove all requirement rows, all visual screens, audio quality by human listening, target hardware, or 1.2.0 release metadata. Per-row changes are intentionally made only when the associated tests can be mapped without ambiguity; do not bulk-mark the inventory complete.
+
+
+
+## Current exact-head reconciliation — 7 November 2026
+
+### Build #2798 — latest source regression checkpoint
+- Branch: `stage-7/step-6-safe-auto-fallback`.
+- Exact HEAD: `7e8a20fdc9d812f558060f30b31faee49305f6a0`.
+- Run: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42372464405
+- Regression job: **SUCCESS — 1,314 tests passed** (50.297 seconds).
+- Frontend JavaScript syntax, isolated native Qt lifecycle regression and focused Stage 6 History/Task Manager preflight passed.
+- Windows build job: **SKIPPED**, not failed. This source commit did not contain the workflow's `[artifact-checkpoint]` marker.
+- Therefore #2798 is the latest matching-head source regression pass, not a Windows installer/portable build.
+
+### Failure reconciliation before #2798
+- #2795 and #2796 each failed the full regression step with four stale contract assertions: three still expected application version 1.1.1 after the branch changed to 1.2.0, and the Premium V2 capability map lacked the newly registered `import.latest.get` handler.
+- These failures were inspected in their actual logs. The version contracts and capability mapping were corrected before #2798.
+- #2798 passed all 1,314 tests. No test was weakened or skipped to manufacture the pass.
+
+### Changes already present on this branch — preserve, do not redo
+- Persistent latest-import record and Import page card with an Open imported project action.
+- Character chapter-split handling that preserves/rebases only valid assignments and invalidates stale offsets when editor text differs from saved source; deletion refuses to orphan saved dialogue assignments.
+- Measured Production chapter-preview paragraph boundary support for Chapter-Based BGM.
+- Fifteen Premium V2 sidebar destinations including Help, searchable Help & Guide content, and packaged acceptance checks for Help search/no-results/expand/collapse.
+- Current version metadata is 1.2.0. No public release/tag has been created.
+
+### Previous packaged checkpoint — Build #2768
+- Exact commit: `9ff9bc05d70444c375c692839d2e8346d34b70cf`.
+- Run: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42365316494
+- Regression suite: **1,293 tests passed**.
+- Windows package job: passed, including frozen-app verification, installer/portable creation, Microsoft Defender, SHA-256 manifest and artifact upload.
+- Frozen-app acceptance logged 97 passing checks, including Sound Design/Music Library, real full-book mix previews, selected-chapter Production preview and Save As, 30/60/90-second measured previews, real multi-chapter generation, M4B chapters, player/mini-player, pause/resume/cancel/retry/recovery, persistence and 41 responsive viewports.
+- Installer artifact: `Ryu-Audiobook-Installer-2768`, 846,239,172 bytes.
+- Portable artifact: `Ryu-Audiobook-Portable-2768`, 1,183,224,790 bytes.
+- SHA manifest artifact: `Ryu-Audiobook-Release-SHA256-2768`, 3,046 bytes.
+- Piper benchmark artifact: `Ryu-Audiobook-Stage7-Piper-Benchmark-2768`, 803 bytes.
+- Artifacts expire 7 December 2026. The packaged app version was 1.1.1; this package predates the current 1.2.0 source updates and must not be handed out as the latest candidate.
+
+### Current package and acceptance decision
+The next workflow run is intentionally requested with the `[artifact-checkpoint]` marker. It must run both the full regression suite and Windows package job against the new exact HEAD. The resulting artifacts must be downloaded from that same run. Do not use #2768 artifacts as substitutes for the current candidate.
+
+
+
+## REL-01 — Live PR recheck at Build #2798 HEAD
+
+Rechecked against current open PR metadata and GitHub commit comparisons with working HEAD `7e8a20fdc9d812f558060f30b31faee49305f6a0`:
+
+| PR | Current GitHub state | Comparison result | Decision |
+|---|---|---|---|
+| #15 | Open, draft | PR head is an ancestor of current branch (0 commits behind). | Already in current lineage; do not merge again. |
+| #19 | Open, draft | PR head is an ancestor of current branch (0 commits behind). | Already in current lineage; do not merge again. |
+| #20 | Open, draft | PR head is an ancestor of current branch (0 commits behind). | Already in current lineage; do not merge again. |
+| #18 | Open, ready | Diverged; PR head has 27 commits not in current branch. | Do not merge wholesale. Compare its Character Inspector behavior with the current evolved Premium V2 Character Studio implementation and port only a proven missing behavior. |
+| #26 | Open, ready | Diverged; PR head has 43 commits not in current branch. | Do not merge wholesale. Current branch already has recoverable project trash, Character Library bridge behavior and the newer latest-import status card; verify remaining parity before deciding whether any isolated change is missing. |
+| #4 | Open, ready | Diverged; PR head has 2 commits not in current branch. | Current Voice Studio contains equivalent Qwen preset draft-reset behavior. Do not merge blindly; keep only if a distinct tested behavior is missing. |
+
+**REL-01 disposition:** duplicate merges are not required for #15/#19/#20. #18/#26/#4 remain open dependency reviews, not permission to merge entire branches. No unrelated PR was merged during this checkpoint.
 

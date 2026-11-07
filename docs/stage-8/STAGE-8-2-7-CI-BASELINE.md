@@ -81,7 +81,7 @@ The Stage 8 source branch has since advanced beyond the original `b9ae3e8` basel
 - Help & Guide: searchable and expandable topic cards cover the major screens, latest BGM and preview rules, Qwen model-size setup, storage, recovery, troubleshooting and known limitations.
 - Responsiveness: the full aspect-ratio, portrait, window-state, split-screen, mixed-monitor and 100/125/150/200% scaling matrix is recorded for manual execution.
 
-The latest marker checkpoint must be validated by the exact branch's push-triggered Windows workflow. The connected GitHub status interface currently returns no combined status and no PR-triggered workflow run for the latest push candidate; this does not prove that a push workflow passed or failed. Record its actual Actions run, tests, build job, artifact hashes and expiry once visible. Until then, matching-head CI remains **PENDING / UNVERIFIED**.
+The latest source-only checkpoint is Build #2798 on exact HEAD `7e8a20fdc9d812f558060f30b31faee49305f6a0`: the regression job passed 1,314 tests and the Windows package job was skipped because the commit did not contain `[artifact-checkpoint]`. The exact-head Windows package remains pending and is requested by the current documentation checkpoint commit.
 
 
 ## Exact-HEAD regression checkpoint — Build #2765
@@ -121,4 +121,32 @@ Build #2765 closes the package-report regression assertions introduced during St
 - Windows installer integration installed, upgraded, launched the offline self-test/Premium V2 app, uninstalled and preserved user data.
 - Package reporter recorded a 500,000,000-byte target miss. Package-size optimization remains deferred; do not remove offline assets to chase the target.
 - **Release boundary:** build used `RYU_APP_VERSION=1.1.1`. This is a successful Stage 8 candidate package, not a Version 1.2.0 installer/release. Physical target-PC, actual listening, monitor/DPI and GPU-vendor checks remain separate.
+
+
+
+## Latest source checkpoint — Build #2798 (7 November 2026)
+
+- Branch: `stage-7/step-6-safe-auto-fallback`.
+- Exact source HEAD: `7e8a20fdc9d812f558060f30b31faee49305f6a0`.
+- Workflow: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42372464405.
+- Regression: **1,314 tests passed**.
+- Frontend syntax, isolated native Qt lifecycle regression and focused Stage 6 History/Task Manager preflight passed.
+- Windows build job: skipped because the source commit did not contain `[artifact-checkpoint]`. This is not a package failure and did not produce installer/portable artifacts.
+- The #2795/#2796 failures were traced to four stale contract assertions: three expected 1.1.1 after the source version became 1.2.0, and one expected the new `import.latest.get` bridge handler to have a capability-map entry. Those contracts were corrected; #2798 passed all 1,314 tests.
+
+## Prior packaged checkpoint — Build #2768
+
+- Commit: `9ff9bc05d70444c375c692839d2e8346d34b70cf`.
+- Workflow: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42365316494.
+- Regression: **1,293 tests passed**; Windows package job passed.
+- Frozen-app acceptance: 97 logged PASS checks, including real Sound Design/Music Library operations, chapter BGM strategies/offsets, cues, full-book mix preview, selected Production chapter preview and Save As, 30/60/90-second measured previews, full generation, M4B chapters, player/mini-player, pause/resume/cancel/retry/recovery, persistence and 41 viewport emulations.
+- Installer artifact `Ryu-Audiobook-Installer-2768`: 846,239,172 bytes.
+- Portable artifact `Ryu-Audiobook-Portable-2768`: 1,183,224,790 bytes.
+- Release SHA manifest `Ryu-Audiobook-Release-SHA256-2768`: 3,046 bytes.
+- Piper benchmark artifact `Ryu-Audiobook-Stage7-Piper-Benchmark-2768`: 803 bytes.
+- Artifacts expire 7 December 2026. Packaged app version was 1.1.1; it predates current 1.2.0 source updates and is not the current candidate.
+
+## Current candidate package request
+
+The current commit includes the `[artifact-checkpoint]` marker so the workflow should run both regression and Windows packaging on the exact new HEAD. Record the new run, test total, package artifacts, checksums, sizes and expiry here only after the workflow completes. No public release/tag is being created by this checkpoint.
 
