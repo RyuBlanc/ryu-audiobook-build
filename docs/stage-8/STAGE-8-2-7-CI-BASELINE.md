@@ -255,3 +255,14 @@ The following `[artifact-checkpoint]` commit is documentation-only and requests 
 - Build #2812: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42391383182 — exact source commit `c7b79a4f1efb6f186d0b01e1c7a36f3b61fbc35f`; full regression **1,321 tests passed**. Windows packaging was skipped by design.
 - The all-destination responsive overflow test remains enabled. Matching-head Windows acceptance is the next gate; if any further overflow remains, element diagnostics will identify the actual descendant.
 
+
+
+## Responsive per-viewport bounds correction — 7 November 2026
+
+- Build #2813 passed the Sound page at 600x800 after the track grid became a single flexible column, then reported the History page container as 600px against a 590px workspace.
+- Review found the destination check captured `availablePageWidth` before iterating through the viewport list, then reused it as the iframe was resized. This made the width comparison stale across viewport transitions and prevented the failure message from showing the live workspace bounds.
+- Test correction commit: `b790817d005c15126761747df8b5f6d43a2f4aff`. The test now measures `workspace.getBoundingClientRect()` after each viewport resize and each destination activation, checks page left/right against the current workspace bounds, and reports workspace and page geometry together.
+- A new contract test ensures that measurement is performed after page activation and prevents the stale-width pattern from returning.
+- Build #2814: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42393738565 — **1,322 tests passed**; the new per-viewport measurement test and previous Sound mobile/grid checks are included. Windows packaging was skipped intentionally.
+- No CSS change was made for the #2813 History diagnostic because the stale measurement needed correction before treating it as a product defect. Matching-head packaged verification is required.
+
