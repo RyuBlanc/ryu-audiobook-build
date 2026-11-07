@@ -96,3 +96,11 @@ The latest marker checkpoint must be validated by the exact branch's push-trigge
 | Packaged Windows acceptance | Pending | Must follow the exact-head package build |
 
 Build #2765 closes the package-report regression assertions introduced during Stage 8 package optimization. It is a regression-only success, not a release package checkpoint. The next commit is intentionally an artifact-checkpoint documentation commit so the workflow runs both tests and the Windows packaging job against the same exact HEAD. No requirement is marked verified complete solely from this workflow.
+
+### Follow-up regression checkpoint — Build #2767
+
+- Exact commit: `df35adc0ecc34ffcb2ffc1f574cf5deaf797e0ba`.
+- Workflow: [Build #2767](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42360081999).
+- Result: regression `tests` job passed; Windows `build` job was skipped because this commit did not request an artifact checkpoint.
+- Correction: packaged Production Preview selector acceptance now resolves the live option node on each poll and records selector diagnostics on timeout. A dedicated source-contract test protects this behavior.
+- Boundary: this is regression evidence only. It does not supersede failed packaged acceptance in #2766 and does not establish frozen-app, installer, portable-package, or runtime acceptance.
