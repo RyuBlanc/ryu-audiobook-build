@@ -1949,6 +1949,107 @@ class RegressionTests(unittest.TestCase):
             self.assertGreaterEqual(_duration_ms(output), 4000)
             self.assertLessEqual(_duration_ms(output), 5500)
 
+    def test_chapter_based_sound_design_preview_ignores_auto_bgm_for_unassigned_chapter(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.ui.premium_v2_host import PremiumV2Bridge
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "saved-narration.wav"
+            source.write_bytes(b"saved narration fixture")
+            automatic_track = root / "automatic-default.wav"
+            automatic_track.write_bytes(b"automatic music fixture")
+            host = SimpleNamespace(_preview_cancel_events={})
+            state = {
+                "background_audio_mode": "auto",
+                "background_audio_enabled": True,
+                "chapter_bgm_strategy": "chapter-based",
+                "chapter_bgm_overrides": {},
+                "_preview_chapter_number": 2,
+                "_preview_chapter_index": 2,
+                "_preview_chapter_title": "Chapter Two",
+                "_preview_chapter_text": "The story continues.",
+            }
+
+            def write_output(args):
+                Path(args[-1]).write_bytes(b"encoded preview" * 200)
+
+            with (
+                patch("app.ui.premium_v2_host.app_root", return_value=root),
+                patch("app.audio.library.effective_background_audio_mode", return_value="auto"),
+                patch("app.audio.library.is_chapter_transition_sound_enabled", return_value=False),
+                patch("app.audio.library.validate_saved_audio_paths"),
+                patch("app.audio.assembler._duration_ms", return_value=10000),
+                patch("app.audio.assembler._selected_music_recipe", return_value=("calm", 0)),
+                patch("app.audio.assembler._chapter_bgm_override_for", return_value={"rule": "none"}) as resolve_override,
+                patch("app.audio.library.resolve_music_track", return_value=automatic_track) as automatic_music,
+                patch("app.audio.assembler._mix_chapter_bgm") as chapter_mix,
+                patch("app.audio.assembler._run", side_effect=write_output),
+            ):
+                output = PremiumV2Bridge._render_sound_design_preview(
+                    host, source, "chapter-preview-no-bgm", state
+                )
+
+            self.assertTrue(output.is_file())
+            resolve_override.assert_called_once()
+            automatic_music.assert_not_called()
+            chapter_mix.assert_not_called()
+
+    def test_chapter_based_sound_design_preview_uses_only_explicit_chapter_track_in_auto_mode(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.ui.premium_v2_host import PremiumV2Bridge
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "saved-narration.wav"
+            source.write_bytes(b"saved narration fixture")
+            automatic_track = root / "automatic-default.wav"
+            automatic_track.write_bytes(b"automatic music fixture")
+            chapter_track = root / "chapter-two.wav"
+            chapter_track.write_bytes(b"explicit chapter music fixture")
+            host = SimpleNamespace(_preview_cancel_events={})
+            state = {
+                "background_audio_mode": "auto",
+                "background_audio_enabled": True,
+                "chapter_bgm_strategy": "chapter-based",
+                "chapter_bgm_overrides": {},
+                "_preview_chapter_number": 2,
+                "_preview_chapter_index": 2,
+                "_preview_chapter_title": "Chapter Two",
+                "_preview_chapter_text": "The story continues.",
+            }
+
+            def write_mix(_source, track, output, _volume, **_kwargs):
+                self.assertEqual(Path(track), chapter_track)
+                output.write_bytes(b"mixed chapter preview" * 200)
+                return output
+
+            with (
+                patch("app.ui.premium_v2_host.app_root", return_value=root),
+                patch("app.audio.library.effective_background_audio_mode", return_value="auto"),
+                patch("app.audio.library.is_chapter_transition_sound_enabled", return_value=False),
+                patch("app.audio.library.validate_saved_audio_paths"),
+                patch("app.audio.assembler._duration_ms", return_value=10000),
+                patch("app.audio.assembler._selected_music_recipe", return_value=("calm", 0)),
+                patch(
+                    "app.audio.assembler._chapter_bgm_override_for",
+                    return_value={"rule": "custom", "path": str(chapter_track), "volume": 0.2},
+                ) as resolve_override,
+                patch("app.audio.library.resolve_music_track", return_value=automatic_track) as automatic_music,
+                patch("app.audio.assembler._mix_chapter_bgm", side_effect=write_mix) as chapter_mix,
+                patch("app.audio.assembler._run", side_effect=lambda args: Path(args[-1]).write_bytes(b"encoded" * 200)),
+            ):
+                output = PremiumV2Bridge._render_sound_design_preview(
+                    host, source, "chapter-preview-explicit-bgm", state
+                )
+
+            self.assertTrue(output.is_file())
+            resolve_override.assert_called_once()
+            automatic_music.assert_not_called()
+            chapter_mix.assert_called_once()
+
     def test_pause_profiles_keep_sentence_and_dialogue_turns_natural(self):
         from app.tts.pacing import pause_after_ms
         self.assertGreaterEqual(pause_after_ms("That is the end.", "natural"), 280)
