@@ -2243,18 +2243,35 @@
       const optionFor = chapterNumber => Array.from(productionChapterPicker.options || [])
         .find(option => option.value === String(chapterNumber));
       const waitForSelection = async chapterNumber => {
-        const expectedOption = optionFor(chapterNumber);
         const expectedChapter = savedPreviewChapters.find(item => Number(item.number) === Number(chapterNumber));
-        await waitFor("Production-owned Chapter " + chapterNumber + " selection", function () {
-          const optionText = productionChapterPicker.selectedOptions?.[0]?.textContent || "";
-          const statusText = document.querySelector("#productionPreviewStatus")?.textContent || "";
-          return productionChapterPicker.value === String(chapterNumber) &&
-            Boolean(expectedOption && expectedOption.selected) &&
-            optionText.includes("Chapter " + chapterNumber) &&
-            (!expectedChapter?.title || optionText.includes(String(expectedChapter.title))) &&
-            statusText.includes("Chapter " + chapterNumber) &&
-            (statusText.includes("selected.") || statusText.includes("Preview ready"));
-        }, 10000);
+        try {
+          await waitFor("Production-owned Chapter " + chapterNumber + " selection", function () {
+            // Resolve the option on every poll. The live chapter-list refresh can
+            // replace <option> nodes while preserving the selected chapter value;
+            // retaining an earlier option reference would then observe a detached,
+            // permanently unselected node and produce a false timeout.
+            const expectedOption = optionFor(chapterNumber);
+            const optionText = productionChapterPicker.selectedOptions?.[0]?.textContent || "";
+            const statusText = document.querySelector("#productionPreviewStatus")?.textContent || "";
+            return productionChapterPicker.value === String(chapterNumber) &&
+              Boolean(expectedOption && expectedOption.selected) &&
+              optionText.includes("Chapter " + chapterNumber) &&
+              (!expectedChapter?.title || optionText.includes(String(expectedChapter.title))) &&
+              statusText.includes("Chapter " + chapterNumber) &&
+              (statusText.includes("selected.") || statusText.includes("Preview ready"));
+          }, 10000);
+        } catch (error) {
+          throw new Error(String(error?.message || error) + ". Production chapter selector diagnostic=" + JSON.stringify({
+            value:productionChapterPicker.value,
+            disabled:productionChapterPicker.disabled,
+            selectedText:productionChapterPicker.selectedOptions?.[0]?.textContent || null,
+            options:Array.from(productionChapterPicker.options || []).map(option => ({
+              value:option.value,text:option.textContent,selected:option.selected
+            })),
+            status:document.querySelector("#productionPreviewStatus")?.textContent || null,
+            expectedChapter:expectedChapter || null
+          }));
+        }
       };
       // If Chapter 2 is already auto-selected, a change to the same value is
       // intentionally a no-op in the production UI. Select another saved
