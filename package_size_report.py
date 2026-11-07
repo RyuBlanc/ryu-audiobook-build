@@ -63,10 +63,14 @@ def build_report(
                 "file_count": count,
             })
 
+    def asset_dir(relative: Path) -> Path:
+        candidates = (dist / relative, dist / "_internal" / relative)
+        return next((path for path in candidates if path.is_dir()), candidates[0])
+
     offline_paths = {
-        "piper_models": dist / "bundled_models" / "piper",
-        "kokoro_models": dist / "bundled_models" / "kokoro",
-        "starter_audio": dist / "assets" / "starter_audio",
+        "piper_models": asset_dir(Path("bundled_models") / "piper"),
+        "kokoro_models": asset_dir(Path("bundled_models") / "kokoro"),
+        "starter_audio": asset_dir(Path("assets") / "starter_audio"),
     }
     offline = {}
     for name, path in offline_paths.items():
