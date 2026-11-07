@@ -886,6 +886,10 @@ def assemble_m4b(
 
         if effective_audio_mode == "auto":
             processed_chapters: list[Path] = []
+            # Same BGM is a book-level choice. Resolve automatic legacy-mode
+            # music once and reuse that exact track for every chapter.
+            same_auto_music_path = None
+            same_auto_music_resolved = False
             for index, (chapter_file, chapter_dir, chapter_title) in enumerate(
                 zip(chapters, chapter_dirs, names), start=1
             ):
@@ -915,15 +919,18 @@ def assemble_m4b(
                 duration_ms = _duration_ms(current_audio)
                 duration_seconds = max(0.1, duration_ms / 1000.0)
                 music_gain = max(0.0, min(0.50, float(background_audio_volume)))
-                # Chapter-Based BGM is explicit-only: automatic mood
-                # selection must never become a hidden fallback track for an
-                # unassigned chapter or layer beneath a selected chapter track.
-                music_path = None
-                if effective_bgm_strategy != "chapter-based":
-                    music_path = resolve_music_track(
-                        mood, selected_track=auto_music_variation,
-                        seed_text=f"{chapter_title}|{narration_text}|{index}",
-                    )
+                # Chapter-Based is explicit-only. Same BGM resolves one
+                # book-level track on the first eligible chapter and reuses it.
+                if effective_bgm_strategy == "chapter-based":
+                    music_path = None
+                else:
+                    if not same_auto_music_resolved:
+                        same_auto_music_path = resolve_music_track(
+                            mood, selected_track=auto_music_variation,
+                            seed_text=f"book-default|{chapter_title}|{narration_text}",
+                        )
+                        same_auto_music_resolved = True
+                    music_path = same_auto_music_path
                 if music_path is not None and music_gain > 0.0:
                     fade_in = min(max(0.0, float(background_audio_fade_in)), duration_seconds)
                     fade_out = min(max(0.0, float(background_audio_fade_out)), duration_seconds)
