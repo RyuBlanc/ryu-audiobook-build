@@ -2472,9 +2472,9 @@ class RegressionTests(unittest.TestCase):
             root = Path(temp)
             dist = root / "dist" / "Ryu's Audiobook"
             files = {
-                dist / "bundled_models" / "piper" / "voice.onnx": 10,
-                dist / "bundled_models" / "kokoro" / "model.onnx": 20,
-                dist / "assets" / "starter_audio" / "music" / "track.mp3": 30,
+                dist / "_internal" / "bundled_models" / "piper" / "voice.onnx": 10,
+                dist / "_internal" / "bundled_models" / "kokoro" / "model.onnx": 20,
+                dist / "_internal" / "assets" / "starter_audio" / "music" / "track.mp3": 30,
                 dist / "_internal" / "PySide6" / "QtWebEngineCore.dll": 40,
                 dist / "_internal" / "onnxruntime" / "capi" / "onnxruntime.dll": 50,
                 dist / "Ryu's Audiobook.exe": 60,
