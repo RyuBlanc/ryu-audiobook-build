@@ -12,7 +12,7 @@ import tempfile
 import threading
 from typing import Any
 
-from PySide6.QtCore import QObject, QEvent, Qt, Slot, Signal, QUrl
+from PySide6.QtCore import QObject, QEvent, Qt, Slot, Signal, QUrl, QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import QWebEngineSettings
@@ -327,10 +327,45 @@ class InstallerWindow(QMainWindow):
         self.web.page().setWebChannel(self.channel)
         self.bridge.closeRequested.connect(self.close)
         self._drag_offset = None
+        self._startup_smoke_marker = os.environ.get("RYU_INSTALLER_STARTUP_SMOKE_MARKER", "").strip()
+        self._startup_smoke_attempts = 0
+        if self._startup_smoke_marker:
+            self.web.loadFinished.connect(self._on_startup_smoke_page_loaded)
         self.web.load(QUrl.fromLocalFile(str(page.resolve())))
         screen = QApplication.primaryScreen().availableGeometry()
         self.move(screen.x() + (screen.width() - self.width()) // 2,
                   screen.y() + (screen.height() - self.height()) // 2)
+
+
+    def _write_startup_smoke_marker(self, status: str, detail: str) -> None:
+        marker_value = getattr(self, "_startup_smoke_marker", "")
+        if not marker_value:
+            return
+        try:
+            marker = Path(marker_value)
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.write_text(json.dumps({"status": status, "detail": detail, "window_title": self.windowTitle()}, ensure_ascii=False), encoding="utf-8")
+        except OSError as exc:
+            print(f"Could not write HTML installer startup marker: {exc}", file=sys.stderr)
+
+    def _on_startup_smoke_page_loaded(self, loaded: bool) -> None:
+        if not loaded:
+            self._write_startup_smoke_marker("failed", "The HTML installer page did not load.")
+            return
+        self._probe_startup_smoke_bridge()
+
+    def _probe_startup_smoke_bridge(self) -> None:
+        self.web.page().runJavaScript("Boolean(window.__ryuInstallerBridgeReady === true)", self._on_startup_smoke_bridge_probe)
+
+    def _on_startup_smoke_bridge_probe(self, ready: bool) -> None:
+        if ready:
+            self._write_startup_smoke_marker("ready", "The HTML installer page and native QWebChannel bridge are ready.")
+            return
+        self._startup_smoke_attempts += 1
+        if self._startup_smoke_attempts >= 50:
+            self._write_startup_smoke_marker("failed", "The HTML installer page loaded, but its native QWebChannel bridge did not become ready.")
+            return
+        QTimer.singleShot(100, self._probe_startup_smoke_bridge)
 
     def eventFilter(self, obj, event):
         # WebEngine sends mouse events to Chromium child widgets, not reliably
