@@ -1381,6 +1381,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("storageTab.click()", storage)
         self.assertIn("button.dataset.ryuStorageNavigationBound", storage)
         self.assertIn("storage.choose_root", storage)
+        self.assertNotIn("Custom project-library and audio-assets root selection is not implemented", adapter)
+        self.assertIn("Manage supported project, audio asset and model storage locations in Settings > Storage.", adapter)
         self.assertIn("benchmarkButton.disabled = false", guard)
         self.assertNotIn("performance is intentionally marked Not tested", guard)
         self.assertNotIn("[data-model-repair]", guard)
