@@ -2960,6 +2960,7 @@
       '.ryu-assigned-dialogue small{display:block;margin-bottom:6px;font-size:10px;letter-spacing:.06em;text-transform:uppercase;opacity:.8;}' +
       '.ryu-assigned-dialogue-ai{background:rgba(236,160,45,.075);border-color:rgba(236,160,45,.22);box-shadow:inset 3px 0 0 #efae35;}' +
       '.ryu-assigned-dialogue-manual{background:rgba(36,190,122,.07);border-color:rgba(36,190,122,.2);box-shadow:inset 3px 0 0 #22c982;}' +
+      '.ryu-assigned-dialogue-unknown{background:rgba(140,145,155,.06);border-color:rgba(140,145,155,.2);box-shadow:inset 3px 0 0 #8d929b;}' +
       '.ryu-assigned-dialogue.is-selected{outline:2px solid rgba(255,255,255,.62);outline-offset:1px;}' +
       '.assigned-character.active{border-color:rgba(227,182,94,.8);background:rgba(227,182,94,.08);}' +
       '#characterAssignPopover{max-height:82vh;overflow-y:auto;box-sizing:border-box;}' +
@@ -3039,7 +3040,10 @@
     const projectDefaultSeries = String(activeCharacterProjectSeries() || '').trim().toLowerCase();
     const passages = [];
     const chapterSet = new Set();
+    const seenPassageIds = new Set();
     let aiAssigned = 0;
+    let manualAssigned = 0;
+    let sourceUnavailable = 0;
     for (const chapter of chapters) {
       const source = String(chapter.text || '');
       for (const assignment of characterAssignmentsFor(chapter)) {
@@ -3070,10 +3074,17 @@
             start < 0 || end <= start || end > source.length) continue;
         const text = source.slice(start, end);
         if (!text || (assignment.text && String(assignment.text) !== text)) continue;
+        const passageId = String(chapter.number) + ':' + start + ':' + end;
+        if (seenPassageIds.has(passageId)) continue;
+        seenPassageIds.add(passageId);
 
         chapterSet.add(Number(chapter.number));
-        const sourceKind = String(assignment.source || 'manual').trim().toLowerCase();
+        const rawSourceKind = String(assignment.source || '').trim().toLowerCase().replace(/_/g, '-');
+        const sourceKind = ['ai', 'ai-analyzed'].includes(rawSourceKind)
+          ? 'ai' : rawSourceKind === 'manual' ? 'manual' : 'unknown';
         if (sourceKind === 'ai') aiAssigned += 1;
+        else if (sourceKind === 'manual') manualAssigned += 1;
+        else sourceUnavailable += 1;
         passages.push({
           chapter_number:Number(chapter.number), start, end, text,
           source:sourceKind,
@@ -3085,7 +3096,8 @@
     const dialogueLines = passages.length;
     const aiAssignedPercent = dialogueLines ? Math.round(aiAssigned / dialogueLines * 100) : 0;
     return {passages, chapters:[...chapterSet].sort((a,b) => a-b), dialogueLines,
-      aiAssignedLines:aiAssigned, aiAssignedPercent};
+      aiAssignedLines:aiAssigned, manualAssignedLines:manualAssigned,
+      sourceUnavailableLines:sourceUnavailable, aiAssignedPercent};
   }
   function renderCharacterInspector() {
     const selected = selectedCharacterRow();
@@ -3143,14 +3155,15 @@
     if (quotesNode) {
       const rows = assignments.passages;
       quotesNode.innerHTML = rows.length ? rows.map(row => {
-        const sourceKind = String(row.source || 'manual').toLowerCase() === 'ai' ? 'ai' : 'manual';
+        const sourceKind = row.source === 'ai' ? 'ai' : row.source === 'manual' ? 'manual' : 'unknown';
+        const sourceLabel = sourceKind === 'ai' ? 'AI-assigned' :
+          sourceKind === 'manual' ? 'Manually assigned' : 'Source not recorded';
         const key = characterAssignmentKey(selected.name, seriesValue) + '::' +
           row.chapter_number + ':' + row.start + ':' + row.end;
         const active = key === selectedDialogueKey;
         return '<button type="button" class="ryu-assigned-dialogue ryu-assigned-dialogue-' + sourceKind +
           (active ? ' is-selected' : '') + '" data-assigned-dialogue-key="' + esc(key) + '">' +
-          '<small>Chapter ' + Number(row.chapter_number) + ' · ' +
-          (sourceKind === 'ai' ? 'AI-assigned' : 'Manually assigned') + '</small>' +
+          '<small>Chapter ' + Number(row.chapter_number) + ' · ' + sourceLabel + '</small>' +
           '<span>' + esc(row.text) + '</span></button>';
       }).join('') : '<div class="ryu-character-empty"><b>No assigned dialogue yet</b>Assign and save a source passage in Character assigning to see it here.</div>';
       if (selectedDialogueKey && !selectedDialogueRow) window.ryuPremiumSelectedAssignedDialogueKey = '';

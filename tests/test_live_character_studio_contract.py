@@ -230,5 +230,75 @@ class LiveCharacterStudioContracts(unittest.TestCase):
         self.assertIn('"real_time_factor": real_time_factor', host)
 
 
+    def test_assigned_cast_statistics_behaviorally_validate_saved_provenance_aliases_and_series(self):
+        import json
+        import shutil
+        import subprocess
+
+        node = shutil.which("node")
+        self.assertIsNotNone(node, "Node.js is required for the live Assigned Cast behavior test.")
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        start = adapter.index("function characterVoiceAssignments(name, series) {")
+        end = adapter.index("function renderCharacterInspector()", start)
+        function_source = adapter[start:end]
+        harness = r"""
+const characters = [
+  {name:"Mira", aliases:["Miri"], series:"Series A"},
+  {name:"Mira B", aliases:["Mira"], series:"Series B"}
+];
+function characterCanonical(item) { return String(item && (item.name || item.primary_name) || "").trim(); }
+function characterAliases(item) { return Array.isArray(item && item.aliases) ? item.aliases.map(String) : []; }
+function librarySeriesName(item) { return String(item && item.series || ""); }
+function activeCharacterProjectSeries() { return ""; }
+function characterSeries(item) { return librarySeriesName(item || {}) || activeCharacterProjectSeries() || "Unassigned series"; }
+function characterRowForName(name, series) {
+  const key = String(name || "").trim().toLowerCase();
+  const seriesKey = String(series || "").trim().toLowerCase();
+  const matches = characters.filter(item => characterCanonical(item).toLowerCase() === key ||
+    characterAliases(item).some(alias => alias.toLowerCase() === key));
+  const scoped = matches.filter(item => characterSeries(item).toLowerCase() === seriesKey);
+  return scoped.length === 1 ? scoped[0] : null;
+}
+function characterAssignmentsFor(chapter) {
+  return Array.isArray(chapter.dialogue_assignments) ? chapter.dialogue_assignments : [];
+}
+function record(sourceText, passage, speaker, source, series) {
+  const start = sourceText.indexOf(passage);
+  return {start, end:start + passage.length, text:passage, speaker, speakers:[speaker], source, series};
+}
+const firstText = "Mira speaks. Miri replies. Mira repeats. Ren speaks. Stale line. Ambiguous line. Other series line. Unknown source.";
+const firstAssignments = [
+  record(firstText, "Mira speaks.", "Mira", "manual", "Series A"),
+  record(firstText, "Mira speaks.", "Mira", "manual", "Series A"),
+  record(firstText, "Miri replies.", "Miri", "ai", "Series A"),
+  record(firstText, "Mira repeats.", "Mira", "ai-analyzed", "Series A"),
+  record(firstText, "Ren speaks.", "Ren", "manual", "Series A"),
+  Object.assign(record(firstText, "Stale line.", "Mira", "manual", "Series A"), {text:"stale source"}),
+  record(firstText, "Ambiguous line.", "Mira", "manual", ""),
+  record(firstText, "Other series line.", "Mira", "manual", "Series B"),
+  record(firstText, "Unknown source.", "Mira", "", "Series A")
+];
+const secondText = "Mira returns.";
+const chapters = [
+  {number:1, text:firstText, dialogue_assignments:firstAssignments},
+  {number:2, text:secondText, dialogue_assignments:[record(secondText, "Mira returns.", "Miri", "ai_analyzed", "Series A")]}
+];
+"""
+        script = harness + "\n" + function_source + r"""
+const result = characterVoiceAssignments("Mira", "Series A");
+process.stdout.write(JSON.stringify(result));
+"""
+        completed = subprocess.run([node, "-e", script], capture_output=True, text=True, check=False)
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        result = json.loads(completed.stdout)
+        self.assertEqual(result["dialogueLines"], 5)
+        self.assertEqual(result["chapters"], [1, 2])
+        self.assertEqual(result["aiAssignedLines"], 3)
+        self.assertEqual(result["manualAssignedLines"], 1)
+        self.assertEqual(result["sourceUnavailableLines"], 1)
+        self.assertEqual(result["aiAssignedPercent"], 60)
+        self.assertEqual([row["source"] for row in result["passages"]], ["manual", "ai", "ai", "unknown", "ai"])
+
+
 if __name__ == "__main__":
     unittest.main()
