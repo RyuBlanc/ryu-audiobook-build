@@ -1,6 +1,6 @@
 # Stage 8.2 — Full UI parity and production verification
 
-**Branch:** `fix/import-qa-speaker-hover-hardware`  
+**Historical branch snapshot:** `fix/import-qa-speaker-hover-hardware`  
 **Started:** 2026-10-19  
 **Baseline commit:** `8357e2eef8a0a217077f54b14bfaf0298e258fab`  
 **Baseline Windows build:** [Build #493](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39186820298) — successful
@@ -173,3 +173,14 @@ The active native Voice Studio selector, desktop preview bridge, persisted Setti
 - Added a regression test that exercises custom BGM on one chapter, no BGM on another, scene cue insertion, and output duration bounds. Static contract tests cover the bridge, adapter, generation manager, and assembler connections.
 - **Validation pending:** the latest changes must pass a full Windows CI run. Interactive playback, sound levels, and all 15 destinations still require packaged Windows acceptance. Do not mark Package 2 complete until CI passes and the mix behavior has been verified against actual user projects.
 
+
+
+---
+
+## Current Stage 8 authority and continuation note
+
+This file preserves the historical Stage 8.2.1–8.2.4 audit and evidence. Its older branch name and status snapshot must not be treated as the current execution state.
+
+The controlling current plan is the approved six-step sequence recorded in `docs/FINAL_COMPLETION_ROADMAP.md`; the live requirement-by-requirement evidence, PR lineage, Sound Design fixes, Help & Guide status, responsive matrix and remaining blockers are recorded in `docs/stage-8/STAGE-8-REQUIREMENT-TRACEABILITY.md`.
+
+Current working branch: `stage-7/step-6-safe-auto-fallback`. Do not restart completed stages or merge stacked PRs blindly. The latest candidate must pass a matching-head full regression run and Windows artifact-checkpoint build; older Build #493/#637/#642 evidence is historical and does not validate the current candidate.
