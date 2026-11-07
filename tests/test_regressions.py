@@ -1901,7 +1901,7 @@ class RegressionTests(unittest.TestCase):
 
     def test_chapter_based_bgm_never_falls_back_to_auto_music(self):
         from unittest.mock import patch
-        from app.audio.assembler import _duration_ms, _mix_chapter_bgm
+        from app.audio.assembler import _duration_ms, _run
 
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -1922,7 +1922,7 @@ class RegressionTests(unittest.TestCase):
             # be mixed; an unassigned chapter must remain narration-only.
             with (
                 patch("app.audio.library.resolve_music_track", return_value=default_music) as auto_music,
-                patch("app.audio.assembler._mix_chapter_bgm", wraps=_mix_chapter_bgm) as chapter_mix,
+                patch("app.audio.assembler._run", wraps=_run) as ffmpeg_run,
             ):
                 assemble_m4b(
                     chapters,
@@ -1991,9 +1991,15 @@ class RegressionTests(unittest.TestCase):
                 )
 
                 self.assertEqual(automatic_music.call_count, 1)
-                self.assertEqual(chapter_mix.call_count, 2)
-                mixed_tracks = [Path(call.args[1]) for call in chapter_mix.call_args_list]
-                self.assertEqual(mixed_tracks, [first_track, first_track])
+                # Auto mode uses the book-level FFmpeg mixer directly rather
+                # than _mix_chapter_bgm (the latter is the Chapter-Based path).
+                # Verify that both chapter mixes receive the same resolved bed.
+                book_bgm_calls = [
+                    call.args[0] for call in ffmpeg_run.call_args_list
+                    if "-stream_loop" in call.args[0] and str(first_track) in call.args[0]
+                ]
+                self.assertEqual(len(book_bgm_calls), 2)
+                self.assertTrue(all(str(alternate_track) not in args for args in book_bgm_calls))
 
             self.assertTrue(output.is_file())
             self.assertGreater(output.stat().st_size, 1024)
@@ -2361,7 +2367,7 @@ class RegressionTests(unittest.TestCase):
                     chapter_transition_sound=False,
                 )
 
-            self.assertEqual(result, output)
+            self.assertEqual(result, output.resolve())
             self.assertEqual(captured["args"].count("-i"), 2)
             self.assertIn(str(book_track), captured["args"])
             self.assertNotIn(str(legacy_ambience), captured["args"])
