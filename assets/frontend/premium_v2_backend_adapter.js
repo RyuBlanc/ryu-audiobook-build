@@ -8607,6 +8607,25 @@
         void refreshStorageRoots().catch(error => message(error?.message || String(error), true));
       });
     }
+    // The old prototype "Choose Folder" control had no unambiguous root kind.
+    // Route it to the real Storage tab instead of leaving a dead disabled button.
+    document.querySelectorAll('#settings button').forEach(button => {
+      if ((button.textContent || '').trim().toLowerCase() !== 'choose folder') return;
+      if (button.dataset.ryuStorageNavigationBound === 'true') return;
+      button.dataset.ryuStorageNavigationBound = 'true';
+      button.disabled = false;
+      button.removeAttribute('aria-disabled');
+      button.removeAttribute('data-backend-unavailable');
+      button.textContent = 'Manage storage locations';
+      button.setAttribute('aria-label', 'Manage storage locations');
+      button.title = 'Open Storage settings to manage supported project, audio asset and model locations.';
+      button.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (storageTab) storageTab.click();
+        else message('Storage settings are unavailable in this build.', true);
+      });
+    });
     document.querySelectorAll('[data-storage-action][data-storage-kind]').forEach(button => {
       if (button.dataset.ryuStorageBound === 'true') return;
       button.dataset.ryuStorageBound = 'true';
@@ -8683,12 +8702,7 @@
     const dialogueReason = 'This item is not linked to an exact source dialogue passage. Refresh the chapter and choose a real passage.';
     document.querySelectorAll('#aiQueue [data-ai-line]:not([data-dialogue-id])')
       .forEach(element => disable(element, dialogueReason));
-    // Model Center lifecycle actions are backed by models.install/repair/uninstall/verify.
-    document.querySelectorAll('#settings button').forEach(element => {
-      if ((element.textContent || '').trim().toLowerCase() === 'choose folder') {
-        disable(element, 'Changing the application storage root is not implemented. Existing project and asset paths remain unchanged.');
-      }
-    });
+    // The legacy storage button is routed to the functional Storage tab by wireStorageControls().
     const benchmarkButton = $('runBenchmark');
     if (benchmarkButton) {
       benchmarkButton.disabled = false;
