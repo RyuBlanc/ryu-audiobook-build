@@ -3564,7 +3564,10 @@ class PremiumV2Bridge(QObject):
                 state.get("background_audio_fade_out")
                 if state.get("background_audio_fade_out") is not None else 3.0
             )
-            if sound_enabled and audio_mode == "manual":
+            # Chapter-Based is an explicit-only policy even for legacy projects
+            # whose audio source mode still says auto. Never route those projects
+            # through mood-selected fallback music.
+            if sound_enabled and (audio_mode == "manual" or strategy == "chapter-based"):
                 if strategy == "chapter-based":
                     override = {}
                     chapter_number = selected_number or 1
