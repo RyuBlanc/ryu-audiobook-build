@@ -266,3 +266,13 @@ The following `[artifact-checkpoint]` commit is documentation-only and requests 
 - Build #2814: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42393738565 — **1,322 tests passed**; the new per-viewport measurement test and previous Sound mobile/grid checks are included. Windows packaging was skipped intentionally.
 - No CSS change was made for the #2813 History diagnostic because the stale measurement needed correction before treating it as a product defect. Matching-head packaged verification is required.
 
+
+
+## Character Library tablet toolbar correction and explicit acceptance — 7 November 2026
+
+- Build #2815 failed packaged responsive acceptance at 900x1440. Exact diagnostic: Library page scrollWidth 680 versus 624 available; `#characterLibraryZone` 562px wide/654px scrollWidth; `.character-library-toolbar` computed columns `260px 230px 144.344px`; the segmented control extended to x=956 while the toolbar ended at x=864 (92px toolbar internal overflow; child beyond toolbar boundary by 66px).
+- Build #2816 added a 761px–1100px tablet breakpoint: two minmax(0,1fr) columns; children constrained; segmented control spans both columns and its buttons may flex. Character Library tablet correction is in commit `532d41cb3b98a14041f49e6756c72c4a6897c7a1`. #2816 passed 1,324 tests, but its build job was skipped. It produced no Windows artifacts.
+- Added a real packaged DOM assertion in commit `00d573011257a0845ed5001d3d9230a6cc78090c`: on Library at 900x1440 the test inspects `.character-library-toolbar`, its scroll/client widths and child bounding rectangles, and records `stage8_library_toolbar_900x1440_no_overflow`. The test does not alter/relax the general page overflow assertion.
+- Build #2817: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42397140614 — exact HEAD `00d573011257a0845ed5001d3d9230a6cc78090c`; full regression **1,324 tests passed** (62.342 seconds), focused 44 tests passed. Windows package job skipped by design.
+- This source includes the prior Sound one-column fix (`c7b79a4f1efb6f186d0b01e1c7a36f3b61fbc35f`) and Character Library tablet toolbar fix. Matching-head Windows acceptance is pending and must pass all 15 destinations across 41 viewports before artifact packaging.
+
