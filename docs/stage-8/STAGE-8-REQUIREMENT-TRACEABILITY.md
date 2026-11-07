@@ -307,3 +307,48 @@ The most recent commits on this branch include the test-first BGM regression, as
 At the same source head, a static scan found 108 distinct direct backend command calls in the Premium V2 adapter and 132 host handler keys; all 108 direct command names had a matching handler (zero missing). This is a source-level contract result, not proof of runtime click behavior.
 
 **Status:** HELP-01..03 and the touched UI parity controls are CODE CHANGED — NOT VERIFIED. The Help page must be opened and searched on the packaged Windows app, and each described workflow must be checked against the actual controls before the guide is accepted.
+
+
+## Final UI responsiveness and flicker acceptance matrix
+
+This matrix is mandatory for the final Windows acceptance pass. Static CSS checks or a maximized-window screenshot do not replace it.
+
+### Aspect-ratio and orientation coverage
+
+- 4:3
+- 5:4
+- 3:2
+- 16:10
+- 16:9
+- 21:9 ultrawide
+- 32:9 super-ultrawide
+- Portrait orientation
+
+Use representative native resolutions for each ratio, including narrow and high-resolution layouts where available.
+
+### Window and desktop layout coverage
+
+- Minimized → restored, maximized → restored, repeated resize and rapid navigation.
+- Half-screen and quarter-screen snapped layouts.
+- Full-screen and normal windowed operation.
+- Single monitor, extended monitors and mixed-resolution monitors.
+- Mixed-DPI monitor movement while the app is open.
+
+### Windows display scaling
+
+- 100%
+- 125%
+- 150%
+- 200%
+
+### Required observations on every layout
+
+- No clipped, overlapping or unreachable buttons, labels, menus, dialogs, tables, toolbars or playback controls.
+- No persistent horizontal overflow; long text, filenames, model paths, errors and metadata wrap or scroll within their own panel.
+- Sidebar collapse/expand, page scrolling, nested scrolling, dropdowns, modals, tooltips and keyboard focus remain usable.
+- Dashboard cards, Library tables, import/chapter editors, Voice/Character/Pronunciation/Sound panels, Production controls, Audiobook player, History/Jobs, Models, Performance, Settings and Help reflow without losing state.
+- Mini-player remains correctly positioned and usable while navigating and resizing.
+- No white/black flashes, layout jumps, repeated DOM rebuild flicker, frozen input, lost text edits or WebEngine renderer crashes during resize/navigation.
+- Verify repeated navigation and resize cycles, not just a single screenshot.
+
+**Acceptance evidence:** record OS version, display resolution, aspect ratio, scaling percentage, monitor arrangement, window state, screen/module tested, observed result and any defect ID. Any untested combination remains OPEN; do not claim universal responsiveness from one PC or one monitor.
