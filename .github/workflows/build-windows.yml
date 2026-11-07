@@ -768,7 +768,7 @@ jobs:
             if (-not $ready) { throw "HTML installer page/native bridge did not become ready within 45 seconds." }
             Write-Host "HTML installer UI and native QWebChannel bridge startup PASSED: $($startup.detail)"
           } finally {
-            if ($null -ne $proc) { $proc.Refresh(); if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force } }
+            if ($null -ne $proc) { $proc.Refresh(); if (-not $proc.HasExited) { & taskkill.exe /PID $proc.Id /T /F | Out-Null } }
             Remove-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue
             Remove-Item Env:RYU_INSTALLER_STARTUP_SMOKE_MARKER -ErrorAction SilentlyContinue
           }
@@ -833,7 +833,7 @@ jobs:
             }
             if (-not $ready) { throw 'Installed app did not reach Premium V2 startup readiness within 90 seconds.' }
           } finally {
-            if ($null -ne $app) { $app.Refresh(); if (-not $app.HasExited) { Stop-Process -Id $app.Id -Force } }
+            if ($null -ne $app) { $app.Refresh(); if (-not $app.HasExited) { & taskkill.exe /PID $app.Id /T /F | Out-Null } }
             Remove-Item -LiteralPath $startupMarker -Force -ErrorAction SilentlyContinue
             Remove-Item Env:RYU_STARTUP_SMOKE_MARKER -ErrorAction SilentlyContinue
             Remove-Item Env:RYU_UI_MODE -ErrorAction SilentlyContinue

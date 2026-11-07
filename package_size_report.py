@@ -109,7 +109,7 @@ def build_report(
         "build": {
             "commit_sha": os.environ.get("GITHUB_SHA", ""),
             "run_number": os.environ.get("GITHUB_RUN_NUMBER", ""),
-            "app_version": payload_info.get("version", ""),
+            "app_version": os.environ.get("RYU_APP_VERSION", payload_info.get("version", "")),
         },
         "target_bytes": int(target_bytes),
         "dist": {
@@ -135,7 +135,7 @@ def build_report(
         },
         "payload_info": payload_info,
         "notes": [
-            "No assets are removed or excluded by this report.",
+            "The report does not mutate assets. build.py prunes only the optional QtWebEngine DevTools debug resource and excludes unused Qt Quick/QML/Quick3D/PDF/ShaderTools modules; offline Piper/Kokoro models and starter audio remain bundled.",
             "The dist total is the installed portable payload before GitHub artifact ZIP compression.",
             "The HTML setup wrapper embeds the core installer; HTML-minus-core is a size-delta estimate, not a per-file runtime attribution.",
             "Use largest_files and runtime_components to identify candidates for optional packaging, not as permission to remove required offline assets.",

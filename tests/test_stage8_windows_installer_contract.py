@@ -26,6 +26,7 @@ class Stage8WindowsInstallerContractTests(unittest.TestCase):
             "preserve-on-uninstall.txt",
             "Build\\s+",
             "/VERYSILENT",
+            "taskkill.exe /PID",
         ):
             self.assertIn(required, workflow)
 

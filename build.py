@@ -16,6 +16,7 @@ from PySide6.QtSvg import QSvgRenderer
 
 ROOT = Path(__file__).resolve().parent
 from app.version import APP_VERSION
+from scripts.qt_payload_pruner import prune_optional_qt_assets
 
 BUILD_NUMBER = os.environ.get("RYU_BUILD_NUMBER", "dev")
 INSTALLER_VERSION_FILE = ROOT / "installer" / "version.generated.iss"
@@ -415,6 +416,12 @@ args = [
     "--collect-all=onnxruntime",
     "--collect-all=kokoro_onnx",
     "--collect-all=espeakng_loader",
+    "--exclude-module=PySide6.QtQuick",
+    "--exclude-module=PySide6.QtQml",
+    "--exclude-module=PySide6.QtQuick3D",
+    "--exclude-module=PySide6.QtQuick3DPhysics",
+    "--exclude-module=PySide6.QtPdf",
+    "--exclude-module=PySide6.QtShaderTools",
     "--hidden-import=PySide6.QtCore",
     "--hidden-import=PySide6.QtGui",
     "--hidden-import=PySide6.QtWidgets",
@@ -473,3 +480,6 @@ else:
     )
 
 PyInstaller.__main__.run(args)
+
+pruned_optional_assets = prune_optional_qt_assets(ROOT / "dist" / "Ryu's Audiobook")
+print("Removed optional QtWebEngine DevTools debug resources:", pruned_optional_assets)
