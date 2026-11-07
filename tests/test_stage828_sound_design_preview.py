@@ -890,11 +890,11 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
             write_tone(second_chunk, 440, 1.0)
             write_tone(music, 220, 3.0)
             (chapter_dir / "narration.json").write_text(
-                json.dumps({"narration_text":"First paragraph ends here.\\n\\nSecond paragraph follows."}),
+                json.dumps({"narration_text":"First paragraph ends here.\n\nSecond paragraph follows."}),
                 encoding="utf-8",
             )
             (chapter_dir / "chunk_manifest.json").write_text(json.dumps({"chunks":[
-                {"file":first_chunk.name,"text":"First paragraph ends here.\\n\\n"},
+                {"file":first_chunk.name,"text":"First paragraph ends here.\n\n"},
                 {"file":second_chunk.name,"text":"Second paragraph follows."},
             ]}), encoding="utf-8")
             music.with_name(music.name + ".license.json").write_text(
