@@ -10754,7 +10754,13 @@
       }
       if (button.closest('#settings') && label === 'choose folder') {
         stop();
-        message('Custom project-library and audio-assets root selection is not implemented in this build; the existing local storage paths were not changed.', true);
+        const storageTab = document.querySelector('[data-settings-tab="storage"]');
+        if (storageTab) {
+          storageTab.click();
+          message('Manage supported project, audio asset and model storage locations in Settings > Storage.');
+        } else {
+          message('Storage settings are unavailable in this build.', true);
+        }
         return;
       }
       if (button.closest('#settings') && label === 'export logs') {
