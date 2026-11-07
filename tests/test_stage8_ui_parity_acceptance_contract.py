@@ -69,6 +69,12 @@ class Stage8UIPackagedAcceptanceContractTests(unittest.TestCase):
         self.assertIn("workspaceWidth:workspaceRect.width", source)
         self.assertIn("pageWidth:pageRect.width", source)
 
+    def test_packaged_responsive_acceptance_measures_character_library_toolbar_at_900x1440(self):
+        source = (ROOT / "tests" / "stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
+        self.assertIn('destination === "library" && label === "900x1440"', source)
+        self.assertIn("Character Library toolbar overflows at 900x1440", source)
+        self.assertIn('record("stage8_library_toolbar_900x1440_no_overflow"', source)
+
     def test_character_library_toolbar_fits_tablet_workspace_widths(self):
         html = (ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
         rule = "@media(min-width:761px) and (max-width:1100px){.character-library-toolbar{grid-template-columns:repeat(2,minmax(0,1fr));min-width:0}"

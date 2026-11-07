@@ -954,6 +954,38 @@
                 workspaceWidth:workspaceRect.width,
                 pageLeft:pageRect.left,pageRight:pageRect.right,pageWidth:pageRect.width
               }));
+          if (destination === "library" && label === "900x1440") {
+            const characterZone = page.querySelector("#characterLibraryZone");
+            const characterToolbar = characterZone?.querySelector(".character-library-toolbar");
+            const toolbarRect = characterToolbar?.getBoundingClientRect();
+            const toolbarOverflow = characterToolbar
+              ? characterToolbar.scrollWidth > characterToolbar.clientWidth + 2 ||
+                Array.from(characterToolbar.children).some(child => {
+                  const rect = child.getBoundingClientRect();
+                  return rect.left < toolbarRect.left - 2 || rect.right > toolbarRect.right + 2;
+                })
+              : true;
+            must(Boolean(characterToolbar) && !toolbarOverflow,
+              "Character Library toolbar overflows at 900x1440: " +
+                JSON.stringify({
+                  zone: characterZone ? {
+                    width:characterZone.clientWidth,scrollWidth:characterZone.scrollWidth
+                  } : null,
+                  toolbar: characterToolbar ? {
+                    left:Math.round(toolbarRect.left),right:Math.round(toolbarRect.right),
+                    width:characterToolbar.clientWidth,scrollWidth:characterToolbar.scrollWidth,
+                    gridColumns:getComputedStyle(characterToolbar).gridTemplateColumns,
+                    children:Array.from(characterToolbar.children).map(child=>{
+                      const rect=child.getBoundingClientRect();
+                      return {className:String(child.className||""),left:Math.round(rect.left),
+                        right:Math.round(rect.right),width:Math.round(rect.width),
+                        scrollWidth:child.scrollWidth,clientWidth:child.clientWidth};
+                    })
+                  } : null
+                }));
+            record("stage8_library_toolbar_900x1440_no_overflow",true,
+              JSON.stringify({width:characterToolbar.clientWidth,scrollWidth:characterToolbar.scrollWidth}));
+          }
           const pageOverflow = page.scrollWidth > availablePageWidth + 2;
           const overflowElements = pageOverflow ? Array.from(page.querySelectorAll("*")).map(element => {
             const rect = element.getBoundingClientRect();
