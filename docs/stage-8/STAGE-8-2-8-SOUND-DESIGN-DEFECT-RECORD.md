@@ -77,3 +77,39 @@ The separate Production chapter sound preview path in `PremiumV2Bridge._render_s
 - The test confirms the full-book preview start path uses stable chapter IDs to locate saved narration, excludes empty/skipped chapters, does not re-synthesize narration, queues the preview worker, and reports the expected included chapter set.
 - The worker's disposable-copy safety, actual M4B render and cancellation behavior still require matching-head tests and runtime acceptance.
 
+
+
+## Third defect: BGM validation and Same BGM policy were still mode-dependent
+
+Two further edge cases were found by tracing saved-state validation and the assembler's legacy auto mode.
+
+### Chapter-Based validation was checking the wrong asset
+
+- In legacy `auto` source mode, validation checked `auto_music_track_path` and did not validate explicit chapter overrides.
+- This could block a valid Chapter-Based No BGM chapter because an unused automatic track had been deleted.
+- Conversely, it could allow a missing explicitly assigned chapter track through validation.
+
+**Test-first evidence**
+- Regression tests: `test_chapter_based_auto_mode_ignores_stale_automatic_track_path` and `test_chapter_based_auto_mode_validates_explicit_chapter_track`.
+- Test commit: `9c456dbb18498ec0461ce0391b20045092bcb7c4`.
+- Fix commit: `5b31851b663a9ccadebe3fb36d89e972d067bfd1`.
+- Chapter-Based validation now validates only explicitly assigned custom chapter tracks, regardless of legacy auto/manual mode; it ignores stale book-default/automatic paths. Voice Only still bypasses inactive asset validation.
+
+### Same BGM could choose a different automatic track for each chapter
+
+- In legacy `auto` source mode, the assembler resolved mood music independently for every chapter even when the saved strategy was Same BGM.
+- This contradicted the book-level single-track rule.
+
+**Test-first evidence**
+- Regression test: `test_same_bgm_auto_mode_uses_one_track_for_every_chapter`.
+- Test commit: `ef431137c5850bbae9f88d9f99cec641a6a579c1`.
+- Fix commit: `24cf31f0f6b76ea8e700e0c60ee99bd04835b241`.
+- The assembler now resolves one automatic legacy-mode track on the first eligible chapter and reuses that exact path for every chapter. Chapter-Based remains explicit-only.
+
+### Remaining preview limitation to resolve
+
+The individual Production chapter sound preview currently rejects the `after_first_paragraph` BGM start offset because its temporary preview audio does not carry saved full-chapter paragraph timing boundaries. Final full-book assembly has a boundary-aware path. This is an open preview/final parity gap; do not mark the start-offset preview requirement complete until it is implemented and tested.
+
+### Updated verification boundary
+
+These are source/test commits only. Matching-head CI, packaged Windows audio listening and final preview-vs-M4B comparison remain pending.
