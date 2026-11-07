@@ -2324,6 +2324,49 @@ class RegressionTests(unittest.TestCase):
             # ambience path is neither layered nor allowed to block generation.
             validate_saved_audio_paths(state)
 
+    def test_manual_voice_preview_uses_one_book_bgm_not_legacy_ambience_layer(self):
+        from app.audio.preview_mixer import mix_voice_preview
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            voice = root / "voice.wav"
+            book_track = root / "book-default.wav"
+            legacy_ambience = root / "legacy-ambience.wav"
+            output = root / "preview.wav"
+            _write_wav(voice, 1.0)
+            _write_wav(book_track, 1.0)
+            _write_wav(legacy_ambience, 1.0)
+            captured = {}
+
+            def fake_ffmpeg(args):
+                captured["args"] = list(args)
+                Path(args[-1]).write_bytes(b"mixed preview" * 200)
+
+            with (
+                patch("app.audio.preview_mixer._run_ffmpeg", side_effect=fake_ffmpeg),
+                patch("app.audio.preview_mixer._duration_seconds", return_value=1.0),
+            ):
+                result = mix_voice_preview(
+                    voice,
+                    output,
+                    "A short voice preview.",
+                    background_enabled=True,
+                    background_mode="manual",
+                    background_audio_path=book_track,
+                    music_volume=0.18,
+                    ambience_audio_path=legacy_ambience,
+                    ambience_volume=0.15,
+                    story_effects_enabled=False,
+                    chapter_transition_sound=False,
+                )
+
+            self.assertEqual(result, output)
+            self.assertEqual(captured["args"].count("-i"), 2)
+            self.assertIn(str(book_track), captured["args"])
+            self.assertNotIn(str(legacy_ambience), captured["args"])
+            self.assertTrue(output.is_file())
+
     def test_pause_profiles_keep_sentence_and_dialogue_turns_natural(self):
         from app.tts.pacing import pause_after_ms
         self.assertGreaterEqual(pause_after_ms("That is the end.", "natural"), 280)
