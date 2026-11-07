@@ -959,6 +959,26 @@
     record("active_project", true, "The packaged app loaded a three-chapter project with real saved narration fixtures.");
 
     must(typeof window.go === "function", "The Premium V2 navigation function is unavailable.");
+    const stage8Destinations = [
+      "dashboard", "library", "import", "chapters", "voices",
+      "characters", "pronunciation", "sound", "generate", "player",
+      "history", "models", "performance", "settings", "help"
+    ];
+    for (const destination of stage8Destinations) {
+      const navigationButton = document.querySelector(
+        'button.nav-btn[data-page="' + destination + '"]'
+      );
+      must(navigationButton, "The sidebar navigation button is missing: " + destination);
+      navigationButton.click();
+      await waitFor("Packaged sidebar destination " + destination, function () {
+        const page = document.getElementById(destination);
+        return Boolean(page && page.classList.contains("active") &&
+          !page.classList.contains("hidden") && page.getClientRects().length > 0);
+      }, 12000);
+      record("stage829_sidebar_destination_" + destination, true,
+        "The packaged sidebar action opened the real " + destination + " page container.");
+    }
+
     window.go('sound');
     await waitFor("Sound Design page", function () {
       const page = document.querySelector("#sound");
