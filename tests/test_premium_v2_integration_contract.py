@@ -1362,7 +1362,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn('"piper_models"', reporter)
         self.assertIn('"kokoro_models"', reporter)
         self.assertIn('"starter_audio"', reporter)
-        self.assertIn("No assets are removed or excluded by this report.", reporter)
+        self.assertIn("The report does not mutate assets.", reporter)
         self.assertIn("html_wrapper_overhead_bytes", reporter)
         self.assertIn("largest_files", reporter)
 

@@ -2518,7 +2518,7 @@ class RegressionTests(unittest.TestCase):
             self.assertEqual(report["installers"]["core_setup_bytes"], 100)
             self.assertEqual(report["installers"]["html_wrapper_overhead_bytes"], 50)
             self.assertEqual(report["payload_info"]["version"], "1.2.0+build.test")
-            self.assertIn("No assets are removed or excluded by this report.", report["notes"])
+            self.assertIn("The report does not mutate assets.", report["notes"])
 
     def test_pause_profiles_keep_sentence_and_dialogue_turns_natural(self):
         from app.tts.pacing import pause_after_ms
