@@ -77,7 +77,16 @@ class Project:
             raise IOError("Saved chapter data could not be verified.")
 
     @classmethod
-    def load(cls, folder: Path) -> "Project":
+    def load(cls, folder: Path, *, migrate_legacy: bool = True) -> "Project":
+        """Load project metadata and chapters.
+
+        Legacy chapter/narration/BGM identity migration is intentionally optional.
+        Library refreshes and cache invalidation may need to reread the two small
+        project files repeatedly; those reads must not rescan every narration
+        directory or rerun migration work. A project is migrated on its first
+        authoritative open in the desktop session.
+        """
+        folder = Path(folder)
         project_file = folder / "project.json"
         chapters_file = folder / "chapters.json"
         if not project_file.exists() or not chapters_file.exists():
@@ -87,70 +96,101 @@ class Project:
         if not isinstance(chapter_data, list):
             raise ValueError("Invalid Ryu's Audiobook chapter data.")
         chapters = [Chapter(**item) for item in chapter_data]
-        seen_ids: set[str] = set()
-        identity_changed = False
-        for item, chapter in zip(chapter_data, chapters):
-            if not isinstance(item, dict) or not str(item.get("chapter_id") or "").strip():
-                identity_changed = True
-            if chapter.chapter_id in seen_ids:
-                from uuid import uuid4
-                chapter.chapter_id = uuid4().hex
-                identity_changed = True
-            seen_ids.add(chapter.chapter_id)
-        if identity_changed:
-            cls._atomic_write_text(
-                chapters_file,
-                json.dumps([asdict(chapter) for chapter in chapters], ensure_ascii=False, indent=2),
-            )
-        # Attach IDs to legacy narration only when both number and title match exactly.
-        working_audio = folder / "working_audio"
-        by_number_title = {
-            (chapter.number, chapter.title.strip().casefold()): chapter.chapter_id
-            for chapter in chapters
-        }
-        if working_audio.is_dir():
-            for chapter_dir in working_audio.iterdir():
-                manifest = chapter_dir / "narration.json"
-                if not chapter_dir.is_dir() or not manifest.is_file():
-                    continue
-                try:
-                    narration = json.loads(manifest.read_text(encoding="utf-8"))
-                    key = (int(narration.get("chapter") or 0), str(narration.get("title") or "").strip().casefold())
-                    chapter_id = by_number_title.get(key)
-                    if chapter_id and not str(narration.get("chapter_id") or "").strip():
-                        narration["chapter_id"] = chapter_id
-                        cls._atomic_write_text(
-                            manifest, json.dumps(narration, ensure_ascii=False, indent=2)
-                        )
-                except (OSError, ValueError, TypeError, json.JSONDecodeError):
-                    continue
-        # Bind legacy number-keyed BGM assignments to stable chapter IDs
-        # while loading the project, before chapter numbers can change.
-        state_file = folder / "state.json"
-        if state_file.is_file():
-            from app.core.state import load_state, save_state
-            state = load_state(folder)
-            stored_overrides = state.get("chapter_bgm_overrides")
-            if isinstance(stored_overrides, dict):
-                migrated_overrides = dict(stored_overrides)
-                for chapter in chapters:
-                    identity_key = str(chapter.chapter_id)
-                    legacy_value = stored_overrides.get(str(chapter.number))
-                    if identity_key not in migrated_overrides and isinstance(legacy_value, dict):
-                        migrated_overrides[identity_key] = dict(legacy_value)
-                if migrated_overrides != stored_overrides:
-                    state["chapter_bgm_overrides"] = migrated_overrides
+
+        if migrate_legacy:
+            seen_ids: set[str] = set()
+            identity_changed = False
+            for item, chapter in zip(chapter_data, chapters):
+                if not isinstance(item, dict) or not str(item.get("chapter_id") or "").strip():
+                    identity_changed = True
+                if chapter.chapter_id in seen_ids:
+                    from uuid import uuid4
+                    chapter.chapter_id = uuid4().hex
+                    identity_changed = True
+                seen_ids.add(chapter.chapter_id)
+            if identity_changed:
+                cls._atomic_write_text(
+                    chapters_file,
+                    json.dumps([asdict(chapter) for chapter in chapters], ensure_ascii=False, indent=2),
+                )
+
+            # Attach IDs to legacy narration only when both number and title match exactly.
+            working_audio = folder / "working_audio"
+            by_number_title = {
+                (chapter.number, chapter.title.strip().casefold()): chapter.chapter_id
+                for chapter in chapters
+            }
+            if working_audio.is_dir():
+                for chapter_dir in working_audio.iterdir():
+                    manifest = chapter_dir / "narration.json"
+                    if not chapter_dir.is_dir() or not manifest.is_file():
+                        continue
                     try:
-                        save_state(folder, state)
-                    except OSError as exc:
-                        raise RuntimeError(
-                            "Could not safely migrate this project's chapter BGM assignments. "
-                            "Make the project folder writable and reopen it before editing chapters."
-                        ) from exc
+                        narration = json.loads(manifest.read_text(encoding="utf-8"))
+                        key = (int(narration.get("chapter") or 0), str(narration.get("title") or "").strip().casefold())
+                        chapter_id = by_number_title.get(key)
+                        if chapter_id and not str(narration.get("chapter_id") or "").strip():
+                            narration["chapter_id"] = chapter_id
+                            cls._atomic_write_text(
+                                manifest, json.dumps(narration, ensure_ascii=False, indent=2)
+                            )
+                    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                        continue
+
+            # Bind legacy number-keyed BGM assignments to stable chapter IDs.
+            state_file = folder / "state.json"
+            if state_file.is_file():
+                from app.core.state import load_state, save_state
+                state = load_state(folder)
+                stored_overrides = state.get("chapter_bgm_overrides")
+                if isinstance(stored_overrides, dict):
+                    migrated_overrides = dict(stored_overrides)
+                    for chapter in chapters:
+                        identity_key = str(chapter.chapter_id)
+                        legacy_value = stored_overrides.get(str(chapter.number))
+                        if identity_key not in migrated_overrides and isinstance(legacy_value, dict):
+                            migrated_overrides[identity_key] = dict(legacy_value)
+                    if migrated_overrides != stored_overrides:
+                        state["chapter_bgm_overrides"] = migrated_overrides
+                        try:
+                            save_state(folder, state)
+                        except OSError as exc:
+                            raise RuntimeError(
+                                "Could not safely migrate this project's chapter BGM assignments. "
+                                "Make the project folder writable and reopen it before editing chapters."
+                            ) from exc
 
         source_name = metadata.get("source_file")
         source = folder / "source" / source_name if source_name else None
         return cls(metadata["title"], folder, source, chapters)
+
+
+def resolve_library_project_folder(folder: Path) -> Path | None:
+    """Resolve a direct child project folder without enumerating the whole Library.
+
+    The resolved parent check also rejects symlinks that escape the selected or
+    legacy Library roots. A disconnected configured Library is distinguished
+    from a missing project so the active-project setting is never silently lost.
+    """
+    target = Path(folder).expanduser().resolve()
+    for root_value in project_library_roots():
+        root = Path(root_value).expanduser().resolve()
+        if target.parent != root:
+            continue
+        if not root.is_dir():
+            raise FileNotFoundError(
+                "The Library location is unavailable. Reconnect the selected drive "
+                "before opening or editing this project."
+            )
+        if (
+            not target.is_dir()
+            or not (target / "project.json").is_file()
+            or not (target / "chapters.json").is_file()
+        ):
+            return None
+        return target
+    return None
+
 
 def create_project(title: str, source_path: Path, chapters: list[Chapter]) -> Project:
     """Create a project transactionally so failed imports never appear as partial books.

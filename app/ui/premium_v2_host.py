@@ -36,7 +36,7 @@ from app.ui.frontend_assets import (
     premium_v2_logo_candidates,
     prepare_native_host_html,
 )
-from app.core.project import Project, create_project, list_projects
+from app.core.project import Project, create_project, list_projects, resolve_library_project_folder
 from app.core.character_identity import character_identity_key
 from app.core.character_library import (
     character_library_path as reusable_character_library_path,
@@ -377,6 +377,12 @@ class PremiumV2Bridge(QObject):
         super().__init__(parent)
         ensure_roots()
         self.settings = QSettings("RyuBlanc", "Ryu's Audiobook")
+        # Active project resolution is a hot path for chapter, cast, voice,
+        # pronunciation, sound and generation commands. Cache the loaded object
+        # and invalidate it only when its two authoritative JSON files change.
+        self._active_project_cache_lock = threading.RLock()
+        self._active_project_cache: tuple[str, tuple[int, int, int, int], Project] | None = None
+        self._active_project_migrated_folders: set[str] = set()
         self._jobs_lock = threading.RLock()
         self._performance_history_lock = threading.RLock()
         # Serialize review-skip writes with the character-analysis worker's final
@@ -1113,12 +1119,50 @@ class PremiumV2Bridge(QObject):
         purge_trashed_project(entry)
         return {"purged": True}
 
+    @staticmethod
+    def _project_file_signature(folder: Path) -> tuple[int, int, int, int]:
+        """Cheap change detector for the authoritative project and chapter files."""
+        project_stat = (folder / "project.json").stat()
+        chapters_stat = (folder / "chapters.json").stat()
+        return (
+            int(project_stat.st_mtime_ns), int(project_stat.st_size),
+            int(chapters_stat.st_mtime_ns), int(chapters_stat.st_size),
+        )
+
+    def _load_library_project(self, folder: str | Path) -> Project | None:
+        """Load one known Library child; do not enumerate unrelated projects."""
+        target = resolve_library_project_folder(Path(folder))
+        if target is None:
+            return None
+        key = str(target)
+        signature = self._project_file_signature(target)
+        lock = getattr(self, "_active_project_cache_lock", None)
+        if lock is None:
+            lock = threading.RLock()
+            self._active_project_cache_lock = lock
+        with lock:
+            cached = getattr(self, "_active_project_cache", None)
+            if cached and cached[0] == key and cached[1] == signature:
+                return cached[2]
+
+            migrated = getattr(self, "_active_project_migrated_folders", None)
+            if migrated is None:
+                migrated = set()
+                self._active_project_migrated_folders = migrated
+            # Do the legacy chapter/narration/BGM ID migration once per project
+            # per app session. Later file changes reload only project.json and
+            # chapters.json; they do not rescan the narration tree.
+            project = Project.load(target, migrate_legacy=key not in migrated)
+            migrated.add(key)
+            signature = self._project_file_signature(target)
+            self._active_project_cache = (key, signature, project)
+            return project
+
     def _project_open(self, payload: dict[str, Any]) -> dict[str, Any]:
         requested = str(payload.get("folder") or "").strip()
         if not requested:
             raise ValueError("Choose a saved local project first.")
-        selected = next((p for p in list_projects()
-                         if str(p.folder.resolve()) == str(Path(requested).resolve())), None)
+        selected = self._load_library_project(requested)
         if selected is None:
             raise ValueError("That project is not present in the local library.")
         self.settings.setValue("project/active_folder", str(selected.folder.resolve()))
@@ -1126,11 +1170,10 @@ class PremiumV2Bridge(QObject):
         return self._project_summary(selected)
 
     def _project_get_active(self, _payload: dict[str, Any]) -> dict[str, Any] | None:
-        folder = str(self.settings.value("project/active_folder", "") or "")
+        folder = str(self.settings.value("project/active_folder", "") or "").strip()
         if not folder:
             return None
-        selected = next((p for p in list_projects()
-                         if str(p.folder.resolve()) == str(Path(folder).resolve())), None)
+        selected = self._load_library_project(folder)
         if selected is None:
             self.settings.remove("project/active_folder")
             self.settings.sync()
@@ -1371,14 +1414,19 @@ class PremiumV2Bridge(QObject):
         }
 
     def _active_project(self):
-        folder = str(self.settings.value("project/active_folder", "") or "")
+        folder = str(self.settings.value("project/active_folder", "") or "").strip()
         if not folder:
             raise ValueError("Open a local project from the Library first.")
-        selected = next((p for p in list_projects()
-                         if str(p.folder.resolve()) == str(Path(folder).resolve())), None)
+        try:
+            selected = self._load_library_project(folder)
+        except FileNotFoundError:
+            # Do not erase the saved project path when an external Library drive
+            # is disconnected. The user can reconnect it and continue.
+            raise
         if selected is None:
             self.settings.remove("project/active_folder")
             self.settings.sync()
+            self._active_project_cache = None
             raise ValueError("The active project is no longer available in the local library.")
         return selected
 
