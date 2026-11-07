@@ -466,16 +466,16 @@ The #2758 run supports automated/package evidence for the Sound Design, Music Li
 - Therefore #2798 is the latest matching-head source regression pass, not a Windows installer/portable build.
 
 ### Failure reconciliation before #2798
-- #2795 and #2796 each failed the full regression step with four stale contract assertions: three still expected application version 1.1.1 after the branch changed to 1.2.0, and the Premium V2 capability map lacked the newly registered `import.latest.get` handler.
-- These failures were inspected in their actual logs. The version contracts and capability mapping were corrected before #2798.
-- #2798 passed all 1,314 tests. No test was weakened or skipped to manufacture the pass.
+- #2795 and #2796 failed the full regression step with four contract assertions: three still expected 1.1.1 after the branch had been prematurely changed to 1.2.0, and the Premium V2 capability map lacked the newly registered `import.latest.get` handler.
+- The capability-map defect was corrected before #2798. The version assertions were changed to 1.2.0 at that time, but that conflicts with Master Register Sections 0, 21 and 23, which gate the version bump on final acceptance.
+- This follow-up restores the required 1.1.1 version gate and re-aligns the four version contracts. The next matching-head regression run must confirm this correction. No functional test is being weakened.
 
 ### Changes already present on this branch — preserve, do not redo
 - Persistent latest-import record and Import page card with an Open imported project action.
 - Character chapter-split handling that preserves/rebases only valid assignments and invalidates stale offsets when editor text differs from saved source; deletion refuses to orphan saved dialogue assignments.
 - Measured Production chapter-preview paragraph boundary support for Chapter-Based BGM.
 - Fifteen Premium V2 sidebar destinations including Help, searchable Help & Guide content, and packaged acceptance checks for Help search/no-results/expand/collapse.
-- Current version metadata is 1.2.0. No public release/tag has been created.
+- Version gate correction: keep APP_VERSION at 1.1.1 until all required acceptance gates pass; 1.2.0 remains the planned final release version only.
 
 ### Previous packaged checkpoint — Build #2768
 - Exact commit: `9ff9bc05d70444c375c692839d2e8346d34b70cf`.
@@ -508,4 +508,18 @@ Rechecked against current open PR metadata and GitHub commit comparisons with wo
 | #4 | Open, ready | Diverged; PR head has 2 commits not in current branch. | Current Voice Studio contains equivalent Qwen preset draft-reset behavior. Do not merge blindly; keep only if a distinct tested behavior is missing. |
 
 **REL-01 disposition:** duplicate merges are not required for #15/#19/#20. #18/#26/#4 remain open dependency reviews, not permission to merge entire branches. No unrelated PR was merged during this checkpoint.
+
+
+
+## REL-07 version-gate correction — 7 November 2026
+
+The #2790–#2798 branch history changed `APP_VERSION` to 1.2.0 before the full release acceptance gates had passed. This conflicts with the Master Register's explicit versioning rule. The current candidate must therefore remain **1.1.1** while friend/Windows acceptance and remaining Stage 8 requirements are completed. The planned 1.2.0 version is to be applied only after acceptance, on the exact accepted source commit, immediately before the final installer/portable release build.
+
+The following contracts are restored to 1.1.1 for the candidate:
+- `tests/test_audiobook_brain.py`
+- `tests/test_regressions.py`
+- `tests/test_ui_stability_111.py`
+- `tests/test_application_version_contract.py`
+
+The `1.2.0+build.test` fixture in package-size-report tests is test data, not the application's release version, and is intentionally unchanged.
 

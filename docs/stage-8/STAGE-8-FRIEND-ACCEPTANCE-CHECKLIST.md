@@ -1,10 +1,11 @@
 # Ryu Audiobook — Stage 8 Friend Acceptance Checklist
 
-**Purpose:** Validate the exact Stage 8 Windows candidate in a real Windows environment. This is a test handoff, not a claim that Stage 8 is already released.
+**Purpose:** Validate the exact Stage 8 Windows candidate in a real Windows environment. This is a test handoff, not a claim that Stage 8 is already released. The application version must remain 1.1.1 until all final acceptance gates are passed; 1.2.0 is applied only for the final accepted release.
 
 ## Before testing
 
-- Use only the installer and/or portable artifact from the same latest successful artifact-checkpoint run. Do not use Build #2768 as the current candidate; it is the older 1.1.1 package.
+- Use only the installer and/or portable artifact from the same latest successful artifact-checkpoint run. Do not use Build #2768 as the current candidate; it predates the latest source changes even though it is also version 1.1.1.
+- Until final release acceptance, the candidate should display version 1.1.1 plus its unique build number. Version 1.2.0 is reserved for the final accepted release.
 - Record the exact build number shown in the app's About/version area and the artifact name.
 - Record Windows edition/build, CPU, RAM, GPU, available disk space, display resolution and Windows scaling percentage.
 - Use a small non-sensitive test book. Keep a backup of its source file.
