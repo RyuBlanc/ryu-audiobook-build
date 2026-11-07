@@ -280,9 +280,7 @@ class Stage8JobRetryRecoveryTests(unittest.TestCase):
                 "type": "audiobook-generation", "state": "failed",
                 "recoverable": True, "retry_count": 2,
             }
-            harness, project = self._harness(folder, source, {
-                "generation_job_id": "failed-job", "generation_recovery_required": False,
-            })
+            harness, project = self._harness(folder, source)
             with (
                 patch("app.ui.premium_v2_host.list_projects", return_value=[project]),
                 patch("app.ui.premium_v2_host.load_state", return_value={
@@ -307,9 +305,7 @@ class Stage8JobRetryRecoveryTests(unittest.TestCase):
                 "recoverable": True, "retry_count": 1,
                 "error": {"code": "interrupted"},
             }
-            harness, project = self._harness(folder, source, {
-                "generation_job_id": "interrupted-job", "generation_recovery_required": True,
-            })
+            harness, project = self._harness(folder, source)
             with (
                 patch("app.ui.premium_v2_host.list_projects", return_value=[project]),
                 patch("app.ui.premium_v2_host.load_state", return_value={
@@ -380,9 +376,7 @@ class Stage8JobRetryRecoveryTests(unittest.TestCase):
                 "job_id": "active-job", "project_folder": str(folder),
                 "type": "audiobook-generation", "state": "running",
             }
-            harness, project = self._harness(folder, source, {
-                "generation_job_id": "failed-job", "generation_recovery_required": False,
-            }, {"active-job": active})
+            harness, project = self._harness(folder, source, {"active-job": active})
             with (
                 patch("app.ui.premium_v2_host.list_projects", return_value=[project]),
                 patch("app.ui.premium_v2_host.load_state", return_value={
