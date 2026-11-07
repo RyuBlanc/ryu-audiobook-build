@@ -847,6 +847,11 @@
         ["900x1440",900,1440],["1080x1920",1080,1920],["1440x2560",1440,2560],
         ["2160x3840",2160,3840]
       ];
+      const stage8ResponsiveDestinations = [
+        "dashboard", "library", "import", "chapters", "voices",
+        "characters", "pronunciation", "sound", "generate", "player",
+        "history", "models", "performance", "settings", "help"
+      ];
       const stage6CheckResponsiveViewport = async (label,width,height) => {
         // Change both the iframe browsing-context attributes and its CSS size.
         // Wait for the real iframe viewport resize; a synthetic resize event
@@ -921,6 +926,29 @@
           "Task Manager row breakpoint mismatch at " + label + ": " + jobColumns + " columns.");
         must(getComputedStyle(mini).position === "fixed",
           "Mini-player stopped using its viewport-pinned layout at " + label + ".");
+
+        // Exercise every approved destination as the active page at every
+        // requested viewport, not just the shared shell and the player pages.
+        const availablePageWidth = workspace.getBoundingClientRect().width;
+        const pageContainers = Array.from(d.querySelectorAll(".page"));
+        for (const destination of stage8ResponsiveDestinations) {
+          const page = d.getElementById(destination);
+          must(page && page.classList.contains("page"),
+            "Responsive fixture is missing destination " + destination + ".");
+          for (const candidate of pageContainers) candidate.classList.remove("active");
+          page.classList.add("active");
+          const pageRect = page.getBoundingClientRect();
+          must(page.getClientRects().length > 0 && pageRect.width <= availablePageWidth + 2 &&
+            pageRect.left >= -2 && pageRect.right <= width + 2,
+            destination + " page container exceeds the responsive workspace at " + label + ": " +
+              JSON.stringify({left:pageRect.left,right:pageRect.right,width:pageRect.width,available:availablePageWidth}));
+          must(page.scrollWidth <= availablePageWidth + 2,
+            destination + " page has horizontal overflow at " + label + ": " +
+              JSON.stringify({scrollWidth:page.scrollWidth,available:availablePageWidth}));
+        }
+        for (const candidate of pageContainers) candidate.classList.remove("active");
+        playerPage.classList.add("active");
+        historyRow.closest("#history")?.classList.add("active");
       };
       for (const viewport of stage6ResponsiveViewports) {
         await stage6CheckResponsiveViewport(viewport[0],viewport[1],viewport[2]);
@@ -928,7 +956,7 @@
       record("stage6_responsive_shared_shell_bounds_41_resolutions",true,
         "At all 41 viewports, the two-column application shell, top bar and workspace stayed within the viewport, with min-width:0 applied to the workspace.");
       record("stage6_responsive_viewport_matrix_41_resolutions",true,
-        "All 41 requested aspect-ratio resolutions were emulated against the actual Premium V2 stylesheet and player, library, mini-player, History, Task Manager and job-details DOM.");
+        "All 41 requested aspect-ratio resolutions were emulated against the actual Premium V2 stylesheet, all 15 active page containers, player, library, mini-player, History, Task Manager and job-details DOM.");
 
       // Window-size and effective CSS viewport emulation. These are browser
       // viewport checks, not assertions about physical monitor topology or OS DPI.
@@ -959,12 +987,7 @@
     record("active_project", true, "The packaged app loaded a three-chapter project with real saved narration fixtures.");
 
     must(typeof window.go === "function", "The Premium V2 navigation function is unavailable.");
-    const stage8Destinations = [
-      "dashboard", "library", "import", "chapters", "voices",
-      "characters", "pronunciation", "sound", "generate", "player",
-      "history", "models", "performance", "settings", "help"
-    ];
-    for (const destination of stage8Destinations) {
+    for (const destination of stage8ResponsiveDestinations) {
       const navigationButton = document.querySelector(
         'button.nav-btn[data-page="' + destination + '"]'
       );

@@ -22,6 +22,9 @@ class Stage8UIPackagedAcceptanceContractTests(unittest.TestCase):
         self.assertIn('button.nav-btn[data-page="', source)
         self.assertIn('page.classList.contains("active")', source)
         self.assertIn('page.getClientRects().length > 0', source)
+        self.assertIn("const stage8ResponsiveDestinations = [", source)
+        self.assertIn('page.scrollWidth <= availablePageWidth + 2', source)
+        self.assertIn('destination + " page has horizontal overflow at " + label', source)
 
 
 if __name__ == "__main__":
