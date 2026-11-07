@@ -1367,7 +1367,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         for current_rule in (
             "Same BGM", "Chapter-Based", "No BGM", "Voice Only",
             "10, 30, 60 or 90 seconds", "M4B", "Scanned/image-only PDF",
-            "Settings > Storage", "After first paragraph",
+            "Settings > Storage", "After first paragraph", "0.6B or 1.7B",
+            "VoiceDesign itself uses its 1.7B model",
         ):
             self.assertIn(current_rule, adapter)
         self.assertIn("Known limitations", adapter)
