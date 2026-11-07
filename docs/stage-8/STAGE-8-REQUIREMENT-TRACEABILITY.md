@@ -418,3 +418,12 @@ The small SHA-256 manifest artifact from Build #2677 was downloaded and inspecte
 - The Windows workflow now generates `package-size-report.json` and includes it in the release manifest artifact. This report will be available only after a successful matching-head build.
 
 **Status:** baseline size target FAILED; attribution and optimization are IN PROGRESS. Do not delete offline models, runtime providers, licensed starter audio or other required assets to force the target. First inspect the new per-file report; then evaluate safe options such as removing duplicated installer UI runtime or making genuinely optional providers/assets separately installable without losing offline capability.
+
+
+## Stage 8 exact-HEAD CI checkpoint — 2026-11-07
+
+- Candidate source commit: `f46f74ddd95cc2499deee342bceeefb14877ae28`.
+- Windows Actions run #2757: `42354876609` — **SUCCESS**.
+- Completed gates: Python dependency installation; Premium V2 adapter, installer and packaged Sound Design JavaScript syntax; isolated native Qt lifecycle regression; focused Stage 6 History/Task Manager preflight; complete remaining regression suite.
+- The workflow's `build` job was intentionally skipped because this commit did not contain the `[artifact-checkpoint]` marker. Therefore this run is regression evidence only, not installer/portable package evidence.
+- Next exact-candidate action: create a documentation-only `[artifact-checkpoint]` commit, then verify the dependent Windows build and artifact jobs on that new exact HEAD. Do not transfer the #2757 test result to a different commit without rerunning its required gates.
