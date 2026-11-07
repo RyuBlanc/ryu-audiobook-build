@@ -13,7 +13,7 @@ class Stage8UIPackagedAcceptanceContractTests(unittest.TestCase):
             "characters", "pronunciation", "sound", "generate", "player",
             "history", "models", "performance", "settings", "help",
         ]
-        start = source.index("const stage8Destinations = [")
+        start = source.index("const stage8ResponsiveDestinations = [")
         end = source.index("];", start) + 2
         block = source[start:end]
         for destination in expected:
