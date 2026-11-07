@@ -140,3 +140,12 @@ Legacy ambience remains a compatibility alternate only when no explicit book-def
 ### Verification boundary
 
 These test and source changes are committed but not yet verified by matching-head CI. Real listening checks must confirm Same BGM is one continuous bed, Chapter-Based No BGM is narration-only, and Voice Only excludes all BGM/cues.
+
+
+## Full-book preview safety regression coverage
+
+- Disposable-copy test commit: `acc3296f9812692792b976dc3a29b7d7a3db69aa`.
+- Cancellation/partial-output cleanup test commit: `a58d9674e7315381a858b643b45b7e578aa6b4ef`.
+- The tests exercise the actual `_render_full_book_preview` worker with a controlled assembler: it mutates only the staged copy, proves the saved narration chunk remains byte-identical, verifies the staged copy is removed, and confirms cancellation deletes partial output and records a cancelled job.
+- These are regression tests for existing disposable-copy/cancellation logic; no new source change was needed for these two cases.
+- Matching-head CI and actual M4B listening remain pending.
