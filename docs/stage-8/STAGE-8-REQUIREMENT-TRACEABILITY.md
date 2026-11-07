@@ -381,3 +381,12 @@ The current source and contract tests already cover the core PROD/GEN preview an
 - Existing regression coverage also includes generation cancel, pause/resume at safe chapter boundaries, atomic resume state, completed-chunk reuse, empty-chapter handling and M4B packaging/progress.
 
 **Status:** source/contract coverage present for PROD-05..09, PROD-15 and the related GEN requirements. Matching-head CI and packaged Windows execution remain UNVERIFIED. Real audio must still confirm selected-chapter-only preview, playback, save/download, chapter/project switching, and preview/final parity. The short-preview After first paragraph offset remains an explicitly documented limitation; full-book mix preview uses saved chapter timing boundaries.
+
+
+### Generation retry/recovery safety tests added
+
+- Test file: `tests/test_stage6_history_task_manager.py`.
+- Test commits: `53ad60d0ff7ec1590b0017ccb31e5b4d176832d3`, `a1f9a401f1c39e002c00b361e78da5c357812096`, `9c6f89011f03959e22b0f6c1db4206e5672c32ac`, `7abd79f5b3a5701cc8e9f1f9654f7421adb8c3ba`.
+- Six new tests cover failed-job retry lineage/count, interrupted-job recovery lineage, rejection of non-recoverable and non-generation jobs, rejection of non-interrupted/unflagged recovery, protection against a newer generation owning the project, and prevention of a second active generation for the same project.
+- These tests exercise the existing host retry/recovery guards; no source change was made in this audit.
+- Matching-head test execution remains pending.
