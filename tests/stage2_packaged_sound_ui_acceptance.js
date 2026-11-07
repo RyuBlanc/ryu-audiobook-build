@@ -765,7 +765,10 @@
       const stage6ResponsiveApp = document.querySelector("#app")?.outerHTML || "";
       const stage6ResponsiveJobs = jobsModal?.outerHTML || "";
       const stage6ResponsiveDetails = document.querySelector("#jobDetailsModal")?.outerHTML || "";
+      const stage6ResponsiveSound = document.querySelector("#sound")?.outerHTML || "";
       must(stage6ResponsiveCss.length > 10000 &&
+        stage6ResponsiveApp.includes('id="sound"') &&
+        stage6ResponsiveSound.includes('id="soundTrackGrid"') &&
         stage6ResponsiveApp.includes('id="player"') &&
         stage6ResponsiveApp.includes('id="history"') &&
         stage6ResponsiveApp.includes('id="miniPlayer"') &&
@@ -792,7 +795,8 @@
         '" data-effects="' + stage6ResponsiveEffects + '"><head><meta charset="utf-8">' +
         '<meta name="viewport" content="width=device-width, initial-scale=1">' +
         '<style>' + stage6ResponsiveStyle + '</style></head><body>' +
-        stage6ResponsiveApp + stage6ResponsiveJobs + stage6ResponsiveDetails + '</body></html>';
+        stage6ResponsiveApp.replace(/<section class="page" id="sound">[\\s\\S]*?(?=<section class="page")/, "") +
+        stage6ResponsiveSound + stage6ResponsiveJobs + stage6ResponsiveDetails + '</body></html>';
       await waitFor("responsive CSS fixture loads",() => {
         const frameDoc = stage6ResponsiveFrame.contentDocument;
         return Boolean(frameDoc && frameDoc.readyState === "complete" &&
