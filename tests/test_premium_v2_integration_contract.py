@@ -1351,7 +1351,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("writeStyleIfChanged(progress, 'width', pct + '%')", refresh_jobs)
 
 
-    def test_only_unimplemented_prototype_actions_are_disabled(self):
+    def test_source_less_queue_placeholders_are_hidden_and_storage_is_navigable(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         start = adapter.index("function applyUnavailableControlStates()")
@@ -1361,8 +1361,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             "#aiQueue [data-ai-line]:not([data-dialogue-id])", "$('runBenchmark')",
         ):
             self.assertIn(selector, guard)
-        self.assertIn("element.disabled = true", guard)
-        self.assertIn("element.setAttribute('aria-disabled', 'true')", guard)
+        self.assertIn("element.hidden = true", guard)
+        self.assertIn("element.setAttribute('aria-hidden', 'true')", guard)
         self.assertIn("element.title = reason", guard)
         self.assertNotIn("#settings button", guard)
         self.assertNotIn("Changing the application storage root is not implemented", guard)
