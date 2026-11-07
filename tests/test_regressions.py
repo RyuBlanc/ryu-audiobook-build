@@ -2367,6 +2367,59 @@ class RegressionTests(unittest.TestCase):
             self.assertNotIn(str(legacy_ambience), captured["args"])
             self.assertTrue(output.is_file())
 
+    def test_full_book_preview_mixes_disposable_copies_without_mutating_saved_narration(self):
+        import threading
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+        from app.ui.full_book_preview import _render_full_book_preview
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source_dir = root / "project" / "working_audio" / "001_Chapter"
+            source_chunk = source_dir / "chunks" / "00001.wav"
+            _write_wav(source_chunk, 1.0)
+            original_bytes = source_chunk.read_bytes()
+            output = root / "Previews" / "full-book-mix-preview.m4b"
+            output.parent.mkdir(parents=True)
+            captured = {}
+            cancel_event = threading.Event()
+
+            def mutate_only_staged_audio(chapter_dirs, output_path, *args, **kwargs):
+                captured["staged_dirs"] = list(chapter_dirs)
+                self.assertNotEqual(Path(chapter_dirs[0]).resolve(), source_dir.resolve())
+                staged_chunk = Path(chapter_dirs[0]) / "chunks" / "00001.wav"
+                staged_chunk.write_bytes(b"staged preview mutation")
+                kwargs["progress"](1, 1, "mixing")
+                Path(output_path).write_bytes(b"valid preview output" * 200)
+                return Path(output_path)
+
+            host = SimpleNamespace(
+                _job_update=Mock(),
+                _jobs_lock=threading.RLock(),
+                _preview_cancel_events={"preview-job": cancel_event},
+            )
+            state = {
+                "background_audio_mode": "off",
+                "background_audio_enabled": False,
+                "chapter_transition_sound": False,
+            }
+
+            with (
+                patch("app.audio.assembler.assemble_m4b", side_effect=mutate_only_staged_audio),
+                patch("app.audio.assembler._duration_ms", return_value=1000),
+            ):
+                _render_full_book_preview(
+                    host, "preview-job", SimpleNamespace(), [source_dir], ["Chapter"],
+                    output, "Preview Book", "Author", {"title": "Preview Book"}, 256,
+                    state, cancel_event,
+                )
+
+            self.assertEqual(source_chunk.read_bytes(), original_bytes)
+            self.assertTrue(output.is_file())
+            self.assertFalse(captured["staged_dirs"][0].exists())
+            self.assertEqual(host._job_update.call_args.kwargs["state"], "completed")
+            self.assertNotIn("preview-job", host._preview_cancel_events)
+
     def test_pause_profiles_keep_sentence_and_dialogue_turns_natural(self):
         from app.tts.pacing import pause_after_ms
         self.assertGreaterEqual(pause_after_ms("That is the end.", "natural"), 280)
