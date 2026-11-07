@@ -58,6 +58,17 @@ class Stage8UIPackagedAcceptanceContractTests(unittest.TestCase):
         self.assertIn("rightOverflow", source)
         self.assertIn("internalOverflow", source)
 
+    def test_responsive_destination_bounds_are_measured_after_viewport_and_activation(self):
+        source = (ROOT / "tests" / "stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
+        measure = "const workspaceRect = workspace.getBoundingClientRect();"
+        activate = 'page.classList.add("active");'
+        self.assertIn(measure, source)
+        self.assertGreater(source.index(measure), source.index(activate))
+        self.assertIn("workspaceLeft:workspaceRect.left", source)
+        self.assertIn("workspaceRight:workspaceRect.right", source)
+        self.assertIn("workspaceWidth:workspaceRect.width", source)
+        self.assertIn("pageWidth:pageRect.width", source)
+
     def test_help_guide_badge_does_not_claim_release_version_before_version_bump(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("Stage 8 acceptance candidate", adapter)

@@ -935,7 +935,6 @@
 
         // Exercise every approved destination as the active page at every
         // requested viewport, not just the shared shell and the player pages.
-        const availablePageWidth = workspace.getBoundingClientRect().width;
         const pageContainers = Array.from(d.querySelectorAll(".page"));
         for (const destination of stage8ResponsiveDestinations) {
           const page = d.getElementById(destination);
@@ -943,11 +942,18 @@
             "Responsive fixture is missing destination " + destination + ".");
           for (const candidate of pageContainers) candidate.classList.remove("active");
           page.classList.add("active");
+          const workspaceRect = workspace.getBoundingClientRect();
+          const availablePageWidth = workspaceRect.width;
           const pageRect = page.getBoundingClientRect();
           must(page.getClientRects().length > 0 && pageRect.width <= availablePageWidth + 2 &&
+            pageRect.left >= workspaceRect.left - 2 && pageRect.right <= workspaceRect.right + 2 &&
             pageRect.left >= -2 && pageRect.right <= width + 2,
             destination + " page container exceeds the responsive workspace at " + label + ": " +
-              JSON.stringify({left:pageRect.left,right:pageRect.right,width:pageRect.width,available:availablePageWidth}));
+              JSON.stringify({
+                workspaceLeft:workspaceRect.left,workspaceRight:workspaceRect.right,
+                workspaceWidth:workspaceRect.width,
+                pageLeft:pageRect.left,pageRight:pageRect.right,pageWidth:pageRect.width
+              }));
           const pageOverflow = page.scrollWidth > availablePageWidth + 2;
           const overflowElements = pageOverflow ? Array.from(page.querySelectorAll("*")).map(element => {
             const rect = element.getBoundingClientRect();
