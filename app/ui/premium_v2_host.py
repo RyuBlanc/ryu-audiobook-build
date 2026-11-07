@@ -589,6 +589,7 @@ class PremiumV2Bridge(QObject):
             "project.rename": True,
             "import.choose_file": True,
             "import.start": True,
+            "import.latest.get": True,
             "voice.list": True,
             "voice.catalog": True,
             "voice.credentials.set": True,
