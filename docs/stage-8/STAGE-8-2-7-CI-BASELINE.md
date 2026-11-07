@@ -54,7 +54,7 @@ This baseline checkpoint is intentionally committed with the `[artifact-checkpoi
 
 - A package from the exact current Stage 8 candidate commit is still required.
 - CI packaging does not prove installer or portable launch, real playback, real audio generation, UI responsiveness or absence of flicker/crashes on target Windows devices.
-- NVIDIA, AMD and Intel accelerator checks remain pending until tested on corresponding hardware. The carried-forward warmed 30-second Qwen preview target is under 60 seconds; the supplied Stage 8 source records the hosted CPU path at 268.184 seconds, so that CPU target is not met.
+- NVIDIA, AMD and Intel accelerator checks remain pending until tested on corresponding hardware. The carried-forward warmed 30-second Qwen preview target is under 60 seconds; the latest recorded CPU timings are approximately 298–305 seconds, so that CPU target is not met.
 - Investigate the large installer and portable sizes. Do not remove required offline assets or user data to meet a size target.
 - No Version 1.2.0 version bump, tag or public release until all required acceptance evidence is recorded or a limitation is explicitly accepted.
 
@@ -67,6 +67,18 @@ This baseline checkpoint is intentionally committed with the `[artifact-checkpoi
 | Previous Windows package baseline | Passed | Build #2677; commit `e71c16b980c0dd1a669028761a9152ae246a6b0a` |
 | Exact-branch candidate package | Pending | Record new artifact-checkpoint run here |
 | Failure/skip root-cause audit | In progress | Package skip explained by workflow condition; no failed job in #2680 |
-| Full requirement-level traceability | Pending | To be completed from the Master Bug & Change Register and Stage 8 detailed requirements |
+| Full requirement-level traceability | Established; verification pending | 128 requirement IDs and final acceptance items recorded in `STAGE-8-REQUIREMENT-TRACEABILITY.md`; statuses remain open until evidence is attached |
 | Runtime/manual acceptance | Pending | Must be recorded separately from CI |
 
+
+
+## Latest Stage 8 candidate reconciliation
+
+The Stage 8 source branch has since advanced beyond the original `b9ae3e8` baseline with test-first Sound Design changes, Premium V2 action wiring fixes and the in-app Help & Guide. The current evidence record is `docs/stage-8/STAGE-8-REQUIREMENT-TRACEABILITY.md`.
+
+- Sound Design: Chapter-Based explicit-only fallback, Same BGM single-track selection, single-bed legacy ambience handling, chapter asset validation and full-book preview safety/cancellation regressions are committed. Thirteen regression tests were added; none is marked passed without a matching-head run.
+- Premium V2 parity: 108 direct adapter command names were statically checked against 132 host handlers; zero missing direct command names. The legacy storage action routes to Settings > Storage, stale source-less queue rows are hidden, and real Character Studio actions are no longer blocked by the old document-level guard.
+- Help & Guide: searchable and expandable topic cards cover the major screens, latest BGM and preview rules, Qwen model-size setup, storage, recovery, troubleshooting and known limitations.
+- Responsiveness: the full aspect-ratio, portrait, window-state, split-screen, mixed-monitor and 100/125/150/200% scaling matrix is recorded for manual execution.
+
+The latest marker checkpoint must be validated by the exact branch's push-triggered Windows workflow. The connected GitHub status interface currently returns no combined status and no PR-triggered workflow run for the latest push candidate; this does not prove that a push workflow passed or failed. Record its actual Actions run, tests, build job, artifact hashes and expiry once visible. Until then, matching-head CI remains **PENDING / UNVERIFIED**.
