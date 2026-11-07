@@ -8688,20 +8688,18 @@
     return result;
   }
   function applyUnavailableControlStates() {
-    const disable = (element, reason) => {
+    const hide = (element, reason) => {
       if (!element || element.dataset.backendUnavailable === 'true') return;
-      element.disabled = true;
-      element.setAttribute('aria-disabled', 'true');
+      element.hidden = true;
+      element.setAttribute('aria-hidden', 'true');
       element.dataset.backendUnavailable = 'true';
       element.title = reason;
-      const label = (element.getAttribute('aria-label') || element.textContent || element.id || 'Control').trim();
-      element.setAttribute('aria-label', label + '. Unavailable: ' + reason);
     };
-    // Character Studio actions are now bound to source-backed project data.
-    // Only prototype queue buttons without exact source identity remain unavailable.
-    const dialogueReason = 'This item is not linked to an exact source dialogue passage. Refresh the chapter and choose a real passage.';
+    // Character Studio actions are bound only to exact source-backed dialogue.
+    // Hide stale prototype queue rows rather than presenting inert disabled actions.
+    const dialogueReason = 'This item is not linked to an exact source dialogue passage.';
     document.querySelectorAll('#aiQueue [data-ai-line]:not([data-dialogue-id])')
-      .forEach(element => disable(element, dialogueReason));
+      .forEach(element => hide(element, dialogueReason));
     // The legacy storage button is routed to the functional Storage tab by wireStorageControls().
     const benchmarkButton = $('runBenchmark');
     if (benchmarkButton) {
