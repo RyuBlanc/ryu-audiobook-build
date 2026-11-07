@@ -1381,6 +1381,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("storageTab.click()", storage)
         self.assertIn("button.dataset.ryuStorageNavigationBound", storage)
         self.assertIn("storage.choose_root", storage)
+        self.assertIn("button.matches('#aiQueue [data-ai-line]:not([data-dialogue-id])')", adapter)
+        self.assertNotIn("button.matches('[data-ai-line]')", adapter)
         self.assertNotIn("Custom project-library and audio-assets root selection is not implemented", adapter)
         self.assertIn("Manage supported project, audio asset and model storage locations in Settings > Storage.", adapter)
         self.assertIn("benchmarkButton.disabled = false", guard)
