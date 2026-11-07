@@ -197,7 +197,7 @@ This inventory extracts all stable requirement IDs from the Master Bug & Change 
 
 ## REL-01 — Live branch and pull-request dependency audit
 
-**Audited against Stage 8 working HEAD `811822a0497b6943ba61b85105b797a9409b2a18`; the branch has since advanced with test-first Sound Design changes through `709b9a708687ba6b7ea7e0723be9212c9e2174aa`.
+**PR dependency graph and file comparisons were audited at working HEAD `811822a0497b6943ba61b85105b797a9409b2a18`; the branch has since advanced with Sound Design tests/fixes and preview coverage through `b8d7b11699535438b44cb32491af5382a7f7ae09`. The recorded branch-divergence conclusions remain to be rechecked before any PR merge.
 
 | PR | Current state | Head / base | Comparison with working branch | Integration decision |
 |---|---|---|---|---|
@@ -230,3 +230,10 @@ The most recent commits on this branch include the test-first BGM regression, as
 - Production chapter-preview root-cause fix: `37d30f94a8244d0eac87dc6b4601195cf5ff9030`.
 - Defect record update: `709b9a708687ba6b7ea7e0723be9212c9e2174aa`.
 - Exact matching-head tests and Windows packaging are still unverified. The next candidate checkpoint must use a commit message containing `[artifact-checkpoint]` so the Windows build job is eligible to run.
+
+
+## Additional 8.2.8 preview coverage
+
+- Full-book preview regression test commit: `bc5429e72e8d8d4857aa91f10925e6cc37d2cc36`.
+- Sound Design defect record updated at `b8d7b11699535438b44cb32491af5382a7f7ae09`.
+- The latest candidate checkpoint includes all three regression additions and both source fixes. Matching-head CI remains unverified; do not infer success from the older 1,258-test Build #2680.
