@@ -390,3 +390,31 @@ The current source and contract tests already cover the core PROD/GEN preview an
 - Six new tests cover failed-job retry lineage/count, interrupted-job recovery lineage, rejection of non-recoverable and non-generation jobs, rejection of non-interrupted/unflagged recovery, protection against a newer generation owning the project, and prevention of a second active generation for the same project.
 - These tests exercise the existing host retry/recovery guards; no source change was made in this audit.
 - Matching-head test execution remains pending.
+
+
+## Stage 8.2.11 — Windows package-size investigation
+
+### Verified Build #2677 baseline
+
+The small SHA-256 manifest artifact from Build #2677 was downloaded and inspected. These are exact file sizes and hashes from commit `e71c16b980c0dd1a669028761a9152ae246a6b0a`:
+
+| Package file | Size (bytes) | SHA-256 |
+|---|---:|---|
+| HTML Setup.exe | 884,807,898 | `f3548de6d50b612b48a802df3c56580a763d746aa16980aa46c1713cc6abc407` |
+| Core Setup.exe | 657,915,759 | `ed3c1165c367e535da8a4640c7b1720be02026dd897885708e1bb3cf6926c44b` |
+| Main application EXE | 12,151,399 | `634265e02bc7aea789077adb4de68dbc9837eecb8d3a522e84a74e7da18e842d` |
+
+- The HTML installer is 226,892,139 bytes larger than the core installer (about 226.9 MB size delta). The wrapper is built as a separate PySide6/QtWebEngine application and embeds the core installer; this is a strong optimization candidate, but the delta is not yet a per-file attribution.
+- The portable artifact was 1,368,242,573 bytes. The installer artifact ZIP was 884,808,062 bytes, effectively the size of the single Setup.exe.
+- The 500 MB target (500,000,000 bytes, decimal) is not met by the core installer, HTML installer or portable artifact.
+- The Qwen integration smoke model is downloaded to the Actions runner temporary directory, not intentionally bundled into the application payload.
+- Offline Piper/Kokoro model assets, QtWebEngine, ONNX runtime components and starter audio are intentional product dependencies. No required assets have been removed.
+
+### New size-profile evidence
+
+- Added `package_size_report.py` to report the frozen application total, file count, top-level directories, largest 50 files, offline Piper/Kokoro/starter-audio sizes, runtime component directories, installer sizes and the payload metadata.
+- The reporter supports PyInstaller's root and `_internal` asset layouts and uses a decimal 500,000,000-byte target.
+- Added a regression test for component accounting and a Premium V2 contract test requiring the report to be generated and uploaded with the release SHA manifest.
+- The Windows workflow now generates `package-size-report.json` and includes it in the release manifest artifact. This report will be available only after a successful matching-head build.
+
+**Status:** baseline size target FAILED; attribution and optimization are IN PROGRESS. Do not delete offline models, runtime providers, licensed starter audio or other required assets to force the target. First inspect the new per-file report; then evaluate safe options such as removing duplicated installer UI runtime or making genuinely optional providers/assets separately installable without losing offline capability.
