@@ -10744,7 +10744,7 @@
         return;
       }
       if (button.id === 'acceptHighConfidence' || button.id === 'skipAiSuggestion' ||
-          button.matches('[data-ai-line]') || button.id === 'aiUseLibrary' ||
+          button.matches('#aiQueue [data-ai-line]:not([data-dialogue-id])') || button.id === 'aiUseLibrary' ||
           button.id === 'aiCreateNew' || button.id === 'createCharacterQuick') {
         stop();
         message('Bulk acceptance and queue predictions are not connected to verified source passages. Select an individual dialogue passage and explicitly assign a saved character instead.', true);
