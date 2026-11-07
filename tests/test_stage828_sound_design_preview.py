@@ -809,7 +809,6 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
         )
         units = _preview_units(
             text, PreviewProvider(), "Narrator", None, max_chars=1200,
-            preserve_paragraph_boundaries=True,
         )
 
         self.assertEqual(len(units), 2)
