@@ -1,9 +1,12 @@
 """Stage 6 History and Task Manager functional contracts."""
 from __future__ import annotations
 
+import tempfile
 import threading
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from app.ui import premium_v2_host as host
 
@@ -249,6 +252,148 @@ class Stage6HistoryTaskManagerTests(unittest.TestCase):
         self.assertIn("const previewAudio = new Audio(fileUrl)", adapter_source)
         self.assertIn("await previewAudio.play().catch(error =>", adapter_source)
         self.assertIn("if (soundPreviewAudio !== previewAudio || previewAudio.paused) return;", adapter_source)
+
+
+class Stage8JobRetryRecoveryTests(unittest.TestCase):
+    def _harness(self, folder: Path, source_row: dict, project_state: dict, extra_jobs: dict | None = None):
+        class Harness:
+            _job_retry = host.PremiumV2Bridge._job_retry
+            _job_recover = host.PremiumV2Bridge._job_recover
+            _restart_generation_from_job = host.PremiumV2Bridge._restart_generation_from_job
+
+            def __init__(self):
+                self._jobs_lock = threading.RLock()
+                self._jobs = {source_row["job_id"]: dict(source_row)}
+                self._jobs.update({key: dict(value) for key, value in (extra_jobs or {}).items()})
+                self._production_generate_book = Mock(return_value={"job_id": "new-generation-job"})
+                self._job_update = Mock(return_value={"job_id": "new-generation-job"})
+
+        project = SimpleNamespace(folder=folder)
+        harness = Harness()
+        return harness, project
+
+    def test_failed_recoverable_generation_retry_creates_new_job_and_preserves_lineage(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            source = {
+                "job_id": "failed-job", "project_folder": str(folder),
+                "type": "audiobook-generation", "state": "failed",
+                "recoverable": True, "retry_count": 2,
+            }
+            harness, project = self._harness(folder, source, {
+                "generation_job_id": "failed-job", "generation_recovery_required": False,
+            })
+            with (
+                patch("app.ui.premium_v2_host.list_projects", return_value=[project]),
+                patch("app.ui.premium_v2_host.load_state", return_value={
+                    "generation_job_id": "failed-job", "generation_recovery_required": False,
+                }),
+            ):
+                result = harness._job_retry({"job_id": "failed-job"})
+
+            self.assertEqual(result["job_id"], "new-generation-job")
+            self.assertEqual(result["retry_of_job_id"], "failed-job")
+            harness._production_generate_book.assert_called_once_with({"_project_folder": str(folder)})
+            harness._job_update.assert_called_once_with(
+                "new-generation-job", retry_of_job_id="failed-job", retry_count=3,
+            )
+
+    def test_interrupted_generation_recovery_requires_project_recovery_flag_and_records_lineage(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            source = {
+                "job_id": "interrupted-job", "project_folder": str(folder),
+                "type": "audiobook-generation", "state": "failed",
+                "recoverable": True, "retry_count": 1,
+                "error": {"code": "interrupted"},
+            }
+            harness, project = self._harness(folder, source, {
+                "generation_job_id": "interrupted-job", "generation_recovery_required": True,
+            })
+            with (
+                patch("app.ui.premium_v2_host.list_projects", return_value=[project]),
+                patch("app.ui.premium_v2_host.load_state", return_value={
+                    "generation_job_id": "interrupted-job", "generation_recovery_required": True,
+                }),
+            ):
+                result = harness._job_recover({"job_id": "interrupted-job"})
+
+            self.assertEqual(result["job_id"], "new-generation-job")
+            self.assertEqual(result["retry_of_job_id"], "interrupted-job")
+            self.assertEqual(result["recovery_of_job_id"], "interrupted-job")
+            harness._job_update.assert_called_once_with(
+                "new-generation-job", retry_of_job_id="interrupted-job",
+                retry_count=2, recovery_of_job_id="interrupted-job",
+            )
+
+    def test_retry_rejects_nonrecoverable_failure_and_non_generation_jobs(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            nonrecoverable = {
+                "job_id": "failed-job", "project_folder": str(folder),
+                "type": "audiobook-generation", "state": "failed", "recoverable": False,
+            }
+            harness, _project = self._harness(folder, nonrecoverable, {})
+            with self.assertRaisesRegex(ValueError, "not marked recoverable"):
+                harness._job_retry({"job_id": "failed-job"})
+            self.assertFalse(harness._production_generate_book.called)
+
+            import_job = dict(nonrecoverable, job_id="import-job", type="import", recoverable=True)
+            harness, _project = self._harness(folder, import_job, {})
+            with self.assertRaisesRegex(ValueError, "Only full audiobook generation"):
+                harness._job_retry({"job_id": "import-job"})
+            self.assertFalse(harness._production_generate_book.called)
+
+    def test_recovery_rejects_non_interrupted_or_unflagged_projects(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            source = {
+                "job_id": "failed-job", "project_folder": str(folder),
+                "type": "audiobook-generation", "state": "failed",
+                "recoverable": True, "error": {"code": "provider_error"},
+            }
+            harness, _project = self._harness(folder, source, {})
+            with self.assertRaisesRegex(ValueError, "not an interrupted"):
+                harness._job_recover({"job_id": "failed-job"})
+            self.assertFalse(harness._production_generate_book.called)
+
+            interrupted = dict(source, error={"code": "interrupted"})
+            harness, project = self._harness(folder, interrupted, {})
+            with (
+                patch("app.ui.premium_v2_host.list_projects", return_value=[project]),
+                patch("app.ui.premium_v2_host.load_state", return_value={
+                    "generation_job_id": "failed-job", "generation_recovery_required": False,
+                }),
+            ):
+                with self.assertRaisesRegex(ValueError, "not marked as interrupted/recoverable"):
+                    harness._job_recover({"job_id": "failed-job"})
+            self.assertFalse(harness._production_generate_book.called)
+
+    def test_retry_blocks_a_second_active_generation_for_the_same_project(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            source = {
+                "job_id": "failed-job", "project_folder": str(folder),
+                "type": "audiobook-generation", "state": "failed", "recoverable": True,
+            }
+            active = {
+                "job_id": "active-job", "project_folder": str(folder),
+                "type": "audiobook-generation", "state": "running",
+            }
+            harness, project = self._harness(folder, source, {
+                "generation_job_id": "failed-job", "generation_recovery_required": False,
+            }, {"active-job": active})
+            with (
+                patch("app.ui.premium_v2_host.list_projects", return_value=[project]),
+                patch("app.ui.premium_v2_host.load_state", return_value={
+                    "generation_job_id": "failed-job", "generation_recovery_required": False,
+                }),
+            ):
+                with self.assertRaisesRegex(ValueError, "already has another active generation"):
+                    harness._job_retry({"job_id": "failed-job"})
+            self.assertFalse(harness._production_generate_book.called)
+
+
 
 if __name__ == "__main__":
     unittest.main()
