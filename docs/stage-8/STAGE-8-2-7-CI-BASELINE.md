@@ -214,12 +214,33 @@ After GitHub Actions completes, replace the pending statuses with the exact run 
 - No Stage 8 package is marked complete by this checkpoint request alone. The six approved packages 8.2.7–8.2.12 still require their own requirement-level and release-gate evidence. The Version 1.2.0 release remains gated; #2804's frozen EXE was v1.1.1.
 
 
-## Responsive fixture correction — 7 November 2026
+## Responsive acceptance investigation and corrective preflight — 7 November 2026
 
-- Builds #2804 and #2806 both passed regression and frozen startup but failed the Stage 8 responsive acceptance with the same 600x800 diagnostic (scrollWidth 666, available 590).
-- Investigation of the actual acceptance harness found that the responsive iframe cloned the live app, Player, History, mini-player, Task Manager and details surfaces, but did not separately include the actual Sound page element. The loop nevertheless activated a page with id="sound" in the cloned app. This means the reported 666px Sound-page measurement was not a grounded measurement of the actual Sound-page markup.
-- The mobile CSS attempt in source commit `238b7875cb6edbeeec40969054ed59da7b44e9b2` did not change the repeated diagnostic. Do not claim it fixed the issue.
-- Test correction commit: `02d5efd035ac90987321063730c4dc7043032e44`. The responsive iframe now captures the live `#sound` page and includes it in the actual CSS/viewport fixture, while removing the original duplicate before insertion. The fixture also requires `#soundTrackGrid` to exist before proceeding.
-- The all-15-destination/41-viewport assertions remain unchanged and are not weakened. The next run must tell us whether the real Sound page overflows and supply a trustworthy measurement. Fix production CSS only if that corrected test proves a real defect.
-- Matching-head regression and Windows package verification: pending.
+### Failure evidence
+
+- Build #2804 (commit `8870c6d44ab122d86a344b95507061ca79f991ea`) passed 1,319 regression tests and frozen-app startup, then failed packaged responsive acceptance at 600x800: scrollWidth 666, available width 590.
+- Build #2806 (commit `ed955bbf255e942444cb2923428ead38def94793`) repeated the same 666/590 failure after the initial CSS adjustment.
+- Build #2808 (commit `525257e27fc4594a6dd9ee4b683adf0b61d9748a`) failed at 664/590 after changing the responsive fixture. The same logs confirm real M4B full generation, Production Preview Save As, retry M4B, restart persistence, player restoration, History and Task Manager checks completed before the responsive assertion stopped the job.
+- These failed runs produced no installer/portable artifacts. Their downstream installer, Defender and upload steps were skipped.
+
+### Confirmed causes and corrections
+
+1. **Mobile Sound import panel retained the tablet flex row.** The `max-width:1150px` CSS sets `.sound-import-box` to a horizontal flex row. The previous `max-width:760px` block never overrode that declaration. At 600px, the import explanation, label, category selector and import button could therefore remain on one horizontal row. The mobile rule now switches this panel to a single-column grid, constrains its children to the available width and makes the selector/button full-width. Source correction is in commit `539f1a8f0bb96c8f8ec42e18754754f6795f4d7a`.
+
+2. **Responsive fixture must use one complete app DOM.** The prior fixture cloned the complete `#app` and separately re-appended a Sound page extracted from it; its removal regex was double-escaped, so it did not reliably remove the original page. The corrected fixture now uses the one complete `#app` clone, asserts exactly one `#sound` element and checks that the real `#soundTrackGrid` markup exists. It also reports the top overflowing descendant elements (bounds, scroll width, min-width, grid columns and overflow mode) if a page still fails. The all-15-destination/41-viewport assertions remain unchanged.
+
+3. **Intermediate preflight correction.** Commit `93909739e291f81305f7d98199107d984da5ec65` had a malformed intermediate CSS insertion. Test-only Build #2809 failed the new mobile CSS contract test for that reason. The mobile media rule was reconstructed in full in `539f1a8f0bb96c8f8ec42e18754754f6795f4d7a`.
+
+### Matching-head regression preflight
+
+- Build #2810: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42388007419
+- Exact source HEAD: `539f1a8f0bb96c8f8ec42e18754754f6795f4d7a`.
+- Full regression suite: **1,321 tests passed** (44.931 seconds).
+- The new tests `test_sound_import_controls_stack_at_narrow_viewports` and `test_responsive_fixture_uses_one_complete_sound_page_and_reports_overflowing_elements` both passed.
+- Frontend JavaScript syntax validation, isolated Qt lifecycle and focused History/Task Manager preflight passed.
+- Windows package job was skipped because this was intentionally a test-only commit. This is a valid source preflight, not a new package artifact.
+
+### Next exact-head package checkpoint
+
+The following `[artifact-checkpoint]` commit is documentation-only and requests the Windows package on the exact source HEAD above. The packaged Sound Design acceptance must pass the actual Sound page through the full 41-viewport/all-15-destination matrix. Only then can the workflow continue to installer/portable packaging, Defender, manifests and uploads. If responsive acceptance still fails, use its new element-level diagnostics and do not weaken the assertion.
 
