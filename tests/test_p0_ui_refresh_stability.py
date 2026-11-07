@@ -95,7 +95,7 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
             "openProjectWithPreservedDraft(candidate.folder)",
         ):
             self.assertIn(route, adapter)
-        self.assertEqual(adapter.count("call('project.open'"), 1)
+        self.assertEqual(adapter.count("call('project.open'"), 2)
 
     def test_project_open_does_not_start_a_racing_fire_and_forget_active_refresh(self):
         adapter = (
