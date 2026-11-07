@@ -255,7 +255,7 @@ class Stage6HistoryTaskManagerTests(unittest.TestCase):
 
 
 class Stage8JobRetryRecoveryTests(unittest.TestCase):
-    def _harness(self, folder: Path, source_row: dict, project_state: dict, extra_jobs: dict | None = None):
+    def _harness(self, folder: Path, source_row: dict, extra_jobs: dict | None = None):
         class Harness:
             _job_retry = host.PremiumV2Bridge._job_retry
             _job_recover = host.PremiumV2Bridge._job_recover
@@ -333,13 +333,13 @@ class Stage8JobRetryRecoveryTests(unittest.TestCase):
                 "job_id": "failed-job", "project_folder": str(folder),
                 "type": "audiobook-generation", "state": "failed", "recoverable": False,
             }
-            harness, _project = self._harness(folder, nonrecoverable, {})
+            harness, _project = self._harness(folder, nonrecoverable)
             with self.assertRaisesRegex(ValueError, "not marked recoverable"):
                 harness._job_retry({"job_id": "failed-job"})
             self.assertFalse(harness._production_generate_book.called)
 
             import_job = dict(nonrecoverable, job_id="import-job", type="import", recoverable=True)
-            harness, _project = self._harness(folder, import_job, {})
+            harness, _project = self._harness(folder, import_job)
             with self.assertRaisesRegex(ValueError, "Only full audiobook generation"):
                 harness._job_retry({"job_id": "import-job"})
             self.assertFalse(harness._production_generate_book.called)
@@ -352,13 +352,13 @@ class Stage8JobRetryRecoveryTests(unittest.TestCase):
                 "type": "audiobook-generation", "state": "failed",
                 "recoverable": True, "error": {"code": "provider_error"},
             }
-            harness, _project = self._harness(folder, source, {})
+            harness, _project = self._harness(folder, source)
             with self.assertRaisesRegex(ValueError, "not an interrupted"):
                 harness._job_recover({"job_id": "failed-job"})
             self.assertFalse(harness._production_generate_book.called)
 
             interrupted = dict(source, error={"code": "interrupted"})
-            harness, project = self._harness(folder, interrupted, {})
+            harness, project = self._harness(folder, interrupted)
             with (
                 patch("app.ui.premium_v2_host.list_projects", return_value=[project]),
                 patch("app.ui.premium_v2_host.load_state", return_value={
