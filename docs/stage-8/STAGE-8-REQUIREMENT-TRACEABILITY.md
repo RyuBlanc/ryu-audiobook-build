@@ -246,3 +246,14 @@ The most recent commits on this branch include the test-first BGM regression, as
 - Defect record updated at `998320c29046d6b84b82d578d12704ebcdc93eb6`.
 - Open gap: Production chapter preview still rejects `after_first_paragraph` BGM offset because the preview does not currently carry paragraph timing boundaries. The final full-book assembler has a boundary-aware implementation; preview/final parity remains incomplete.
 - Seven regression tests have been added across the Sound Design test commits. None is marked passed until a matching-head run is inspected.
+
+
+## Latest Sound Design single-track correction
+
+- Same BGM manual single-layer regression and stale-ambience validation test: `a50a5397c691d1c871c49b3c7257d0b56dd3fbec`.
+- Chapter-Based No BGM legacy-ambience regression: `6fd085416ab410f0ea27233a45c4dc1be836c33b`.
+- Voice-preview single-track regression: `aac289f9f17c4ccdea876b716a6637a50621da19`.
+- Source fixes: assembler `fa339850428e16d61d0d028f365d4e0355035c9b`, validation `22fc0238e4ac153e028f843316799a32c3d9f9e7`, voice preview `b7a4f366887f68c13ef7f7f1177a6150ae6719a1`.
+- Defect record updated at `dfacf903df912539d44025bddb1a95c8e15d873e`.
+- Remaining known preview parity limitation: `after_first_paragraph` is still rejected by the individual Production chapter preview because that preview has no saved paragraph-boundary timing metadata. Full-book preview/final assembly use the saved chunk manifest boundary path.
+- Eleven Sound Design regression tests have been added across the test commits listed in this matrix. No passing matching-head CI result is yet recorded.
