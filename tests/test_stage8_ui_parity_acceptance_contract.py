@@ -69,6 +69,14 @@ class Stage8UIPackagedAcceptanceContractTests(unittest.TestCase):
         self.assertIn("workspaceWidth:workspaceRect.width", source)
         self.assertIn("pageWidth:pageRect.width", source)
 
+    def test_character_library_toolbar_fits_tablet_workspace_widths(self):
+        html = (ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
+        rule = "@media(min-width:761px) and (max-width:1100px){.character-library-toolbar{grid-template-columns:repeat(2,minmax(0,1fr));min-width:0}"
+        self.assertIn(rule, html)
+        self.assertIn(".character-library-toolbar>*{min-width:0;max-width:100%}", html)
+        self.assertIn(".character-library-toolbar>.segmented{grid-column:1/-1", html)
+        self.assertIn(".character-library-toolbar>.segmented button{flex:1;min-width:0;white-space:nowrap}", html)
+
     def test_help_guide_badge_does_not_claim_release_version_before_version_bump(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("Stage 8 acceptance candidate", adapter)
