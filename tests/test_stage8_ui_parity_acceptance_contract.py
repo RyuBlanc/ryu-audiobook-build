@@ -44,6 +44,9 @@ class Stage8UIPackagedAcceptanceContractTests(unittest.TestCase):
         self.assertIn(".sound-import-box{display:grid;grid-template-columns:minmax(0,1fr)", mobile)
         self.assertIn(".sound-import-box>*{min-width:0;max-width:100%}", mobile)
         self.assertIn(".sound-import-box select,.sound-import-box .btn{width:100%;max-width:100%}", mobile)
+        self.assertIn(".sound-track-grid{grid-template-columns:minmax(0,1fr);min-width:0}", mobile)
+        self.assertIn(".sound-track,.sound-track-info{min-width:0;max-width:100%;overflow-wrap:anywhere}", mobile)
+        self.assertIn(".sound-track-info>*{min-width:0;max-width:100%}", mobile)
 
     def test_responsive_fixture_uses_one_complete_sound_page_and_reports_overflowing_elements(self):
         source = (ROOT / "tests" / "stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
