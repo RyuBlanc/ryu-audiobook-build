@@ -100,7 +100,7 @@ class CharacterAssignmentDeleteTests(unittest.TestCase):
         source = "Mira speaks. Both characters answer."
         assignments = [
             {"start":0,"end":12,"text":"Mira speaks","speaker":"Mira","source":"manual"},
-            {"start":14,"end":source.index(" answer"),"text":"Both characters","speaker":"Mira",
+            {"start":13,"end":source.index(" answer"),"text":"Both characters","speaker":"Mira",
              "speakers":["Mira","Ren"],"multi_speaker_mode":"chorus","source":"ai"},
         ]
         with tempfile.TemporaryDirectory() as temporary:
