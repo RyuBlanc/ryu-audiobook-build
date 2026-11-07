@@ -427,3 +427,27 @@ The small SHA-256 manifest artifact from Build #2677 was downloaded and inspecte
 - Completed gates: Python dependency installation; Premium V2 adapter, installer and packaged Sound Design JavaScript syntax; isolated native Qt lifecycle regression; focused Stage 6 History/Task Manager preflight; complete remaining regression suite.
 - The workflow's `build` job was intentionally skipped because this commit did not contain the `[artifact-checkpoint]` marker. Therefore this run is regression evidence only, not installer/portable package evidence.
 - Next exact-candidate action: create a documentation-only `[artifact-checkpoint]` commit, then verify the dependent Windows build and artifact jobs on that new exact HEAD. Do not transfer the #2757 test result to a different commit without rerunning its required gates.
+
+
+## Build #2758 evidence reconciliation (2026-11-07)
+
+The successful exact-source checkpoint is preserved as historical evidence; it is not discarded or superseded by later regression-only commits.
+
+- Build #2758 exact source: `48436fa0f84e3d011cfe93dc6154d10fbe65ab11`.
+- Regression job: 1,280 tests passed.
+- Windows package job: succeeded; HTML installer/portable artifacts and SHA manifest were uploaded.
+- Frozen-app acceptance passed for the integrated Sound Design/Music Library/Production/Generation/Player/History/Task Manager workflows listed in the CI baseline record.
+- 41 viewport emulation cases passed; OS-level multi-monitor/DPI/minimized-window checks remain pending.
+- Application metadata in this build: Version 1.1.1. It is not the final Version 1.2.0 candidate.
+- Evidence detail and hashes: `docs/stage-8/STAGE-8-2-7-CI-BASELINE.md`.
+
+### Evidence status policy applied
+
+The 128-row requirement inventory is a requirement ledger, not a count of tests. A green full suite does not automatically mean all 128 rows are complete. For a row to advance:
+1. Use a matching test/build commit after the relevant code change.
+2. Identify a behavioural test or packaged interaction proving the actual requirement; static presence checks alone are insufficient.
+3. Keep physical listening, target PC/GPU, manual DPI/monitor and user-observed workflows in `RUNTIME ACCEPTANCE PENDING` until that evidence exists.
+4. Record run number, commit, gate, observed result and remaining gate in the row.
+
+The #2758 run supports automated/package evidence for the Sound Design, Music Library, Production, Generation, Player, History/Task Manager, installer and responsive-emulation requirements exercised by that run. It does not prove all requirement rows, all visual screens, audio quality by human listening, target hardware, or 1.2.0 release metadata. Per-row changes are intentionally made only when the associated tests can be mapped without ambiguity; do not bulk-mark the inventory complete.
+
