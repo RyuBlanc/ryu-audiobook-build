@@ -2131,6 +2131,45 @@ class RegressionTests(unittest.TestCase):
             host._job_update.assert_called_once()
             self.assertEqual(host._job_update.call_args.kwargs["state"], "running")
 
+    def test_chapter_based_auto_mode_ignores_stale_automatic_track_path(self):
+        from app.audio.library import validate_saved_audio_paths
+
+        with tempfile.TemporaryDirectory() as temp:
+            missing_auto_track = Path(temp) / "deleted-automatic-track.wav"
+            state = {
+                "background_audio_mode": "auto",
+                "background_audio_enabled": True,
+                "chapter_bgm_strategy": "chapter-based",
+                "auto_music_track_path": str(missing_auto_track),
+                "chapter_bgm_overrides": {"2": {"rule": "none"}},
+                "chapter_transition_sound": False,
+            }
+
+            # The unused auto-selection path must not block a Chapter-Based
+            # project whose selected chapter explicitly has No BGM.
+            validate_saved_audio_paths(state)
+
+    def test_chapter_based_auto_mode_validates_explicit_chapter_track(self):
+        from app.audio.library import validate_saved_audio_paths
+
+        with tempfile.TemporaryDirectory() as temp:
+            missing_chapter_track = Path(temp) / "deleted-chapter-track.wav"
+            state = {
+                "background_audio_mode": "auto",
+                "background_audio_enabled": True,
+                "chapter_bgm_strategy": "chapter-based",
+                "auto_music_track_path": "",
+                "chapter_bgm_overrides": {
+                    "2": {"rule": "custom", "path": str(missing_chapter_track), "volume": 0.2}
+                },
+                "chapter_transition_sound": False,
+            }
+
+            # Chapter overrides are active in Chapter-Based mode regardless
+            # of the legacy auto/manual source-mode flag and must fail closed.
+            with self.assertRaisesRegex(FileNotFoundError, "custom BGM for chapter 2"):
+                validate_saved_audio_paths(state)
+
     def test_pause_profiles_keep_sentence_and_dialogue_turns_natural(self):
         from app.tts.pacing import pause_after_ms
         self.assertGreaterEqual(pause_after_ms("That is the end.", "natural"), 280)
