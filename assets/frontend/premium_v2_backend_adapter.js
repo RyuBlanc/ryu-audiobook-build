@@ -1269,6 +1269,63 @@
     projectCardStatusObserver.observe(saveState, {subtree:true,childList:true,characterData:true});
   }
 
+  async function refreshLatestImport() {
+    const page = $('import');
+    if (!page) return null;
+    let card = $('latestImportCard');
+    if (!card) {
+      card = document.createElement('section');
+      card.id = 'latestImportCard';
+      card.className = 'card';
+      card.style.marginBottom = '16px';
+      const header = page.querySelector('.page-head');
+      if (header && header.parentElement === page) header.insertAdjacentElement('afterend', card);
+      else page.prepend(card);
+    }
+    let record = null;
+    try { record = await call('import.latest.get'); }
+    catch (error) {
+      card.hidden = true;
+      card.innerHTML = '';
+      return null;
+    }
+    if (!record || !record.project_folder) {
+      card.hidden = true;
+      card.innerHTML = '';
+      delete card.dataset.latestImportSignature;
+      return null;
+    }
+    const signature = JSON.stringify([
+      record.project_folder, record.title, record.source_name,
+      record.chapter_count, record.imported_at
+    ]);
+    if (card.dataset.latestImportSignature !== signature) {
+      card.dataset.latestImportSignature = signature;
+      const importedAt = new Date(record.imported_at);
+      const importedLabel = Number.isNaN(importedAt.getTime())
+        ? String(record.imported_at || 'Recently')
+        : importedAt.toLocaleString();
+      card.innerHTML =
+        '<div class="section-head" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">' +
+          '<div><span class="eyebrow">Recent import</span><h3 style="margin:4px 0">' + esc(record.title || 'Imported book') + '</h3>' +
+          '<p class="muted" style="margin:0">' + esc(record.source_name || 'Source file unavailable') + ' · ' +
+          Number(record.chapter_count || 0) + ' chapters · ' + esc(importedLabel) + '</p></div>' +
+          '<button class="btn small" type="button" data-open-latest-import>Open imported project</button></div>';
+      card.querySelector('[data-open-latest-import]')?.addEventListener('click', async () => {
+        try {
+          await call('project.open', {folder:record.project_folder});
+          await refreshProjects();
+          window.go('library');
+          showToast('Opened ' + String(record.title || 'the imported project') + '.');
+        } catch (error) {
+          showToast(error.message || 'Could not open the imported project.', 'error');
+        }
+      });
+    }
+    card.hidden = false;
+    return record;
+  }
+
   async function refreshProjects() {
     const requestToken = ++projectListEpoch;
     const loadedProjects = await call('project.list');
@@ -1327,6 +1384,7 @@
     }
     await refreshDashboardHero(projects);
     await refreshCurrentProjectCard();
+    await refreshLatestImport();
     renderAudiobookLibrary(projects);
     if (!playerAudio || !playerAudio.src) clearAudiobookPlayerDisplay();
     if (isVisiblePage('generate')) await refreshProductionSummary();
@@ -5956,6 +6014,9 @@
   async function refreshJobsImpl() {
     ensureFailedJobsFilter();
     const allJobs = await call('job.list', {include_hidden:false});
+    if (allJobs.some(job => String(job.type || '').toLowerCase() === 'import' && job.state === 'completed')) {
+      await refreshLatestImport();
+    }
     // A poll can start before the modal is parsed and finish after it is mounted.
     // Re-run the idempotent filter ensure after the asynchronous bridge call.
     ensureFailedJobsFilter();

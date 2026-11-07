@@ -431,6 +431,7 @@ class PremiumV2Bridge(QObject):
                 "project.rename": self._project_rename,
                 "import.choose_file": self._import_choose_file,
                 "import.start": self._import_start,
+                "import.latest.get": self._import_latest_get,
                 "voice.list": self._voice_list,
                 "voice.catalog": self._voice_catalog,
                 "voice.credentials.set": self._voice_credentials_set,
@@ -996,6 +997,12 @@ class PremiumV2Bridge(QObject):
             if has_active_job:
                 raise ValueError("This project has an active background job. Cancel or finish it before moving the book to Trash.")
         entry = trash_project(project)
+        try:
+            from app.core.import_status import clear_latest_import_for_folder
+
+            clear_latest_import_for_folder(target)
+        except Exception:
+            log.exception("Could not clear latest-import status for trashed project %s", target)
         if active_folder == target:
             self.settings.remove("project/active_folder")
             self.settings.sync()
@@ -1049,6 +1056,12 @@ class PremiumV2Bridge(QObject):
         # History entry first, preserves shared Character Library/pronunciation
         # data, and removes only the project's saved output file and project tree.
         delete_project(project)
+        try:
+            from app.core.import_status import clear_latest_import_for_folder
+
+            clear_latest_import_for_folder(target)
+        except Exception:
+            log.exception("Could not clear latest-import status for deleted project %s", target)
         if active_folder == target:
             self.settings.remove("project/active_folder")
             self.settings.sync()
@@ -2090,6 +2103,11 @@ class PremiumV2Bridge(QObject):
         threading.Thread(target=self._import_worker, args=(job_id, path, title, cancel_event), daemon=True).start()
         return {"job_id": job_id, "state": "running", "file_path": str(path)}
 
+    def _import_latest_get(self, _payload: dict[str, Any]) -> dict[str, Any] | None:
+        from app.core.import_status import load_latest_import
+
+        return load_latest_import()
+
     @staticmethod
     def _format_import_error(path: Path, error: Exception, stage: str = "extracting") -> str:
         detail = str(error).strip() or error.__class__.__name__
@@ -2165,6 +2183,14 @@ class PremiumV2Bridge(QObject):
                           "source_title": book.title, "word_count": sum(len((c.text or "").split()) for c in chapters),
                           "imported_at": self._now(), "modified_at": self._now()})
             save_state(project.folder, state)
+            try:
+                from app.core.import_status import record_latest_import
+
+                record_latest_import(project)
+            except Exception:
+                # The import itself is already saved. A recent-import card is
+                # auxiliary metadata and must never turn a valid import into a failure.
+                log.exception("Could not persist latest-import status for %s", project.folder)
             self._job_update(job_id, state="completed", stage="Import complete", progress=100,
                              message=("Book imported and saved locally" +
                                       (f"; removed {len(removed_noise)} likely page-noise line(s)" if removed_noise else "")),
