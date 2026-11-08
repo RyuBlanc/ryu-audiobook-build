@@ -21,7 +21,7 @@ class ProductionGenerationHarness:
         host.PremiumV2Bridge._character_series_for_voice_assignment
     )
 
-    def __init__(self, project, profile, job_id="stage53-production-job") -> None:
+    def __init__(self, project, profile, job_id="stage53-production-job", narrator_only=False) -> None:
         self.project = project
         self.profile = profile
         self.job_id = job_id
@@ -29,15 +29,19 @@ class ProductionGenerationHarness:
         self._assert_no_active_audio_synthesis = Mock()
         self.close_preview_provider_cache = Mock()
         self._active_project = Mock(return_value=project)
+        self.narrator_only = narrator_only
         self._resolve_narrator_for_generation = Mock(
             return_value=(
                 profile,
                 {
                     "source": "project_override",
                     "profile_name": profile.name,
-                    "generation_mode": "character_cast",
-                    "narrator_only": False,
-                    "character_voice_profile_count": 0,
+                    "generation_mode": "narrator_only" if narrator_only else "character_cast",
+                    "narrator_only": narrator_only,
+                    "character_voice_profile_count": 1 if narrator_only else 0,
+                    "effective_character_rows": [
+                        {"name":"Mira","series":"Saved Series","voice_profile":"Mira Voice"}
+                    ] if narrator_only else [],
                 },
             )
         )
@@ -76,13 +80,14 @@ def _complete_saved_state(project_folder: Path, cover: Path, output: Path) -> di
 
 
 class Stage53ProductionPreflightTests(unittest.TestCase):
-    def _run_production(self, root: Path, chapters: list[Chapter], payload=None):
+    def _run_production(self, root: Path, chapters: list[Chapter], payload=None, *, narrator_only=False):
         project_folder = root / "saved-project"
         project_folder.mkdir(parents=True, exist_ok=True)
         cover = root / "saved-cover.png"
         cover.write_bytes(b"PNG fixture")
         output = root / "output" / "saved-book.m4b"
         state = _complete_saved_state(project_folder, cover, output)
+        state["narrator_only_generation"] = narrator_only
         project = SimpleNamespace(
             folder=project_folder,
             title="Saved Book",
@@ -95,7 +100,7 @@ class Stage53ProductionPreflightTests(unittest.TestCase):
             voice_id="saved-narrator-voice",
             provider="piper",
         )
-        bridge = ProductionGenerationHarness(project, profile)
+        bridge = ProductionGenerationHarness(project, profile, narrator_only=narrator_only)
         manager = Mock()
 
         with (
@@ -175,6 +180,29 @@ class Stage53ProductionPreflightTests(unittest.TestCase):
             self.assertEqual(manager.start.call_args.args[0].resolve(), output.resolve())
             self.assertIsNone(state["output_path"])
             bridge._job_update.assert_called_once()
+
+    def test_narrator_only_full_generation_bypasses_all_character_profiles(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            chapters = [Chapter(1, "Opening", "Mira said, “Hello.”")]
+            bridge, manager, manager_factory, result, state, output, profile = self._run_production(
+                root,
+                chapters,
+                narrator_only=True,
+            )
+
+            positional = manager_factory.call_args.args
+            self.assertIs(positional[0].profile, profile)
+            self.assertEqual(positional[1], profile.voice_id)
+            self.assertNotEqual(positional[0].__class__.__name__, "CastAwareProvider")
+            self.assertTrue(state["narrator_only_generation"])
+            self.assertEqual(state["generation_mode"], "narrator_only")
+            job_result = bridge._job_update.call_args.kwargs["result"]
+            self.assertTrue(job_result["narrator_only"])
+            self.assertEqual(job_result["generation_mode"], "narrator_only")
+            self.assertTrue(result["narrator_only"])
+            self.assertEqual(result["generation_mode"], "narrator_only")
+            bridge._resolve_narrator_for_generation.assert_called_once()
 
     def test_all_empty_or_all_excluded_projects_are_rejected_before_job_creation(self) -> None:
         scenarios = (
