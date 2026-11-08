@@ -7258,6 +7258,7 @@ class PremiumV2Bridge(QObject):
         # Never let a transient Voice Studio selection silently replace the narrator
         # that this project will use for production.
         profile, narrator_selection = self._resolve_narrator_for_generation(project, state, chapters)
+        narrator_only = bool(narrator_selection.get("narrator_only"))
         profile_name = profile.name
         metadata_missing = missing_required_metadata_fields(project.title, state, profile_name)
         if metadata_missing:
@@ -7284,42 +7285,46 @@ class PremiumV2Bridge(QObject):
             generation_characters, _cast_mapping_issues = self._effective_generation_character_rows(
                 state, project_series, available_profiles=saved_profiles, strict=True
             )
-        for character in generation_characters:
-            if not isinstance(character, dict):
-                continue
-            assigned_name = str(character.get("voice_profile") or "").strip()
-            if not assigned_name:
-                continue
-            assigned_profile = available_profiles.get(assigned_name.casefold())
-            if assigned_profile is None:
-                raise ValueError(
-                    f"Character '{character.get('name', 'Unknown')}' uses voice profile "
-                    f"'{assigned_name}', which is no longer available. Reassign its voice in Character Studio."
+        # Narrator-only mode must use exactly the saved narrator profile. Do not
+        # even resolve cast profiles in this mode: an unavailable character
+        # profile must not block narration-only generation.
+        if not narrator_only:
+            for character in generation_characters:
+                if not isinstance(character, dict):
+                    continue
+                assigned_name = str(character.get("voice_profile") or "").strip()
+                if not assigned_name:
+                    continue
+                assigned_profile = available_profiles.get(assigned_name.casefold())
+                if assigned_profile is None:
+                    raise ValueError(
+                        f"Character '{character.get('name', 'Unknown')}' uses voice profile "
+                        f"'{assigned_name}', which is no longer available. Reassign its voice in Character Studio."
+                    )
+                cast_profiles[assigned_profile.name] = assigned_profile
+                character_series = self._character_series_for_voice_assignment(
+                    character, project_series
                 )
-            cast_profiles[assigned_profile.name] = assigned_profile
-            character_series = self._character_series_for_voice_assignment(
-                character, project_series
-            )
-            character_names = [str(character.get("name") or "").strip()]
-            aliases = character.get("aliases") or []
-            if isinstance(aliases, list):
-                character_names.extend(str(alias).strip() for alias in aliases)
-            for character_name in character_names:
-                if character_name:
-                    cast_assignments[character_name] = assigned_profile.name
-                    if character_series:
-                        cast_identity_assignments[
-                            character_identity_key(character_name, character_series)
-                        ] = assigned_profile.name
-        if cast_assignments or cast_identity_assignments:
-            from app.tts.cast_provider import CastAwareProvider
-            provider = CastAwareProvider(
-                provider, voice, cast_profiles, cast_assignments,
-                narrating_character=str(state.get("narrating_character") or ""),
-                backend_override=str(state.get("backend") or "automatic"),
-                narrator_profile=profile,
-                identity_assignments=cast_identity_assignments,
-            )
+                character_names = [str(character.get("name") or "").strip()]
+                aliases = character.get("aliases") or []
+                if isinstance(aliases, list):
+                    character_names.extend(str(alias).strip() for alias in aliases)
+                for character_name in character_names:
+                    if character_name:
+                        cast_assignments[character_name] = assigned_profile.name
+                        if character_series:
+                            cast_identity_assignments[
+                                character_identity_key(character_name, character_series)
+                            ] = assigned_profile.name
+            if cast_assignments or cast_identity_assignments:
+                from app.tts.cast_provider import CastAwareProvider
+                provider = CastAwareProvider(
+                    provider, voice, cast_profiles, cast_assignments,
+                    narrating_character=str(state.get("narrating_character") or ""),
+                    backend_override=str(state.get("backend") or "automatic"),
+                    narrator_profile=profile,
+                    identity_assignments=cast_identity_assignments,
+                )
         output_text = str(payload.get("output_path") or state.get("output_path") or state.get("generation_target_path") or "").strip()
         if output_text:
             output = Path(output_text).expanduser().resolve()
@@ -7385,7 +7390,6 @@ class PremiumV2Bridge(QObject):
         ):
             state.pop(recovery_key, None)
         generation_mode = str(narrator_selection.get("generation_mode") or "character_cast")
-        narrator_only = bool(narrator_selection.get("narrator_only"))
         state.update({"voice_profile": profile.name, "voice_id": profile.voice_id,
                       "narrator": profile.name,
                       "narrator_profile_source": str(narrator_selection.get("source") or "none"),
