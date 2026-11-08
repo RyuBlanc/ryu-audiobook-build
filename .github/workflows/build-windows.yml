@@ -989,7 +989,7 @@ jobs:
               throw "Microsoft Defender did not provide a recognized completed-scan result for '$path'. Output: $scanText. No release artifacts will be uploaded."
             }
           }
-          Write-Host 'Microsoft Defender completed both release executable scans without reporting a detection.'
+          Write-Host 'Microsoft Defender completed all three release executable scans (application, HTML installer and core installer) without reporting a detection.'
 
       - name: Upload Windows installer artifact
         id: upload_installer
