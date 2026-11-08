@@ -81,6 +81,28 @@ class Stage6HistoryTaskManagerTests(unittest.TestCase):
         self.assertIn("data-job-view", self.adapter)
         self.assertIn("data-job-detail-field", self.adapter)
 
+    def test_generation_identity_is_visible_in_history_and_task_manager_details(self) -> None:
+        self.assertIn("function generationModeLabel(job)", self.adapter)
+        mode_helper = self.adapter.split("function generationModeLabel(job)", 1)[1].split(
+            "function jobMetaSummary(job)", 1
+        )[0]
+        self.assertIn("result.narrator_only === true", mode_helper)
+        self.assertIn("result.generation_mode === 'narrator_only'", mode_helper)
+        self.assertIn("result.generation_mode === 'character_cast'", mode_helper)
+        self.assertIn("Generation mode not recorded", mode_helper)
+        summary = self.adapter.split("function jobMetaSummary(job)", 1)[1].split(
+            "function ensureJobDetailsModal()", 1
+        )[0]
+        self.assertIn("const mode = generationModeLabel(job)", summary)
+        details = self.adapter.split("function renderJobDetails(job)", 1)[1].split(
+            "async function", 1
+        )[0]
+        self.assertIn("const generationResult = job?.result", details)
+        self.assertIn("['Generation mode', generationMode]", details)
+        self.assertIn("['Saved narrator profile', generationResult.voice_profile", details)
+        self.assertIn("['Character profiles configured'", details)
+        self.assertIn("...generationIdentityFields", details)
+
     def test_task_manager_dialog_is_bounded_and_reflows_at_small_viewports(self) -> None:
         html = (ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
         base = ".modal-back>.jobs-modal{box-sizing:border-box;width:min(780px,calc(100vw - 40px));min-width:0;max-width:100%;max-height:calc(100dvh - 40px);overflow-x:hidden;overflow-y:auto}"
