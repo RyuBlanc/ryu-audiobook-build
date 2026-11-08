@@ -6040,6 +6040,66 @@
     const anyAudioActive = fullActive || previewActive;
     const metadataComplete = project?.metadata_complete === true && !metadataDialogDirty;
     syncProductionPreviewChapterSelector();
+    let narratorOnlyControl = $('narratorOnlyGeneration');
+    if (!narratorOnlyControl) {
+      const generateButton = $('startGenerate');
+      const generateCard = generateButton?.closest('.card') || generateButton?.parentElement;
+      if (generateCard) {
+        const row = document.createElement('label');
+        row.id = 'narratorOnlyGenerationControl';
+        row.style.cssText = 'display:flex;align-items:flex-start;gap:10px;margin:12px 0;padding:12px;border:1px solid var(--border,rgba(128,128,128,.28));border-radius:10px;cursor:pointer';
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.id = 'narratorOnlyGeneration';
+        input.checked = project?.narrator_only_generation === true;
+        input.style.cssText = 'margin-top:3px;flex:0 0 auto';
+        input.addEventListener('change', async () => {
+          const requested = input.checked === true;
+          input.disabled = true;
+          try {
+            const saved = await call('production.narrator_only.save', {
+              enabled:requested,
+              expected_project_folder:String(project?.folder || '')
+            });
+            if (saved.project_folder !== String(project?.folder || '')) {
+              throw new Error('The active project changed while saving Narrator-Only Generation. Reopen Production and retry.');
+            }
+            input.checked = saved.enabled === true;
+            project.narrator_only_generation = input.checked;
+            window.ryuPremiumActiveProject = {...project,narrator_only_generation:input.checked};
+            const status = $('narratorOnlyGenerationStatus');
+            if (status) status.textContent = input.checked
+              ? 'Saved for this book. The saved narrator reads all narration and dialogue.'
+              : 'Off. Character assignments and speaker review will be used.';
+          } catch (error) {
+            input.checked = project?.narrator_only_generation === true;
+            message(error?.message || String(error), true);
+          } finally { input.disabled = false; }
+        });
+        const copy = document.createElement('span');
+        copy.style.cssText = 'display:grid;gap:3px;min-width:0';
+        const title = document.createElement('strong');
+        title.textContent = 'Narrator-Only Generation';
+        const description = document.createElement('small');
+        description.className = 'muted';
+        description.textContent = 'Use the saved narrator for every passage, including dialogue. Requires a saved book or series narrator.';
+        const status = document.createElement('small');
+        status.id = 'narratorOnlyGenerationStatus';
+        status.className = 'muted';
+        status.textContent = input.checked
+          ? 'Saved for this book. The saved narrator reads all narration and dialogue.'
+          : 'Off. Character assignments and speaker review will be used.';
+        copy.append(title,description,status);
+        row.append(input,copy);
+        generateButton?.parentElement?.insertBefore(row,generateButton);
+        narratorOnlyControl = input;
+      }
+    } else {
+      const savedValue = project?.narrator_only_generation === true;
+      if (document.activeElement !== narratorOnlyControl && narratorOnlyControl.checked !== savedValue) {
+        narratorOnlyControl.checked = savedValue;
+      }
+    }
     // Job-state refreshes must never overwrite the required metadata gate.
     if (fullStart) fullStart.disabled = anyAudioActive || !metadataComplete;
     // Preview remains available when metadata is incomplete; only active audio
@@ -10313,7 +10373,8 @@
       if($('productionPreviewTiming'))$('productionPreviewTiming').textContent='Waiting for the preview worker to start.';
       if($('previewState'))$('previewState').textContent='Preparing';
       if($('validation'))$('validation').textContent='Preparing selected chapter preview.';
-      const data=await call('production.preview',{profile_name:name,chapter_number:chapterNumber,chapter_id:chapterId,duration_seconds:Number(duration),include_sound_design:true,_production_preview:true});
+      const narratorOnly = $('narratorOnlyGeneration')?.checked === true;
+      const data=await call('production.preview',{profile_name:activeProject.voice_profile,chapter_number:chapterNumber,chapter_id:chapterId,narrator_only_generation:narratorOnly,duration_seconds:Number(duration),include_sound_design:true,_production_preview:true});
       if(previewToken!==voicePreviewEpoch)return;
       if(!data?.job_id)throw new Error('The Production preview job was not created.');
       const previewProfileName=String(data.profile_name||name);
@@ -10433,8 +10494,10 @@
       window.ryuPremiumApplicationSettings = savedSettings || {};
       await refreshTerms();
       const bitrate = Number(activeProject?.audio_bitrate || savedSettings?.bitrate || 256);
+      const narratorOnly = $('narratorOnlyGeneration')?.checked === true;
       const data = await call('production.generate_book', {
-        profile_name:selectedVoice || $('profileName')?.value || activeProject?.voice_profile,
+        profile_name:activeProject?.voice_profile,
+        narrator_only_generation:narratorOnly,
         bitrate
       });
       if(!data?.job_id)throw new Error('The full audiobook generation job was not created.');
