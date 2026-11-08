@@ -2,7 +2,7 @@
 
 **Source of truth:** Master Bug & Change Register (Sections 0–24), Stage 8 Detailed Requirements, and the six-package Stage 8 execution plan supplied on 7 November 2026.
 **Repository:** `RyuBlanc/ryu-audiobook-build`
-**Working branch:** `stage-7/step-6-safe-auto-fallback`
+**Current repair branch:** `fix/application-wide-closure-2026-11-08`
 **Implementation commits:** regression test `ef8044248daf2f109025861d231831f54cd19ca4`; assembler fix `cb25247c4dc95ff9f8ae518fe40dd7a52e17d583`; defect record `025a467112e60244bec541b5943283b838119ed5`.
 
 ## Status rules
@@ -16,6 +16,24 @@
 - **BLOCKED / UNSUPPORTED — EXPLICITLY DOCUMENTED:** only with a specific reason and explicit treatment.
 
 Do not treat Build #2680's 1,258 passing tests as proof for code committed afterwards. Do not mark a requirement complete from a static element/function-name test. Manual Windows/audio acceptance remains distinct from CI.
+
+## Current evidence overlay — 8 November 2026
+
+This dated overlay is newer than the historical baseline/status snapshots in the matrix below. It supersedes the listed historical statuses only where it names the requirement and its evidence; it does **not** bulk-close the rest of the matrix.
+
+| Requirement area | Current evidence | Current acceptance status |
+|---|---|---|
+| Character Studio large review queue / chapter navigator | Builds #2839/#2841 passed their matching regression gates; #2844/#2846 added source-backed assignment counts and valid whitespace word counts. | Automated regression evidence exists; installed full-book review and saved-source comparison remain pending. |
+| CS / Production canonical dialogue passage identity (XAPP-03) | app/chapters/passage_index.py persists an atomic revision-aware index, stable passage IDs, chapter/source revisions, exact source slices, assignment state, AI-suggestion spans, counts and overlap issues. Character review and cast-aware Production consume it for saved projects. | Build #2866 passed 1,374 tests on 5ecbd0f. Real novel count reconciliation (including 1,175 vs 1,196), review decisions and installed-app acceptance remain pending. |
+| Models/Sound catalogue responsiveness (XAPP-09) | Cache-miss and forced scans use single-flight background jobs; stale last-known-good snapshots are preserved; frontend waits asynchronously for completion before refreshing model/cue/music consumers. | Build #2866 passed 1,374 tests. Large real filesystem cold-scan responsiveness under concurrent work on installed Windows remains pending. |
+| Stage 2 Sound Design / Music Library | Build #2847 produced an installer/portable checkpoint and passed the then-current packaged Sound Design acceptance on its own SHA. Later async catalogue changes are regression-tested in #2866. | #2847 artifacts are not the binary for 5ecbd0f; exact-current-head Windows package and packaged Sound runtime checks are pending. |
+| Frozen Master full requirement set | The complete requirement inventory remains the table below. | **Not complete.** No bulk status promotion is inferred from the 1,374-test pass. |
+
+**Current exact-head evidence:** Build #2866, commit `5ecbd0f2490519bf862021a5b87114228b2cc325`, **SUCCESS — 1,374 tests passed**. Its Windows build job was skipped, so it is regression-only. A documentation `[artifact-checkpoint]` commit follows this code head; that new head must pass both regression and Windows packaging before its installer/portable artifacts are considered current.
+
+**500 MB installer target:** explicitly deprioritized by the user in favour of closing functional defects. Keep it visible as a known unmet target, but do not block the functional closure sequence or remove required offline assets to pursue it.
+
+**Unclosed areas:** full real-book analysis and false-positive handling; target-device Qwen inference/performance; saved voice identity heard in real previews and final audio; narrator-only and multi-character end-to-end M4B; exact Task Manager/restart/cancellation; reconciled production readiness and cross-screen project state; complete control-to-backend/persistence/restart audit; Help & Guide parity; PR/release-candidate reconciliation; current-SHA installer/portable runtime acceptance; and the remaining UI/responsive/Player/History/Pronunciation/Storage/Library Master requirements. See docs/FINAL_CLOSURE_STATUS.md for the detailed XAPP register.
 
 ## Frozen requirement IDs
 
