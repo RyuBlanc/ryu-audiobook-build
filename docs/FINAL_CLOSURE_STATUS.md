@@ -114,3 +114,50 @@ Additional source corrections after the initial large-review overlay:
 - XAPP-09's synchronous cold/forced Models and Sound catalogue scan paths remain open.
 - The prior Build #2842 package attempt is on commit `2fc1434bc14e5962c5ebb9d2a470e8f379da63c2`, which predates these source corrections; it must not be presented as the package for `ec8b7a6`.
 
+
+## 8 November 2026 — Catalogue responsiveness and canonical passage index closure
+
+**Current repair branch:** `fix/application-wide-closure-2026-11-08`  
+**Exact tested commit:** `5ecbd0f2490519bf862021a5b87114228b2cc325`  
+**Matching-head regression run:** [Build #2866](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42462993020) — **SUCCESS, 1,374 tests passed** (44 targeted preflight tests plus the full regression suite).  
+**Windows packaging:** **SKIPPED** on #2866. A new `[artifact-checkpoint]` run is required; do not reuse #2847's package as the binary for this source.
+
+### XAPP-09 — Cold Models/Sound catalogue scans moved off the UI bridge
+
+The former `models.list` and `sound.catalog` cache-miss/forced-refresh paths performed filesystem traversal on the synchronous Qt bridge dispatcher. The current repair uses one single-flight background scan per catalogue, returns the last-known-good snapshot immediately, records a durable job, and publishes a replacement snapshot only after a successful scan against the current source generation. Concurrent requests share the same scan. A failed scan leaves the prior snapshot intact and reports a failed job rather than replacing it with an empty catalogue.
+
+The frontend now awaits catalogue job completion asynchronously before applying cue/music filters or showing refreshed model/voice state. Sound imports invalidate and refresh the catalogue; Voice Studio waits for model inventory; cue and chapter-BGM views share the catalogue loader. The 1,374-test matching-head suite passes.
+
+**Status:** automated source/regression gate passed. Real cold-scan responsiveness on a large installed Models folder and large Sound library, concurrent with preview/generation on Windows, remains **RUNTIME ACCEPTANCE PENDING**. Do not yet claim the Not Responding issue is fully closed.
+
+### XAPP-03 — Persisted revision-aware passage index integrated
+
+The project-local `dialogue_passage_index.json` now records schema version, source revision, assignment/review revision, combined index revision, stable passage IDs, chapter identity/revision, exact source offsets/text, speaker/assignment state, AI suggestions, counts and overlap issues. Rebuilds are atomic and the loader validates the saved revision and every returned source slice before reuse.
+
+Character Studio narration/review data and cast-aware Production's unresolved-speaker gate now read this persisted index for saved projects. AI-discovered source spans without quote/dash delimiters are added to the same review index when their offsets and exact text match the saved chapter. Overlapping AI spans are recorded as index issues and block cast-aware production until reconciled. Projectless/temporary test harnesses retain the pure segmenter fallback; installed projects use the persisted index.
+
+**Status:** matching-head automated regression gate passed. The actual novel's historical **1,175 versus 1,196** passage discrepancy has not been proven reconciled, and the full-book installed-app review/assignment workflow remains **RUNTIME ACCEPTANCE PENDING**. This is not permission to call the count mismatch resolved without comparing against the user's saved book.
+
+### Failure-run reconciliation
+
+- #2848–#2855 and #2856–#2865 are historical red test-first/repair attempts. They exposed real integration and compatibility failures and were not waived.
+- Build #2866 is the first current-head full-suite pass after the catalogue worker and canonical-index compatibility corrections: 1,374 tests passed on `5ecbd0f`.
+- The old failed runs were **not rerun on their own commits**; the corrected, newer candidate is what passed. The Windows package gate remains outstanding on the current head.
+- Previous successful Build #2847 remains a valid packaged checkpoint for its own SHA `548335540422593920f6e1795b29c8e9eb11d75f`, not for `5ecbd0f`.
+
+### Requirements that remain open — do not silently close
+
+- XAPP-01/02: full real-book analysis quality, cross-chapter identity/alias handling, false-positive rejection, persistent dismiss/exclusion and correction of existing false entries.
+- XAPP-04/05: installed-app large-book navigation and saved profile assignment/reopen/preview/final-output routing.
+- XAPP-07: real per-device Qwen CustomVoice/VoiceDesign/Clone benchmark and NVIDIA/AMD/Intel/integrated-GPU acceptance; physical inference-device evidence is still required.
+- XAPP-08/13: actual narrator-only and multi-character book generation, audio listening, interruption/retry/resume and M4B validation on Windows.
+- XAPP-10/11/12/14/16: real Task Manager timing/cancellation/restart, Voice Studio state consistency, one reconciled readiness state, exact Assigned Cast metrics, and cross-screen active-project state.
+- XAPP-15/17: complete Premium V2 visible-control/backend/persistence/restart audit and final Help & Guide verification against the packaged app.
+- XAPP-18: current release-candidate/PR dependency reconciliation remains to be recorded; no PR is to be merged merely to clear its open state.
+- XAPP-19/20: same-SHA installer/portable parity and integrated runtime acceptance remain open after the next package.
+- Frozen Master requirements outside XAPP-01–20 remain authoritative. Use `docs/stage-8/STAGE-8-REQUIREMENT-TRACEABILITY.md` and the Dragon Studio checklist; do not treat 1,374 passing tests as sign-off for all 128 frozen requirements.
+
+### Package-size priority
+
+The user has explicitly deprioritized the **500 MB executable target** in favour of functional completion. Retain the target and the size report as a documented non-priority; do not spend this closure window pruning required offline assets, and do not trade away Piper/Kokoro/Qwen runtime dependencies or bundled licensed starter assets merely to reduce package size.
+
