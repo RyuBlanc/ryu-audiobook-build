@@ -52,5 +52,28 @@ class CharacterStudioUIContracts(unittest.TestCase):
         self.assertIn("Math.min(pendingQueue.length, visibleCount + 120)", adapter)
 
 
+    def test_ai_chapter_navigator_reports_per_chapter_metrics_and_search_status_filters(self):
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        start = adapter.index("function renderDialogueReview()")
+        end = adapter.index("function renderAiChapterDocument()", start)
+        review = adapter[start:end]
+        self.assertIn("chapterPassages", review)
+        self.assertIn("wordCount", review)
+        self.assertIn("assignedCount", review)
+        self.assertIn("aiSuggestedCount", review)
+        self.assertIn("skippedCount", review)
+        self.assertIn("data-ai-chapter-search", review)
+        self.assertIn("data-ai-chapter-status", review)
+        self.assertIn("data-ai-chapter-filter", review)
+        self.assertIn("data-ai-chapter-status-filter", review)
+        self.assertIn("ryuPremiumAiChapterFilter", review)
+        self.assertIn("ryuPremiumAiChapterStatusFilter", review)
+        self.assertIn("Not analysed yet", review)
+        self.assertIn("Needs review", review)
+        self.assertIn("Review complete", review)
+        self.assertIn("chapterNav.addEventListener('input'", review)
+        self.assertIn("chapterNav.addEventListener('change'", review)
+
+
 if __name__ == "__main__":
     unittest.main()
