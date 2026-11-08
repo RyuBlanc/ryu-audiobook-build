@@ -6467,7 +6467,10 @@ class PremiumV2Bridge(QObject):
             from app.chapters.characters import (
                 is_likely_character_name, is_user_confirmed_character_record,
             )
-            self._character_list({})
+            # This worker must not call the UI bridge's _character_list method:
+            # the pronunciation worker can run independently of Character Studio,
+            # and _character_list performs UI-facing persistence cleanup. Use the
+            # saved project cast directly and apply the same authoritative filter.
             state = load_state(project.folder)
             confirmed_character_names: set[str] = set()
             for character in state.get("characters") or []:
