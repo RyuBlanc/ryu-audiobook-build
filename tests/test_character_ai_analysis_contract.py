@@ -1,42 +1,45 @@
 from pathlib import Path
+import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_character_worker_uses_existing_book_wide_local_ai_pipeline():
-    host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
-    start = host.index("    def _character_worker(self, job_id: str, project) -> None:")
-    end = host.index("\n    def _character_assign(", start)
-    worker = host[start:end]
-    assert "from app.ai.brain import AudiobookBrain" in worker
-    assert "brain.analyze_book(" in worker
-    assert "progress=update_ai_progress" in worker
-    assert "brain.close()" in worker
-    assert "source_grounded_fallback" in worker
+class CharacterAIAnalysisContracts(unittest.TestCase):
+    def test_character_worker_uses_existing_book_wide_local_ai_pipeline(self):
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        start = host.index("    def _character_worker(self, job_id: str, project) -> None:")
+        end = host.index("\n    def _character_assign(", start)
+        worker = host[start:end]
+        self.assertIn("from app.ai.brain import AudiobookBrain", worker)
+        self.assertIn("brain.analyze_book(", worker)
+        self.assertIn("progress=update_ai_progress", worker)
+        self.assertIn("brain.close()", worker)
+        self.assertIn("source_grounded_fallback", worker)
+
+    def test_ai_dialogue_predictions_are_grounded_in_exact_chapter_source_and_cast(self):
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn("ai_dialogue_by_chapter", host)
+        self.assertIn("quote_key not in source_key", host)
+        self.assertIn("Local AI book-context analysis:", host)
+        self.assertIn("canonical_speaker", host)
+
+    def test_analysis_reports_full_coverage_and_no_silent_suggestion_limit(self):
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        start = host.index("    def _character_worker(self, job_id: str, project) -> None:")
+        end = host.index("\n    def _character_assign(", start)
+        worker = host[start:end]
+        self.assertNotIn("max_suggestions = 3000", worker)
+        self.assertIn('"processed_chapters": processed_chapters', worker)
+        self.assertIn('"total_chapters": total_chapters', worker)
+        self.assertIn('"coverage_complete":', worker)
+        self.assertIn('"truncated": False', worker)
+
+    def test_local_ai_book_context_starts_with_user_saved_character_cast(self):
+        brain = (ROOT / "app/ai/brain.py").read_text(encoding="utf-8")
+        self.assertIn('initial_characters = base_context.get("characters")', brain)
+        self.assertIn('bible[name] = dict(row, name=name)', brain)
+        self.assertIn('book_context["characters"] = list(bible.values())', brain)
 
 
-def test_ai_dialogue_predictions_are_grounded_in_the_exact_chapter_source_and_cast():
-    host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
-    assert "ai_dialogue_by_chapter" in host
-    assert "quote_key not in source_key" in host
-    assert "Local AI book-context analysis:" in host
-    assert "canonical_speaker" in host
-
-
-def test_analysis_reports_full_coverage_and_no_silent_suggestion_limit():
-    host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
-    start = host.index("    def _character_worker(self, job_id: str, project) -> None:")
-    end = host.index("\n    def _character_assign(", start)
-    worker = host[start:end]
-    assert "max_suggestions = 3000" not in worker
-    assert '"processed_chapters": processed_chapters' in worker
-    assert '"total_chapters": total_chapters' in worker
-    assert '"coverage_complete":' in worker
-    assert '"truncated": False' in worker
-
-
-def test_local_ai_book_context_starts_with_the_user_saved_character_cast():
-    brain = (ROOT / "app/ai/brain.py").read_text(encoding="utf-8")
-    assert 'initial_characters = base_context.get("characters")' in brain
-    assert 'bible[name] = dict(row, name=name)' in brain
-    assert 'book_context["characters"] = list(bible.values())' in brain
+if __name__ == "__main__":
+    unittest.main()
