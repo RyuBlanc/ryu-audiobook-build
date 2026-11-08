@@ -338,3 +338,51 @@ class Stage53ProductionPreflightTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GenerationProgressDispatchHarness:
+    _generation_progress = host.PremiumV2Bridge._generation_progress
+
+    def __init__(self):
+        self._job_update = Mock()
+
+
+class Stage53GenerationProgressDispatchTests(unittest.TestCase):
+    def test_generation_progress_maps_plan_chunks_and_m4b_stages_monotonically(self):
+        bridge = GenerationProgressDispatchHarness()
+        events = (
+            ((0, 2, 0, "plan:4:0:4"), "Preparing generation plan", 2),
+            ((1, 2, 0, "chunk-start:1/4"), "Rendering chapter audio", 3),
+            ((1, 2, 1, "chunk:1/2:1/4"), "Rendering narration chunks", 24),
+            ((2, 2, 4, "m4b-packaging"), "Assembling audiobook", 90),
+            ((2, 2, 4, "m4b-package:2/4:Encoding final chapters"), "Encoding and validating output", 94),
+            ((2, 2, 4, "m4b-complete"), "Validating final audiobook", 99),
+        )
+        observed = []
+        for args, expected_stage, expected_progress in events:
+            bridge._generation_progress("progress-job", *args)
+            changes = bridge._job_update.call_args.kwargs
+            self.assertEqual(changes["state"], "running")
+            self.assertEqual(changes["stage"], expected_stage)
+            self.assertEqual(changes["progress"], expected_progress)
+            self.assertEqual(changes["current_chapter"], args[0])
+            self.assertEqual(changes["chapters_total"], args[1])
+            observed.append(changes["progress"])
+
+        self.assertEqual(observed, sorted(observed))
+        self.assertEqual(observed[-1], 99)
+
+    def test_paused_generation_progress_keeps_last_saved_progress_percentage(self):
+        bridge = GenerationProgressDispatchHarness()
+        bridge._generation_progress("progress-job", 2, 5, 8, "chunk:2/5:8/12")
+        before = dict(bridge._job_update.call_args.kwargs)
+        bridge._generation_progress(
+            "progress-job", 2, 5, 0,
+            "paused:Generation paused at a saved chunk/batch checkpoint. Resume to continue.",
+        )
+        paused = bridge._job_update.call_args.kwargs
+        self.assertEqual(paused["state"], "paused")
+        self.assertEqual(paused["stage"], "Paused at chapter checkpoint")
+        self.assertNotIn("progress", paused)
+        self.assertIn("saved chunk/batch checkpoint", paused["message"])
+        self.assertGreater(before["progress"], 0)
