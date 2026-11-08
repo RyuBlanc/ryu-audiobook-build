@@ -161,3 +161,4 @@ Character Studio narration/review data and cast-aware Production's unresolved-sp
 
 The user has explicitly deprioritized the **500 MB executable target** in favour of functional completion. Retain the target and the size report as a documented non-priority; do not spend this closure window pruning required offline assets, and do not trade away Piper/Kokoro/Qwen runtime dependencies or bundled licensed starter assets merely to reduce package size.
 
+**Traceability ledger synchronized:** `docs/stage-8/STAGE-8-REQUIREMENT-TRACEABILITY.md` updated in commit `e810ac09aef394673d8c98ac81763f7610d86c12`. It now carries the 8 November exact-head overlay and retains the remaining Master requirements as open where installed/runtime evidence is absent.
