@@ -699,7 +699,7 @@ class ProductionReadinessUiTests(unittest.TestCase):
         adapter = (root / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
 
         helper_start = adapter.index("function productionGenerationBlockReason(active)")
-        helper_end = adapter.index("\n  function renderProductionMetadataGate", helper_start)
+        helper_end = adapter.index("function renderProductionMetadataGate(active)", helper_start)
         helper = adapter[helper_start:helper_end]
         for marker in (
             "active.metadata_complete !== true",
@@ -717,6 +717,12 @@ class ProductionReadinessUiTests(unittest.TestCase):
         gate = adapter[gate_start:gate_end]
         self.assertIn("const generationBlockReason = productionGenerationBlockReason(active);", gate)
         self.assertIn("start.disabled = Boolean(generationBlockReason) || audioActive;", gate)
+
+        self.assertIn("const generationBlockReason = productionGenerationBlockReason(project);", generation)
+        self.assertIn("fullStart.disabled = anyAudioActive || Boolean(generationBlockReason);", generation)
+        self.assertIn("productionGenerationBlockReason(project)", generation)
+        self.assertIn("fullStart.title = anyAudioActive", generation)
+        self.assertNotIn("fullStart.disabled = anyAudioActive || !metadataComplete;", generation)
 
         flow_start = adapter.index("function refreshDashboardFlow(project)")
         flow_end = adapter.index("\n  function ", flow_start + 10)
