@@ -464,8 +464,54 @@
     const analyzedItems = items.filter(item =>
       item.source === 'local-dialogue-analysis' || analyzedIds.has(String(item.id || ''))
     );
+    const selectedNumber = Number(window.ryuPremiumAiChapterNumber || characterStudioSelectedChapter || window.ryuPremiumSelectedChapter || chapters[0]?.number || 0);
+    const selectedChapter = chapters.find(chapter => Number(chapter.number) === selectedNumber) || chapters[0] || null;
+    let chapterNav = $('aiChapterNavigator');
+    if (queue && !chapterNav) {
+      chapterNav = document.createElement('div');
+      chapterNav.id = 'aiChapterNavigator';
+      chapterNav.className = 'ryu-ai-chapter-navigator';
+      chapterNav.style.cssText = 'display:grid;gap:6px;max-height:230px;overflow:auto;margin:0 0 12px;padding-right:3px;';
+      queue.parentElement?.insertBefore(chapterNav, queue);
+    }
+    if (chapterNav) {
+      const priorScroll = chapterNav.scrollTop;
+      const chapterButtons = chapters.map(chapter => {
+        const number = Number(chapter.number);
+        const chapterRows = analyzedItems.filter(item => Number(item.chapter_number) === number && !item.skipped);
+        const pendingRows = chapterRows.filter(item => !item.assigned);
+        const active = number === Number(selectedChapter?.number);
+        const status = !characterAnalysisStatus.analyzed ? 'Not analysed yet' :
+          (pendingRows.length ? pendingRows.length + ' need review' : 'Review complete');
+        return '<button type="button" class="chapter-pick ' + (active ? 'active' : '') +
+          '" data-ai-chapter-number="' + number + '" aria-current="' + (active ? 'page' : 'false') +
+          '" style="display:flex;flex-direction:column;align-items:flex-start;gap:3px;width:100%;text-align:left;padding:9px 11px;border-radius:9px;border:1px solid ' +
+          (active ? 'var(--accent,#c92c57)' : 'var(--border,#303744)') +
+          ';background:' + (active ? 'rgba(197,39,82,.16)' : 'rgba(255,255,255,.02)') +
+          ';color:inherit;cursor:pointer"><b>Chapter ' + number + ' · ' +
+          esc(String(chapter.title || 'Untitled chapter')) + '</b><small>' +
+          esc(status + ' · ' + pendingRows.length + ' pending') + '</small></button>';
+      }).join('');
+      chapterNav.innerHTML = '<div class="ryu-character-subsection">Chapters · select to review</div>' +
+        (chapterButtons || '<div class="ryu-character-empty">No chapters are loaded.</div>');
+      chapterNav.scrollTop = priorScroll;
+      if (!chapterNav.dataset.liveBound) {
+        chapterNav.dataset.liveBound = '1';
+        chapterNav.addEventListener('click', event => {
+          const button = event.target.closest('[data-ai-chapter-number]');
+          if (!button) return;
+          const number = Number(button.dataset.aiChapterNumber);
+          if (!chapters.some(chapter => Number(chapter.number) === number)) return;
+          window.ryuPremiumAiChapterNumber = number;
+          window.ryuPremiumSelectedChapter = number;
+          characterStudioSelectedChapter = number;
+          window.ryuPremiumSelectedDialogueId = '';
+          renderDialogueReview();
+        });
+      }
+    }
     const renderSignature = JSON.stringify([
-      characterAnalysisStatus.analyzed, items.map(item => [
+      characterAnalysisStatus.analyzed, selectedChapter?.number, items.map(item => [
         item.id,item.chapter_number,item.start,item.end,item.text,item.speakers,item.assigned,
         item.assignmentSource,item.skipped,(item.suggestions||[]).map(candidate=>[candidate.name,candidate.confidence,candidate.evidence])
       ])
@@ -489,8 +535,6 @@
     if (progressLabel) progressLabel.textContent = !characterAnalysisStatus.analyzed
       ? 'Run Analyze book' : (counted.length ? percent + '% assigned' : 'No suggestions');
     if (pendingBadge) pendingBadge.textContent = characterAnalysisStatus.analyzed ? remaining + ' left' : 'Not analyzed';
-    const selectedNumber = Number(window.ryuPremiumAiChapterNumber || characterStudioSelectedChapter || window.ryuPremiumSelectedChapter || chapters[0]?.number || 0);
-    const selectedChapter = chapters.find(chapter => Number(chapter.number) === selectedNumber) || chapters[0] || null;
     if (title) title.textContent = selectedChapter
       ? 'Chapter ' + selectedChapter.number + ' · ' + String(selectedChapter.title || 'Untitled chapter')
       : 'Dialogue review';
@@ -500,7 +544,10 @@
         ? 'Green passages are saved assignments; orange passages have real analysis suggestions; plain passages have no saved assignment or supported prediction.'
         : 'Open a local project to review its source text and dialogue assignments.');
     if (queue) {
-      const pending = analyzedItems.filter(item => !item.assigned && !item.skipped);
+      const pending = analyzedItems.filter(item =>
+        Number(item.chapter_number) === Number(selectedChapter?.number) &&
+        !item.assigned && !item.skipped
+      );
       if (!characterAnalysisStatus.analyzed) {
         queue.innerHTML = '<div class="ryu-character-empty"><b>Analysis has not run</b>Select Run analysis again to create review suggestions from the active project. Manual source-text assignment is still available.</div>';
       } else {
@@ -3856,14 +3903,8 @@
     }
     const voice = $('editCharacterVoice');
     if (voice) {
-      voice.title = 'Voice assignments are managed in Character Studio so all volumes stay consistent.';
-      if (!modal.__ryuVoiceLockObserver && typeof MutationObserver !== 'undefined') {
-        modal.__ryuVoiceLockObserver = new MutationObserver(() => {
-          if (!modal.classList.contains('show')) voice.disabled = false;
-        });
-        modal.__ryuVoiceLockObserver.observe(modal, {attributes:true, attributeFilter:['class']});
-      }
-      if (modal.classList.contains('show')) voice.disabled = true;
+      voice.title = 'Choose a saved Voice Studio profile for this character, or select Unassigned.';
+      voice.disabled = voice.options.length <= 1;
     }
   }
   function ensureCharacterRecoveryButton() {
@@ -6803,9 +6844,24 @@
         '</b><small>' + esc(row.series) + ' · ' + esc(row.profile || 'No audio profile assigned') +
         (row.source === 'library' ? ' · Character Library' : ' · This project') + '</small></button>';
     }).join('') || '<p class="muted">No saved characters exist yet. Use New character to create one in a series.</p>';
+    const savedVoiceProfiles = characterSavedProfiles();
+    const profileOptions = ['<option value="">No character voice profile yet</option>',
+      ...savedVoiceProfiles.map(profile => '<option value="' + esc(profile.name) + '">' +
+        esc(profile.name) + ' · ' + esc(profile.provider || 'Voice') + '</option>')
+    ].join('');
+    const profileSelector = '<div class="ryu-character-subsection" style="margin-top:12px">Character audio profile</div>' +
+      '<label class="ryu-ai-profile-selector" style="display:grid;gap:6px;margin:0 0 12px">' +
+      '<span>Assign a saved Voice Studio profile now (or assign one later)</span>' +
+      '<select id="aiCharacterVoiceProfile" style="width:100%;min-width:0">' + profileOptions + '</select></label>';
     if ($('predictionList')) $('predictionList').innerHTML =
       '<div class="ryu-character-subsection">AI suggestions</div>' + candidateHtml +
-      '<div class="ryu-character-subsection">Saved / manually created characters</div>' + savedHtml;
+      '<div class="ryu-character-subsection">Saved / manually created characters</div>' + savedHtml +
+      profileSelector;
+    const initialChoice = $('predictionList')?.querySelector('.prediction-option.active');
+    const initialProfile = String(initialChoice?.dataset.profile || '');
+    if ($('aiCharacterVoiceProfile') && savedVoiceProfiles.some(profile => profile.name === initialProfile)) {
+      $('aiCharacterVoiceProfile').value = initialProfile;
+    }
     if ($('confirmAiCharacter')) $('confirmAiCharacter').disabled = !(suggestions.length || savedOptions.length);
     const removeButton = ensureDialogueUnassignButton();
     if (removeButton) removeButton.hidden = !(item.assignmentPresent || item.assigned);
@@ -6828,7 +6884,7 @@
         '<option value="' + esc(profile.name) + '">' + esc(profile.name) + ' · ' + esc(profile.provider || 'Voice') + '</option>'
       ).join('');
       $('editCharacterVoice').value = selected.voice_profile || '';
-      $('editCharacterVoice').disabled = true;
+      $('editCharacterVoice').disabled = saved.length === 0;
     }
     if ($('editCharacterScope')) $('editCharacterScope').value = selected.scope || 'Current book only';
     populateEditCharacterSeriesOptions(characterSeries(selected));
@@ -6849,7 +6905,7 @@
       name,
       short_description:$('editCharacterShort')?.value || '',
       aliases:$('editCharacterAliases')?.value || '',
-      voice_profile:String(current.voice_profile || ''),
+      voice_profile:String($('editCharacterVoice')?.value ?? current.voice_profile ?? ''),
       series, scope:series ? 'Series · ' + series : 'Current book only',
       notes:$('editCharacterNotes')?.value || ''
     });
@@ -7049,6 +7105,11 @@
       if (button.matches('#predictionList .prediction-option')) {
         handle(() => {
           document.querySelectorAll('#predictionList .prediction-option').forEach(item => item.classList.toggle('active', item === button));
+          if ($('aiCharacterVoiceProfile')) {
+            const preferred = String(button.dataset.profile || '');
+            $('aiCharacterVoiceProfile').value = characterSavedProfiles().some(profile => profile.name === preferred)
+              ? preferred : '';
+          }
           if ($('confirmAiCharacter')) $('confirmAiCharacter').disabled = false;
         });
         return;
@@ -7060,8 +7121,9 @@
           if (!name) throw new Error('Select an AI suggestion or a saved character first.');
           const assignmentSource = selected.dataset.source === 'ai' ? 'ai' : 'manual';
           const assignmentConfidence = assignmentSource === 'ai' ? Number(selected.dataset.confidence || 0) : 1.0;
+          const selectedProfile = String($('aiCharacterVoiceProfile')?.value ?? selected.dataset.profile ?? '').trim();
           await assignPassageToCharacter(name, String(selected.dataset.series || activeCharacterProjectSeries()),
-            String(selected.dataset.profile || ''), assignmentSource, assignmentConfidence);
+            selectedProfile, assignmentSource, assignmentConfidence);
           $('aiPredictionModal')?.classList.remove('show');
           window.ryuPremiumSelectedDialogueId = '';
         });
