@@ -32,6 +32,32 @@ class NarratorResolverHarness:
 
 
 class NarratorOnlyGenerationTests(unittest.TestCase):
+    def test_narrator_only_is_off_by_default_without_character_profiles(self):
+        project = SimpleNamespace(title="Cast-aware book")
+        harness = NarratorResolverHarness(SimpleNamespace(name="Saved Narrator"))
+        _profile, selection = harness._resolve_narrator_for_generation(
+            project, {"characters": []}, [Chapter(1, "Opening", '“Hello there,” she said.')]
+        )
+        self.assertFalse(selection["narrator_only"])
+        self.assertEqual(selection["generation_mode"], "character_cast")
+
+    def test_narrator_only_is_explicit_book_opt_in_and_routes_all_passages(self):
+        project = SimpleNamespace(title="Narrator-only book")
+        chapters = [Chapter(1, "Opening", '“Hello there,” she said.')]
+        with patch(
+            "app.chapters.speaker_segmentation.segment_chapter_speakers",
+            side_effect=AssertionError("Narrator-only mode must not demand character review"),
+        ):
+            profile, selection = NarratorResolverHarness(
+                SimpleNamespace(name="Saved Narrator")
+            )._resolve_narrator_for_generation(
+                project, {"characters": [], "narrator_only_generation": True}, chapters
+            )
+        self.assertEqual(profile.name, "Saved Narrator")
+        self.assertTrue(selection["narrator_only"])
+        self.assertEqual(selection["generation_mode"], "narrator_only")
+        self.assertEqual(selection["dialogue_routing"], "narrator_for_all_passages")
+
     def test_no_character_profiles_allows_unassigned_dialogue_with_saved_narrator(self):
         project = SimpleNamespace(title="Narrator-only book")
         chapters = [Chapter(1, "Opening", '“Hello there,” she said.')]
@@ -50,7 +76,7 @@ class NarratorOnlyGenerationTests(unittest.TestCase):
         self.assertEqual(selection["character_voice_profile_count"], 0)
         self.assertEqual(selection["dialogue_routing"], "narrator_for_all_passages")
 
-    def test_zero_profiles_with_226_unassigned_characters_is_narrator_only(self):
+    def test_zero_profiles_with_226_unassigned_characters_is_cast_aware_by_default(self):
         project = SimpleNamespace(title="Narrator-only book")
         chapters = [Chapter(1, "Opening", '“Hello there,” she said.')]
         characters = [{"name": f"Candidate {n}", "voice_profile": ""} for n in range(226)]
@@ -60,8 +86,22 @@ class NarratorOnlyGenerationTests(unittest.TestCase):
         )._resolve_narrator_for_generation(project, {"characters": characters}, chapters)
 
         self.assertEqual(profile.name, "Saved Narrator")
-        self.assertTrue(selection["narrator_only"])
+        self.assertFalse(selection["narrator_only"])
+        self.assertEqual(selection["generation_mode"], "character_cast")
         self.assertEqual(selection["character_voice_profile_count"], 0)
+
+    def test_explicit_narrator_only_ignores_character_voice_assignments(self):
+        project = SimpleNamespace(title="Narrator-only book")
+        characters = [{"name":"Mira","voice_profile":"Mira Voice"}]
+        harness = NarratorResolverHarness(SimpleNamespace(name="Saved Narrator"))
+        harness._saved_profiles.append(SimpleNamespace(name="Mira Voice", voice_id="mira-voice"))
+        _profile, selection = harness._resolve_narrator_for_generation(
+            project, {"characters":characters,"narrator_only_generation":True},
+            [Chapter(1, "Opening", "“Hello there,” she said.")]
+        )
+        self.assertTrue(selection["narrator_only"])
+        self.assertEqual(selection["character_voice_profile_count"], 1)
+        self.assertEqual(selection["dialogue_routing"], "narrator_for_all_passages")
 
     def test_configured_character_profile_keeps_unresolved_dialogue_gate(self):
         project = SimpleNamespace(title="Cast book")
