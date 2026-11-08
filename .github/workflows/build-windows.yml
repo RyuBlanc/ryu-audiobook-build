@@ -33,6 +33,7 @@ on:
       - stage-6/**
       - stage-7/**
       - fix/application-wide-closure-2026-11-08
+      - fix/xapp-08-explicit-narrator-only-2026-11-08
   workflow_dispatch:
 
 # Build artifacts are produced and verified on every main build.
