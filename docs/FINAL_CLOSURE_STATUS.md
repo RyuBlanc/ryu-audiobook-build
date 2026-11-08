@@ -187,7 +187,43 @@ The user has explicitly deprioritized the **500 MB executable target** in favour
 ### Scope still not claimed complete
 
 - This overlay does not close physical NVIDIA/AMD/Intel GPU inference and benchmark acceptance, a real long-book analysis and listening session, final audiobook playback/metadata acceptance, or the current-head Windows package.
-- The previous successful Windows package is Build #2847 and predates the pronunciation/Qt-runner corrections. A new artifact checkpoint must be produced from the latest tested SHA before calling that package current.
+- Build #2887 supersedes the previous #2847 package checkpoint. Its installer/portable artifacts match exact SHA `5f811eb60a912353926704b6ba7c8fbfed41e0cc`, with 1,387 tests passed, verified Windows packaging, install/upgrade/uninstall acceptance, and clean Microsoft Defender CI scans. Any source change after that SHA requires a new exact-head package before that binary is called current.
 - The 500 MB executable target is explicitly not a release blocker and must not drive removal of required offline assets.
 - Historical failed run records remain visible in GitHub. #2886 is the current cumulative passing regression checkpoint; do not rerun obsolete commits whose source predates the fixes.
 
+## 8 November 2026 — Build #2887 integrated closure checkpoint
+
+**Exact packaged head:** `5f811eb60a912353926704b6ba7c8fbfed41e0cc`  
+**PR:** [#31 — Stage 8: integrated application-wide closure and release acceptance](https://github.com/RyuBlanc/ryu-audiobook-build/pull/31), open draft, base `stage-7/responsive-active-project-cache`, 70 commits, 38 changed files.  
+**Run:** [Build #2887](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42477948917), full suite **1,387 passed**, Windows build succeeded.
+
+### Artifact identities
+
+- Installer artifact ID: `13616938581`, workflow artifact name `Ryu-Audiobook-Installer-2887`, ZIP size 846,086,086 bytes.
+- Portable artifact ID: `13616784388`, workflow artifact name `Ryu-Audiobook-Portable-2887`, ZIP size 1,183,376,406 bytes.
+- SHA-256 manifest artifact ID: `13617037536`, ZIP size 3,044 bytes.
+- Piper benchmark artifact ID: `13617435436`, ZIP size 804 bytes.
+
+Manifest binary SHA-256:
+- HTML installer: `ead5dfa97b328f47794f4cee7a676f6c2e85192b884278967e75207688fcb9b2` (846,085,922 bytes).
+- Core installer: `edf811bf60a630a5e98f54d4f2bcd1e15a6cafcede67d73b371a71d3bca60567` (619,261,899 bytes).
+- Main application executable: `898a479dadd53816e2447ba7f15c51619fdea15634f4d93d7144eefd3626f384` (12,211,104 bytes).
+
+Defender run #2887 reports no threats for the application executable, HTML installer and core installer. This is CI evidence, not proof of disposition of any prior endpoint-specific detection.
+
+Verified benchmark: Piper CPU provider, 12.8053 seconds of audio generated in 3.5205 seconds, RTF 0.2749, on GitHub's Windows runner. No Qwen accelerator inventory was reported.
+
+### Outstanding closure gates (do not infer from test pass)
+
+- Actual long-book analysis, character/alias quality, false-cast cleanup on the user's saved project, and reconciliation of real dialogue totals.
+- Installed Windows check of large-book review and passage index, including the known 1,175/1,196 discrepancy.
+- Saved voice profile heard in Test Voice and final production after project restart.
+- Qwen CustomVoice 0.6B/1.7B, VoiceDesign, Voice Clone and Automatic-mode benchmark matrix on actual NVIDIA/AMD/Intel/iGPU devices; 30-second preview under 60 seconds on agreed hardware.
+- Real narrator-only and multi-character end-to-end M4B generation, playback, interruption, retry and resume.
+- Task Manager elapsed time, cancellation, duplicate-job handling and restart recovery in packaged Windows.
+- Full Premium V2 control-to-backend-to-persistence-to-restart acceptance and responsive display matrix.
+- Full Pronunciation dictionary/profile/conflict/audio-invalidation requirements and Sound Design preview/final mix parity.
+- Help & Guide parity and release PR/dependency review.
+- Existing documented unsupported capabilities remain open/classified, including additional export formats, blank-project lifecycle, scanned PDF OCR, remote model updates, generic model test-generation, SQLite migration, external model/cache roots and credential storage integration.
+
+The 500 MB executable target is not a functional release gate and remains deprioritized. Do not remove required offline voice models or starter audio to pursue it.
