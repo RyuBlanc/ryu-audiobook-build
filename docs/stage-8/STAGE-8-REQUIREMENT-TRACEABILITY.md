@@ -553,3 +553,12 @@ The `1.2.0+build.test` fixture in package-size-report tests is test data, not th
 - When enabled, every source passage (including quoted/dash-led dialogue) uses the saved narrator and cast routing is bypassed. When disabled, normal cast-aware speaker-review validation runs, even when no character voice profile is assigned.
 - Production chapter preview reads the same saved mode and bypasses cast routing when enabled. Full generation records the effective mode in the project/job state.
 - Full-generation persistence coverage now also asserts that the saved book state and the durable job/launch result expose `generation_mode` and `narrator_only` for the chosen mode; the cast-aware Stage 5.3 path must explicitly remain `character_cast` when the toggle is off. Narrator-only-specific runtime acceptance remains open: generate/listen to the full book, inspect M4B metadata/chapter playback, and test interruption/cancel/retry/resume on packaged Windows under XAPP-08/13.
+
+
+### XAPP-08 — Full-generation cast isolation correction (8 November 2026)
+
+- Source review found that the original explicit narrator-only resolver and Production preview bypass were not sufficient: full-book Production still resolved saved character profiles and could wrap the narrator provider with `CastAwareProvider`.
+- The full-generation path now skips character-profile resolution and cast-provider construction when the persisted per-book narrator-only flag is enabled. This means unavailable character profiles cannot block narrator-only generation, and the only TTS identity passed to the generation manager is the saved narrator.
+- A Stage 5.3 production-path regression now creates a narrator-only book with a saved character voice assignment and asserts that the generation manager receives the saved narrator-bound provider, no cast router, and narrator-only state/mode in the project state, job result and launch response.
+- The normal cast-aware path remains covered and must continue routing character dialogue to assigned profiles when narrator-only is off.
+- This is automated source evidence only until a matching-head Windows regression/package run and actual full-book audio/M4B acceptance complete.
