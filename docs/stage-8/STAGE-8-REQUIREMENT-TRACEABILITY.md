@@ -544,3 +544,12 @@ The following contracts are restored to 1.1.1 for the candidate:
 
 The `1.2.0+build.test` fixture in package-size-report tests is test data, not the application's release version, and is intentionally unchanged.
 
+ 
+## XAPP-08 — Narrator-only Generation implementation overlay (8 November 2026)
+
+- Narrator-only routing is an explicit per-book opt-in (`narrator_only_generation`); zero character profiles no longer silently activate it.
+- The setting is saved in the active book's project state and defaults off when absent. The Production checkbox persists the setting for the selected book and validates active-project ownership before accepting the save.
+- Enabling narrator-only mode resolves the saved book narrator override or inherited series default. Missing or unavailable narrator profiles continue to block generation.
+- When enabled, every source passage (including quoted/dash-led dialogue) uses the saved narrator and cast routing is bypassed. When disabled, normal cast-aware speaker-review validation runs, even when no character voice profile is assigned.
+- Production chapter preview reads the same saved mode and bypasses cast routing when enabled. Full generation records the effective mode in the project/job state.
+- Runtime acceptance remains open: generate/listen to the full book, inspect M4B metadata/chapter playback, and test interruption/cancel/retry/resume on packaged Windows under XAPP-08/13.
