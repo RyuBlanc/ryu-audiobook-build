@@ -292,3 +292,195 @@ class Stage53StaleGenerationCallbackTests(unittest.TestCase):
             update = bridge._job_update.call_args.kwargs
             self.assertEqual(update["state"], "completed")
             self.assertEqual(update["output_path"], str(output_a))
+
+
+class GenerationRecoveryLaunchHarness:
+    """Exercise Recover -> Production -> GenerationManager using the real bridge methods."""
+
+    _job_recover = host.PremiumV2Bridge._job_recover
+    _restart_generation_from_job = host.PremiumV2Bridge._restart_generation_from_job
+    _production_generate_book = host.PremiumV2Bridge._production_generate_book
+    _resolve_narrator_for_generation = host.PremiumV2Bridge._resolve_narrator_for_generation
+
+    def __init__(self, project, original_job_id: str, narrator_profile) -> None:
+        self.project = project
+        self.original_job_id = original_job_id
+        self.narrator_profile = narrator_profile
+        self._jobs_lock = threading.RLock()
+        self._jobs = {
+            original_job_id: {
+                "job_id": original_job_id,
+                "id": original_job_id,
+                "type": "audiobook-generation",
+                "project_title": project.title,
+                "project_folder": str(project.folder),
+                "state": "failed",
+                "progress": 42,
+                "retry_count": 0,
+                "recoverable": True,
+                "error": {"code": "interrupted", "message": "Worker did not survive restart."},
+                "result": {
+                    "generation_mode": "narrator_only",
+                    "narrator_only": True,
+                    "character_voice_profile_count": 2,
+                },
+            }
+        }
+        self._history = {}
+        self._generators = {}
+        self._new_job_id = "recovered-generation-job"
+        self._assert_no_active_model_lifecycle = Mock()
+        self._assert_no_active_audio_synthesis = Mock()
+        self.close_preview_provider_cache = Mock()
+        self._generation_progress = Mock()
+        self._generation_finished = Mock()
+        self._now = Mock(return_value="2026-11-08T19:30:00+00:00")
+        self.settings = SimpleNamespace(value=lambda _key, default=None: default)
+
+    def _project_series_name(self, _project, state):
+        return str(state.get("series") or "Saved Series")
+
+    def _narrator_series_default_read(self, _project, _state, series):
+        return {
+            "series": series,
+            "profile_name": self.narrator_profile.name,
+            "effective_profile_name": self.narrator_profile.name,
+            "source": "project_override",
+            "profile_available": True,
+            "saved": True,
+        }
+
+    def _find_profile(self, name):
+        return self.narrator_profile if name == self.narrator_profile.name else None
+
+    def _effective_generation_character_rows(self, _state, _series, *, strict=False):
+        # The project contains saved cast assignments. Narrator-only recovery
+        # must deliberately bypass their providers during the next generation.
+        return (
+            [{"name": "Mira", "series": "Saved Series", "voice_profile": "Mira Voice"},
+             {"name": "Arun", "series": "Saved Series", "voice_profile": "Arun Voice"}],
+            [],
+        )
+
+    def _new_job(self, job_type, title, description, project=None):
+        self._jobs[self._new_job_id] = {
+            "job_id": self._new_job_id,
+            "id": self._new_job_id,
+            "type": job_type,
+            "title": title,
+            "description": description,
+            "project_title": project.title if project else "",
+            "project_folder": str(project.folder) if project else "",
+            "state": "queued",
+            "progress": 0,
+            "retry_count": 0,
+            "result": None,
+            "recoverable": False,
+        }
+        return self._new_job_id
+
+    def _job_update(self, job_id, **changes):
+        row = self._jobs[job_id]
+        row.update(changes)
+        return dict(row)
+
+
+class Stage53GenerationRecoveryLaunchTests(unittest.TestCase):
+    def test_recover_launches_new_job_with_saved_narrator_only_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project_folder = root / "saved-project"
+            project_folder.mkdir()
+            cover = root / "cover.png"
+            cover.write_bytes(b"cover fixture")
+            output = root / "output" / "saved-book.m4b"
+            original_job_id = "interrupted-narrator-only-job"
+            chapter = SimpleNamespace(
+                number=1,
+                chapter_id="chapter-one",
+                title="Opening",
+                text="Mira said, “The journey begins.”",
+                skip_for_generation=False,
+                dialogue_assignments=[],
+            )
+            project = SimpleNamespace(
+                folder=project_folder,
+                title="Saved Book",
+                chapters=[chapter],
+            )
+            narrator = SimpleNamespace(
+                name="Persisted Narrator",
+                voice_id="persisted-narrator-voice",
+                provider="piper",
+            )
+            state = {
+                "status": "failed",
+                "generation_job_id": original_job_id,
+                "generation_recovery_required": True,
+                "generation_interrupted_at": "2026-11-08T19:00:00+00:00",
+                "generation_mode": "narrator_only",
+                "narrator_only_generation": True,
+                "character_voice_profile_count": 2,
+                "voice_profile": narrator.name,
+                "voice_id": narrator.voice_id,
+                "narrator_profile_source": "project_override",
+                "author": "Saved Author",
+                "publisher": "Saved Publisher",
+                "series": "Saved Series",
+                "series_volume": "2",
+                "language": "en-GB",
+                "year": "2026",
+                "genre": "Fantasy",
+                "cover_path": str(cover),
+                "output_path": None,
+                "audio_bitrate": 192,
+                "narration_speed": 0.97,
+                "pacing_profile": "relaxed",
+                "pronunciation_enabled": True,
+                "background_audio_mode": "off",
+                "background_audio_enabled": False,
+                "chapter_bgm_strategy": "same",
+                "chapter_bgm_overrides": {},
+                "characters": [
+                    {"name": "Mira", "voice_profile": "Mira Voice"},
+                    {"name": "Arun", "voice_profile": "Arun Voice"},
+                ],
+            }
+            bridge = GenerationRecoveryLaunchHarness(project, original_job_id, narrator)
+            manager = Mock()
+
+            with (
+                patch.object(host, "list_projects", return_value=[project]),
+                patch.object(host, "load_state", return_value=state),
+                patch.object(host, "save_state"),
+                patch.object(host, "provider_from_profile", return_value=(object(), narrator.voice_id)),
+                patch.object(host, "load_profiles", return_value=[]),
+                patch.object(host, "_effective_pronunciation_dictionary", return_value=[]),
+                patch.object(host, "GenerationManager", return_value=manager) as manager_factory,
+                patch("app.audio.library.effective_background_audio_mode", return_value="off"),
+                patch("app.audio.library.is_chapter_transition_sound_enabled", return_value=False),
+                patch("app.audio.library.validate_saved_audio_paths"),
+            ):
+                recovered = bridge._job_recover({"job_id": original_job_id})
+
+            self.assertEqual(recovered["recovery_of_job_id"], original_job_id)
+            self.assertEqual(recovered["job_id"], bridge._new_job_id)
+            self.assertEqual(recovered["generation_mode"], "narrator_only")
+            self.assertIs(recovered["narrator_only"], True)
+
+            new_job = bridge._jobs[bridge._new_job_id]
+            self.assertEqual(new_job["state"], "running")
+            self.assertEqual(new_job["recovery_of_job_id"], original_job_id)
+            self.assertEqual(new_job["result"]["generation_mode"], "narrator_only")
+            self.assertIs(new_job["result"]["narrator_only"], True)
+            self.assertEqual(new_job["result"]["character_voice_profile_count"], 2)
+
+            provider = manager_factory.call_args.args[0]
+            self.assertIs(provider.profile, narrator)
+            self.assertEqual(manager_factory.call_args.args[1], narrator.voice_id)
+            self.assertNotEqual(provider.__class__.__name__, "CastAwareProvider")
+            manager.start.assert_called_once()
+            self.assertEqual(state["generation_job_id"], bridge._new_job_id)
+            self.assertIs(state["narrator_only_generation"], True)
+            self.assertEqual(state["generation_mode"], "narrator_only")
+            self.assertNotIn("generation_recovery_required", state)
