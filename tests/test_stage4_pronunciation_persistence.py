@@ -337,5 +337,47 @@ class PronunciationPersistenceTests(unittest.TestCase):
         self.assertEqual(["Mira"], [row["written_form"] for row in self.list(self.bridge_a)])
 
 
+    def test_per_profile_pronunciation_matrix_results_are_persisted_and_scoped(self):
+        results = [
+            {"profile_name": "Narrator A", "provider": "piper", "status": "passed",
+             "actual_duration_seconds": 9.8, "synthesis_seconds": 2.4, "total_seconds": 2.9,
+             "real_time_factor": 0.245, "pronunciation_replacements": 1},
+            {"profile_name": "Qwen Voice", "provider": "qwen", "status": "failed",
+             "error": "Provider temporarily unavailable"},
+        ]
+        saved = host.PremiumV2Bridge._pronunciation_test_results_save(
+            self.bridge_a,
+            {"written_form": "Yamato", "scope": "Current book", "results": results},
+        )
+        self.assertEqual(2, saved["saved"])
+        loaded = host.PremiumV2Bridge._pronunciation_test_results_get(
+            self.bridge_a, {"written_form": "Yamato", "scope": "Current book"}
+        )
+        self.assertEqual(2, len(loaded["results"]))
+        by_profile = {row["profile_name"]: row for row in loaded["results"]}
+        self.assertEqual("passed", by_profile["Narrator A"]["status"])
+        self.assertEqual(9.8, by_profile["Narrator A"]["actual_duration_seconds"])
+        self.assertEqual(1, by_profile["Narrator A"]["pronunciation_replacements"])
+        self.assertEqual("failed", by_profile["Qwen Voice"]["status"])
+        self.assertEqual([], host.PremiumV2Bridge._pronunciation_test_results_get(
+            self.bridge_b, {"written_form": "Yamato", "scope": "Current book"}
+        )["results"])
+
+    def test_per_profile_pronunciation_matrix_rejects_invalid_results(self):
+        with self.assertRaisesRegex(ValueError, "profile"):
+            host.PremiumV2Bridge._pronunciation_test_results_save(
+                self.bridge_a,
+                {"written_form": "Mira", "scope": "Current book",
+                 "results": [{"profile_name": "", "provider": "piper", "status": "passed"}]},
+            )
+        with self.assertRaisesRegex(ValueError, "duration"):
+            host.PremiumV2Bridge._pronunciation_test_results_save(
+                self.bridge_a,
+                {"written_form": "Mira", "scope": "Current book",
+                 "results": [{"profile_name": "Narrator", "provider": "piper",
+                              "status": "passed", "actual_duration_seconds": -1}]},
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
