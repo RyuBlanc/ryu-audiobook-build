@@ -608,3 +608,89 @@ class MetadataPremiumV2UiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProductionPreviewSaveHarness:
+    _production_preview_save = host.PremiumV2Bridge._production_preview_save
+
+    def __init__(self, job):
+        self._jobs_lock = threading.RLock()
+        self._jobs = {str(job["job_id"]): dict(job)}
+
+
+class ProductionPreviewSaveTests(unittest.TestCase):
+    def _preview_job(self, root: Path):
+        preview_root = root / "app" / "Previews"
+        preview_root.mkdir(parents=True, exist_ok=True)
+        project_folder = root / "library" / "saved-book"
+        project_folder.mkdir(parents=True)
+        source = preview_root / "production-preview-stable-job.m4a"
+        source.write_bytes(b"validated chapter preview bytes" * 128)
+        job = {
+            "job_id": "stable-preview-job",
+            "type": "production-preview",
+            "state": "completed",
+            "project_folder": str(project_folder.resolve()),
+            "current_chapter": 4,
+            "current_chapter_id": "stable-chapter-four",
+            "result": {"output_path": str(source.resolve())},
+        }
+        return preview_root, project_folder, source, job
+
+    def test_completed_preview_saves_exact_job_project_and_chapter_audio(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _preview_root, project_folder, source, job = self._preview_job(root)
+            bridge = ProductionPreviewSaveHarness(job)
+            requested_destination = root / "Downloads" / "saved-preview.wav"
+            expected_destination = requested_destination.with_suffix(".m4a")
+            payload = {
+                "job_id": job["job_id"],
+                "project_folder": str(project_folder.resolve()),
+                "chapter_number": 4,
+                "chapter_id": "stable-chapter-four",
+                "source_path": str(source.resolve()),
+                "suggested_name": "Opening / Chapter Four",
+            }
+
+            with (
+                patch.object(host, "app_root", return_value=root / "app"),
+                patch.object(host.QFileDialog, "getSaveFileName", return_value=(str(requested_destination), "")),
+            ):
+                result = bridge._production_preview_save(payload)
+
+            self.assertFalse(result["cancelled"])
+            self.assertEqual(Path(result["path"]).resolve(), expected_destination.resolve())
+            self.assertEqual(result["job_id"], job["job_id"])
+            self.assertEqual(result["chapter_number"], 4)
+            self.assertEqual(expected_destination.read_bytes(), source.read_bytes())
+            self.assertEqual(result["bytes"], source.stat().st_size)
+
+    def test_preview_save_rejects_stale_identity_and_foreign_audio_paths(self):
+        mutations = (
+            ("job type", lambda job, payload, _root: job.update(type="voice-preview")),
+            ("unfinished job", lambda job, payload, _root: job.update(state="running")),
+            ("project", lambda job, payload, _root: job.update(project_folder=str(_root / "other-project"))),
+            ("chapter number", lambda job, payload, _root: job.update(current_chapter=3)),
+            ("chapter id", lambda job, payload, _root: job.update(current_chapter_id="replacement-chapter")),
+            ("worker output", lambda job, payload, root: job["result"].update(output_path=str(root / "foreign.m4a"))),
+            ("payload source", lambda job, payload, root: payload.update(source_path=str(root / "foreign.m4a"))),
+        )
+        for label, mutate in mutations:
+            with self.subTest(identity=label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                _preview_root, project_folder, source, original_job = self._preview_job(root)
+                job = dict(original_job)
+                job["result"] = dict(original_job["result"])
+                payload = {
+                    "job_id": job["job_id"],
+                    "project_folder": str(project_folder.resolve()),
+                    "chapter_number": 4,
+                    "chapter_id": "stable-chapter-four",
+                    "source_path": str(source.resolve()),
+                }
+                mutate(job, payload, root)
+                bridge = ProductionPreviewSaveHarness(job)
+                with patch.object(host, "app_root", return_value=root / "app"):
+                    with self.assertRaises(ValueError):
+                        bridge._production_preview_save(payload)
