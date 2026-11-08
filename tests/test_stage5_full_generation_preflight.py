@@ -135,6 +135,7 @@ class Stage53ProductionPreflightTests(unittest.TestCase):
                 payload={"profile_name": "Transient UI Voice"},
             )
 
+            self.assertEqual(bridge._new_job.call_args.args[0], "audiobook-generation")
             self.assertEqual(result["state"], "running")
             self.assertEqual(result["chapter_count"], 2)
             self.assertEqual(result["empty_chapters_skipped"], 1)
