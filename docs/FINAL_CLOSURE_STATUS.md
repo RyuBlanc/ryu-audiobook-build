@@ -162,3 +162,32 @@ Character Studio narration/review data and cast-aware Production's unresolved-sp
 The user has explicitly deprioritized the **500 MB executable target** in favour of functional completion. Retain the target and the size report as a documented non-priority; do not spend this closure window pruning required offline assets, and do not trade away Piper/Kokoro/Qwen runtime dependencies or bundled licensed starter assets merely to reduce package size.
 
 **Traceability ledger synchronized:** `docs/stage-8/STAGE-8-REQUIREMENT-TRACEABILITY.md` updated in commit `e810ac09aef394673d8c98ac81763f7610d86c12`. It now carries the 8 November exact-head overlay and retains the remaining Master requirements as open where installed/runtime evidence is absent.
+
+
+## Pronunciation candidate and Windows Qt teardown closure — 8 November 2026
+
+**Latest tested code/runner commit:** `3e572dce8a3fbb3dc5d10e0254aba226500a7ff3`  
+**Previous functional code commit:** `321dc94e3ec7534301195443b42e59dd5a084a91`  
+**Branch:** `fix/application-wide-closure-2026-11-08`
+
+### Corrections
+
+- Removed the call from `_pronunciation_analysis_worker()` into the UI bridge method `_character_list()`. Background pronunciation analysis now reads the saved project cast directly and applies the same authoritative `is_likely_character_name()` / user-confirmed-record checks. This prevents pronunciation analysis from depending on Character Studio having been instantiated and avoids performing UI-facing persistence cleanup in the worker.
+- Allowed a single-token Latin transliteration such as `Yamato` only when the authoritative character-name validator accepts it. The candidate must also occur as a whole token in the saved source, have explicit non-English language evidence, pass the common-English-word filter and meet the existing confidence threshold. Ordinary English prose such as `Very`, `The`, `Any` and descriptor phrases remain rejected.
+- Added explicit Windows test-runner Qt teardown after all unittest cases and their cleanups complete. The runner closes test widgets, flushes deferred deletes/events, stops the QApplication and destroys its C++ object while PySide/Qt libraries remain loaded. This addresses the prior post-`OK` process exit with Windows status `-1073740791` (`0xC0000409`).
+
+### Exact CI evidence
+
+- Build #2881 failed on a missing test import; Build #2882 corrected that and passed 1,383 tests.
+- Build #2883 exposed the pronunciation-worker/UI-bridge coupling.
+- Build #2884 removed the bridge call; the worker then ran but the generic candidate guard rejected the expected in-book Japanese single-token name.
+- Build #2885 accepted the name-filter correction and printed `Ran 1,387 tests` / `OK`, but the Windows process crashed during Qt interpreter shutdown with `0xC0000409`.
+- Build #2886 — commit `3e572dce8a3fbb3dc5d10e0254aba226500a7ff3`: **1,387 tests passed; test job exited successfully**. The new explicit Qt teardown removed the post-suite process crash. [Actions run](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42477735032).
+
+### Scope still not claimed complete
+
+- This overlay does not close physical NVIDIA/AMD/Intel GPU inference and benchmark acceptance, a real long-book analysis and listening session, final audiobook playback/metadata acceptance, or the current-head Windows package.
+- The previous successful Windows package is Build #2847 and predates the pronunciation/Qt-runner corrections. A new artifact checkpoint must be produced from the latest tested SHA before calling that package current.
+- The 500 MB executable target is explicitly not a release blocker and must not drive removal of required offline assets.
+- Historical failed run records remain visible in GitHub. #2886 is the current cumulative passing regression checkpoint; do not rerun obsolete commits whose source predates the fixes.
+
