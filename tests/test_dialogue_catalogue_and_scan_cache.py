@@ -56,9 +56,17 @@ class DialogueCatalogueAndScanCacheTests(unittest.TestCase):
         bridge = host.PremiumV2Bridge.__new__(host.PremiumV2Bridge)
         bridge._jobs_lock = host.threading.RLock()
         bridge._catalog_scan_lock = host.threading.RLock()
+        bridge._catalog_cache_lock = host.threading.RLock()
         bridge._catalog_scan_jobs = {}
+        bridge._catalog_scan_generation = {"models": 0, "sound": 0}
         bridge._jobs = {}
-        bridge._new_job = Mock(side_effect=["scan-1", "scan-2", "scan-3"])
+        bridge._new_job = Mock(side_effect=lambda job_type, title, description: (
+            bridge._jobs.setdefault(
+                "scan-" + str(len(bridge._jobs) + 1),
+                {"job_id": "scan-" + str(len(bridge._jobs) + 1),
+                 "type": job_type, "state": "running"}
+            )["job_id"]
+        ))
         bridge._job_update = Mock()
         return bridge
 
