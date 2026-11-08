@@ -114,7 +114,7 @@ class PronunciationCandidateGuardTests(unittest.TestCase):
         ))
 
     def test_character_filter_rejects_explicit_prose_and_preserves_confirmed_alias(self):
-        from app.chapters.characters import Character, merge_character_analysis_record
+        from app.chapters.characters import Character, is_likely_character_name, merge_character_analysis_record
         self.assertFalse(is_likely_character_name("Hearing", explicit=True))
         self.assertFalse(is_likely_character_name("Silver-Haired", trusted=True))
         self.assertTrue(is_likely_character_name("Captain Mira", explicit=True))
