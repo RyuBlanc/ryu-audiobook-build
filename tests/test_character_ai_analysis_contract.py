@@ -41,5 +41,27 @@ class CharacterAIAnalysisContracts(unittest.TestCase):
         self.assertIn('book_context["characters"] = list(bible.values())', brain)
 
 
+    def test_character_delete_persists_series_exclusion_and_readd_restores_detection(self):
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        start = host.index("    def _character_delete(")
+        end = host.index("\n    def ", start + 1)
+        delete_method = host[start:end]
+        create_start = host.index("    def _character_create(")
+        create_end = host.index("\n    def ", create_start + 1)
+        create_method = host[create_start:create_end]
+        worker_start = host.index("    def _character_worker(self, job_id: str, project) -> None:")
+        worker_end = host.index("\n    def ", worker_start + 1)
+        worker = host[worker_start:worker_end]
+        self.assertIn('state["character_detection_exclusions"]', delete_method)
+        self.assertIn('"series": selected_series', delete_method)
+        self.assertIn("character_detection_exclusion_keys(", worker)
+        self.assertIn("excluded_detection_keys", worker)
+        self.assertIn("character_detection_exclusions", create_method)
+        self.assertIn("excluded_detection_keys", worker)
+        self.assertIn("character_detection_exclusion_keys(", worker)
+        self.assertIn("character_detection_exclusions", worker)
+        self.assertIn("protected_names", worker)
+
+
 if __name__ == "__main__":
     unittest.main()
