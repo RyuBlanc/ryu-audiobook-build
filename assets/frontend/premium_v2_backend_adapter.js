@@ -269,6 +269,8 @@
   let mixLevelsRevision = 0, mixLevelsSavePromise = null;
   let soundManifestSavePromise = null, soundManifestSaveRevision = 0, soundManifestPendingOverrides = Object.create(null);
   let cueClearAllStaged = false;
+  let modelInventoryLoadPromise = null, modelInventoryScanRequested = false, modelInventoryLoadedAt = 0;
+  let soundCatalogLoadPromise = null, soundCatalogScanRequested = false, soundCatalogLoadedAt = 0;
   let providerCatalogs = Object.create(null), providerCatalogEpochs = Object.create(null), voiceListEpoch = 0, modelListEpoch = 0, projectListEpoch = 0, characterListEpoch = 0, termsListEpoch = 0, soundListEpoch = 0, historyListEpoch = 0, librarySearchTimer = null, soundSearchTimer = null;
   let dashboardProject = null, selectedAudiobookFolder = null, miniPlayerDismissed = false;
   let metadataDialogProjectFolder = '', metadataDialogDirty = false, metadataDialogEpoch = 0;
@@ -2249,6 +2251,9 @@
 
   async function refreshVoices() {
     const requestToken = ++voiceListEpoch;
+    // Qwen/provider readiness is gated by the same model registry used in Models
+    // Center. Ensure its initial cold scan completes off-thread before cataloguing voices.
+    await loadModelInventory(false);
     const loadedVoices = await call('voice.list');
     if (requestToken !== voiceListEpoch) return voices;
     voices = Array.isArray(loadedVoices) ? loadedVoices : [];
@@ -4357,9 +4362,101 @@
       }
     });
   }
-  async function refreshSounds() {
+  async function waitForCatalogueScan(jobId, label) {
+    if (!jobId) throw new Error('The ' + label + ' refresh did not create a background job.');
+    return new Promise((resolve, reject) => {
+      let checking = false;
+      let settled = false;
+      let timer = null;
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearInterval(timer);
+        timer = null;
+        callback(value);
+      };
+      const tick = async () => {
+        if (settled || checking) return;
+        checking = true;
+        try {
+          const jobs = await call('job.list', {include_hidden:true});
+          const job = Array.isArray(jobs) ? jobs.find(row => row.job_id === jobId) : null;
+          if (!job) throw new Error('The ' + label + ' refresh job disappeared before reporting a result.');
+          if (job.state === 'completed') finish(resolve, job);
+          else if (['failed','cancelled'].includes(job.state)) {
+            finish(reject, new Error(job.error?.message || job.message ||
+              ('The ' + label + ' refresh ' + job.state + '.')));
+          }
+        } catch (error) {
+          finish(reject, error);
+        } finally {
+          checking = false;
+        }
+      };
+      timer = setInterval(() => { void tick(); }, 750);
+      void tick();
+    });
+  }
+
+  async function loadModelInventory(forceRefresh = false) {
+    if (modelInventoryLoadPromise) return modelInventoryLoadPromise;
+    const task = (async () => {
+      if (!forceRefresh && modelInventoryScanRequested &&
+          Date.now() - modelInventoryLoadedAt < 5000) {
+        return await call('models.list');
+      }
+      // Read the last-known-good snapshot immediately. A cold/expired request
+      // starts a single-flight worker; this bridge call never enumerates files.
+      await call('models.list');
+      modelInventoryScanRequested = true;
+      const scan = await call('models.refresh');
+      await waitForCatalogueScan(scan?.job_id, 'model inventory');
+      const rows = await call('models.list');
+      modelInventoryLoadedAt = Date.now();
+      return rows;
+    })();
+    modelInventoryLoadPromise = task;
+    try {
+      return await task;
+    } catch (error) {
+      modelInventoryScanRequested = false;
+      modelInventoryLoadedAt = 0;
+      throw error;
+    } finally {
+      if (modelInventoryLoadPromise === task) modelInventoryLoadPromise = null;
+    }
+  }
+
+  async function loadSoundCatalogue(forceRefresh = false) {
+    if (soundCatalogLoadPromise) return soundCatalogLoadPromise;
+    const task = (async () => {
+      if (!forceRefresh && soundCatalogScanRequested &&
+          Date.now() - soundCatalogLoadedAt < 20000) {
+        return await call('sound.catalog');
+      }
+      await call('sound.catalog');
+      soundCatalogScanRequested = true;
+      const scan = await call('sound.refresh');
+      await waitForCatalogueScan(scan?.job_id, 'Sound Design catalogue');
+      const rows = await call('sound.catalog');
+      soundCatalogLoadedAt = Date.now();
+      return rows;
+    })();
+    soundCatalogLoadPromise = task;
+    try {
+      return await task;
+    } catch (error) {
+      soundCatalogScanRequested = false;
+      soundCatalogLoadedAt = 0;
+      throw error;
+    } finally {
+      if (soundCatalogLoadPromise === task) soundCatalogLoadPromise = null;
+    }
+  }
+
+  async function refreshSounds(forceRefresh = false) {
     const requestToken = ++soundListEpoch;
-    const loaded = await call('sound.catalog');
+    const loaded = await loadSoundCatalogue(forceRefresh);
     if (requestToken !== soundListEpoch) return sounds;
     sounds = Array.isArray(loaded) ? loaded : [];
     const selectedMusicTrack = selectedSoundPath
@@ -4429,7 +4526,7 @@
     // that epoch owns Music Library grid renders, and cue refreshes may overlap a
     // source/category refresh triggered immediately after a music import.
     const [loadedCatalog, loadedAssignments] = await Promise.all([
-      call('sound.catalog'),
+      loadSoundCatalogue(false),
       call('sound.cues.get')
     ]);
     if (requestToken !== cueListEpoch) return cueAssignments;
@@ -5734,6 +5831,7 @@
   }
 
   async function refreshChapterBgm() {
+    await loadSoundCatalogue(false);
     chapterBgmState = await call('sound.chapter_bgm.get');
     const fadeIn = Number(chapterBgmState.fade_in_seconds ?? 2);
     const fadeOut = Number(chapterBgmState.fade_out_seconds ?? 3);
@@ -8637,9 +8735,9 @@
           esc(formatModelBytes(managedStorageBytes)) + ' · Drive free: ' + esc(formatModelBytes(free)) + '</p>';
     }
   }
-  async function refreshModels() {
+  async function refreshModels(forceRefresh = false) {
     const requestToken = ++modelListEpoch;
-    const loadedRows = await call('models.list');
+    const loadedRows = await loadModelInventory(Boolean(forceRefresh));
     if (requestToken !== modelListEpoch) return window.ryuModelInventoryRows || [];
     const rows = Array.isArray(loadedRows) ? loadedRows : [];
     window.ryuModelInventoryRows = rows;
@@ -8669,7 +8767,7 @@
           refreshButton.disabled = true;
           refreshButton.textContent = 'Refreshing…';
           try {
-            await refreshModels();
+            await refreshModels(true);
             await refreshVoices();
             message('Model status refreshed from the local installation and saved voice catalogue.');
           } catch (error) {
@@ -9587,7 +9685,7 @@
       }
     });
 
-    if ($('checkModelUpdates')) $('checkModelUpdates').onclick=act(async()=>{await refreshModels();message('Local model catalogue refreshed. This checks the local catalogue; it does not contact an online update service.');});
+    if ($('checkModelUpdates')) $('checkModelUpdates').onclick=act(async()=>{await refreshModels(true);message('Local model catalogue refreshed. This checks the local catalogue; it does not contact an online update service.');});
     if ($('startQwenInstall')) $('startQwenInstall').onclick=act(async()=>{
       const choice=document.querySelector('input[name="qwenInstall"]:checked')?.value||'customvoice';
       const data=await call('models.install',{selection:choice});
@@ -10663,7 +10761,9 @@
               target_kind: soundButton.id === 'importMusicTracks' ? 'music' : 'cue',
               category: soundButton.id === 'importMusicTracks' ? ($('musicImportCategory')?.value || 'universal') : 'universal'
             });
-            await refreshSounds();
+            soundCatalogScanRequested = false;
+            soundCatalogLoadedAt = 0;
+            await refreshSounds(true);
             await refreshSoundCues();
             await refreshChapterBgm();
             message('Imported ' + (result.imported || []).length + ' audio asset(s) into the local catalogue.');
