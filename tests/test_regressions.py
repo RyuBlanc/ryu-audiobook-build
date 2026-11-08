@@ -1614,6 +1614,111 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("def toggle_generation_pause(self) -> None:", generation)
         self.assertIn('"paused"}', generation)
 
+    def _run_chunk_checkpoint_control_test(self, control: str) -> None:
+        import threading
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.tts.manager import GenerationManager
+
+        first_started = threading.Event()
+        release_first = threading.Event()
+        paused_at_checkpoint = threading.Event()
+        second_started = threading.Event()
+        summaries = []
+
+        class BlockingProvider:
+            def __init__(self):
+                self.calls = 0
+
+            def synthesize(self, text, output_path, voice=None):
+                self.calls += 1
+                if self.calls == 1:
+                    first_started.set()
+                    if not release_first.wait(8):
+                        raise TimeoutError("first synthesis was not released by the test")
+                elif self.calls == 2:
+                    second_started.set()
+                _write_wav(Path(output_path), 0.05)
+                return output_path
+
+            def close(self):
+                return None
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            chapter_dir = root / "working_audio" / "001_Opening"
+            (chapter_dir / "chunks").mkdir(parents=True)
+            # Two deterministic chunks make the pause checkpoint observable
+            # between synthesis requests without depending on heuristic text
+            # splitting or an external TTS provider.
+            plan = SimpleNamespace(
+                chapter_dir=chapter_dir,
+                chunks_with_voices=(("First saved passage.", "Narrator"), ("Second saved passage.", "Narrator")),
+                signature="manager-checkpoint-test-v1",
+                completed=frozenset(),
+            )
+            provider = BlockingProvider()
+
+            def progress(_chapter, _total, _done, message):
+                if str(message or "").startswith("paused:"):
+                    paused_at_checkpoint.set()
+
+            manager = GenerationManager(
+                provider,
+                "Narrator",
+                [Chapter(1, "Opening", "First saved passage. Second saved passage.")],
+                root / "working_audio",
+                on_progress=progress,
+                on_finished=summaries.append,
+                narration_speed=1.0,
+                pacing_profile="off",
+            )
+
+            with patch("app.tts.generator.prepare_chapter_plan", return_value=plan):
+                manager.start(None, "Checkpoint test", "Test Author")
+                self.assertTrue(first_started.wait(5), "first chunk synthesis did not start")
+                manager.pause()
+                release_first.set()
+                self.assertTrue(
+                    paused_at_checkpoint.wait(5),
+                    "pause did not become visible at the persisted chunk checkpoint",
+                )
+                self.assertEqual(provider.calls, 1, "the next chunk started before pause was released")
+
+                if control == "resume":
+                    manager.resume()
+                    self.assertTrue(second_started.wait(5), "resume did not restart the next chunk")
+                elif control == "cancel":
+                    manager.cancel()
+                else:
+                    self.fail(f"Unsupported checkpoint control: {control}")
+
+                manager._thread.join(timeout=10)
+                self.assertFalse(manager._thread.is_alive(), "generation worker did not leave the checkpoint")
+                self.assertEqual(len(summaries), 1)
+
+            summary = summaries[0]
+            if control == "resume":
+                self.assertFalse(summary.cancelled)
+                self.assertEqual(summary.chapters_completed, 1)
+                self.assertEqual(summary.chapters_failed, [])
+                self.assertEqual(provider.calls, 2)
+                self.assertTrue((chapter_dir / "chunks" / "00001.wav").is_file())
+                self.assertTrue((chapter_dir / "chunks" / "00002.wav").is_file())
+            else:
+                self.assertTrue(summary.cancelled)
+                self.assertEqual(summary.chapters_completed, 0)
+                self.assertEqual(summary.chapters_failed, [])
+                self.assertEqual(provider.calls, 1)
+                self.assertTrue((chapter_dir / "chunks" / "00001.wav").is_file())
+                self.assertFalse((chapter_dir / "chunks" / "00002.wav").exists())
+
+    def test_generation_pause_resume_runs_through_saved_chunk_checkpoint(self):
+        self._run_chunk_checkpoint_control_test("resume")
+
+    def test_generation_cancel_while_paused_stops_at_saved_chunk_checkpoint(self):
+        self._run_chunk_checkpoint_control_test("cancel")
+
     def test_project_title_is_propagated_to_generation_and_editor(self):
         workflow = Path("app/ui/workflow.py").read_text(encoding="utf-8")
         generation = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
