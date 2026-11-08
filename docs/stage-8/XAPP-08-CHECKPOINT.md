@@ -15,3 +15,5 @@ The Stage 5.3 full-generation preflight also asserts that narrator mode is persi
 
 
 **Current branch tip:** `c881d9349a48208d5deeac1b6e0f85101d467eb5`. This document update is the exact-head artifact-checkpoint trigger.
+
+**Exact package marker commit:** this commit must be used as the build/package source; tests were run immediately before the marker commit without code changes.
