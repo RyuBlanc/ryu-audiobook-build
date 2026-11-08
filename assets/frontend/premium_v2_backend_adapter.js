@@ -7108,7 +7108,7 @@
     const current = selectedCharacterRow();
     if (!current) throw new Error('Select a real project character before deleting.');
     const name = characterCanonical(current);
-    if (!window.confirm('Remove "' + name + '" from this project cast? Reusable Character Library data is retained.')) return;
+    if (!window.confirm('Dismiss "' + name + '" from this project cast and prevent Character Analysis from automatically adding it again in "' + characterSeries(current) + '"? Saved dialogue assignments must be cleared first. The reusable Character Library entry is retained; explicitly adding it again from the Library restores detection for this series.')) return;
     await call('character.delete', {name, series:characterSeries(current)});
     window.ryuPremiumSelectedCharacter = '';
     window.ryuPremiumSelectedCharacterSeries = '';
