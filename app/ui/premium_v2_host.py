@@ -966,6 +966,7 @@ class PremiumV2Bridge(QObject):
             "series_narrator_profile": str(narrator_selection.get("profile_name") or ""),
             "narrator_voice_configured": narrator_ready,
             "narrator_profile_available": bool(narrator_selection.get("profile_available")),
+            "narrator_only_generation": state.get("narrator_only_generation", False) is True,
             "output_target_path": str(output_target),
             "output_folder": str(output_folder),
             "output_folder_ready": bool(output_folder_ready),
@@ -7088,6 +7089,14 @@ class PremiumV2Bridge(QObject):
         if not isinstance(enabled, bool):
             raise ValueError("Narrator-Only Generation must be enabled or disabled explicitly.")
         state = load_state(project.folder)
+        if enabled:
+            series = self._project_series_name(project, state)
+            narrator = self._narrator_series_default_read(project, state, series)
+            profile_name = str(narrator.get("effective_profile_name") or "").strip()
+            if not profile_name or not narrator.get("profile_available"):
+                raise ValueError(
+                    "Save an available narrator profile for this book or its series before enabling Narrator-Only Generation."
+                )
         state["narrator_only_generation"] = enabled
         state["modified_at"] = self._now()
         save_state(project.folder, state)
