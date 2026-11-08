@@ -8781,10 +8781,24 @@
         summary: 'Review the cast and make sure each dialogue line uses the intended voice.',
         items: [
           'Run Analyze after importing or substantially editing the book. Review character candidates, confidence and dialogue examples before accepting suggestions.',
-          'Use Assigned Cast to review the character, series, dialogue-line count and chapter count. Assigned Voice and AI-assignment percentages should reflect saved project data.',
-          'Manual assignments are shown separately from AI suggestions. Review low-confidence matches and correct aliases or speaker names when needed.',
+          'Use the left chapter list in both Manual and AI review to open the full text of a specific chapter. The AI pending queue is filtered to the selected chapter; selecting a passage opens the source-backed review panel.',
+          'Use Assigned Cast to review the character, series, dialogue-line count and chapter count. Assigned Voice and AI-assignment percentages reflect saved project assignments, not suggested matches.',
+          'Manual assignments are shown separately from AI suggestions. Review low-confidence matches and correct aliases or speaker names when needed. Accepting an AI suggestion saves an assignment; a suggestion alone does not change the cast.',
+          'When reviewing an AI or manual passage, you can choose a saved Voice Studio profile in the review panel. Edit Character also lets you change the saved profile for an existing project character.',
           'Use the selected dialogue and selected saved profile to Test Voice. Stop, resume or replay the test from the in-app controls.',
-          'Create or edit a character when the speaker is missing. Unassigned narration follows the project Narrator fallback; confirm the default narrator voice before full generation.'
+          'Unquoted narration is automatically routed to the project Narrator. Quoted or dash-led dialogue remains in Needs Speaker Review during normal cast-aware generation until it has a character assignment.'
+        ]
+      },
+      {
+        title: 'Narrator-only audiobook generation (GEN-07)',
+        summary: 'Generate a complete audiobook with the narrator voice when no character voice profiles are configured.',
+        items: [
+          'Narrator-only mode is available when the active project has zero saved character voice-profile assignments. A list of detected or manually created character candidates without voice profiles does not prevent this mode.',
+          'Choose a valid, available saved narrator profile using the project narrator or its series default. The narrator must still be configured; missing narrator profiles continue to block generation.',
+          'In narrator-only mode, the narrator intentionally reads every passage, including quoted and dash-led dialogue. You do not need to create character profiles or assign speakers just to generate this version.',
+          'The Production job identifies Narrator-only mode and records the effective narrator and zero configured character profiles. Preview and final generation use the same narrator-only route.',
+          'As soon as any character voice profile is configured in the project, normal cast-aware rules apply. Unassigned dialogue must then be reviewed or assigned before full generation; the app does not silently route a partial cast to the narrator.',
+          'Required project metadata, valid chapters, output-folder permissions and the selected narrator remain mandatory in both modes.'
         ]
       },
       {
@@ -8857,8 +8871,9 @@
         items: [
           'History is the durable record of terminal operations, including completed, failed and cancelled tasks. Use date filters and search to locate an operation.',
           'Background Jobs shows active and queued work. Open job details to inspect progress, logs, error messages and the project or chapter involved.',
-          'Use View, Cancel, Retry or Recover only when the job state offers that action. A retry should preserve valid completed work and report what will be regenerated.',
-          'History and Background Jobs should agree about the final state of an operation. If a job disappears from the active queue, check History for its terminal result.'
+          'Use View, Cancel, Retry or Recover only when the job state offers that action. Character Analysis can be cancelled at a safe inference or chapter boundary; a cancelled analysis does not replace the saved cast with partial results.',
+          'A running synthesis or inference may finish its current safe unit before cancellation takes effect. Check the terminal job state in History instead of assuming the task stopped at the instant Cancel was selected.',
+          'A retry should preserve valid completed work and report what will be regenerated. History and Background Jobs should agree about the final state of an operation. If a job disappears from the active queue, check History for its terminal result.'
         ]
       },
       {
@@ -8869,6 +8884,7 @@
           'Install missing components, Repair unhealthy installations, Verify files or Uninstall unused models from the model action menu.',
           'Active generation or preview jobs protect models they are using. Wait for those jobs to finish before uninstalling or moving a model.',
           'For Qwen, set the global Base model size preference to 0.6B or 1.7B in Models & Voice Engines. VoiceDesign itself uses its 1.7B model and also requires a compatible Base model for long-form voice identity consistency.',
+          'The compute backend can be Automatic or an explicitly selected supported CPU/GPU backend. Automatic attempts a compatible GPU runtime when available; treat a GPU as active only after a real inference reports that device, not merely because Windows lists an adapter.',
           'Uninstalling a model must not delete projects, saved voice profiles or user audio. Check the displayed path before removing files.',
           'Use Settings > Storage to choose supported model, project-library and audio-asset roots. Keep external drives connected during migration and verification.'
         ]
