@@ -1,7 +1,10 @@
 import unittest
 from pathlib import Path
 
-from app.chapters.characters import is_likely_character_name, character_detection_exclusion_keys
+from app.chapters.characters import (
+    is_likely_character_name, character_detection_exclusion_keys,
+    is_user_confirmed_character_record,
+)
 from app.tts.pronunciation_suggester import (
     is_common_english_phrase, is_likely_character_name_candidate,
 )
@@ -93,6 +96,46 @@ class CharacterNameQualityTests(unittest.TestCase):
         self.assertIn("assignment_series.casefold() != series_name.casefold()", host_source)
         self.assertIn("Cannot delete/dismiss", host_source)
 
+
+    def test_generated_series_scope_is_not_user_confirmation(self):
+        self.assertFalse(is_user_confirmed_character_record({
+            "name": "Magic", "series": "Series A", "scope": "Series · Series A",
+        }))
+        self.assertTrue(is_user_confirmed_character_record({"name": "Magic", "user_created": True}))
+        self.assertTrue(is_user_confirmed_character_record({"name": "Mira", "manual_aliases": True}))
+
+    def test_character_studio_read_cleans_legacy_false_names_and_aliases(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.ui.premium_v2_host import PremiumV2Bridge
+
+        project = SimpleNamespace(folder=Path("test-character-cleanup"), chapters=[])
+        state = {
+            "series_name": "Series A",
+            "characters": [
+                {"name": "Mira", "series": "Series A", "scope": "Series · Series A",
+                 "voice_profile": "Saved Voice", "aliases": ["Captain Mira", "Oh", "The", "Any"]},
+                {"name": "Magic", "series": "Series A", "scope": "Series · Series A", "aliases": []},
+                {"name": "Any", "series": "Series A", "scope": "Series · Series A", "aliases": []},
+                {"name": "Hope", "series": "Series A", "user_created": True, "aliases": []},
+            ],
+        }
+        bridge = SimpleNamespace(
+            _active_project=lambda: project,
+            _project_series_name=lambda _project, _state: "Series A",
+            _now=lambda: "2026-11-08T00:00:00",
+        )
+        with (
+            patch("app.ui.premium_v2_host.load_state", return_value=state),
+            patch("app.ui.premium_v2_host.save_state") as save,
+            patch("app.ui.premium_v2_host.prune_invalid_character_records"),
+        ):
+            rows = PremiumV2Bridge._character_list(bridge, {})
+
+        self.assertEqual({row["name"] for row in rows}, {"Mira", "Hope"})
+        mira = next(row for row in rows if row["name"] == "Mira")
+        self.assertEqual(mira["aliases"], ["Captain Mira"])
+        save.assert_called_once()
 
 if __name__ == "__main__":
     unittest.main()

@@ -192,5 +192,18 @@ class PronunciationCandidateGuardTests(unittest.TestCase):
 
 
 
+    def test_safe_merge_requires_non_english_pronunciation_evidence_even_for_known_cast(self):
+        out = {"characters": [], "pronunciation": [], "dialogue": [], "scenes": [], "continuity_notes": []}
+        data = {
+            "characters": [{"name": "Mira", "confidence": 0.99}],
+            "pronunciation": [
+                {"written": "Mira", "spoken": "Mee-rah", "source_language": "English", "script": "Latin", "confidence": 0.99},
+                {"written": "Mira", "spoken": "Mee-rah", "source_language": "Auto-detect", "script": "Latin", "confidence": 0.99},
+            ],
+        }
+        _safe_merge(None, out, data, set(), source_text="Mira spoke to the group.")
+        self.assertIn("Mira", {row["name"] for row in out["characters"]})
+        self.assertEqual(out["pronunciation"], [])
+
 if __name__ == "__main__":
     unittest.main()

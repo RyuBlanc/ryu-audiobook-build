@@ -622,6 +622,26 @@ def character_detection_exclusion_keys(
     return result - protected
 
 
+def is_user_confirmed_character_record(record: dict | None) -> bool:
+    """Return whether a saved cast row has explicit user-backed identity evidence.
+
+    Series/scope is bookkeeping and is never confirmation. Explicit create/edit,
+    a manually maintained alias/sample, or a selected voice is confirmation.
+    Hard English function words, pronouns and interjections are rejected even
+    when a record otherwise has user-backed metadata.
+    """
+    if not isinstance(record, dict):
+        return False
+    return bool(
+        record.get("user_created")
+        or record.get("manual")
+        or record.get("manual_aliases")
+        or record.get("voice_profile")
+        or record.get("voice_name")
+        or str(record.get("dialogue_sample_source") or "").strip().casefold() == "manual"
+    )
+
+
 _EXPLICIT_SPEAKER_NAME_PREFIXES = {
     "will", "captain", "commander", "general", "president", "prince",
     "princess", "emperor", "empress", "king", "queen", "lord", "lady",
@@ -700,15 +720,7 @@ def merge_character_analysis_record(candidate: Character, prior: dict | None = N
     # the unconditional hard-word guard (articles, pronouns and interjections).
     # New aliases produced by the current analysis remain untrusted and must pass
     # the strict candidate filter.
-    prior_aliases_are_user_confirmed = bool(
-        prior.get("manual")
-        or prior.get("user_created")
-        or prior.get("voice_profile")
-        or prior.get("voice_name")
-        or prior.get("short_description")
-        or prior.get("notes")
-        or prior.get("scope")
-    )
+    prior_aliases_are_user_confirmed = is_user_confirmed_character_record(prior)
     aliases = list(dict.fromkeys(
         str(alias).strip()
         for alias in prior_aliases

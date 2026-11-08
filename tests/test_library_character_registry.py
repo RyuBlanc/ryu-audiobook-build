@@ -11,6 +11,7 @@ from PySide6.QtCore import QSettings
 from app.core.character_library import (
     list_characters, list_deleted_characters, restore_character,
     soft_delete_character, sync_characters, update_character,
+    prune_invalid_character_records,
 )
 from app.core.paths import library_root as real_library_root
 from app.core.project import Project, delete_project
@@ -90,6 +91,36 @@ class CharacterLibraryRegistryTests(unittest.TestCase):
             records = list_characters(path=store)
             self.assertEqual(len(records), 2)
             self.assertEqual({item["series"] for item in records}, {"Series One", "Series Two"})
+
+
+    def test_prune_legacy_english_false_characters_and_aliases_is_series_scoped_and_recoverable(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-character-prune-") as tmp:
+            store = Path(tmp) / "character-library.json"
+            store.write_text(json.dumps({
+                "version": 1,
+                "active": [
+                    {"id": "bad-magic", "series": "Series A", "primary_name": "Magic",
+                     "aliases": ["Oh", "The"], "scope": "Series · Series A"},
+                    {"id": "bad-any", "series": "Series A", "primary_name": "Any",
+                     "aliases": [], "scope": "Series · Series A"},
+                    {"id": "good-mira", "series": "Series A", "primary_name": "Mira",
+                     "aliases": ["Captain Mira", "Oh", "Any"], "manual": True},
+                    {"id": "other-series", "series": "Series B", "primary_name": "Magic",
+                     "aliases": [], "scope": "Series · Series B"},
+                ],
+                "deleted": [],
+            }, ensure_ascii=False), encoding="utf-8")
+
+            result = prune_invalid_character_records("Series A", path=store)
+            active_a = list_characters(series="Series A", path=store)
+            active_b = list_characters(series="Series B", path=store)
+            deleted = list_deleted_characters(path=store)
+
+            self.assertEqual(result, {"removed": 2, "aliases_removed": 2})
+            self.assertEqual([row["primary_name"] for row in active_a], ["Mira"])
+            self.assertEqual(active_a[0]["aliases"], ["Captain Mira"])
+            self.assertEqual([row["primary_name"] for row in active_b], ["Magic"])
+            self.assertEqual({row["id"] for row in deleted}, {"bad-magic", "bad-any"})
 
 
 class ProjectDeletionHistoryTests(unittest.TestCase):

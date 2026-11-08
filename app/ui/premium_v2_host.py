@@ -42,6 +42,7 @@ from app.core.character_library import (
     character_library_path as reusable_character_library_path,
     list_characters as list_reusable_characters,
     list_deleted_characters as list_reusable_deleted_characters,
+    prune_invalid_character_records,
     restore_character as restore_reusable_character,
     soft_delete_character as soft_delete_reusable_character,
     sync_characters as sync_reusable_characters,
@@ -53,7 +54,10 @@ from app.documents.parser import (
     extract_text, validate_chapter_text_coverage,
 )
 from app.chapters.detector import detect_chapters
-from app.chapters.characters import analyze_book, merge_character_analysis_record
+from app.chapters.characters import (
+    analyze_book, merge_character_analysis_record, is_likely_character_name,
+    is_user_confirmed_character_record,
+)
 from app.chapters.dialogue_review import retain_current_dialogue_skips
 from app.tts.manager import GenerationManager
 from app.tts.preview import build_voice_preview
@@ -4236,9 +4240,79 @@ class PremiumV2Bridge(QObject):
                     self._preview_cancel_events.pop(job_id, None)
 
     def _character_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
-        state = load_state(self._active_project().folder)
+        """Return a clean saved cast and remove legacy false detections on first review."""
+        project = self._active_project()
+        state = load_state(project.folder)
         rows = state.get("characters") or []
-        return rows if isinstance(rows, list) else []
+        if not isinstance(rows, list):
+            return []
+        default_series = self._project_series_name(project, state)
+        assignment_names: dict[str, set[str]] = {}
+        series_to_prune = {default_series} if default_series else set()
+        for chapter in getattr(project, "chapters", []) or []:
+            for assignment in (getattr(chapter, "dialogue_assignments", []) or []):
+                if not isinstance(assignment, dict):
+                    continue
+                series = str(assignment.get("series") or default_series).strip()
+                if not series:
+                    continue
+                series_to_prune.add(series)
+                speakers = assignment.get("speakers")
+                if not isinstance(speakers, (list, tuple)):
+                    speakers = [assignment.get("speaker")] if assignment.get("speaker") else []
+                assignment_names.setdefault(series.casefold(), set()).update(
+                    str(value or "").strip().casefold()
+                    for value in speakers if str(value or "").strip()
+                )
+
+        cleaned: list[dict[str, Any]] = []
+        for raw in rows:
+            if not isinstance(raw, dict):
+                continue
+            row = dict(raw)
+            name = str(row.get("name") or row.get("primary_name") or "").strip()
+            series = str(row.get("series") or "").strip()
+            if not series:
+                scope = str(row.get("scope") or "").strip()
+                series = (
+                    re.sub(r"(?i)^\s*series\s*[·:-]\s*", "", scope).strip()
+                    if re.match(r"(?i)^\s*series\s*[·:-]", scope) else default_series
+                )
+            if series:
+                series_to_prune.add(series)
+            assignment_backed = name.casefold() in assignment_names.get(series.casefold(), set())
+            trusted = is_user_confirmed_character_record(row) or assignment_backed
+            if not name or not is_likely_character_name(name, trusted=trusted):
+                continue
+            aliases = row.get("aliases") or []
+            if isinstance(aliases, str):
+                aliases = [aliases]
+            alias_trusted = trusted or bool(row.get("manual_aliases"))
+            clean_aliases = list(dict.fromkeys(
+                str(alias).strip()
+                for alias in aliases if str(alias or "").strip()
+                and str(alias).strip().casefold() != name.casefold()
+                and is_likely_character_name(str(alias), trusted=alias_trusted)
+            )) if isinstance(aliases, (list, tuple)) else []
+            if clean_aliases != (aliases if isinstance(aliases, list) else list(aliases or [])):
+                row["aliases"] = clean_aliases
+            cleaned.append(row)
+
+        if cleaned != rows:
+            state["characters"] = cleaned
+            state["modified_at"] = self._now()
+            save_state(project.folder, state)
+
+        # Shared Library false detections are moved into its Recovery Bin.
+        for series in sorted(series_to_prune, key=str.casefold):
+            try:
+                prune_invalid_character_records(
+                    series,
+                    protected_names=assignment_names.get(series.casefold(), set()),
+                )
+            except Exception:
+                log.exception("Could not clean legacy Character Library rows for %s", series)
+        return cleaned
 
     def _character_dialogue_index_get(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Return the persisted passage index, revision and reconciled chapter counts."""
@@ -4527,7 +4601,7 @@ class PremiumV2Bridge(QObject):
                 "name": name, "role": str(payload.get("role") or "Character")[:160],
                 "dialogue_count": 0, "examples": [], "confidence": 1.0,
                 "aliases": aliases, "voice_profile": profile_name or None,
-                "series": series, "user_created": True,
+                "series": series, "user_created": True, "manual": True, "manual_aliases": True,
                 "short_description": str(payload.get("short_description") or "")[:1000],
                 "notes": str(payload.get("notes") or "")[:4000], "scope": "Series · " + series,
             }
@@ -4536,6 +4610,7 @@ class PremiumV2Bridge(QObject):
             match.update({
                 "name": name, "aliases": aliases or list(match.get("aliases") or []),
                 "series": series, "scope": "Series · " + series, "user_created": True,
+                "manual": True, "manual_aliases": True,
                 "short_description": str(payload.get("short_description", match.get("short_description", "")) or "")[:1000],
                 "notes": str(payload.get("notes", match.get("notes", "")) or "")[:4000],
             })
@@ -4665,8 +4740,7 @@ class PremiumV2Bridge(QObject):
                 # or prior confirmed dialogue assignment is user-backed evidence.
                 trusted = bool(
                     row.get("user_created") or row.get("manual") or row.get("voice_profile")
-                    or row.get("voice_name") or row.get("short_description") or row.get("notes")
-                    or (row.get("series") and row.get("primary_name"))
+                    or row.get("voice_name")
                 )
                 # Re-check rows already saved by earlier analysis. A voice profile
                 # must not preserve an English false-positive such as "Oh" or "Any".
@@ -4876,10 +4950,7 @@ class PremiumV2Bridge(QObject):
             # manually created or imported from the reusable Character Library.
             for old_name, prior in old.items():
                 prior_name = str(prior.get("name") or old_name).strip()
-                prior_trusted = bool(
-                    prior.get("user_created") or prior.get("manual") or prior.get("voice_profile")
-                    or prior.get("voice_name") or prior.get("short_description") or prior.get("notes")
-                )
+                prior_trusted = is_user_confirmed_character_record(prior)
                 if not is_likely_character_name(
                     prior_name, trusted=prior_trusted, explicit=prior_name.casefold() in explicit_names
                 ):
@@ -5349,6 +5420,8 @@ class PremiumV2Bridge(QObject):
             "scope": ("Series · " + series_value) if series_value else str(scope_value or "Current book only").strip()[:80],
             "series": series_value,
             "voice_profile": profile_name or None,
+            "manual": True,
+            "manual_aliases": True,
         })
         state["characters"] = characters
         state["modified_at"] = self._now()
@@ -5704,7 +5777,7 @@ class PremiumV2Bridge(QObject):
         registry_path: Path | None = None,
     ) -> None:
         """Merge the real saved cast into its correct series groups in the shared registry."""
-        if not isinstance(characters, list) or not characters:
+        if not isinstance(characters, list):
             return
         state = state if isinstance(state, dict) else load_state(project.folder)
         default_series = self._project_series_name(project, state)
@@ -5740,6 +5813,9 @@ class PremiumV2Bridge(QObject):
                 "line_count": row.get("dialogue_count", row.get("line_count", row.get("lines", 0))),
                 "chapter_count": chapter_count,
                 "confidence": row.get("confidence", 100),
+                "user_created": bool(row.get("user_created")),
+                "manual": bool(row.get("manual")),
+                "manual_aliases": bool(row.get("manual_aliases")),
             }
             grouped.setdefault(series, []).append(normalized)
         for series, rows in grouped.items():
@@ -5751,6 +5827,26 @@ class PremiumV2Bridge(QObject):
                 update_names=update_names,
                 update_voice=update_voice,
                 path=registry_path,
+            )
+        assignment_names: dict[str, set[str]] = {}
+        for chapter in getattr(project, "chapters", []) or []:
+            for assignment in (getattr(chapter, "dialogue_assignments", []) or []):
+                if not isinstance(assignment, dict):
+                    continue
+                series = str(assignment.get("series") or default_series).strip()
+                if not series:
+                    continue
+                speakers = assignment.get("speakers")
+                if not isinstance(speakers, (list, tuple)):
+                    speakers = [assignment.get("speaker")] if assignment.get("speaker") else []
+                assignment_names.setdefault(series.casefold(), set()).update(
+                    str(value or "").strip().casefold()
+                    for value in speakers if str(value or "").strip()
+                )
+        for series in sorted({default_series, *grouped.keys()} - {""}, key=str.casefold):
+            prune_invalid_character_records(
+                series, path=registry_path,
+                protected_names=assignment_names.get(series.casefold(), set()),
             )
 
     def _character_library_bootstrap(self) -> None:
@@ -5923,6 +6019,9 @@ class PremiumV2Bridge(QObject):
                     "notes": notes,
                     "confidence": 100,
                     "voice": voice_profile,
+                    "user_created": True,
+                    "manual": True,
+                    "manual_aliases": True,
                 }],
                 source_project_folder=str(active_project.folder) if active_project else "",
                 source_project_title=str(active_project.title) if active_project else "",
@@ -6362,18 +6461,20 @@ class PremiumV2Bridge(QObject):
         try:
             from app.ai.brain import AudiobookBrain
             from app.ai.learning_context import load_project_learning_context
-            from app.tts.pronunciation_suggester import is_pronunciation_override_candidate
-            from app.chapters.characters import is_likely_character_name
+            from app.tts.pronunciation_suggester import (
+                is_pronunciation_override_candidate, is_likely_character_name_candidate,
+            )
+            from app.chapters.characters import (
+                is_likely_character_name, is_user_confirmed_character_record,
+            )
+            self._character_list({})
             state = load_state(project.folder)
             confirmed_character_names: set[str] = set()
             for character in state.get("characters") or []:
                 if not isinstance(character, dict):
                     continue
                 character_name = str(character.get("name") or "").strip()
-                character_trusted = bool(
-                    character.get("user_created") or character.get("manual")
-                    or character.get("voice_profile") or character.get("voice_name")
-                )
+                character_trusted = is_user_confirmed_character_record(character)
                 if character_name and is_likely_character_name(character_name, trusted=character_trusted):
                     confirmed_character_names.add(character_name.casefold())
                     aliases = character.get("aliases") or []
@@ -6435,7 +6536,9 @@ class PremiumV2Bridge(QObject):
                     bool(re.search(r"(?i)(?<![\w])" + re.escape(written) + r"(?![\w])", source_text))
                 )
                 key = unicodedata.normalize("NFC", written).casefold()
-                if not present or not is_pronunciation_override_candidate(
+                if not present or not is_likely_character_name_candidate(
+                    written, known_names=known_pronunciation_names, script=raw.get("script")
+                ) or not is_pronunciation_override_candidate(
                     written,
                     source_language=raw.get("source_language"),
                     script=raw.get("script"),
