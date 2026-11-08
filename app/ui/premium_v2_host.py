@@ -6539,14 +6539,24 @@ class PremiumV2Bridge(QObject):
                     bool(re.search(r"(?i)(?<![\w])" + re.escape(written) + r"(?![\w])", source_text))
                 )
                 key = unicodedata.normalize("NFC", written).casefold()
-                if not present or not is_likely_character_name_candidate(
+                candidate_is_name = is_likely_character_name_candidate(
                     written, known_names=known_pronunciation_names, script=raw.get("script")
-                ) or not is_pronunciation_override_candidate(
+                )
+                # Unknown one-token Latin transliterations (for example, Yamato)
+                # are not accepted by the generic pronunciation guard on their
+                # own. Permit this narrow path only when the authoritative
+                # character-name validator accepts the token; it still must be
+                # present in the source, carry explicit non-English language
+                # evidence, and pass the same common-English rejection below.
+                if not candidate_is_name and len(written.split()) == 1:
+                    candidate_is_name = is_likely_character_name(written, explicit=True)
+                pronunciation_evidence = is_pronunciation_override_candidate(
                     written,
                     source_language=raw.get("source_language"),
                     script=raw.get("script"),
                     known_names=known_pronunciation_names,
-                ):
+                )
+                if not present or not candidate_is_name or not pronunciation_evidence:
                     continue
                 if key in seen:
                     continue
