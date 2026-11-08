@@ -10,6 +10,9 @@ from app.ui import premium_v2_host as host
 
 class NarratorResolverHarness:
     _resolve_narrator_for_generation = host.PremiumV2Bridge._resolve_narrator_for_generation
+    _character_series_for_voice_assignment = staticmethod(
+        host.PremiumV2Bridge._character_series_for_voice_assignment
+    )
 
     def __init__(self, profile):
         self._project_series_name = Mock(return_value="Test Series")
@@ -20,6 +23,12 @@ class NarratorResolverHarness:
             "profile_available": True,
         })
         self._find_profile = Mock(return_value=profile)
+        self._saved_profiles = [profile] if profile is not None else []
+
+    def _effective_generation_character_rows(self, state, default_series, **kwargs):
+        return host.PremiumV2Bridge._effective_generation_character_rows(
+            self, state, default_series, available_profiles=self._saved_profiles, **kwargs
+        )
 
 
 class NarratorOnlyGenerationTests(unittest.TestCase):
@@ -63,14 +72,14 @@ class NarratorOnlyGenerationTests(unittest.TestCase):
             text="“Hello there,”", chapter_number=1,
         )
 
+        harness = NarratorResolverHarness(SimpleNamespace(name="Saved Narrator"))
+        harness._saved_profiles.append(SimpleNamespace(name="Mira Voice", voice_id="mira-voice"))
         with patch(
             "app.chapters.speaker_segmentation.segment_chapter_speakers",
             return_value=[unresolved],
         ):
             with self.assertRaisesRegex(ValueError, "still need speaker review"):
-                NarratorResolverHarness(
-                    SimpleNamespace(name="Saved Narrator")
-                )._resolve_narrator_for_generation(
+                harness._resolve_narrator_for_generation(
                     project, {"characters": characters}, chapters
                 )
 
