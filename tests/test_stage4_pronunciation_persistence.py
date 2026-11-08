@@ -315,7 +315,8 @@ class PronunciationPersistenceTests(unittest.TestCase):
             self.bridge_a, {"document": document, "replace_conflicts": True}
         )
         rows = {row["written_form"]: row for row in self.list(self.bridge_a)}
-        self.assertEqual(2, applied["imported"])
+        self.assertEqual(1, applied["imported"])
+        self.assertEqual(1, applied["updated"])
         self.assertEqual("My-rah", rows["Mira"]["spoken_form"])
         self.assertEqual("manual", rows["Mira"]["origin"])
         self.assertEqual("Yah-mah-toh", rows["Yamato"]["spoken_form"])
