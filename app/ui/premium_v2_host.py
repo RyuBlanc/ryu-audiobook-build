@@ -7364,9 +7364,9 @@ class PremiumV2Bridge(QObject):
         if kind not in {"models", "sound"}:
             raise ValueError(f"Unsupported catalogue kind: {kind}")
         labels = {
-            "models": ("model-inventory-scan", "Refresh installed model inventory",
+            "models": ("catalog-scan-models", "Refresh installed model inventory",
                        "Inspect local model weights, runtimes, providers and storage."),
-            "sound": ("sound-catalogue-scan", "Refresh Sound Design library",
+            "sound": ("catalog-scan-sound", "Refresh Sound Design library",
                       "Inspect imported and bundled audio assets and their metadata."),
         }
         job_type, title, description = labels[kind]
@@ -7465,7 +7465,10 @@ class PremiumV2Bridge(QObject):
         ready = bool(getattr(self, "_model_inventory_cache_ready", False))
         force_refresh = bool((payload or {}).get("force_refresh"))
         if force_refresh or not ready or time.monotonic() - scanned_at >= 5.0:
-            self._queue_catalog_scan("models")
+            try:
+                self._queue_catalog_scan("models")
+            except RuntimeError as exc:
+                log.warning("Model inventory refresh deferred: %s", exc)
         return list(cached) if isinstance(cached, list) else []
 
     def _models_refresh(self, _payload: dict[str, Any]) -> dict[str, Any]:
@@ -7579,6 +7582,7 @@ class PremiumV2Bridge(QObject):
                 else:
                     outcome = self._models_install_component(model_id, details, report_progress, force_repair=action == "repair")
                 report_progress("Refreshing actual installed state…")
+                self._invalidate_catalog_scan("models")
                 latest = self._refresh_model_inventory_sync()
                 self._job_update(job_id, state="completed", progress=100,
                                  stage=f"{verb} complete", message=str(outcome or f"{verb} completed."),
@@ -8958,7 +8962,10 @@ class PremiumV2Bridge(QObject):
         ready = bool(getattr(self, "_sound_catalog_cache_ready", False))
         force_refresh = bool(payload.get("force_refresh"))
         if force_refresh or not ready or time.monotonic() - scanned_at >= 20.0:
-            self._queue_catalog_scan("sound")
+            try:
+                self._queue_catalog_scan("sound")
+            except RuntimeError as exc:
+                log.warning("Sound catalogue refresh deferred: %s", exc)
         return list(cached) if isinstance(cached, list) else []
 
     def _sound_refresh(self, _payload: dict[str, Any]) -> dict[str, Any]:
