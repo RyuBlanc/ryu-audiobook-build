@@ -17,23 +17,22 @@
 
 Do not treat Build #2680's 1,258 passing tests as proof for code committed afterwards. Do not mark a requirement complete from a static element/function-name test. Manual Windows/audio acceptance remains distinct from CI.
 
-## Current evidence overlay — 8 November 2026
 
-This dated overlay is newer than the historical baseline/status snapshots in the matrix below. It supersedes the listed historical statuses only where it names the requirement and its evidence; it does **not** bulk-close the rest of the matrix.
+## Current evidence overlay — 8 November 2026, Build #2887
 
-| Requirement area | Current evidence | Current acceptance status |
-|---|---|---|
-| Character Studio large review queue / chapter navigator | Builds #2839/#2841 passed their matching regression gates; #2844/#2846 added source-backed assignment counts and valid whitespace word counts. | Automated regression evidence exists; installed full-book review and saved-source comparison remain pending. |
-| CS / Production canonical dialogue passage identity (XAPP-03) | app/chapters/passage_index.py persists an atomic revision-aware index, stable passage IDs, chapter/source revisions, exact source slices, assignment state, AI-suggestion spans, counts and overlap issues. Character review and cast-aware Production consume it for saved projects. | Build #2866 passed 1,374 tests on 5ecbd0f. Real novel count reconciliation (including 1,175 vs 1,196), review decisions and installed-app acceptance remain pending. |
-| Models/Sound catalogue responsiveness (XAPP-09) | Cache-miss and forced scans use single-flight background jobs; stale last-known-good snapshots are preserved; frontend waits asynchronously for completion before refreshing model/cue/music consumers. | Build #2866 passed 1,374 tests. Large real filesystem cold-scan responsiveness under concurrent work on installed Windows remains pending. |
-| Stage 2 Sound Design / Music Library | Build #2847 produced an installer/portable checkpoint and passed the then-current packaged Sound Design acceptance on its own SHA. Later async catalogue changes are regression-tested in #2866. | #2847 artifacts are not the binary for 5ecbd0f; exact-current-head Windows package and packaged Sound runtime checks are pending. |
-| Frozen Master full requirement set | The complete requirement inventory remains the table below. | **Not complete.** No bulk status promotion is inferred from the 1,374-test pass. |
+This overlay supersedes the earlier 1,374-test/#2866 snapshot above. It does not bulk-close the requirement matrix.
 
-**Current exact-head evidence:** Build #2866, commit `5ecbd0f2490519bf862021a5b87114228b2cc325`, **SUCCESS — 1,374 tests passed**. Its Windows build job was skipped, so it is regression-only. A documentation `[artifact-checkpoint]` commit follows this code head; that new head must pass both regression and Windows packaging before its installer/portable artifacts are considered current.
+- **Stage 8 PR:** #31, open draft, base `stage-7/responsive-active-project-cache`, head `fix/application-wide-closure-2026-11-08`, 70 commits, 38 files; current PR head `5f811eb60a912353926704b6ba7c8fbfed41e0cc`.
+- **Build #2887:** [Actions](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42477948917), exact SHA `5f811eb60a912353926704b6ba7c8fbfed41e0cc`, **1,387 automated tests passed** and Windows build job succeeded.
+- **Uploaded Windows outputs:** installer artifact `Ryu-Audiobook-Installer-2887` (artifact ID `13616938581`); portable artifact `Ryu-Audiobook-Portable-2887` (artifact ID `13616784388`); SHA-256/size manifest `Ryu-Audiobook-Release-SHA256-2887` (artifact ID `13617037536`); Piper benchmark `Ryu-Audiobook-Stage7-Piper-Benchmark-2887` (artifact ID `13617435436`). These are the matching Build #2887 artifacts and expire 8 December 2026.
+- **Security gate:** Build #2887's Windows Defender log reports no threats for the application executable, HTML installer and core installer. This is CI scan evidence; it does not prove the user's previous endpoint detection is resolved on every machine.
+- **Offline CPU Piper benchmark:** verified CPU execution provider; synthesis 3.5205 seconds for 12.8053 seconds of audio (real-time factor 0.2749) on the Windows CI host. This is not Qwen GPU evidence.
+- **Installer/portable package target:** the 500,000,000-byte target remains unmet and is explicitly deprioritized by the user. Do not remove required offline models or starter audio to pursue it.
+- **Latest matching-head package evidence:** Build #2887's packages do not include commits made after `5f811eb`; rebuild after any subsequent source change before treating packages as current.
 
-**500 MB installer target:** explicitly deprioritized by the user in favour of closing functional defects. Keep it visible as a known unmet target, but do not block the functional closure sequence or remove required offline assets to pursue it.
+### Acceptance not implied by Build #2887
 
-**Unclosed areas:** full real-book analysis and false-positive handling; target-device Qwen inference/performance; saved voice identity heard in real previews and final audio; narrator-only and multi-character end-to-end M4B; exact Task Manager/restart/cancellation; reconciled production readiness and cross-screen project state; complete control-to-backend/persistence/restart audit; Help & Guide parity; PR/release-candidate reconciliation; current-SHA installer/portable runtime acceptance; and the remaining UI/responsive/Player/History/Pronunciation/Storage/Library Master requirements. See docs/FINAL_CLOSURE_STATUS.md for the detailed XAPP register.
+The 1,387-test pass and package run do not close long-book runtime acceptance, physical GPU benchmarks, full narrator-only/multi-character audiobook listening, 30-second Qwen preview performance on target devices, actual project-restart recovery, or full manual UI/responsive acceptance. Keep these separate from CI-completed items and follow the OPEN entries in the requirement matrix.
 
 ## Frozen requirement IDs
 
