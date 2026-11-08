@@ -204,6 +204,101 @@ class Stage53ProductionPreflightTests(unittest.TestCase):
             self.assertEqual(result["generation_mode"], "narrator_only")
             bridge._resolve_narrator_for_generation.assert_called_once()
 
+    def _run_terminal_callback(self, root: Path, *, narrator_only: bool, failed: bool = False,
+                               superseded: bool = False):
+        project_folder = root / "saved-project"
+        project_folder.mkdir(parents=True, exist_ok=True)
+        output = root / "saved-book.m4b"
+        output.write_bytes(b"validated M4B fixture")
+        job_id = "terminal-generation-job"
+        state = {
+            "generation_job_id": "newer-generation-job" if superseded else job_id,
+            # A newer project owner may have a different mode. The callback
+            # must keep the original job's immutable mode from its job record.
+            "narrator_only_generation": False if superseded else narrator_only,
+            "generation_mode": "character_cast" if superseded or not narrator_only else "narrator_only",
+            "character_voice_profile_count": 0 if superseded else 2,
+            "empty_chapters_skipped": 1,
+            "excluded_chapters_skipped": 1,
+            "chapters_skipped_for_generation": 2,
+        }
+        start_result = {
+            "output_path": str(output),
+            "chapter_count": 2,
+            "generation_mode": "narrator_only" if narrator_only else "character_cast",
+            "narrator_only": narrator_only,
+            "character_voice_profile_count": 2,
+        }
+        summary = SimpleNamespace(
+            output_path=str(output),
+            cancelled=False,
+            packaging_failed=failed,
+            chapters_failed=[2] if failed else [],
+            chapters_completed=1 if failed else 2,
+            chapters_total=2,
+            chapters_completed_numbers=[1] if failed else [1, 2],
+            packaging_error="Fixture packaging failure" if failed else "",
+            failure_details={},
+        )
+        bridge = SimpleNamespace(
+            _jobs_lock=threading.RLock(),
+            _jobs={job_id: {"progress": 96, "result": start_result}},
+            _generators={job_id: object()},
+            _job_update=Mock(),
+            _now=Mock(return_value="2026-11-08T19:00:00+00:00"),
+        )
+        with (
+            patch.object(host, "load_state", return_value=state),
+            patch.object(host, "save_state"),
+            patch.object(host, "is_iso_bmff_file", return_value=False),
+        ):
+            host.PremiumV2Bridge._generation_finished(
+                bridge, job_id, SimpleNamespace(folder=project_folder),
+                summary, output, "Saved Narrator Profile",
+            )
+        return bridge, state, summary
+
+    def test_terminal_success_retains_narrator_only_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            bridge, state, _summary = self._run_terminal_callback(
+                Path(temporary), narrator_only=True,
+            )
+            result = bridge._job_update.call_args.kwargs["result"]
+            self.assertEqual(result["generation_mode"], "narrator_only")
+            self.assertIs(result["narrator_only"], True)
+            self.assertEqual(result["character_voice_profile_count"], 2)
+            self.assertEqual(state["generation_mode"], "narrator_only")
+            self.assertIs(state["narrator_only_generation"], True)
+            self.assertEqual(result["chapters_completed"], 2)
+
+    def test_terminal_failure_retains_character_cast_identity_and_chapter_results(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            bridge, state, _summary = self._run_terminal_callback(
+                Path(temporary), narrator_only=False, failed=True,
+            )
+            changes = bridge._job_update.call_args.kwargs
+            result = changes["result"]
+            self.assertEqual(changes["state"], "failed")
+            self.assertEqual(result["generation_mode"], "character_cast")
+            self.assertIs(result["narrator_only"], False)
+            self.assertEqual(result["character_voice_profile_count"], 2)
+            self.assertEqual(result["chapters_completed"], 1)
+            self.assertEqual(result["chapters_failed"], [2])
+            self.assertEqual(state["generation_mode"], "character_cast")
+
+    def test_superseded_callback_uses_its_own_job_mode_not_new_project_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            bridge, state, _summary = self._run_terminal_callback(
+                Path(temporary), narrator_only=True, superseded=True,
+            )
+            result = bridge._job_update.call_args.kwargs["result"]
+            self.assertIs(result["superseded"], True)
+            self.assertEqual(result["superseded_by_job_id"], "newer-generation-job")
+            self.assertEqual(result["generation_mode"], "narrator_only")
+            self.assertIs(result["narrator_only"], True)
+            self.assertEqual(result["character_voice_profile_count"], 2)
+            self.assertIs(state["narrator_only_generation"], False)
+
     def test_all_empty_or_all_excluded_projects_are_rejected_before_job_creation(self) -> None:
         scenarios = (
             (
