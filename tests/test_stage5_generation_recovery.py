@@ -41,12 +41,18 @@ class Stage53DurableJobRecoveryTests(unittest.TestCase):
             history_path = root / "premium_v2_history.json"
             rows = []
             projects = {}
+            expected_identity: dict[str, dict[str, object]] = {}
 
             for index, prior_status in enumerate(("paused", "running"), start=1):
                 job_id = f"generation-job-{index}"
                 generation_mode = "narrator_only" if index == 1 else "character_cast"
                 narrator_only = generation_mode == "narrator_only"
                 character_voice_profile_count = 0 if narrator_only else 3
+                expected_identity[job_id] = {
+                    "generation_mode": generation_mode,
+                    "narrator_only": narrator_only,
+                    "character_voice_profile_count": character_voice_profile_count,
+                }
                 project_folder = root / f"project-{index}"
                 project_folder.mkdir()
                 save_state(
@@ -96,6 +102,7 @@ class Stage53DurableJobRecoveryTests(unittest.TestCase):
 
             for job_id, project_folder in projects.items():
                 with self.subTest(job_id=job_id):
+                    expected = expected_identity[job_id]
                     recovered = bridge._jobs[job_id]
                     self.assertEqual(recovered["state"], "failed")
                     self.assertEqual(recovered["stage"], "Interrupted by application restart")
@@ -105,22 +112,22 @@ class Stage53DurableJobRecoveryTests(unittest.TestCase):
                     self.assertEqual(bridge._history[job_id]["state"], "failed")
                     self.assertEqual(bridge._history[job_id]["job_id"], job_id)
                     for durable_row in (recovered, persisted_by_id[job_id], bridge._history[job_id]):
-                        self.assertEqual(durable_row["result"]["generation_mode"], generation_mode)
-                        self.assertIs(durable_row["result"]["narrator_only"], narrator_only)
+                        self.assertEqual(durable_row["result"]["generation_mode"], expected["generation_mode"])
+                        self.assertIs(durable_row["result"]["narrator_only"], expected["narrator_only"])
                         self.assertEqual(
                             durable_row["result"]["character_voice_profile_count"],
-                            character_voice_profile_count,
+                            expected["character_voice_profile_count"],
                         )
 
                     project_state = load_state(project_folder)
                     self.assertEqual(project_state["status"], "failed")
                     self.assertEqual(project_state["generation_job_id"], job_id)
                     self.assertTrue(project_state["generation_recovery_required"])
-                    self.assertEqual(project_state["generation_mode"], generation_mode)
-                    self.assertIs(project_state["narrator_only_generation"], narrator_only)
+                    self.assertEqual(project_state["generation_mode"], expected["generation_mode"])
+                    self.assertIs(project_state["narrator_only_generation"], expected["narrator_only"])
                     self.assertEqual(
                         project_state["character_voice_profile_count"],
-                        character_voice_profile_count,
+                        expected["character_voice_profile_count"],
                     )
 
     def test_old_interrupted_job_cannot_overwrite_a_newer_project_generation(self) -> None:
