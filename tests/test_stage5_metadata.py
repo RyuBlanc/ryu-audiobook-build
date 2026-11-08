@@ -814,3 +814,101 @@ class ProductionPreviewDispatchTests(unittest.TestCase):
                             "chapter_id": chapter.chapter_id,
                         })
                 bridge._voice_preview.assert_not_called()
+
+
+class ProductionPreviewJobIsolationHarness:
+    _voice_preview = host.PremiumV2Bridge._voice_preview
+
+    def __init__(self, project, profile):
+        self.project = project
+        self.profile = profile
+        self._active_project = Mock(return_value=project)
+        self._assert_no_active_model_lifecycle = Mock()
+        self._assert_no_active_audio_synthesis = Mock()
+        self._find_profile = Mock(return_value=profile)
+        self._new_job = Mock(return_value="isolated-production-preview-job")
+        self._job_update = Mock()
+        self._now = Mock(return_value="2026-11-08T20:00:00+05:30")
+        self._jobs_lock = threading.RLock()
+        self._preview_cancel_events = {}
+        self._preview_worker = Mock()
+
+
+class ProductionPreviewJobIsolationTests(unittest.TestCase):
+    def test_production_preview_creates_independent_job_without_changing_generation_state(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary) / "project"
+            folder.mkdir()
+            chapter = SimpleNamespace(
+                number=2,
+                title="The Crossing",
+                text="The saved chapter remains the source of preview narration.",
+                chapter_id="chapter-two-stable",
+            )
+            project = SimpleNamespace(
+                folder=folder,
+                title="Independent Preview Book",
+                chapters=[chapter],
+            )
+            profile = SimpleNamespace(name="Saved Narrator")
+            persisted_state = {
+                "generation_job_id": "already-running-full-generation",
+                "status": "generating",
+                "output_path": None,
+                "generation_target_path": str(folder / "final-book.m4b"),
+                "voice_profile": "Saved Narrator",
+                "narrator_only_generation": True,
+            }
+            bridge = ProductionPreviewJobIsolationHarness(project, profile)
+            thread = Mock()
+
+            with (
+                patch.object(host, "load_state", side_effect=lambda _folder: dict(persisted_state)),
+                patch.object(host.threading, "Thread", return_value=thread) as thread_factory,
+            ):
+                result = bridge._voice_preview({
+                    "profile_name": profile.name,
+                    "chapter_number": 2,
+                    "chapter_id": "chapter-two-stable",
+                    "duration_seconds": 30,
+                    "_production_preview": True,
+                    "include_sound_design": True,
+                    "route_character_cast": False,
+                    "apply_pronunciation_rules": True,
+                })
+
+            self.assertEqual(result["job_id"], "isolated-production-preview-job")
+            self.assertEqual(result["state"], "running")
+            self.assertEqual(
+                bridge._new_job.call_args.args[0],
+                "production-preview",
+            )
+            self.assertNotEqual(
+                bridge._new_job.call_args.args[0],
+                "audiobook-generation",
+            )
+            self.assertEqual(
+                bridge._new_job.call_args.args[1],
+                "Production preview · Saved Narrator",
+            )
+            thread_factory.assert_called_once()
+            self.assertEqual(
+                thread_factory.call_args.kwargs["args"][2],
+                chapter.text,
+            )
+            self.assertEqual(
+                bridge._job_update.call_args.kwargs["current_chapter_id"],
+                chapter.chapter_id,
+            )
+            self.assertEqual(
+                persisted_state,
+                {
+                    "generation_job_id": "already-running-full-generation",
+                    "status": "generating",
+                    "output_path": None,
+                    "generation_target_path": str(folder / "final-book.m4b"),
+                    "voice_profile": "Saved Narrator",
+                    "narrator_only_generation": True,
+                },
+            )
+            thread.start.assert_called_once()
