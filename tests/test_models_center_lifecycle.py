@@ -364,7 +364,7 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
                 patch("app.tts.qwen_character_runtime.model_installed", return_value=False),
                 patch("app.tts.qwen_character_runtime.runtime_ready", return_value=False),
             ):
-                rows = bridge._models_list({})
+                rows = bridge._build_model_inventory()
 
             by_id = {row["model_id"]: row for row in rows}
             self.assertEqual(by_id["chatterbox-runtime"]["storage_bytes"], 9)
@@ -1146,7 +1146,7 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
                 patch("app.tts.qwen_character_runtime.runtime_ready", return_value=True),
             ):
                 bridge._models_uninstall_component("custom-0.6b", {}, lambda _message: None)
-                refreshed = bridge._models_list({})
+                refreshed = bridge._refresh_model_inventory_sync()
 
             by_id = {row["model_id"]: row for row in refreshed}
             self.assertFalse(by_id["custom-0.6b"]["installed"])
