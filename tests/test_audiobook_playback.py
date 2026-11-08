@@ -328,3 +328,92 @@ class AudiobookPlayerBridgeTests(unittest.TestCase):
                             "position_seconds": value,
                         })
                 save.assert_not_called()
+
+
+class GenerationManagerFullBookIntegrationTests(unittest.TestCase):
+    def test_generation_manager_creates_validated_multichapter_m4b_end_to_end(self):
+        from app.chapters.detector import Chapter
+        from app.tts.manager import GenerationManager
+
+        class DeterministicProvider:
+            def __init__(self):
+                self.calls = []
+
+            def synthesize(self, text, output_path, voice=None):
+                self.calls.append((text, voice))
+                _write_wav(Path(output_path), seconds=0.30)
+                return output_path
+
+            def close(self):
+                return None
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "finished" / "integration-book.m4b"
+            cover = root / "cover.png"
+            Image.new("RGB", (320, 320), (96, 24, 48)).save(cover, format="PNG")
+            chapters = [
+                Chapter(1, "Opening", "The first chapter begins. The road is quiet."),
+                Chapter(2, "The Crossing", "The travellers reach the river. The bridge is old."),
+            ]
+            metadata = {
+                "title": "Generation Manager Integration Book",
+                "author": "Integration Test Author",
+                "narrator": "Integration Narrator",
+                "publisher": "Integration Publishing",
+                "series": "Integration Series",
+                "series_number": "1",
+                "language": "en",
+                "year": "2026",
+                "genre": "Fantasy",
+                "description": "End-to-end generation and final M4B validation fixture.",
+            }
+            provider = DeterministicProvider()
+            summaries = []
+            manager = GenerationManager(
+                provider,
+                "integration-narrator-voice",
+                chapters,
+                root / "working_audio",
+                on_finished=summaries.append,
+                narration_speed=1.0,
+                pacing_profile="off",
+                metadata=metadata,
+                bitrate=128,
+            )
+
+            manager.start(
+                output,
+                metadata["title"],
+                metadata["author"],
+                cover,
+                metadata=metadata,
+            )
+            manager._thread.join(timeout=30)
+
+            self.assertFalse(manager._thread.is_alive(), "full-book generation worker did not finish")
+            self.assertEqual(len(summaries), 1)
+            summary = summaries[0]
+            self.assertFalse(summary.cancelled)
+            self.assertFalse(summary.packaging_failed)
+            self.assertEqual(summary.chapters_total, 2)
+            self.assertEqual(summary.chapters_completed, 2)
+            self.assertEqual(summary.chapters_completed_numbers, [1, 2])
+            self.assertEqual(summary.chapters_failed, [])
+            self.assertEqual(Path(summary.output_path).resolve(), output.resolve())
+            self.assertEqual(len(provider.calls), 2)
+
+            self.assertTrue(output.is_file())
+            self.assertGreater(output.stat().st_size, 1024)
+            self.assertTrue(is_iso_bmff_file(output))
+            report = assembler._ffmpeg_probe_report(output)
+            self.assertIn("Chapter #", report)
+            self.assertIn("Opening", report)
+            self.assertIn("The Crossing", report)
+            self.assertIn("attached pic", report.casefold())
+            assembler._validate_m4b_container(
+                output,
+                chapter_titles=["Opening", "The Crossing"],
+                metadata=metadata,
+                cover=cover,
+            )
