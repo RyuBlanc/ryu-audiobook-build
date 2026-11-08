@@ -483,6 +483,8 @@ class PremiumV2Bridge(QObject):
                 "character.update": self._character_update,
                 "character.delete": self._character_delete,
                 "pronunciation.list": self._pronunciation_list,
+                "pronunciation.export": self._pronunciation_export,
+                "pronunciation.import": self._pronunciation_import,
                 "pronunciation.save": self._pronunciation_save,
                 "pronunciation.delete": self._pronunciation_delete,
                 "pronunciation.delete_many": self._pronunciation_delete_many,
@@ -644,6 +646,8 @@ class PremiumV2Bridge(QObject):
             "character.update": True,
             "character.delete": True,
             "pronunciation.list": True,
+            "pronunciation.export": True,
+            "pronunciation.import": True,
             "pronunciation.save": True,
             "pronunciation.delete": True,
             "pronunciation.delete_many": True,
@@ -6188,6 +6192,193 @@ class PremiumV2Bridge(QObject):
             "global_library",
         ))
         return entries
+
+    def _pronunciation_export(self, _payload: dict[str, Any]) -> dict[str, Any]:
+        """Export the visible book/series/global dictionary without flattening scope."""
+        project = self._active_project()
+        state = load_state(project.folder)
+        entries = self._pronunciation_list({})
+        return {
+            "schema": "ryu.pronunciation-dictionary",
+            "version": 1,
+            "exported_at": self._now(),
+            "project_title": str(getattr(project, "title", "") or ""),
+            "series_name": str(state.get("series") or state.get("series_name") or "").strip(),
+            "entries": entries,
+        }
+
+    def _pronunciation_import(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Validate a versioned dictionary, preview conflicts, then apply only on explicit confirmation."""
+        payload = payload if isinstance(payload, dict) else {}
+        document = payload.get("document")
+        if not isinstance(document, dict):
+            raise ValueError("Choose a valid versioned pronunciation dictionary JSON file.")
+        if document.get("schema") != "ryu.pronunciation-dictionary" or document.get("version") != 1:
+            raise ValueError("Unsupported pronunciation dictionary schema or version.")
+        raw_entries = document.get("entries")
+        if not isinstance(raw_entries, list):
+            raise ValueError("The pronunciation dictionary must contain an entries array.")
+        if len(raw_entries) > 5000:
+            raise ValueError("A pronunciation dictionary import is limited to 5,000 entries.")
+
+        project = self._active_project()
+        state = load_state(project.folder)
+        active_series = str(state.get("series") or state.get("series_name") or "").strip()
+        normalized: list[dict[str, Any]] = []
+        imported_identities: dict[tuple[str, str, str], dict[str, Any]] = {}
+        for index, raw in enumerate(raw_entries):
+            if not isinstance(raw, dict):
+                raise ValueError(f"Pronunciation entry {index + 1} must be an object.")
+            written = _normalize_pronunciation_text(
+                raw.get("written_form") or raw.get("written") or raw.get("word"),
+                "Written term", 500,
+            )
+            spoken = _normalize_pronunciation_text(
+                raw.get("spoken_form") or raw.get("spoken") or raw.get("pronunciation"),
+                "Pronunciation", 1000,
+            )
+            scope_value = raw.get("scope_type") or raw.get("scope") or "current_book"
+            scope_type, scope_id, scope_label = _parse_pronunciation_scope(scope_value, raw.get("scope_id"))
+            if scope_type == "series" and (
+                not active_series or scope_id.casefold() != active_series.casefold()
+            ):
+                raise ValueError(
+                    f"Entry '{written}' belongs to Series · {scope_id}, not the active project series. "
+                    "Open that series project before importing its entries."
+                )
+            origin = str(raw.get("origin") or "manual").strip().casefold()
+            if origin not in {"manual", "ai"}:
+                raise ValueError(f"Entry '{written}' has an unsupported origin.")
+            enabled = raw.get("enabled", True)
+            if not isinstance(enabled, bool):
+                raise ValueError(f"Entry '{written}' enabled value must be true or false.")
+            language = _normalize_pronunciation_text(raw.get("language") or "Auto-detect", "Language", 100)
+            handling_mode = _normalize_pronunciation_text(
+                raw.get("handling_mode") or "automatic", "Handling mode", 100
+            )
+            row: dict[str, Any] = {
+                "written_form": written,
+                "spoken_form": spoken,
+                "language": language,
+                "handling_mode": handling_mode,
+                "scope": scope_label,
+                "scope_type": scope_type,
+                "scope_id": scope_id,
+                "origin": origin,
+                "enabled": enabled,
+            }
+            for field, limit in (("ipa", 200), ("script", 80), ("reason", 500)):
+                value = str(raw.get(field) or "").strip()
+                if value:
+                    row[field] = value[:limit]
+            if raw.get("confidence") is not None:
+                try:
+                    confidence = float(raw.get("confidence"))
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise ValueError(f"Entry '{written}' has invalid confidence.") from exc
+                if not math.isfinite(confidence) or not 0 <= confidence <= 1:
+                    raise ValueError(f"Entry '{written}' confidence must be from 0 to 1.")
+                row["confidence"] = confidence
+            alternatives = raw.get("alternatives", [])
+            if not isinstance(alternatives, list):
+                raise ValueError(f"Entry '{written}' alternatives must be an array.")
+            row["alternatives"] = [
+                str(value).strip()[:300] for value in alternatives[:5] if str(value or "").strip()
+            ]
+            identity = (scope_type, scope_id.casefold(), unicodedata.normalize("NFC", written).casefold())
+            prior_import = imported_identities.get(identity)
+            if prior_import and prior_import["spoken_form"].casefold() != spoken.casefold():
+                raise ValueError(
+                    f"The import file contains conflicting readings for '{written}' in {scope_label}."
+                )
+            imported_identities[identity] = row
+            if not prior_import:
+                normalized.append(row)
+
+        saved = self._pronunciation_list({})
+        saved_by_identity = {
+            (
+                str(row.get("scope_type") or "current_book"),
+                str(row.get("scope_id") or "").casefold(),
+                unicodedata.normalize("NFC", str(row.get("written_form") or "")).casefold(),
+            ): row
+            for row in saved if isinstance(row, dict)
+        }
+        conflicts: list[dict[str, Any]] = []
+        duplicates = 0
+        new_count = 0
+        for row in normalized:
+            identity = (row["scope_type"], row["scope_id"].casefold(), row["written_form"].casefold())
+            existing = saved_by_identity.get(identity)
+            if not existing:
+                new_count += 1
+                continue
+            if str(existing.get("spoken_form") or "").casefold() == row["spoken_form"].casefold():
+                duplicates += 1
+                continue
+            conflicts.append({
+                "written_form": row["written_form"],
+                "scope": row["scope"],
+                "existing_spoken_form": existing.get("spoken_form"),
+                "imported_spoken_form": row["spoken_form"],
+                "existing_origin": existing.get("origin", "manual"),
+                "imported_origin": row["origin"],
+                "protected_manual": existing.get("origin") == "manual" and row["origin"] == "ai",
+            })
+
+        replace_conflicts = payload.get("replace_conflicts") is True
+        apply_changes = payload.get("apply") is True
+        protected = [row for row in conflicts if row["protected_manual"]]
+        preview = {
+            "schema": "ryu.pronunciation-dictionary",
+            "preview": not apply_changes,
+            "total_entries": len(raw_entries),
+            "unique_entries": len(normalized),
+            "new_count": new_count,
+            "duplicate_count": duplicates,
+            "conflict_count": len(conflicts),
+            "protected_manual_count": len(protected),
+            "conflicts": conflicts,
+            "imported": 0,
+        }
+        if not apply_changes:
+            return preview
+        if conflicts and not replace_conflicts:
+            raise ValueError("Import conflicts require an explicit replace confirmation.")
+        if protected:
+            raise ValueError(
+                "An imported AI pronunciation cannot overwrite a saved manual pronunciation. "
+                "Resolve that entry manually in the active scope."
+            )
+
+        imported = 0
+        updated = 0
+        for row in normalized:
+            identity = (row["scope_type"], row["scope_id"].casefold(), row["written_form"].casefold())
+            existing = saved_by_identity.get(identity)
+            if existing and str(existing.get("spoken_form") or "").casefold() == row["spoken_form"].casefold():
+                continue
+            result = self._pronunciation_save({
+                **row,
+                "scope": row["scope"],
+                "scope_id": row["scope_id"],
+                "origin": row["origin"],
+                "enabled": row["enabled"],
+                **({"original_written_form": row["written_form"],
+                    "original_scope": row["scope"],
+                    "original_scope_id": row["scope_id"]} if existing else {}),
+            })
+            if existing or result.get("updated_existing"):
+                updated += 1
+            else:
+                imported += 1
+        return {
+            **preview,
+            "preview": False,
+            "imported": imported,
+            "updated": updated,
+            "conflicts_replaced": len(conflicts),
+        }
 
     def _pronunciation_save(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Add or edit a rule in one scope while retaining its manual/AI provenance."""
