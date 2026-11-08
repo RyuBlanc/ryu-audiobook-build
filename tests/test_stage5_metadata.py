@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from app.chapters.detector import Chapter
 from app.core.project import Project
 from app.core.state import load_state, save_state
 from app.production_metadata import missing_required_metadata_fields, normalize_metadata_text
@@ -579,6 +580,160 @@ class MetadataBridgeTests(unittest.TestCase):
                 with patch("app.audio.library.validate_saved_audio_paths"):
                     with self.assertRaisesRegex(ValueError, "Input Project Details"):
                         host.PremiumV2Bridge._production_generate_book(bridge, {})
+
+
+class ProjectSummaryReadinessHarness:
+    _project_summary = host.PremiumV2Bridge._project_summary
+
+    def _project_series_name(self, project, state=None):
+        values = state if isinstance(state, dict) else load_state(project.folder)
+        return str(values.get("series") or project.title)
+
+    def _narrator_series_default_read(self, _project, _state, _series):
+        return {
+            "effective_profile_name": "Saved Narrator",
+            "profile_name": "Saved Narrator",
+            "profile_available": True,
+            "source": "project_override",
+        }
+
+
+class ProjectSummaryReadinessTests(unittest.TestCase):
+    def _project(self, root: Path, *, target: str = ""):
+        folder = root / "library" / "saved-book"
+        folder.mkdir(parents=True)
+        source = root / "source-book.txt"
+        source.write_text("Original imported text", encoding="utf-8")
+        project = Project(
+            "Readiness Book",
+            folder,
+            source,
+            [
+                Chapter(1, "Opening", "This chapter can be generated."),
+                Chapter(2, "Empty", "  \n "),
+                Chapter(3, "Excluded", "This chapter is explicitly excluded.", skip_for_generation=True),
+            ],
+        )
+        project.save()
+        cover = folder / "assets" / "cover.png"
+        cover.parent.mkdir(parents=True, exist_ok=True)
+        cover.write_bytes(b"cover fixture")
+        state = {
+            "author": "A. Writer",
+            "publisher": "Example Press",
+            "series": "Example Series",
+            "series_volume": "1",
+            "language": "en",
+            "year": "2026",
+            "genre": "Fantasy",
+            "cover_path": str(cover),
+        }
+        if target:
+            state["generation_target_path"] = target
+        save_state(folder, state)
+        return project, state, cover
+
+    def _summary(self, project, root: Path, *, writable: bool = True):
+        audio_root = root / "AudioBooks"
+        audio_root.mkdir(parents=True, exist_ok=True)
+        with (
+            patch.object(host, "audiobooks_root", return_value=audio_root),
+            patch.object(host, "persist_project_cover", side_effect=lambda source, _folder: Path(source).resolve()),
+            patch.object(host.os, "access", return_value=writable),
+        ):
+            return ProjectSummaryReadinessHarness()._project_summary(project)
+
+    def test_new_book_reports_usable_default_output_before_first_generation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project, _state, _cover = self._project(root)
+            summary = self._summary(project, root)
+
+            self.assertIsNone(summary["output_path"])
+            self.assertFalse(summary["completed"])
+            self.assertTrue(summary["output_configured"])
+            self.assertTrue(summary["output_folder_ready"])
+            self.assertTrue(summary["output_format_supported"])
+            self.assertEqual(Path(summary["output_target_path"]).suffix, ".m4b")
+            self.assertEqual(summary["eligible_chapter_count"], 1)
+            self.assertEqual(summary["empty_chapter_count"], 1)
+            self.assertEqual(summary["excluded_chapter_count"], 1)
+            self.assertTrue(summary["metadata_complete"])
+
+    def test_missing_custom_output_directory_is_ready_when_existing_parent_is_writable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "new-output" / "nested" / "Readiness Book.m4b"
+            project, _state, _cover = self._project(root, target=str(target))
+            summary = self._summary(project, root)
+
+            self.assertFalse(target.parent.exists())
+            self.assertTrue(summary["output_folder_ready"])
+            self.assertTrue(summary["output_configured"])
+            self.assertTrue(summary["output_format_supported"])
+
+    def test_unsupported_output_format_and_unwritable_parent_are_not_ready(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "Readiness Book.mp3"
+            project, _state, _cover = self._project(root, target=str(target))
+            unsupported = self._summary(project, root)
+            self.assertFalse(unsupported["output_format_supported"])
+            self.assertFalse(unsupported["output_configured"])
+
+            supported_target = root / "Readiness Book.m4b"
+            save_state(project.folder, {
+                "author": "A. Writer", "publisher": "Example Press", "series": "Example Series",
+                "series_volume": "1", "language": "en", "year": "2026", "genre": "Fantasy",
+                "cover_path": str(project.folder / "assets" / "cover.png"),
+                "generation_target_path": str(supported_target),
+            })
+            unwritable = self._summary(project, root, writable=False)
+            self.assertFalse(unwritable["output_folder_ready"])
+            self.assertFalse(unwritable["output_configured"])
+
+
+class ProductionReadinessUiTests(unittest.TestCase):
+    def test_dashboard_and_start_button_use_complete_generation_prerequisites(self):
+        root = Path(__file__).resolve().parents[1]
+        adapter = (root / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+
+        helper_start = adapter.index("function productionGenerationBlockReason(active)")
+        helper_end = adapter.index("\n  function renderProductionMetadataGate", helper_start)
+        helper = adapter[helper_start:helper_end]
+        for marker in (
+            "active.metadata_complete !== true",
+            "active.narrator_voice_configured !== true",
+            "active.narrator_profile_available !== true",
+            "active.eligible_chapter_count ?? active.prepared_chapter_count ?? 0",
+            "active.output_format_supported !== true",
+            "active.output_folder_ready !== true",
+            "active.output_configured !== true",
+        ):
+            self.assertIn(marker, helper)
+
+        gate_start = adapter.index("function renderProductionMetadataGate(active)")
+        gate_end = adapter.index("\n  function populateMetadataHistory", gate_start)
+        gate = adapter[gate_start:gate_end]
+        self.assertIn("const generationBlockReason = productionGenerationBlockReason(active);", gate)
+        self.assertIn("start.disabled = Boolean(generationBlockReason) || audioActive;", gate)
+
+        flow_start = adapter.index("function refreshDashboardFlow(project)")
+        flow_end = adapter.index("\n  function ", flow_start + 10)
+        flow = adapter[flow_start:flow_end]
+        for marker in (
+            "const metadataComplete = project.metadata_complete === true;",
+            "project.eligible_chapter_count ?? project.prepared_chapter_count ?? 0",
+            "project.narrator_only_generation === true",
+            "project.narrator_profile_available === true",
+            "project.output_folder_ready === true",
+            "project.output_format_supported === true",
+            "{key:'import', ready:metadataComplete",
+            "const canGenerate = chaptersReady && metadataComplete && narratorReady && outputReady;",
+        ):
+            self.assertIn(marker, flow)
+        self.assertNotIn("{key:'import', ready:Boolean(project.source_exists)", flow)
+        self.assertIn("Bypassed · saved narrator reads all passages", flow)
 
 
 class MetadataPremiumV2UiTests(unittest.TestCase):
