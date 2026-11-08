@@ -38,6 +38,19 @@ class CharacterStudioUIContracts(unittest.TestCase):
         self.assertIn("window.ryuPremiumAiChapterNumber = number", review)
         self.assertIn("renderAiChapterDocument();", review)
 
+    def test_ai_review_queue_exposes_all_pending_passages_in_bounded_batches(self):
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        start = adapter.index("function renderDialogueReview()")
+        end = adapter.index("function renderAiChapterDocument()", start)
+        review = adapter[start:end]
+        self.assertNotIn("pending.slice(0, 120)", review)
+        self.assertIn("pendingQueue.slice(0, visibleCount)", review)
+        self.assertIn("data-ai-load-more", review)
+        self.assertIn("ryuPremiumDialogueReviewVisibleCount", review)
+        self.assertIn("ryuPremiumDialogueReviewQueueSignature", review)
+        self.assertIn("Show more passages", review)
+        self.assertIn("Math.min(pendingQueue.length, visibleCount + 120)", adapter)
+
 
 if __name__ == "__main__":
     unittest.main()
