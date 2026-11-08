@@ -695,3 +695,122 @@ class ProductionPreviewSaveTests(unittest.TestCase):
                 with patch.object(host, "app_root", return_value=root / "app"):
                     with self.assertRaises(ValueError):
                         bridge._production_preview_save(payload)
+
+
+class ProductionPreviewDispatchHarness:
+    _production_preview = host.PremiumV2Bridge._production_preview
+
+    def __init__(self, project, selection, profile):
+        self.project = project
+        self.selection = selection
+        self.profile = profile
+        self._active_project = Mock(return_value=project)
+        self._project_series_name = Mock(return_value="Saved Series")
+        self._narrator_series_default_read = Mock(return_value=selection)
+        self._find_profile = Mock(return_value=profile)
+        self._voice_preview = Mock(return_value={"job_id": "production-preview-job", "state": "running"})
+
+
+class ProductionPreviewDispatchTests(unittest.TestCase):
+    def _fixture(self, *, narrator_only: bool):
+        chapter = SimpleNamespace(
+            number=4,
+            chapter_id="stable-chapter-four",
+            title="The Crossing",
+            text="The saved chapter text is authoritative. The bridge is old.",
+            skip_for_generation=False,
+        )
+        project = SimpleNamespace(
+            folder=Path("saved-project"),
+            title="Saved Production Book",
+            chapters=[chapter],
+        )
+        profile = SimpleNamespace(name="Persisted Narrator Profile", voice_id="persisted-narrator-voice")
+        selection = {
+            "effective_profile_name": profile.name,
+            "profile_available": True,
+            "source": "project_override",
+        }
+        state = {
+            "series": "Saved Series",
+            "narrator_only_generation": narrator_only,
+            "pronunciation_enabled": True,
+        }
+        return project, chapter, profile, selection, state
+
+    def test_production_preview_uses_saved_narrator_and_forces_final_generation_parity(self):
+        for narrator_only in (False, True):
+            with self.subTest(narrator_only=narrator_only):
+                project, chapter, profile, selection, state = self._fixture(
+                    narrator_only=narrator_only,
+                )
+                bridge = ProductionPreviewDispatchHarness(project, selection, profile)
+                caller_payload = {
+                    "chapter_number": 4,
+                    "chapter_id": chapter.chapter_id,
+                    "provider": "caller-controlled-provider",
+                    "voice_id": "caller-controlled-voice",
+                    "profile_name": "Unsaved UI selection",
+                    "text": "Caller text must not replace saved chapter text.",
+                    "allow_projectless_preview": True,
+                    "_bypass_pronunciation_dictionary": True,
+                    "apply_pronunciation_rules": False,
+                    "include_sound_design": False,
+                }
+
+                with patch.object(host, "load_state", return_value=state):
+                    result = bridge._production_preview(caller_payload)
+
+                self.assertEqual(result["job_id"], "production-preview-job")
+                bridge._narrator_series_default_read.assert_called_once_with(
+                    project, state, "Saved Series",
+                )
+                preview_payload = bridge._voice_preview.call_args.args[0]
+                self.assertEqual(preview_payload["chapter_number"], 4)
+                self.assertEqual(preview_payload["chapter_id"], "stable-chapter-four")
+                self.assertEqual(preview_payload["profile_name"], profile.name)
+                self.assertIs(preview_payload["route_character_cast"], not narrator_only)
+                self.assertIs(preview_payload["apply_pronunciation_rules"], True)
+                self.assertIs(preview_payload["include_sound_design"], True)
+                self.assertIs(preview_payload["_production_preview"], True)
+                for forbidden in (
+                    "provider", "voice_id", "text", "allow_projectless_preview",
+                    "_bypass_pronunciation_dictionary",
+                ):
+                    self.assertNotIn(forbidden, preview_payload)
+
+    def test_production_preview_rejects_stale_chapter_identity_and_blank_text(self):
+        project, chapter, profile, selection, state = self._fixture(narrator_only=False)
+        bridge = ProductionPreviewDispatchHarness(project, selection, profile)
+        with self.assertRaisesRegex(ValueError, "chapter identity changed"):
+            bridge._production_preview({
+                "chapter_number": 4,
+                "chapter_id": "old-chapter-id",
+            })
+        bridge._voice_preview.assert_not_called()
+
+        chapter.text = "   "
+        with self.assertRaisesRegex(ValueError, "no saved narration text"):
+            bridge._production_preview({
+                "chapter_number": 4,
+                "chapter_id": chapter.chapter_id,
+            })
+        bridge._voice_preview.assert_not_called()
+
+    def test_production_preview_blocks_missing_or_unavailable_saved_narrator(self):
+        project, chapter, profile, selection, state = self._fixture(narrator_only=True)
+        for narrator_selection in (
+            {"effective_profile_name": "", "profile_available": False},
+            {"effective_profile_name": profile.name, "profile_available": False},
+        ):
+            with self.subTest(selection=narrator_selection):
+                bridge = ProductionPreviewDispatchHarness(
+                    project, narrator_selection, profile,
+                )
+                with patch.object(host, "load_state", return_value=state):
+                    with self.assertRaises(ValueError):
+                        bridge._production_preview({
+                            "chapter_number": 4,
+                            "chapter_id": chapter.chapter_id,
+                        })
+                bridge._voice_preview.assert_not_called()
