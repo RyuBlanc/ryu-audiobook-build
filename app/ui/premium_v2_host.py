@@ -485,6 +485,8 @@ class PremiumV2Bridge(QObject):
                 "pronunciation.list": self._pronunciation_list,
                 "pronunciation.export": self._pronunciation_export,
                 "pronunciation.import": self._pronunciation_import,
+                "pronunciation.test_results.get": self._pronunciation_test_results_get,
+                "pronunciation.test_results.save": self._pronunciation_test_results_save,
                 "pronunciation.save": self._pronunciation_save,
                 "pronunciation.delete": self._pronunciation_delete,
                 "pronunciation.delete_many": self._pronunciation_delete_many,
@@ -648,6 +650,8 @@ class PremiumV2Bridge(QObject):
             "pronunciation.list": True,
             "pronunciation.export": True,
             "pronunciation.import": True,
+            "pronunciation.test_results.get": True,
+            "pronunciation.test_results.save": True,
             "pronunciation.save": True,
             "pronunciation.delete": True,
             "pronunciation.delete_many": True,
@@ -6582,6 +6586,102 @@ class PremiumV2Bridge(QObject):
         state["pronunciation_enabled"] = enabled
         save_state(project.folder, state)
         return {"saved": True, "enabled": enabled}
+
+    def _pronunciation_test_results_get(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Return persisted per-profile pronunciation test outcomes for one scoped entry."""
+        payload = payload if isinstance(payload, dict) else {}
+        written = _normalize_pronunciation_text(payload.get("written_form"), "Written term", 500)
+        scope_type, scope_id, _ = _parse_pronunciation_scope(
+            payload.get("scope") or payload.get("scope_type") or "current_book",
+            payload.get("scope_id"),
+        )
+        state = load_state(self._active_project().folder)
+        stored = state.get("pronunciation_test_results")
+        rows = stored if isinstance(stored, list) else []
+        key = unicodedata.normalize("NFC", written).casefold()
+        results = [
+            dict(row) for row in rows if isinstance(row, dict)
+            and str(row.get("scope_type") or "current_book") == scope_type
+            and str(row.get("scope_id") or "").casefold() == scope_id.casefold()
+            and unicodedata.normalize("NFC", str(row.get("written_form") or "")).casefold() == key
+        ]
+        results.sort(key=lambda row: str(row.get("tested_at") or ""), reverse=True)
+        return {"written_form": written, "scope_type": scope_type, "scope_id": scope_id, "results": results}
+
+    def _pronunciation_test_results_save(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Persist each saved-profile preview outcome without persisting ephemeral audio URLs."""
+        payload = payload if isinstance(payload, dict) else {}
+        written = _normalize_pronunciation_text(payload.get("written_form"), "Written term", 500)
+        scope_type, scope_id, scope_label = _parse_pronunciation_scope(
+            payload.get("scope") or payload.get("scope_type") or "current_book",
+            payload.get("scope_id"),
+        )
+        incoming = payload.get("results")
+        if not isinstance(incoming, list) or not incoming or len(incoming) > 50:
+            raise ValueError("Provide between 1 and 50 saved-profile test results.")
+        state = load_state(self._active_project().folder)
+        stored_value = state.get("pronunciation_test_results")
+        stored = [dict(row) for row in stored_value if isinstance(row, dict)] if isinstance(stored_value, list) else []
+        saved = 0
+        key = unicodedata.normalize("NFC", written).casefold()
+        for raw in incoming:
+            if not isinstance(raw, dict):
+                raise ValueError("Each saved-profile test result must be an object.")
+            profile_name = _normalize_pronunciation_text(raw.get("profile_name"), "Profile name", 120)
+            provider = str(raw.get("provider") or "unknown").strip()[:80] or "unknown"
+            status = str(raw.get("status") or "").strip().casefold()
+            if status not in {"passed", "failed"}:
+                raise ValueError("Profile test status must be passed or failed.")
+            row: dict[str, Any] = {
+                "test_id": str(uuid.uuid4()),
+                "written_form": written,
+                "scope_type": scope_type,
+                "scope_id": scope_id,
+                "scope": scope_label,
+                "profile_name": profile_name,
+                "provider": provider,
+                "status": status,
+                "tested_at": self._now(),
+            }
+            for field in ("actual_duration_seconds", "synthesis_seconds", "total_seconds", "real_time_factor"):
+                if raw.get(field) in (None, ""):
+                    continue
+                try:
+                    number = float(raw.get(field))
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise ValueError(f"Profile test {field.replace('_', ' ')} must be a non-negative number.") from exc
+                if not math.isfinite(number) or number < 0:
+                    raise ValueError(f"Profile test {field.replace('_', ' ')} must be a non-negative number.")
+                row[field] = round(number, 4)
+            if status == "passed" and float(row.get("actual_duration_seconds") or 0) <= 0:
+                raise ValueError("A passed profile test must include its measured audio duration.")
+            try:
+                replacements = int(raw.get("pronunciation_replacements") or 0)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError("Pronunciation replacement count must be a non-negative integer.") from exc
+            if replacements < 0:
+                raise ValueError("Pronunciation replacement count must be a non-negative integer.")
+            row["pronunciation_replacements"] = replacements
+            if raw.get("error"):
+                row["error"] = str(raw.get("error"))[:800]
+            identity = (scope_type, scope_id.casefold(), key, profile_name.casefold())
+            prior = next((
+                index for index, existing in enumerate(stored)
+                if (
+                    str(existing.get("scope_type") or "current_book"),
+                    str(existing.get("scope_id") or "").casefold(),
+                    unicodedata.normalize("NFC", str(existing.get("written_form") or "")).casefold(),
+                    str(existing.get("profile_name") or "").casefold(),
+                ) == identity
+            ), None)
+            if prior is None:
+                stored.append(row)
+            else:
+                stored[prior] = row
+            saved += 1
+        state["pronunciation_test_results"] = stored[-2000:]
+        save_state(self._active_project().folder, state)
+        return {"saved": saved, "total_results": len(state["pronunciation_test_results"])}
 
     def _pronunciation_analyze(self, _payload: dict[str, Any]) -> dict[str, Any]:
         """Start the existing local audiobook-AI pronunciation analysis for saved chapters."""
