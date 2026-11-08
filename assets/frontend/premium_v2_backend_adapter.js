@@ -5966,6 +5966,7 @@
   function backgroundGenerationJobActions(job, id, action, canControlGeneration, canCancelImport, canCancelPreview) {
     const state = String(job.state || 'unknown').toLowerCase();
     const isGeneration = Boolean(canControlGeneration);
+    const canCancelAnalysis = String(job.type || '').toLowerCase() === 'character-analysis';
     const actions = [];
     if (isGeneration && state === 'running') {
       actions.push(action('pause','Pause','secondary'));
@@ -5979,7 +5980,8 @@
     } else if (state === 'queued' ||
         (isGeneration && ['running','paused','pause_requested'].includes(state)) ||
         (canCancelImport && state === 'running') ||
-        (canCancelPreview && ['queued','running'].includes(state))) {
+        (canCancelPreview && ['queued','running'].includes(state)) ||
+        (canCancelAnalysis && ['queued','running'].includes(state))) {
       actions.push(action('cancel','Cancel','ghost'));
     }
     if (state === 'failed' && job.recoverable && isGeneration) {
@@ -5988,7 +5990,7 @@
     } else if (state === 'cancelled' && isGeneration) {
       actions.push(action('retry','Retry','secondary'));
     }
-    if (['running','pause_requested'].includes(state) && !isGeneration && !canCancelImport && !canCancelPreview) {
+    if (['running','pause_requested'].includes(state) && !isGeneration && !canCancelImport && !canCancelPreview && !canCancelAnalysis) {
       actions.push('<small>Cancellation and pause are not supported for this operation.</small>');
     }
     return actions.join('');

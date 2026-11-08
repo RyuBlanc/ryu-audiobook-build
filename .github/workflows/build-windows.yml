@@ -32,6 +32,7 @@ on:
       - stage-5/**
       - stage-6/**
       - stage-7/**
+      - fix/application-wide-closure-2026-11-08
   workflow_dispatch:
 
 # Build artifacts are produced and verified on every main build.

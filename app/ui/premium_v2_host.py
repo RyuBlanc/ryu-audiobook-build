@@ -396,6 +396,7 @@ class PremiumV2Bridge(QObject):
         self._generators: dict[str, GenerationManager] = {}
         self._import_cancel_events: dict[str, threading.Event] = {}
         self._preview_cancel_events: dict[str, threading.Event] = {}
+        self._analysis_cancel_events: dict[str, threading.Event] = {}
         self._preview_provider_cache_lock = threading.RLock()
         self._preview_provider_cache: dict[str, Any] | None = None
         self._preview_provider_cache_timer: threading.Timer | None = None
@@ -4394,12 +4395,28 @@ class PremiumV2Bridge(QObject):
             raise ValueError("Import a book with chapters before analysing characters.")
         job_id = self._new_job("character-analysis", "Analyze story characters",
                                "Analyze saved chapters and dialogue evidence", project)
+        self._analysis_cancel_events[job_id] = threading.Event()
         self._job_update(job_id, state="running", started_at=self._now(), stage="Analyzing dialogue", progress=5)
-        threading.Thread(target=self._character_worker, args=(job_id, project), daemon=True).start()
+        try:
+            threading.Thread(target=self._character_worker, args=(job_id, project), daemon=True).start()
+        except Exception as exc:
+            self._analysis_cancel_events.pop(job_id, None)
+            self._job_update(job_id, state="failed", stage="Could not start analysis",
+                             message=str(exc), error={"code":"character_analysis_start_failed","message":str(exc)},
+                             recoverable=True)
+            raise
         return {"job_id": job_id, "state": "running"}
 
     def _character_worker(self, job_id: str, project) -> None:
+        cancel_event = self._analysis_cancel_events.get(str(job_id))
+        analysis_committed = False
+
+        def check_cancelled() -> None:
+            if cancel_event is not None and cancel_event.is_set():
+                raise InterruptedError("Character analysis cancellation requested.")
+
         try:
+            check_cancelled()
             state = load_state(project.folder)
             # Re-analysis rebuilds recommendations, but the user’s skip decisions
             # belong to the exact source passages already reviewed. Keep the
@@ -4467,6 +4484,9 @@ class PremiumV2Bridge(QObject):
                 brain = AudiobookBrain(Path(project.folder))
 
                 def update_ai_progress(fraction: float, message: str) -> None:
+                    # The brain reports progress between local inference passes.
+                    # Raising here stops the worker at a safe model boundary.
+                    check_cancelled()
                     percent = max(8, min(68, 8 + int(max(0.0, min(1.0, float(fraction))) * 60)))
                     self._job_update(
                         job_id, state="running", stage="Local AI • " + str(message or "Analyzing book"),
@@ -4490,6 +4510,8 @@ class PremiumV2Bridge(QObject):
                 if ai_warnings:
                     ai_method = "local_llm_with_fallback_or_warnings"
             except Exception as exc:
+                if cancel_event is not None and cancel_event.is_set():
+                    raise InterruptedError("Character analysis cancelled during local AI inference.") from exc
                 ai_warnings.append(
                     "Local AI analysis was unavailable; source-grounded fallback was used: "
                     f"{type(exc).__name__}: {exc}"
@@ -4664,6 +4686,7 @@ class PremiumV2Bridge(QObject):
             processed_chapters = 0
             total_chapters = len(project.chapters)
             for chapter_index, chapter in enumerate(project.chapters, 1):
+                check_cancelled()
                 self._job_update(
                     job_id, state="running", stage="Indexing dialogue passages",
                     progress=min(94, 68 + int((chapter_index - 1) / max(1, total_chapters) * 26)),
@@ -4680,6 +4703,7 @@ class PremiumV2Bridge(QObject):
                     if isinstance(row, dict)
                 ]
                 for segment in segments:
+                    check_cancelled()
                     source = str(chapter.text or "")
                     start, end = int(segment.start), int(segment.end)
                     if start < 0 or end <= start or end > len(source):
@@ -4823,7 +4847,9 @@ class PremiumV2Bridge(QObject):
                     "updated_at": self._now(),
                 }
                 latest_state["modified_at"] = self._now()
+                check_cancelled()
                 save_state(project.folder, latest_state)
+                analysis_committed = True
                 state = latest_state
             self._sync_saved_cast(project, items, state, update_names=False, update_voice=False)
             method_label = (
@@ -4848,9 +4874,19 @@ class PremiumV2Bridge(QObject):
                 },
             )
         except Exception as exc:
-            log.exception("Premium V2 character analysis failed")
-            self._job_update(job_id, state="failed", stage="Analysis failed", message=str(exc),
-                             error={"code": "character_analysis_failed", "message": str(exc)}, recoverable=True)
+            if cancel_event is not None and cancel_event.is_set() and not analysis_committed:
+                self._job_update(
+                    job_id, state="cancelled", stage="Analysis cancelled",
+                    message="Character analysis was cancelled at a safe boundary. No partial cast or dialogue index was committed.",
+                    result={"cancelled": True, "partial_results_committed": False},
+                    recoverable=False,
+                )
+            else:
+                log.exception("Premium V2 character analysis failed")
+                self._job_update(job_id, state="failed", stage="Analysis failed", message=str(exc),
+                                 error={"code": "character_analysis_failed", "message": str(exc)}, recoverable=True)
+        finally:
+            self._analysis_cancel_events.pop(str(job_id), None)
 
     def _character_assign(self, payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
@@ -6729,6 +6765,15 @@ class PremiumV2Bridge(QObject):
                 import_cancel = self._import_cancel_events.get(job_id)
             if row and row.get("state") in {"completed", "failed", "cancelled"}:
                 return dict(row)
+            analysis_cancel = self._analysis_cancel_events.get(job_id)
+            if row and row.get("type") == "character-analysis" and analysis_cancel is not None and row.get("state") in {"queued", "running", "cancel_requested"}:
+                analysis_cancel.set()
+                if row.get("state") == "cancel_requested":
+                    return dict(row)
+                return self._job_update(
+                    job_id, state="cancel_requested", stage="Cancellation requested",
+                    message="Character analysis will stop at the next safe local-AI inference or chapter boundary; saved cast data will be preserved.",
+                )
             if row and preview_cancel is not None and row.get("state") in {"queued", "running", "cancel_requested"}:
                 preview_cancel.set()
                 return self._job_update(job_id, state="cancel_requested", stage="Cancellation requested",
