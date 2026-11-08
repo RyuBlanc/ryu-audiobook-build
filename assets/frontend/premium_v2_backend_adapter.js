@@ -8271,15 +8271,25 @@
     return job?.completed_at || job?.updated_at || job?.started_at || job?.queued_at || job?.created_at || '';
   }
 
+  function generationModeLabel(job) {
+    if (String(job?.type || '') !== 'audiobook-generation') return '';
+    const result = job?.result && typeof job.result === 'object' ? job.result : {};
+    if (result.narrator_only === true || result.generation_mode === 'narrator_only') return 'Narrator-only';
+    if (result.generation_mode === 'character_cast') return 'Character cast';
+    // Legacy jobs created before mode tracking must not be silently re-labelled.
+    return 'Generation mode not recorded';
+  }
+
   function jobMetaSummary(job) {
     const project = String(job?.project_title || job?.project_name || '').trim() || 'Project unavailable';
+    const mode = generationModeLabel(job);
     const phase = String(job?.chapter_title || job?.stage || job?.phase || '').trim();
     const elapsed = Number(job?.elapsed_seconds);
     const elapsedText = Number.isFinite(elapsed) && elapsed >= 0 ? formatTime(elapsed) : 'Elapsed time unavailable';
     const dateValue = jobDateValue(job);
     const dateText = dateValue && Number.isFinite(Date.parse(dateValue))
       ? new Date(dateValue).toLocaleString() : 'Timestamp unavailable';
-    return [project, phase, elapsedText, dateText].filter(Boolean).join(' · ');
+    return [project, mode, phase, elapsedText, dateText].filter(Boolean).join(' · ');
   }
 
   function ensureJobDetailsModal() {
@@ -8324,6 +8334,18 @@
     const state = String(job?.state || 'unknown');
     const error = job?.error && typeof job.error === 'object'
       ? String(job.error.message || '') : String(job?.error || '');
+    const generationResult = job?.result && typeof job.result === 'object' ? job.result : {};
+    const generationMode = generationModeLabel(job) || 'Not applicable';
+    const configuredProfiles = Number(generationResult.character_voice_profile_count);
+    const generationIdentityFields = String(job?.type || '') === 'audiobook-generation'
+      ? [
+          ['Generation mode', generationMode],
+          ['Saved narrator profile', generationResult.voice_profile || 'Not recorded'],
+          ['Character profiles configured',
+            Number.isFinite(configuredProfiles) && configuredProfiles >= 0
+              ? String(Math.floor(configuredProfiles)) : 'Not recorded']
+        ]
+      : [];
     const result = job?.result && typeof job.result === 'object'
       ? String(job.result.summary || job.result.message || '')
       : String(job?.result || '');
@@ -8340,6 +8362,7 @@
       ['Started', job?.started_at || 'Unavailable'],
       ['Finished', job?.completed_at || 'Not finished'],
       ['Output', job?.output_path || job?.result?.output_path || 'No output registered'],
+      ...generationIdentityFields,
       ['Result', result || 'No result summary reported'],
       ['Recovery', job?.recoverable ? 'Recoverable' : 'Not marked recoverable']
     ];
