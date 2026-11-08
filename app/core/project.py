@@ -176,8 +176,8 @@ def resolve_library_project_folder(folder: Path) -> Path | None:
     from a missing project so the active-project setting is never silently lost.
     """
     target = Path(folder).expanduser().resolve()
-    for root_value in project_library_roots():
-        root = Path(root_value).expanduser().resolve()
+    for root in project_library_roots():
+        root = Path(root).expanduser().resolve()
         if target.parent != root:
             continue
         if not root.is_dir():
@@ -316,7 +316,7 @@ def list_projects() -> list[Project]:
             if key in seen_folders:
                 continue
 
-            fingerprint = _project_list_fingerprint(resolved_folder)
+            fingerprint = _project_list_fingerprint(folder)
             if fingerprint is None:
                 continue
             with _PROJECT_LIST_CACHE_LOCK:
@@ -328,21 +328,21 @@ def list_projects() -> list[Project]:
                     # Listing is observational only. Legacy chapter IDs, narration
                     # manifests and BGM keys are migrated on authoritative open,
                     # never during every Dashboard/Library search refresh.
-                    project = Project.load(resolved_folder, migrate_legacy=False)
+                    project = Project.load(folder, migrate_legacy=False)
                 except (OSError, ValueError, KeyError, json.JSONDecodeError):
                     continue
 
-                after_load = _project_list_fingerprint(resolved_folder)
+                after_load = _project_list_fingerprint(folder)
                 if after_load is None:
                     continue
                 if after_load != fingerprint:
                     # A concurrent Save replaced files while the snapshot was read.
                     # Re-read once so we do not expose mixed project/chapter data.
                     try:
-                        project = Project.load(resolved_folder, migrate_legacy=False)
+                        project = Project.load(folder, migrate_legacy=False)
                     except (OSError, ValueError, KeyError, json.JSONDecodeError):
                         continue
-                    after_load = _project_list_fingerprint(resolved_folder)
+                    after_load = _project_list_fingerprint(folder)
                     if after_load is None:
                         continue
                 with _PROJECT_LIST_CACHE_LOCK:

@@ -53,7 +53,7 @@ class ProjectListPerformanceCacheTests(unittest.TestCase):
             ) as loader,
         ):
             first = list_projects()
-            edited = Project.load(self.folder, migrate_legacy=False)
+            edited = original_load(self.folder, migrate_legacy=False)
             edited.chapters[0].text = "Updated saved chapter text with a different length."
             edited.save()
             second = list_projects()
