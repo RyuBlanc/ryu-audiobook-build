@@ -384,6 +384,10 @@ class PremiumV2Bridge(QObject):
         self._active_project_cache: tuple[str, tuple[int, int, int, int], Project] | None = None
         self._active_project_migrated_folders: set[str] = set()
         self._jobs_lock = threading.RLock()
+        self._catalog_scan_lock = threading.RLock()
+        self._catalog_cache_lock = threading.RLock()
+        self._catalog_scan_jobs: dict[str, str] = {}
+        self._catalog_scan_generation: dict[str, int] = {"models": 0, "sound": 0}
         self._performance_history_lock = threading.RLock()
         # Serialize review-skip writes with the character-analysis worker's final
         # reconciliation so a click during a long analysis cannot be overwritten.
@@ -502,6 +506,7 @@ class PremiumV2Bridge(QObject):
                 "storage.cleanup_source": self._storage_cleanup_source,
                 "storage.cleanup_temp": self._storage_cleanup_temp,
                 "models.list": self._models_list,
+                "models.refresh": self._models_refresh,
                 "models.files": self._models_files,
                 "models.open_folder": self._models_open_folder,
                 "models.copy_path": self._models_copy_path,
@@ -520,6 +525,7 @@ class PremiumV2Bridge(QObject):
                 "diagnostics.export_logs": self._diagnostics_export_logs,
                 "system.open_output": self._system_open_output,
                 "sound.catalog": self._sound_catalog,
+                "sound.refresh": self._sound_refresh,
                 "sound.import": self._sound_import,
                 "sound.assign": self._sound_assign,
                 "sound.save_manifest": self._sound_save_manifest,
@@ -660,6 +666,7 @@ class PremiumV2Bridge(QObject):
             "storage.cleanup_source": True,
             "storage.cleanup_temp": True,
             "models.list": True,
+            "models.refresh": True,
             "models.files": True,
             "models.open_folder": True,
             "models.copy_path": True,
@@ -678,6 +685,7 @@ class PremiumV2Bridge(QObject):
             "diagnostics.export_logs": True,
             "system.open_output": True,
             "sound.catalog": True,
+            "sound.refresh": True,
             "sound.import": True,
             "sound.assign": True,
             "sound.save_manifest": True,
@@ -7326,22 +7334,144 @@ class PremiumV2Bridge(QObject):
                 "Let the model operation finish, then retry."
             )
 
+    def _invalidate_catalog_scan(self, kind: str) -> None:
+        """Mark one catalogue dirty without discarding its last-known-good snapshot."""
+        if kind not in {"models", "sound"}:
+            raise ValueError(f"Unsupported catalogue kind: {kind}")
+        with self._catalog_scan_lock:
+            self._catalog_scan_generation[kind] = int(self._catalog_scan_generation.get(kind, 0)) + 1
+            if kind == "models":
+                self._model_inventory_cache_ready = False
+            else:
+                self._sound_catalog_cache_ready = False
+
+    def _build_model_inventory(self) -> list[dict[str, Any]]:
+        """Perform the expensive authoritative model/filesystem scan; call from a worker."""
+        from app.tts.model_registry import build_inventory
+        return list(build_inventory())
+
+    def _refresh_model_inventory_sync(self) -> list[dict[str, Any]]:
+        """Publish a model inventory built by an existing background lifecycle worker."""
+        rows = self._build_model_inventory()
+        with self._catalog_cache_lock:
+            self._model_inventory_cache = rows
+            self._model_inventory_cache_at = time.monotonic()
+            self._model_inventory_cache_ready = True
+        return list(rows)
+
+    def _queue_catalog_scan(self, kind: str) -> str:
+        """Queue one durable single-flight scan while preserving the last good snapshot."""
+        if kind not in {"models", "sound"}:
+            raise ValueError(f"Unsupported catalogue kind: {kind}")
+        labels = {
+            "models": ("model-inventory-scan", "Refresh installed model inventory",
+                       "Inspect local model weights, runtimes, providers and storage."),
+            "sound": ("sound-catalogue-scan", "Refresh Sound Design library",
+                      "Inspect imported and bundled audio assets and their metadata."),
+        }
+        job_type, title, description = labels[kind]
+        with self._catalog_scan_lock:
+            current_id = self._catalog_scan_jobs.get(kind)
+            if current_id:
+                with self._jobs_lock:
+                    current = self._jobs.get(current_id)
+                if current and str(current.get("state") or "").casefold() in {"queued", "running"}:
+                    return current_id
+                self._catalog_scan_jobs.pop(kind, None)
+
+            job_id = self._new_job(job_type, title, description)
+            self._catalog_scan_jobs[kind] = job_id
+            self._job_update(
+                job_id, state="running", started_at=self._now(), progress=5,
+                stage="Preparing background scan",
+                message="The application remains usable while the local catalogue is scanned.",
+            )
+
+        def worker() -> None:
+            try:
+                while True:
+                    with self._catalog_scan_lock:
+                        generation = int(self._catalog_scan_generation.get(kind, 0))
+                    self._job_update(
+                        job_id, state="running", progress=15,
+                        stage=("Scanning installed models and runtimes" if kind == "models"
+                               else "Scanning local and bundled audio assets"),
+                        message="Filesystem enumeration is running in a background worker.",
+                    )
+                    rows = (
+                        self._build_model_inventory() if kind == "models"
+                        else self._build_sound_catalog()
+                    )
+                    with self._catalog_scan_lock:
+                        if int(self._catalog_scan_generation.get(kind, 0)) != generation:
+                            self._job_update(
+                                job_id, state="running", progress=80,
+                                stage="Source changed · rescanning",
+                                message="Files changed during the scan; reconciling against the latest filesystem state.",
+                            )
+                            continue
+                        with self._catalog_cache_lock:
+                            if kind == "models":
+                                self._model_inventory_cache = rows
+                                self._model_inventory_cache_at = time.monotonic()
+                                self._model_inventory_cache_ready = True
+                            else:
+                                self._sound_catalog_cache = rows
+                                self._sound_catalog_cache_at = time.monotonic()
+                                self._sound_catalog_cache_ready = True
+                    self._job_update(
+                        job_id, state="completed", progress=100,
+                        stage="Catalogue refreshed",
+                        message=f"Verified {len(rows)} catalogue entries.",
+                        result={"catalogue": kind, "entry_count": len(rows)},
+                        error=None, recoverable=False,
+                    )
+                    break
+            except Exception as exc:
+                log.exception("Background %s catalogue scan failed", kind)
+                self._job_update(
+                    job_id, state="failed", progress=100,
+                    stage="Catalogue refresh failed",
+                    message="The previous catalogue snapshot was preserved.",
+                    error={"code": kind + "_catalogue_scan_failed", "message": str(exc)},
+                    recoverable=True,
+                )
+            finally:
+                with self._catalog_scan_lock:
+                    if self._catalog_scan_jobs.get(kind) == job_id:
+                        self._catalog_scan_jobs.pop(kind, None)
+
+        try:
+            threading.Thread(
+                target=worker, daemon=True,
+                name="RyuModelInventoryScan" if kind == "models" else "RyuSoundCatalogueScan",
+            ).start()
+        except Exception as exc:
+            with self._catalog_scan_lock:
+                if self._catalog_scan_jobs.get(kind) == job_id:
+                    self._catalog_scan_jobs.pop(kind, None)
+            self._job_update(
+                job_id, state="failed", stage="Could not start catalogue scan",
+                message="The previous catalogue snapshot was preserved.",
+                error={"code": kind + "_catalogue_scan_start_failed", "message": str(exc)},
+                recoverable=True,
+            )
+        return job_id
+
     def _models_list(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
-        """Return the authoritative model inventory with bounded refresh scans."""
+        """Return the last-known inventory immediately and refresh stale data off-thread."""
         cached = getattr(self, "_model_inventory_cache", None)
         scanned_at = float(getattr(self, "_model_inventory_cache_at", 0.0) or 0.0)
+        ready = bool(getattr(self, "_model_inventory_cache_ready", False))
         force_refresh = bool((payload or {}).get("force_refresh"))
-        if (
-            not force_refresh
-            and isinstance(cached, list)
-            and time.monotonic() - scanned_at < 5.0
-        ):
-            return list(cached)
-        from app.tts.model_registry import build_inventory
-        rows = build_inventory()
-        self._model_inventory_cache = rows
-        self._model_inventory_cache_at = time.monotonic()
-        return list(rows)
+        if force_refresh or not ready or time.monotonic() - scanned_at >= 5.0:
+            self._queue_catalog_scan("models")
+        return list(cached) if isinstance(cached, list) else []
+
+    def _models_refresh(self, _payload: dict[str, Any]) -> dict[str, Any]:
+        """Explicit Refresh Status action; the scan itself never runs on the Qt thread."""
+        job_id = self._queue_catalog_scan("models")
+        return {"job_id": job_id, "state": "running", "catalogue": "models"}
 
     def _models_files(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Return paginated actual file metadata for one inventory component."""
@@ -7449,7 +7579,7 @@ class PremiumV2Bridge(QObject):
                 else:
                     outcome = self._models_install_component(model_id, details, report_progress, force_repair=action == "repair")
                 report_progress("Refreshing actual installed state…")
-                latest = self._models_list({})
+                latest = self._refresh_model_inventory_sync()
                 self._job_update(job_id, state="completed", progress=100,
                                  stage=f"{verb} complete", message=str(outcome or f"{verb} completed."),
                                  result={"action": action, "model_id": model_id, "detail": str(outcome or ""),
@@ -8821,16 +8951,23 @@ class PremiumV2Bridge(QObject):
         return {"opened": True, "path": str(folder.resolve())}
 
     def _sound_catalog(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        """Return the last-known audio catalogue immediately; cold scans are workers."""
         payload = payload if isinstance(payload, dict) else {}
         cached = getattr(self, "_sound_catalog_cache", None)
         scanned_at = float(getattr(self, "_sound_catalog_cache_at", 0.0) or 0.0)
+        ready = bool(getattr(self, "_sound_catalog_cache_ready", False))
         force_refresh = bool(payload.get("force_refresh"))
-        if (
-            not force_refresh
-            and isinstance(cached, list)
-            and time.monotonic() - scanned_at < 20.0
-        ):
-            return list(cached)
+        if force_refresh or not ready or time.monotonic() - scanned_at >= 20.0:
+            self._queue_catalog_scan("sound")
+        return list(cached) if isinstance(cached, list) else []
+
+    def _sound_refresh(self, _payload: dict[str, Any]) -> dict[str, Any]:
+        """Explicit Sound Design refresh; filesystem work stays outside the bridge thread."""
+        job_id = self._queue_catalog_scan("sound")
+        return {"job_id": job_id, "state": "running", "catalogue": "sound"}
+
+    def _build_sound_catalog(self) -> list[dict[str, Any]]:
+        """Build the actual audio catalogue; called only by a background worker."""
         from app.audio.library import AUDIO_EXTENSIONS, MUSIC_CATEGORY_LABELS, audio_asset_role, metadata_for
         local_root = app_root() / "Audio Library"
         bundled = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2])) / "assets" / "starter_audio"
@@ -8962,8 +9099,6 @@ class PremiumV2Bridge(QObject):
             except OSError:
                 log.exception("Could not scan sound asset folder %s", root)
         rows = sorted(found.values(), key=lambda row: (row["source"], row["title"].casefold()))
-        self._sound_catalog_cache = rows
-        self._sound_catalog_cache_at = time.monotonic()
         return list(rows)
 
     def _sound_import(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -9027,7 +9162,13 @@ class PremiumV2Bridge(QObject):
             imported.append({"title": destination.stem, "path": str(destination.resolve()),
                              "source": "Imported locally", "format": destination.suffix.lower(),
                              "size_bytes": destination.stat().st_size})
-        return {"cancelled": False, "imported": imported, "catalog": self._sound_catalog({"force_refresh": True})}
+        self._invalidate_catalog_scan("sound")
+        refresh_job_id = self._queue_catalog_scan("sound")
+        return {
+            "cancelled": False, "imported": imported,
+            "catalog": self._sound_catalog({}),
+            "catalog_refresh_job_id": refresh_job_id,
+        }
 
     def _sound_assign(self, payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
