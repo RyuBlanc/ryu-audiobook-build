@@ -312,7 +312,7 @@ class PronunciationPersistenceTests(unittest.TestCase):
         self.assertEqual(0, preview["imported"])
         self.assertEqual("Mee-rah", self.list(self.bridge_a)[0]["spoken_form"])
         applied = host.PremiumV2Bridge._pronunciation_import(
-            self.bridge_a, {"document": document, "replace_conflicts": True}
+            self.bridge_a, {"document": document, "apply": True, "replace_conflicts": True}
         )
         rows = {row["written_form"]: row for row in self.list(self.bridge_a)}
         self.assertEqual(1, applied["imported"])
