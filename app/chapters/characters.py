@@ -688,6 +688,7 @@ def merge_character_analysis_record(candidate: Character, prior: dict | None = N
         str(alias).strip()
         for alias in [*prior_aliases, *(candidate.aliases or [])]
         if str(alias).strip()
+        and is_likely_character_name(str(alias), trusted=False)
     ))
     item = {
         "name": candidate.name,

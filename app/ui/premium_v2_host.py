@@ -4675,9 +4675,18 @@ class PremiumV2Bridge(QObject):
                 ):
                     continue
                 if trusted:
+                    clean_aliases = [
+                        str(alias).strip() for alias in aliases
+                        if str(alias or "").strip()
+                        and is_likely_character_name(
+                            str(alias),
+                            explicit=str(alias).strip().casefold() in explicit_names,
+                        )
+                    ]
+                    row["aliases"] = clean_aliases
                     trusted_rows.append(row)
                     trusted_keys.add(name.casefold())
-                    trusted_keys.update(str(alias).strip().casefold() for alias in aliases if str(alias or "").strip())
+                    trusted_keys.update(alias.casefold() for alias in clean_aliases)
             for chapter in project.chapters:
                 for assignment in (getattr(chapter, "dialogue_assignments", []) or []):
                     if not isinstance(assignment, dict):
@@ -6372,7 +6381,7 @@ class PremiumV2Bridge(QObject):
                         confirmed_character_names.update(
                             str(alias).strip().casefold() for alias in aliases
                             if str(alias or "").strip()
-                            and is_likely_character_name(str(alias), trusted=character_trusted)
+                            and is_likely_character_name(str(alias), trusted=False)
                         )
             learning_context = load_project_learning_context(Path(project.folder))
             brain = AudiobookBrain(Path(project.folder))

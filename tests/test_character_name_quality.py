@@ -66,6 +66,23 @@ class CharacterNameQualityTests(unittest.TestCase):
         self.assertTrue(is_likely_character_name("Hope", trusted=True))
         self.assertTrue(is_likely_character_name_candidate("Hyoudou Issei"))
 
+    def test_saved_false_detection_aliases_are_removed_during_cast_merge(self):
+        from app.chapters.characters import Character, merge_character_analysis_record
+
+        merged = merge_character_analysis_record(
+            Character(
+                name="Mira",
+                role="Possible Character",
+                aliases=["Ren", "Oh", "The", "Any"],
+            ),
+            {
+                "name": "Mira",
+                "aliases": ["Miri", "Actually", "Hmm", "Tobio"],
+                "voice_profile": "Voice A",
+            },
+        )
+        self.assertEqual(set(merged["aliases"]), {"Ren", "Miri", "Tobio"})
+
     def test_ai_aliases_are_not_promoted_to_trusted_and_assignment_restores_are_series_scoped(self):
         host_source = (Path(__file__).resolve().parents[1] / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         self.assertIn("explicit=str(alias).strip().casefold() in explicit_names", host_source)
