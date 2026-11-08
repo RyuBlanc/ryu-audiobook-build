@@ -7541,6 +7541,34 @@ class PremiumV2Bridge(QObject):
         callback_job_id = str(job_id or "").strip()
         owns_project_state = not current_project_job_id or current_project_job_id == callback_job_id
 
+        # The project state can already belong to a newer generation by the
+        # time this worker finishes. Read this job's immutable-at-start mode
+        # from its own durable queue snapshot first; only use project state as
+        # a compatibility fallback while this callback still owns that state.
+        with self._jobs_lock:
+            job_row = dict(self._jobs.get(callback_job_id) or {})
+        prior_result = job_row.get("result")
+        prior_result = dict(prior_result) if isinstance(prior_result, dict) else {}
+        if "narrator_only" in prior_result:
+            narrator_only = prior_result.get("narrator_only") is True
+        elif prior_result.get("generation_mode"):
+            narrator_only = str(prior_result.get("generation_mode")) == "narrator_only"
+        else:
+            narrator_only = state.get("narrator_only_generation", False) is True if owns_project_state else False
+        generation_mode = "narrator_only" if narrator_only else "character_cast"
+        count_value = prior_result.get("character_voice_profile_count")
+        if count_value is None and owns_project_state:
+            count_value = state.get("character_voice_profile_count", 0)
+        try:
+            character_voice_profile_count = max(0, int(count_value or 0))
+        except (TypeError, ValueError, OverflowError):
+            character_voice_profile_count = 0
+        terminal_identity = {
+            "generation_mode": generation_mode,
+            "narrator_only": narrator_only,
+            "character_voice_profile_count": character_voice_profile_count,
+        }
+
         if not owns_project_state:
             # A late callback may finish after a newer generation has claimed
             # this project. Keep the old job's terminal record, but never let it
@@ -7558,6 +7586,7 @@ class PremiumV2Bridge(QObject):
                     ),
                     output_path=None,
                     result={
+                        **terminal_identity,
                         "superseded": True,
                         "superseded_by_job_id": newer_job_id,
                         "chapters_total": summary.chapters_total,
@@ -7585,6 +7614,15 @@ class PremiumV2Bridge(QObject):
                         "project state. " + detail
                     ),
                     output_path=None,
+                    result={
+                        **terminal_identity,
+                        "superseded": True,
+                        "superseded_by_job_id": newer_job_id,
+                        "chapters_total": summary.chapters_total,
+                        "chapters_completed": summary.chapters_completed,
+                        "chapters_failed": list(summary.chapters_failed or []),
+                        "voice_profile": voice_name,
+                    },
                     error={
                         "code": status,
                         "message": detail,
@@ -7618,6 +7656,12 @@ class PremiumV2Bridge(QObject):
                 log.exception("Could not prepare Audiobooks playback source for %s", actual)
                 success = False
 
+        # Persist the same generation identity to project state and the
+        # terminal queue/history snapshot. This is deliberately derived from
+        # the job's start snapshot above, not a later frontend selection.
+        state.update(terminal_identity)
+        state["narrator_only_generation"] = narrator_only
+
         if success:
             source_stat = actual.stat()
             state.update({"status": "completed", "output_path": str(actual), "voice_profile": voice_name,
@@ -7631,7 +7675,8 @@ class PremiumV2Bridge(QObject):
             save_state(project.folder, state)
             self._job_update(job_id, state="completed", stage="Audiobook ready", progress=100,
                              message="Generator completed; the M4B and Audiobooks playback copy are ready",
-                             output_path=str(actual), result={"output_path": str(actual), "file_url": actual.resolve().as_uri(),
+                             output_path=str(actual), result={**terminal_identity,
+                                 "output_path": str(actual), "file_url": actual.resolve().as_uri(),
                                  "playback_output_path": str(playback_output) if playback_output else None,
                                  "playback_format": playback_output.suffix.lower().lstrip(".") if playback_output else None,
                                  "file_size": actual.stat().st_size, "chapters_total": summary.chapters_total,
@@ -7659,6 +7704,18 @@ class PremiumV2Bridge(QObject):
                              # as if this attempt produced a complete audiobook.
                              output_path=str(actual) if valid and status != "cancelled"
                                  and not summary.packaging_failed and not summary.chapters_failed else None,
+                             result={**terminal_identity,
+                                     "output_path": str(actual) if valid and status != "cancelled"
+                                         and not summary.packaging_failed and not summary.chapters_failed else None,
+                                     "chapters_total": summary.chapters_total,
+                                     "chapters_completed": summary.chapters_completed,
+                                     "completed_chapters": list(summary.chapters_completed_numbers or []),
+                                     "chapters_failed": list(summary.chapters_failed or []),
+                                     "chapter_count": summary.chapters_total,
+                                     "empty_chapters_skipped": int(state.get("empty_chapters_skipped") or 0),
+                                     "excluded_chapters_skipped": int(state.get("excluded_chapters_skipped") or 0),
+                                     "chapters_skipped_for_generation": int(state.get("chapters_skipped_for_generation") or 0),
+                                     "voice_profile": voice_name},
                              error={"code": status, "message": detail,
                                     "failed_chapters": list(summary.chapters_failed or [])},
                              recoverable=not summary.cancelled)
