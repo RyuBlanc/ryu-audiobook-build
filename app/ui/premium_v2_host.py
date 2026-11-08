@@ -735,7 +735,14 @@ class PremiumV2Bridge(QObject):
         try:
             output_target = output_target.resolve()
             output_folder = output_target.parent
-            output_folder_ready = output_folder.is_dir() and os.access(output_folder, os.W_OK)
+            # Generation creates missing output directories before starting the
+            # worker. Readiness should therefore check the nearest existing
+            # ancestor that must permit those directory creations, rather than
+            # requiring a custom destination folder to exist in advance.
+            creation_root = output_folder
+            while not creation_root.exists() and creation_root != creation_root.parent:
+                creation_root = creation_root.parent
+            output_folder_ready = creation_root.is_dir() and os.access(creation_root, os.W_OK)
         except (OSError, RuntimeError, ValueError):
             output_folder = output_target.parent
             output_folder_ready = False
@@ -808,6 +815,20 @@ class PremiumV2Bridge(QObject):
             1 for chapter in project.chapters
             if str(getattr(chapter, "text", "") or "").strip()
         )
+        eligible_chapters = sum(
+            1 for chapter in project.chapters
+            if not getattr(chapter, "skip_for_generation", False)
+            and str(getattr(chapter, "text", "") or "").strip()
+        )
+        empty_chapters = sum(
+            1 for chapter in project.chapters
+            if not str(getattr(chapter, "text", "") or "").strip()
+        )
+        excluded_chapters = sum(
+            1 for chapter in project.chapters
+            if getattr(chapter, "skip_for_generation", False)
+            and str(getattr(chapter, "text", "") or "").strip()
+        )
         chapter_text_ratio = prepared_chapters / chapter_count if chapter_count else 0.0
 
         character_rows = state.get("characters")
@@ -859,7 +880,10 @@ class PremiumV2Bridge(QObject):
         metadata_missing = missing_required_metadata_fields(
             project.title, state, effective_narrator_profile if narrator_ready else ""
         )
-        output_configured = bool(output_value)
+        # A configured output means there is a usable M4B destination,
+        # not that an audiobook already exists at that path. The latter is
+        # reported independently by completed/output_path above.
+        output_configured = bool(str(output_target)) and output_folder_ready and output_format_supported
         pronunciation_rules = (
             state.get("pronunciation_dictionary")
             or state.get("pronunciation_rules")
@@ -977,6 +1001,9 @@ class PremiumV2Bridge(QObject):
             "character_voice_count": character_voice_count,
             "character_analysis_done": character_analysis_done,
             "prepared_chapter_count": prepared_chapters,
+            "eligible_chapter_count": eligible_chapters,
+            "empty_chapter_count": empty_chapters,
+            "excluded_chapter_count": excluded_chapters,
             "prepared_percent": prepared_percent,
             "completed_chapter_count": completed_chapter_count,
             "last_edited_chapter_number": last_edited,
