@@ -496,13 +496,12 @@
       const chapterButtons = chapters.map(chapter => {
         const number = Number(chapter.number);
         const chapterPassages = items.filter(item => Number(item.chapter_number) === number);
-        const chapterRows = analyzedItems.filter(item => Number(item.chapter_number) === number);
-        const assignedCount = chapterRows.filter(item => item.assigned && !item.skipped).length;
-        const aiSuggestedCount = chapterRows.filter(item =>
+        const assignedCount = chapterPassages.filter(item => item.assigned && !item.skipped).length;
+        const aiSuggestedCount = chapterPassages.filter(item =>
           !item.skipped && Array.isArray(item.suggestions) && item.suggestions.length > 0
         ).length;
-        const skippedCount = chapterRows.filter(item => item.skipped).length;
-        const pendingRows = chapterRows.filter(item => !item.assigned && !item.skipped);
+        const skippedCount = chapterPassages.filter(item => item.skipped).length;
+        const pendingRows = chapterPassages.filter(item => !item.assigned && !item.skipped);
         const wordCount = Math.max(
           0,
           Number(chapter.word_count) ||
