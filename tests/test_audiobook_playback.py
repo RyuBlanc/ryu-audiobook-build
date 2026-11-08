@@ -8,6 +8,8 @@ import subprocess
 import tempfile
 import unittest
 import wave
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import imageio_ffmpeg
 from PIL import Image
@@ -15,6 +17,7 @@ from PIL import Image
 import app.audio.assembler as assembler
 from app.audio.assembler import _duration_ms, assemble_m4b
 from app.audio.playback import is_iso_bmff_file, prepare_audiobook_playback_source
+from app.ui import premium_v2_host as host
 
 
 def _write_wav(path: Path, seconds: float = 2.0) -> None:
@@ -168,3 +171,160 @@ class AudiobookPlaybackSourceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PlayerBridgeHarness:
+    """Exercise the actual player backend bridge without constructing a Qt window."""
+
+    _player_get_active = host.PremiumV2Bridge._player_get_active
+    _player_position_save = host.PremiumV2Bridge._player_position_save
+
+    def __init__(self, project):
+        self.project = project
+        self._project_summary = Mock(return_value={"readiness": {"ready": True}})
+        preferences = {
+            "player/playback_rate": 1.25,
+            "player/playback_volume": 0.65,
+        }
+        self.settings = SimpleNamespace(
+            sync=Mock(),
+            value=lambda key, default=None: preferences.get(key, default),
+        )
+
+
+class AudiobookPlayerBridgeTests(unittest.TestCase):
+    def _project(self, root: Path, output: Path):
+        root.mkdir(parents=True, exist_ok=True)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        if not output.exists():
+            output.write_bytes(b"finished audiobook fixture" * 8)
+        chapter = SimpleNamespace(number=1, title="Opening")
+        return SimpleNamespace(
+            folder=root,
+            title="Saved Player Book",
+            chapters=[chapter],
+        )
+
+    def test_player_get_active_returns_playable_source_and_safe_preferences(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "project"
+            output = root / "finished.mp3"
+            project = self._project(root, output)
+            state = {
+                "output_path": str(output),
+                "author": "Saved Author",
+                "narrator": "Saved Narrator",
+                "playback_position_seconds": 42.347,
+            }
+            bridge = PlayerBridgeHarness(project)
+
+            with (
+                patch.object(host, "list_projects", return_value=[project]),
+                patch.object(host, "load_state", return_value=state),
+                patch.object(host, "_read_audio_chapter_metadata", return_value=[]),
+                patch.object(host, "is_iso_bmff_file", return_value=False),
+            ):
+                result = bridge._player_get_active({"folder": str(root)})
+
+            self.assertEqual(result["title"], "Saved Player Book")
+            self.assertEqual(result["author"], "Saved Author")
+            self.assertEqual(result["narrator"], "Saved Narrator")
+            self.assertEqual(result["output_path"], str(output.resolve()))
+            self.assertEqual(result["file_url"], output.resolve().as_uri())
+            self.assertEqual(result["playback_format"], "mp3")
+            self.assertEqual(result["playback_position_seconds"], 42.347)
+            self.assertEqual(result["playback_rate"], 1.25)
+            self.assertEqual(result["playback_volume"], 0.65)
+            self.assertEqual(result["chapters"], [{"number": 1, "title": "Opening"}])
+            bridge.settings.sync.assert_called_once()
+
+    def test_player_get_active_rebuilds_stale_playback_cache_without_touching_m4b(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "project"
+            output = root / "finished.m4b"
+            project = self._project(root, output)
+            original_bytes = output.read_bytes()
+            cached_playback = Path(temporary) / "cache" / "finished.mp3"
+            cached_playback.parent.mkdir(parents=True)
+            cached_playback.write_bytes(b"browser playback derivative" * 8)
+            state = {
+                "output_path": str(output),
+                "playback_position_seconds": 18.0,
+                "playback_output_path": str(cached_playback),
+                "playback_source_path": str(output.resolve()),
+                # A mismatched source size must invalidate the old playback cache.
+                "playback_source_size": 1,
+                "playback_source_mtime_ns": output.stat().st_mtime_ns,
+            }
+            embedded_chapters = [
+                {"number": 1, "title": "Opening", "start_seconds": 0.0, "end_seconds": 12.5},
+                {"number": 2, "title": "After the Storm", "start_seconds": 12.5, "end_seconds": 25.0},
+            ]
+            rebuilt = Path(temporary) / "cache" / "rebuilt.mp3"
+            rebuilt.write_bytes(b"rebuilt browser playback derivative" * 8)
+            bridge = PlayerBridgeHarness(project)
+
+            with (
+                patch.object(host, "list_projects", return_value=[project]),
+                patch.object(host, "load_state", return_value=state),
+                patch.object(host, "save_state") as save,
+                patch.object(host, "_read_audio_chapter_metadata", return_value=embedded_chapters),
+                patch.object(host, "is_iso_bmff_file", return_value=True),
+                patch.object(host, "prepare_audiobook_playback_source", return_value=rebuilt) as prepare,
+            ):
+                result = bridge._player_get_active({"folder": str(root)})
+
+            prepare.assert_called_once_with(output)
+            save.assert_called_once_with(root, state)
+            self.assertEqual(output.read_bytes(), original_bytes)
+            self.assertEqual(state["playback_output_path"], str(rebuilt.resolve()))
+            self.assertEqual(state["playback_source_path"], str(output.resolve()))
+            self.assertEqual(state["playback_source_size"], output.stat().st_size)
+            self.assertEqual(state["playback_source_mtime_ns"], output.stat().st_mtime_ns)
+            self.assertEqual(result["file_url"], rebuilt.resolve().as_uri())
+            self.assertEqual(result["source_file_url"], output.resolve().as_uri())
+            self.assertEqual(result["playback_format"], "mp3")
+            self.assertEqual(result["chapters"], embedded_chapters)
+
+    def test_player_position_save_is_project_scoped_and_validates_finite_range(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "project"
+            output = root / "finished.mp3"
+            project = self._project(root, output)
+            state = {"modified_at": "unchanged"}
+            bridge = PlayerBridgeHarness(project)
+
+            with (
+                patch.object(host, "list_projects", return_value=[project]),
+                patch.object(host, "load_state", return_value=state),
+                patch.object(host, "save_state") as save,
+            ):
+                result = bridge._player_position_save({
+                    "folder": str(root),
+                    "position_seconds": 123.456,
+                })
+
+            self.assertEqual(result["position_seconds"], 123.46)
+            self.assertEqual(state["playback_position_seconds"], 123.46)
+            self.assertEqual(state["modified_at"], "unchanged")
+            save.assert_called_once_with(root, state)
+
+    def test_player_position_save_rejects_invalid_values_without_writing(self):
+        invalid_values = (-1, float("nan"), float("inf"), True, 7 * 24 * 60 * 60 + 1)
+        for value in invalid_values:
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary) / "project"
+                output = root / "finished.mp3"
+                project = self._project(root, output)
+                bridge = PlayerBridgeHarness(project)
+                with (
+                    patch.object(host, "list_projects", return_value=[project]),
+                    patch.object(host, "load_state", return_value={}),
+                    patch.object(host, "save_state") as save,
+                ):
+                    with self.assertRaises(ValueError):
+                        bridge._player_position_save({
+                            "folder": str(root),
+                            "position_seconds": value,
+                        })
+                save.assert_not_called()
