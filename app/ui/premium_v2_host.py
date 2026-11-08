@@ -4541,6 +4541,24 @@ class PremiumV2Bridge(QObject):
             })
             if "voice_profile" in payload:
                 match["voice_profile"] = profile_name or None
+        # Explicitly adding this identity again from Character Studio/Library
+        # is the user's restore action for a previously dismissed detection.
+        restored_names = {name.casefold(), *(alias.casefold() for alias in aliases)}
+        exclusions = [
+            dict(row) for row in (state.get("character_detection_exclusions") or [])
+            if isinstance(row, dict)
+        ]
+        state["character_detection_exclusions"] = [
+            row for row in exclusions
+            if not (
+                str(row.get("series") or "").strip().casefold() == series.casefold()
+                and restored_names.intersection({
+                    str(value or "").strip().casefold()
+                    for value in [row.get("name"), *(row.get("aliases") or [])]
+                    if str(value or "").strip()
+                })
+            )
+        ]
         state["characters"] = characters
         state["modified_at"] = self._now()
         save_state(project.folder, state)
@@ -4602,18 +4620,45 @@ class PremiumV2Bridge(QObject):
             saved_rows = [dict(row) for row in (state.get("characters") or []) if isinstance(row, dict)]
             library_rows = list_reusable_characters(series_name)
             raw_text = "\n\n".join(str(chapter.text or "") for chapter in project.chapters)
-            from app.chapters.characters import Character, _discover_explicit_speakers, is_likely_character_name
+            from app.chapters.characters import (
+                Character, _discover_explicit_speakers, is_likely_character_name,
+                character_detection_exclusion_keys,
+            )
             from app.chapters.character_learning import (
                 load_learning_examples, prepare_learning_index, rank_speaker_suggestions,
                 source_grounded_speaker_for_continuity,
             )
             explicit_names = {str(name).casefold() for name in _discover_explicit_speakers(raw_text)}
+            protected_assignment_names = set()
+            for chapter in project.chapters:
+                for assignment in (getattr(chapter, "dialogue_assignments", []) or []):
+                    if not isinstance(assignment, dict):
+                        continue
+                    raw_speakers = assignment.get("speakers")
+                    if not isinstance(raw_speakers, (list, tuple)):
+                        raw_speakers = [assignment.get("speaker")] if assignment.get("speaker") else []
+                    protected_assignment_names.update(
+                        str(speaker or "").strip() for speaker in raw_speakers
+                        if str(speaker or "").strip()
+                    )
+            excluded_detection_keys = character_detection_exclusion_keys(
+                state.get("character_detection_exclusions") or [],
+                series_name,
+                protected_names=protected_assignment_names,
+            )
             trusted_rows = []
             trusted_keys = set()
             for row in [*saved_rows, *library_rows]:
                 name = str(row.get("name") or row.get("primary_name") or "").strip()
                 aliases = row.get("aliases") or []
                 aliases = aliases if isinstance(aliases, (list, tuple)) else []
+                row_identity_names = {name.casefold(), *(
+                    str(alias).strip().casefold() for alias in aliases if str(alias or "").strip()
+                )}
+                # A project dismissal outranks local/shared-library records. A
+                # later confirmed dialogue assignment removes the exclusion above.
+                if row_identity_names.intersection(excluded_detection_keys):
+                    continue
                 # Previously auto-detected labels are not automatically trusted.
                 # A saved voice, manual creation/edit, series-level registry entry,
                 # or prior confirmed dialogue assignment is user-backed evidence.
@@ -4716,7 +4761,7 @@ class PremiumV2Bridge(QObject):
                         continue
                     name = str(ai_character.get("name") or "").strip()
                     key = name.casefold()
-                    if not name or not is_likely_character_name(
+                    if not name or key in excluded_detection_keys or not is_likely_character_name(
                         name, trusted=key in trusted_keys, explicit=key in explicit_names
                     ):
                         continue
@@ -4773,7 +4818,7 @@ class PremiumV2Bridge(QObject):
                 key = name.casefold()
                 explicit = key in explicit_names
                 trusted = key in trusted_keys
-                if not name or not is_likely_character_name(name, trusted=trusted, explicit=explicit):
+                if not name or key in excluded_detection_keys or not is_likely_character_name(name, trusted=trusted, explicit=explicit):
                     return False
                 if trusted or explicit:
                     return True
@@ -5003,6 +5048,63 @@ class PremiumV2Bridge(QObject):
 
                 # Keep unrelated latest state keys intact while replacing analysis-owned
                 # outputs with results calculated from the source snapshot.
+                # A user may dismiss a false detection or add/confirm a cast
+                # member while inference is running. Reconcile the latest persisted
+                # exclusion/confirmation state before committing stale worker output.
+                latest_saved_characters = [
+                    dict(row) for row in (latest_state.get("characters") or [])
+                    if isinstance(row, dict)
+                ]
+                latest_protected_names = set(protected_assignment_names)
+                for row in latest_saved_characters:
+                    if row.get("user_created") or row.get("manual") or row.get("voice_profile"):
+                        latest_protected_names.add(str(row.get("name") or "").strip())
+                        latest_protected_names.update(
+                            str(alias).strip() for alias in (row.get("aliases") or [])
+                            if str(alias or "").strip()
+                        )
+                latest_excluded_keys = character_detection_exclusion_keys(
+                    latest_state.get("character_detection_exclusions") or [],
+                    series_name,
+                    protected_names=latest_protected_names,
+                )
+                def excluded_row(row: dict[str, Any]) -> bool:
+                    names = {
+                        str(row.get("name") or row.get("primary_name") or "").strip().casefold(),
+                        *(str(alias).strip().casefold() for alias in (row.get("aliases") or [])
+                          if str(alias or "").strip()),
+                    }
+                    return bool(names.intersection(latest_excluded_keys))
+                items = [row for row in items if not excluded_row(row)]
+                item_keys = {
+                    (str(row.get("name") or "").strip().casefold(),
+                     str(row.get("series") or series_name).strip().casefold())
+                    for row in items
+                }
+                for row in latest_saved_characters:
+                    key = (str(row.get("name") or "").strip().casefold(),
+                           str(row.get("series") or series_name).strip().casefold())
+                    if (row.get("user_created") or row.get("manual") or row.get("voice_profile")) and key[0] and key not in item_keys and not excluded_row(row):
+                        items.append(row)
+                        item_keys.add(key)
+                for suggestion in suggestions:
+                    if not isinstance(suggestion, dict):
+                        continue
+                    candidates = [
+                        candidate for candidate in (suggestion.get("suggestions") or [])
+                        if isinstance(candidate, dict)
+                        and str(candidate.get("name") or "").strip().casefold() not in latest_excluded_keys
+                    ]
+                    suggestion["suggestions"] = candidates
+                    if str(suggestion.get("suggested_speaker") or "").strip().casefold() in latest_excluded_keys:
+                        try:
+                            best_confidence = float((candidates[0] if candidates else {}).get("confidence") or 0.0)
+                        except (TypeError, ValueError, OverflowError):
+                            best_confidence = 0.0
+                        suggestion["suggested_speaker"] = (
+                            str(candidates[0].get("name") or "") if candidates and best_confidence >= 0.78 else ""
+                        )
+                        suggestion["confidence"] = round(best_confidence, 4)
                 latest_state["characters"] = items
                 latest_state["character_dialogue_suggestions"] = suggestions
                 latest_state["character_dialogue_skips"] = retain_current_dialogue_skips(
@@ -5292,56 +5394,89 @@ class PremiumV2Bridge(QObject):
         return {"character": item, "saved": True}
 
     def _character_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Remove an unreferenced character from exactly one active-project series."""
+        """Dismiss one unreferenced project cast row and persist its re-detection exclusion."""
         project = self._active_project()
         name = str(payload.get("name") or "").strip()
         if not name:
             raise ValueError("Choose a character to delete.")
-        state = load_state(project.folder)
-        characters = list(state.get("characters") or [])
-        default_series = self._project_series_name(project, state)
-        requested_series = str(payload.get("series") or "").strip()
-        matches = [
-            row for row in characters
-            if isinstance(row, dict)
-            and str(row.get("name") or "").strip().casefold() == name.casefold()
-            and (
-                not requested_series
-                or str(row.get("series") or default_series).strip().casefold() == requested_series.casefold()
-            )
-        ]
-        if not matches:
-            raise ValueError("The selected character is no longer in the saved cast for that series.")
-        if len(matches) > 1:
-            raise ValueError("This character name exists in more than one series. Select the series before deleting.")
-        selected = matches[0]
-        selected_series = str(selected.get("series") or default_series).strip()
-        identity_names = {
-            str(value or "").strip().casefold()
-            for value in [selected.get("name"), *(selected.get("aliases") or [])]
-            if str(value or "").strip()
+        review_lock = getattr(self, "_character_review_state_lock", threading.RLock())
+        with review_lock:
+            state = load_state(project.folder)
+            characters = list(state.get("characters") or [])
+            default_series = self._project_series_name(project, state)
+            requested_series = str(payload.get("series") or "").strip()
+            matches = [
+                row for row in characters
+                if isinstance(row, dict)
+                and str(row.get("name") or "").strip().casefold() == name.casefold()
+                and (
+                    not requested_series
+                    or str(row.get("series") or default_series).strip().casefold() == requested_series.casefold()
+                )
+            ]
+            if not matches:
+                raise ValueError("The selected character is no longer in the saved cast for that series.")
+            if len(matches) > 1:
+                raise ValueError("This character name exists in more than one series. Select the series before deleting.")
+            selected = matches[0]
+            selected_series = str(selected.get("series") or default_series).strip()
+            if not selected_series:
+                raise ValueError("The selected character has no series identity. Assign a series before dismissing it.")
+            raw_aliases = selected.get("aliases") or []
+            aliases = raw_aliases if isinstance(raw_aliases, (list, tuple)) else ([raw_aliases] if raw_aliases else [])
+            aliases = list(dict.fromkeys(
+                str(value).strip()[:160] for value in aliases
+                if str(value or "").strip() and str(value).strip().casefold() != name.casefold()
+            ))[:5]
+            identity_names = {name.casefold(), *(value.casefold() for value in aliases)}
+            # Do not leave saved dialogue spans pointing at a character that no longer exists.
+            for chapter in project.chapters:
+                for assignment in list(getattr(chapter, "dialogue_assignments", []) or []):
+                    if not isinstance(assignment, dict):
+                        continue
+                    assignment_series = str(assignment.get("series") or default_series).strip()
+                    if assignment_series and selected_series and assignment_series.casefold() != selected_series.casefold():
+                        continue
+                    raw_speakers = assignment.get("speakers")
+                    if not isinstance(raw_speakers, (list, tuple)):
+                        raw_speakers = [assignment.get("speaker")] if assignment.get("speaker") else []
+                    speakers = {str(value or "").strip().casefold() for value in raw_speakers if str(value or "").strip()}
+                    if speakers.intersection(identity_names):
+                        raise ValueError(
+                            f"Cannot dismiss '{name}' while saved dialogue assignments still refer to this character. "
+                            "Unassign or reassign those passages first."
+                        )
+            exclusions = [
+                dict(row) for row in (state.get("character_detection_exclusions") or [])
+                if isinstance(row, dict)
+            ]
+            existing = next((
+                row for row in exclusions
+                if str(row.get("name") or "").strip().casefold() == name.casefold()
+                and str(row.get("series") or "").strip().casefold() == selected_series.casefold()
+            ), None)
+            if existing is None:
+                exclusions.append({
+                    "name": name,
+                    "aliases": aliases,
+                    "series": selected_series,
+                    "reason": "user-dismissed-from-project-cast",
+                    "created_at": self._now(),
+                })
+            else:
+                existing["aliases"] = list(dict.fromkeys([
+                    *(existing.get("aliases") or []), *aliases
+                ]))[:5]
+                existing["reason"] = "user-dismissed-from-project-cast"
+                existing["created_at"] = self._now()
+            state["character_detection_exclusions"] = exclusions
+            state["characters"] = [row for row in characters if row is not selected]
+            state["modified_at"] = self._now()
+            save_state(project.folder, state)
+        return {
+            "name": name, "series": selected_series, "deleted": True,
+            "detection_excluded": True, "remaining": len(state["characters"]),
         }
-        # Do not leave saved dialogue spans pointing at a character that no longer exists.
-        for chapter in project.chapters:
-            for assignment in list(getattr(chapter, "dialogue_assignments", []) or []):
-                if not isinstance(assignment, dict):
-                    continue
-                assignment_series = str(assignment.get("series") or default_series).strip()
-                if assignment_series and selected_series and assignment_series.casefold() != selected_series.casefold():
-                    continue
-                raw_speakers = assignment.get("speakers")
-                if not isinstance(raw_speakers, (list, tuple)):
-                    raw_speakers = [assignment.get("speaker")] if assignment.get("speaker") else []
-                speakers = {str(value or "").strip().casefold() for value in raw_speakers if str(value or "").strip()}
-                if speakers.intersection(identity_names):
-                    raise ValueError(
-                        f"Cannot delete '{name}' while saved dialogue assignments still refer to this character. "
-                        "Unassign or reassign those passages first."
-                    )
-        state["characters"] = [row for row in characters if row is not selected]
-        state["modified_at"] = self._now()
-        save_state(project.folder, state)
-        return {"name": name, "series": selected_series, "deleted": True, "remaining": len(state["characters"])}
 
     def _character_library_path(self) -> Path:
         return reusable_character_library_path()
