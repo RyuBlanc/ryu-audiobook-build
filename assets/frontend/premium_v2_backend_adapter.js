@@ -466,6 +466,21 @@
     );
     const selectedNumber = Number(window.ryuPremiumAiChapterNumber || characterStudioSelectedChapter || window.ryuPremiumSelectedChapter || chapters[0]?.number || 0);
     const selectedChapter = chapters.find(chapter => Number(chapter.number) === selectedNumber) || chapters[0] || null;
+    const pendingQueue = analyzedItems.filter(item =>
+      Number(item.chapter_number) === Number(selectedChapter?.number) &&
+      !item.assigned && !item.skipped
+    );
+    const queueSignature = String(selectedChapter?.number || 0) + '|' +
+      pendingQueue.map(item => String(item.id || '')).join('|');
+    if (window.ryuPremiumDialogueReviewQueueSignature !== queueSignature) {
+      window.ryuPremiumDialogueReviewQueueSignature = queueSignature;
+      window.ryuPremiumDialogueReviewVisibleCount = 120;
+    }
+    const visibleCount = Math.min(
+      pendingQueue.length,
+      Math.max(120, Number(window.ryuPremiumDialogueReviewVisibleCount || 120))
+    );
+    const nextVisibleCount = Math.min(pendingQueue.length, visibleCount + 120);
     let chapterNav = $('aiChapterNavigator');
     if (queue && !chapterNav) {
       chapterNav = document.createElement('div');
@@ -511,7 +526,7 @@
       }
     }
     const renderSignature = JSON.stringify([
-      characterAnalysisStatus.analyzed, selectedChapter?.number, items.map(item => [
+      characterAnalysisStatus.analyzed, selectedChapter?.number, queueSignature, visibleCount, items.map(item => [
         item.id,item.chapter_number,item.start,item.end,item.text,item.speakers,item.assigned,
         item.assignmentSource,item.skipped,(item.suggestions||[]).map(candidate=>[candidate.name,candidate.confidence,candidate.evidence])
       ])
@@ -544,14 +559,10 @@
         ? 'Green passages are saved assignments; orange passages have real analysis suggestions; plain passages have no saved assignment or supported prediction.'
         : 'Open a local project to review its source text and dialogue assignments.');
     if (queue) {
-      const pending = analyzedItems.filter(item =>
-        Number(item.chapter_number) === Number(selectedChapter?.number) &&
-        !item.assigned && !item.skipped
-      );
       if (!characterAnalysisStatus.analyzed) {
         queue.innerHTML = '<div class="ryu-character-empty"><b>Analysis has not run</b>Select Run analysis again to create review suggestions from the active project. Manual source-text assignment is still available.</div>';
       } else {
-        queue.innerHTML = pending.slice(0, 120).map(item => {
+        const visibleRows = pendingQueue.slice(0, visibleCount).map(item => {
           const preview = item.text.length > 75 ? item.text.slice(0, 72) + '…' : item.text;
           const candidate = item.suggestions?.[0];
           const note = candidate
@@ -561,7 +572,15 @@
             '" data-ai-line="' + esc(item.id) + '" data-dialogue-id="' + esc(item.id) + '">' +
             '<span>Chapter ' + Number(item.chapter_number) + ' · ' + esc(item.chapter_title) + '</span><b>' + esc(preview) +
             '</b><small>' + esc(note) + '</small></button>';
-        }).join('') || '<div class="ryu-character-empty"><b>Review queue is clear</b>All analyzed passages are assigned or skipped, or the analysis found no suggestions. Run analysis again to refresh suggestions.</div>';
+        }).join('');
+        const remaining = Math.max(0, pendingQueue.length - visibleCount);
+        const loadMore = remaining > 0
+          ? '<button type="button" class="btn small secondary" data-ai-load-more data-ai-next-count="' + nextVisibleCount +
+            '" aria-label="Show more passages; ' + remaining + ' remaining" style="width:100%;margin-top:8px">Show more passages · ' +
+            Math.min(120, remaining) + ' more (' + remaining + ' remaining)</button>'
+          : '';
+        queue.innerHTML = (visibleRows + loadMore) ||
+          '<div class="ryu-character-empty"><b>Review queue is clear</b>All analyzed passages are assigned or skipped, or the analysis found no suggestions. Run analysis again to refresh suggestions.</div>';
       }
     }
     renderAiChapterDocument();
@@ -11136,6 +11155,19 @@
           await refreshChapters();
           message('Saved speaker assignment for Chapter ' + result.chapter_number + '.');
         })().catch(err => message(err?.message || String(err), true));
+        return;
+      }
+      if (button.matches('#aiQueue [data-ai-load-more]')) {
+        stop();
+        const nextCount = Number(button.dataset.aiNextCount);
+        const currentCount = Number(window.ryuPremiumDialogueReviewVisibleCount || 120);
+        if (!Number.isInteger(nextCount) || nextCount <= currentCount) {
+          message('The review queue changed. Refresh the chapter and try again.', true);
+          renderDialogueReview();
+          return;
+        }
+        window.ryuPremiumDialogueReviewVisibleCount = nextCount;
+        renderDialogueReview();
         return;
       }
       // Automatic per-line AI speaker suggestions remain prototype-only. Manual source-backed dialogue speaker assignments are persisted.
