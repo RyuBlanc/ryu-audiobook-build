@@ -6197,7 +6197,7 @@ class PremiumV2Bridge(QObject):
         """Export the visible book/series/global dictionary without flattening scope."""
         project = self._active_project()
         state = load_state(project.folder)
-        entries = self._pronunciation_list({})
+        entries = PremiumV2Bridge._pronunciation_list(self, {})
         return {
             "schema": "ryu.pronunciation-dictionary",
             "version": 1,
@@ -6295,7 +6295,7 @@ class PremiumV2Bridge(QObject):
             if not prior_import:
                 normalized.append(row)
 
-        saved = self._pronunciation_list({})
+        saved = PremiumV2Bridge._pronunciation_list(self, {})
         saved_by_identity = {
             (
                 str(row.get("scope_type") or "current_book"),
@@ -6358,7 +6358,7 @@ class PremiumV2Bridge(QObject):
             existing = saved_by_identity.get(identity)
             if existing and str(existing.get("spoken_form") or "").casefold() == row["spoken_form"].casefold():
                 continue
-            result = self._pronunciation_save({
+            result = PremiumV2Bridge._pronunciation_save(self, {
                 **row,
                 "scope": row["scope"],
                 "scope_id": row["scope_id"],
