@@ -4716,7 +4716,12 @@ class PremiumV2Bridge(QObject):
                         if str(name).strip()
                     ]
                     def normalize_dialogue_match(value: str) -> str:
-                        return re.sub(r"[^0-9a-z]+", "", str(value or "").casefold())
+                        # Preserve Unicode letters and digits. The old ASCII-only
+                        # [0-9a-z] filter erased Japanese, Chinese, Korean and other
+                        # non-Latin quotes, preventing valid local-AI speaker evidence
+                        # from being matched back to its exact source passage.
+                        normalized = unicodedata.normalize("NFKC", str(value or "")).casefold()
+                        return "".join(character for character in normalized if character.isalnum())
                     source_key = normalize_dialogue_match(exact)
                     for ai_row in ai_dialogue_by_chapter.get(int(chapter.number), []):
                         quote_key = normalize_dialogue_match(str(ai_row.get("quote") or ""))
