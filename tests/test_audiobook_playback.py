@@ -10,7 +10,9 @@ import unittest
 import wave
 
 import imageio_ffmpeg
+from PIL import Image
 
+import app.audio.assembler as assembler
 from app.audio.assembler import _duration_ms, assemble_m4b
 from app.audio.playback import is_iso_bmff_file, prepare_audiobook_playback_source
 
@@ -84,6 +86,65 @@ class AudiobookPlaybackSourceTests(unittest.TestCase):
             cached = prepare_audiobook_playback_source(source, cache_root=cache)
             self.assertEqual(cached, playback)
             self.assertEqual(len(list(cache.glob("audiobook_playback_*.mp3"))), 1)
+
+    def test_final_cover_bearing_m4b_validates_chapters_tags_and_embedded_cover(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            chapter = root / "001_Opening"
+            _write_wav(chapter / "chunks" / "00001.wav", seconds=0.8)
+            cover = root / "cover.png"
+            Image.new("RGB", (320, 320), (96, 24, 48)).save(cover, format="PNG")
+            metadata = {
+                "title": "Validated Final Book",
+                "author": "Test Author",
+                "narrator": "Test Narrator",
+                "publisher": "Test Publisher",
+                "series": "Validation Series",
+                "series_number": "2",
+                "language": "en",
+                "year": "2026",
+                "genre": "Audiobook",
+            }
+
+            # A real cover-bearing production output exercises the strict
+            # metadata/chapter/attached-picture validation path. The existing
+            # preview fixture is intentionally coverless and does not do this.
+            output = assemble_m4b(
+                chapter_dirs=[chapter],
+                output_path=root / "validated-final.m4b",
+                title=metadata["title"],
+                author=metadata["author"],
+                cover=cover,
+                chapter_titles=["Opening"],
+                metadata=metadata,
+                bitrate=128,
+            )
+
+            self.assertTrue(is_iso_bmff_file(output))
+            self.assertGreater(output.stat().st_size, 1024)
+            report = assembler._ffmpeg_probe_report(output)
+            self.assertIn("Chapter #", report)
+            self.assertIn("Opening", report)
+            self.assertIn("attached pic", report.casefold())
+
+            # Read-back validation must fail closed for a mismatched chapter
+            # title or metadata tag rather than silently accepting the file.
+            with self.assertRaisesRegex(RuntimeError, "chapter 1 title is missing or incorrect"):
+                assembler._validate_m4b_container(
+                    output,
+                    chapter_titles=["Incorrect Chapter"],
+                    metadata=metadata,
+                    cover=cover,
+                )
+            wrong_metadata = dict(metadata)
+            wrong_metadata["title"] = "Different Book"
+            with self.assertRaisesRegex(RuntimeError, "metadata tag 'title' is missing or incorrect"):
+                assembler._validate_m4b_container(
+                    output,
+                    chapter_titles=["Opening"],
+                    metadata=wrong_metadata,
+                    cover=cover,
+                )
 
     def test_browser_supported_sources_are_not_reencoded(self):
         with tempfile.TemporaryDirectory() as temporary:
