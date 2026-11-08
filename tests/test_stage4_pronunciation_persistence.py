@@ -270,5 +270,68 @@ class PronunciationPersistenceTests(unittest.TestCase):
             for row in remaining
         })
 
+    def test_export_is_versioned_and_preserves_scope_origin_and_enabled_state(self):
+        self.save(self.bridge_a, "Mira", "Mee-rah", origin="manual", enabled=True)
+        self.save(self.bridge_a, "Yamato", "Yah-mah-toh", scope="Global library",
+                  origin="ai", enabled=False, confidence=0.94, reason="Japanese name",
+                  alternatives=["Yah-mah-toe"])
+        self.save(self.bridge_a, "Rimuru", "Ree-moo-roo", scope="Series · Slime",
+                  origin="manual", enabled=True)
+        exported = host.PremiumV2Bridge._pronunciation_export(self.bridge_a, {})
+        self.assertEqual("ryu.pronunciation-dictionary", exported["schema"])
+        self.assertEqual(1, exported["version"])
+        entries = {(row["scope_type"], row["scope_id"], row["written_form"]): row
+                   for row in exported["entries"]}
+        self.assertIn(("current_book", "", "Mira"), entries)
+        self.assertEqual(("global_library", ""), (
+            entries[("global_library", "", "Yamato")]["scope_type"],
+            entries[("global_library", "", "Yamato")]["scope_id"],
+        ))
+        self.assertEqual("ai", entries[("global_library", "", "Yamato")]["origin"])
+        self.assertFalse(entries[("global_library", "", "Yamato")]["enabled"])
+        self.assertEqual("Series · Slime", entries[("series", "Slime", "Rimuru")]["scope"])
+
+    def test_import_preview_reports_conflicts_and_never_overwrites_until_confirmed(self):
+        self.save(self.bridge_a, "Mira", "Mee-rah", origin="manual", enabled=True)
+        document = {
+            "schema": "ryu.pronunciation-dictionary",
+            "version": 1,
+            "entries": [
+                {"written_form": "Mira", "spoken_form": "My-rah", "scope_type": "current_book",
+                 "scope_id": "", "origin": "manual", "enabled": True},
+                {"written_form": "Yamato", "spoken_form": "Yah-mah-toh", "scope_type": "current_book",
+                 "scope_id": "", "origin": "ai", "enabled": False, "confidence": 0.94},
+            ],
+        }
+        preview = host.PremiumV2Bridge._pronunciation_import(self.bridge_a, {"document": document})
+        self.assertEqual(1, preview["conflict_count"])
+        self.assertEqual(1, preview["new_count"])
+        self.assertEqual(0, preview["imported"])
+        self.assertEqual("Mee-rah", self.list(self.bridge_a)[0]["spoken_form"])
+        applied = host.PremiumV2Bridge._pronunciation_import(
+            self.bridge_a, {"document": document, "replace_conflicts": True}
+        )
+        rows = {row["written_form"]: row for row in self.list(self.bridge_a)}
+        self.assertEqual(2, applied["imported"])
+        self.assertEqual("My-rah", rows["Mira"]["spoken_form"])
+        self.assertEqual("manual", rows["Mira"]["origin"])
+        self.assertEqual("Yah-mah-toh", rows["Yamato"]["spoken_form"])
+        self.assertFalse(rows["Yamato"]["enabled"])
+
+    def test_import_rejects_foreign_series_and_malformed_dictionary_without_mutation(self):
+        self.save(self.bridge_a, "Mira", "Mee-rah")
+        foreign_series = {
+            "schema": "ryu.pronunciation-dictionary", "version": 1,
+            "entries": [{"written_form": "Rimuru", "spoken_form": "Ree-moo-roo",
+                         "scope_type": "series", "scope_id": "Other Series"}],
+        }
+        with self.assertRaisesRegex(ValueError, "active project series"):
+            host.PremiumV2Bridge._pronunciation_import(self.bridge_a, {"document": foreign_series})
+        malformed = {"schema": "unknown", "version": 1, "entries": []}
+        with self.assertRaisesRegex(ValueError, "schema"):
+            host.PremiumV2Bridge._pronunciation_import(self.bridge_a, {"document": malformed})
+        self.assertEqual(["Mira"], [row["written_form"] for row in self.list(self.bridge_a)])
+
+
 if __name__ == "__main__":
     unittest.main()
