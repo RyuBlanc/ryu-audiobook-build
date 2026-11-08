@@ -4410,13 +4410,12 @@ class PremiumV2Bridge(QObject):
             saved_rows = [dict(row) for row in (state.get("characters") or []) if isinstance(row, dict)]
             library_rows = list_reusable_characters(series_name)
             raw_text = "\n\n".join(str(chapter.text or "") for chapter in project.chapters)
-            from app.chapters.characters import NAME_STOPWORDS, _discover_explicit_speakers
+            from app.chapters.characters import Character, _discover_explicit_speakers, is_likely_character_name
             from app.chapters.character_learning import (
                 load_learning_examples, prepare_learning_index, rank_speaker_suggestions,
                 source_grounded_speaker_for_continuity,
             )
             explicit_names = {str(name).casefold() for name in _discover_explicit_speakers(raw_text)}
-            stopwords = {str(value).casefold() for value in NAME_STOPWORDS}
             trusted_rows = []
             trusted_keys = set()
             for row in [*saved_rows, *library_rows]:
@@ -4450,20 +4449,141 @@ class PremiumV2Bridge(QObject):
                                                  "series": str(assignment.get("series") or series_name)})
 
             analysis = analyze_book(project.chapters)
+            ai_report: dict[str, Any] = {}
+            ai_method = "source_grounded_fallback"
+            ai_warnings: list[str] = []
+            brain = None
+            try:
+                from app.ai.brain import AudiobookBrain
+                initial_cast = [
+                    {
+                        "name": str(row.get("name") or row.get("primary_name") or "").strip(),
+                        "aliases": list(row.get("aliases") or []) if isinstance(row.get("aliases") or [], (list, tuple)) else [],
+                        "series": str(row.get("series") or series_name),
+                    }
+                    for row in trusted_rows
+                    if str(row.get("name") or row.get("primary_name") or "").strip()
+                ]
+                brain = AudiobookBrain(Path(project.folder))
+
+                def update_ai_progress(fraction: float, message: str) -> None:
+                    percent = max(8, min(68, 8 + int(max(0.0, min(1.0, float(fraction))) * 60)))
+                    self._job_update(
+                        job_id, state="running", stage="Local AI • " + str(message or "Analyzing book"),
+                        progress=percent, message=str(message or "Analyzing the complete book"),
+                    )
+
+                ai_report = brain.analyze_book(
+                    project.chapters,
+                    progress=update_ai_progress,
+                    learning_context={"learning_scope": series_name, "characters": initial_cast},
+                )
+                ai_method = "local_llm"
+                for chapter_report in ai_report.get("chapters", []) if isinstance(ai_report, dict) else []:
+                    if not isinstance(chapter_report, dict):
+                        continue
+                    chapter_number = int(chapter_report.get("chapter") or 0)
+                    for warning in chapter_report.get("warnings", []) or []:
+                        warning_text = str(warning or "").strip()
+                        if warning_text:
+                            ai_warnings.append(f"Chapter {chapter_number}: {warning_text}")
+                if ai_warnings:
+                    ai_method = "local_llm_with_fallback_or_warnings"
+            except Exception as exc:
+                ai_warnings.append(
+                    "Local AI analysis was unavailable; source-grounded fallback was used: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                log.warning("Local Audiobook Brain unavailable for %s: %s", project.title, exc)
+                ai_method = "source_grounded_fallback"
+            finally:
+                if brain is not None:
+                    try:
+                        brain.close()
+                    except Exception:
+                        log.exception("Could not close the Local Audiobook Brain runtime")
+
+            ai_dialogue_by_chapter: dict[int, list[dict[str, Any]]] = {}
+            ai_candidate_confidence: dict[str, float] = {}
+            ai_character_aliases: dict[str, list[str]] = {}
+            ai_chapter_reports = ai_report.get("chapters", []) if isinstance(ai_report, dict) else []
+            for chapter_report in ai_chapter_reports:
+                if not isinstance(chapter_report, dict):
+                    continue
+                chapter_number = int(chapter_report.get("chapter") or 0)
+                ai_dialogue_by_chapter.setdefault(chapter_number, []).extend(
+                    row for row in (chapter_report.get("dialogue") or []) if isinstance(row, dict)
+                )
+                for ai_character in chapter_report.get("characters", []) or []:
+                    if not isinstance(ai_character, dict):
+                        continue
+                    name = str(ai_character.get("name") or "").strip()
+                    key = name.casefold()
+                    if not name or not is_likely_character_name(
+                        name, trusted=key in trusted_keys, explicit=key in explicit_names
+                    ):
+                        continue
+                    occurrence_count = raw_text.casefold().count(key)
+                    if occurrence_count < 1:
+                        continue
+                    try:
+                        confidence = max(0.0, min(1.0, float(ai_character.get("confidence") or 0.0)))
+                    except (TypeError, ValueError, OverflowError):
+                        confidence = 0.0
+                    if occurrence_count < 2 and key not in trusted_keys and key not in explicit_names and confidence < 0.90:
+                        continue
+                    ai_candidate_confidence[key] = max(ai_candidate_confidence.get(key, 0.0), confidence)
+                    aliases = ai_character.get("aliases") or []
+                    if isinstance(aliases, (list, tuple)):
+                        clean_aliases = [
+                            str(alias).strip() for alias in aliases
+                            if str(alias).strip()
+                            and is_likely_character_name(str(alias), trusted=True)
+                            and str(alias).strip().casefold() in raw_text.casefold()
+                        ]
+                        ai_character_aliases[key] = list(dict.fromkeys([
+                            *(ai_character_aliases.get(key) or []), *clean_aliases
+                        ]))
+
+            existing_candidates = {str(row.name).casefold(): row for row in analysis.characters}
+            for key, confidence in ai_candidate_confidence.items():
+                candidate = existing_candidates.get(key)
+                if candidate is None:
+                    ai_name = next((
+                        str(item.get("name") or "").strip()
+                        for chapter_report in ai_chapter_reports if isinstance(chapter_report, dict)
+                        for item in (chapter_report.get("characters") or [])
+                        if isinstance(item, dict) and str(item.get("name") or "").strip().casefold() == key
+                    ), "")
+                    if not ai_name:
+                        continue
+                    candidate = Character(
+                        name=ai_name, role="AI Identified Character",
+                        confidence=confidence, aliases=ai_character_aliases.get(key, []),
+                    )
+                    analysis.characters.append(candidate)
+                    existing_candidates[key] = candidate
+                else:
+                    candidate.confidence = max(float(candidate.confidence or 0.0), confidence)
+                    candidate.aliases = list(dict.fromkeys([
+                        *(candidate.aliases or []), *(ai_character_aliases.get(key) or [])
+                    ]))
             # Filter ordinary capitalized words out of the cast unless the text
             # supplies explicit attribution, the name is already trusted, or it
             # appears repeatedly enough in narration to be a credible identity.
             def credible_candidate(candidate) -> bool:
                 name = str(getattr(candidate, "name", "") or "").strip()
                 key = name.casefold()
-                if not name or key in stopwords:
+                explicit = key in explicit_names
+                trusted = key in trusted_keys
+                if not name or not is_likely_character_name(name, trusted=trusted, explicit=explicit):
                     return False
-                if key in trusted_keys or key in explicit_names:
+                if trusted or explicit:
                     return True
-                count = len(re.findall(r"(?<!\w)" + re.escape(name) + r"(?!\w)", raw_text, re.IGNORECASE))
-                if len(name.split()) > 1:
-                    return count >= 2
-                return count >= 4
+                count = raw_text.casefold().count(key)
+                if ai_candidate_confidence.get(key, 0.0) >= 0.90 and count >= 1:
+                    return True
+                return count >= (3 if len(name.split()) > 1 else 4)
 
             analysis.characters = [candidate for candidate in analysis.characters if credible_candidate(candidate)]
             old = {str(c.get("name", "")).casefold(): c for c in saved_rows}
@@ -4506,7 +4626,6 @@ class PremiumV2Bridge(QObject):
             # exact source offsets. The UI may recommend a name, but never auto-assigns it.
             from app.chapters.dialogue import dialogue_segments
             suggestions = []
-            max_suggestions = 3000
             known_cast = [*trusted_rows, *items]
             # Deduplicate canonical names while preserving every saved alias.
             dedup_known = {}
@@ -4540,23 +4659,31 @@ class PremiumV2Bridge(QObject):
             for learning_series in sorted(learning_series_names, key=str.casefold):
                 learning_examples.extend(load_learning_examples(learning_series))
             learning_index = prepare_learning_index(learning_examples)
-            for chapter in project.chapters:
-                if len(suggestions) >= max_suggestions:
-                    break
+            total_dialogue_segments = 0
+            invalid_dialogue_segments = 0
+            processed_chapters = 0
+            total_chapters = len(project.chapters)
+            for chapter_index, chapter in enumerate(project.chapters, 1):
+                self._job_update(
+                    job_id, state="running", stage="Indexing dialogue passages",
+                    progress=min(94, 68 + int((chapter_index - 1) / max(1, total_chapters) * 26)),
+                    message=f"Mapping source-grounded dialogue in chapter {chapter_index}/{total_chapters}",
+                )
+                processed_chapters += 1
                 last_speaker = ""
                 last_speaker_series = ""
                 last_speaker_end = -1
                 segments = dialogue_segments(chapter)
+                total_dialogue_segments += len(segments)
                 saved_assignments = [
                     row for row in (getattr(chapter, "dialogue_assignments", []) or [])
                     if isinstance(row, dict)
                 ]
                 for segment in segments:
-                    if len(suggestions) >= max_suggestions:
-                        break
                     source = str(chapter.text or "")
                     start, end = int(segment.start), int(segment.end)
                     if start < 0 or end <= start or end > len(source):
+                        invalid_dialogue_segments += 1
                         continue
                     exact = source[start:end]
                     detected = [
@@ -4564,6 +4691,41 @@ class PremiumV2Bridge(QObject):
                         for name, confidence, evidence in (segment.suggestions or [])
                         if str(name).strip()
                     ]
+                    def normalize_dialogue_match(value: str) -> str:
+                        return re.sub(r"[^0-9a-z]+", "", str(value or "").casefold())
+                    source_key = normalize_dialogue_match(exact)
+                    for ai_row in ai_dialogue_by_chapter.get(int(chapter.number), []):
+                        quote_key = normalize_dialogue_match(str(ai_row.get("quote") or ""))
+                        if not quote_key or len(quote_key) < 5:
+                            continue
+                        if quote_key not in source_key and not (len(source_key) >= 12 and source_key in quote_key):
+                            continue
+                        ai_speaker = str(ai_row.get("speaker") or "").strip()
+                        if not ai_speaker:
+                            continue
+                        canonical_speaker = ""
+                        for cast_row in known_cast:
+                            canonical = str(cast_row.get("name") or "").strip()
+                            aliases = cast_row.get("aliases") or []
+                            alias_names = aliases if isinstance(aliases, (list, tuple)) else []
+                            if ai_speaker.casefold() == canonical.casefold() or any(
+                                ai_speaker.casefold() == str(alias).strip().casefold()
+                                for alias in alias_names
+                            ):
+                                canonical_speaker = canonical
+                                break
+                        if not canonical_speaker:
+                            continue
+                        try:
+                            ai_confidence = max(0.0, min(1.0, float(ai_row.get("confidence") or 0.0)))
+                        except (TypeError, ValueError, OverflowError):
+                            ai_confidence = 0.0
+                        ai_evidence = str(ai_row.get("evidence") or "Book-context speaker analysis")
+                        detected.append({
+                            "name": canonical_speaker,
+                            "confidence": round(ai_confidence, 4),
+                            "evidence": "Local AI book-context analysis: " + ai_evidence,
+                        })
                     # Pronoun continuity is local: never carry an old speaker anchor
                     # indefinitely through unrelated dialogue in a long chapter.
                     continuity_is_local = bool(last_speaker and 0 <= start - last_speaker_end <= 420)
@@ -4644,18 +4806,47 @@ class PremiumV2Bridge(QObject):
                     latest_dialogue_suggestions,
                     suggestions,
                 )
-                latest_state["character_analysis"] = {"dialogue_total": analysis.dialogue_total,
-                                                      "unassigned_dialogue": analysis.unassigned_dialogue,
-                                                      "suggestion_count": len(suggestions),
-                                                      "updated_at": self._now()}
+                unresolved_count = sum(1 for row in suggestions if not row.get("assigned"))
+                latest_state["character_analysis"] = {
+                    "dialogue_total": total_dialogue_segments,
+                    "unassigned_dialogue": unresolved_count,
+                    "suggestion_count": len(suggestions),
+                    "processed_chapters": processed_chapters,
+                    "total_chapters": total_chapters,
+                    "dialogue_segment_total": total_dialogue_segments,
+                    "invalid_dialogue_segments": invalid_dialogue_segments,
+                    "coverage_percent": 100 if total_chapters == processed_chapters else int(100 * processed_chapters / max(1, total_chapters)),
+                    "coverage_complete": processed_chapters == total_chapters and invalid_dialogue_segments == 0 and len(suggestions) == total_dialogue_segments,
+                    "truncated": False,
+                    "analysis_method": ai_method,
+                    "analysis_warnings": ai_warnings[:20],
+                    "updated_at": self._now(),
+                }
                 latest_state["modified_at"] = self._now()
                 save_state(project.folder, latest_state)
                 state = latest_state
             self._sync_saved_cast(project, items, state, update_names=False, update_voice=False)
-            self._job_update(job_id, state="completed", stage="Analysis complete", progress=100,
-                             message=f"Detected {len(items)} character candidate(s) from saved chapter text",
-                             result={"characters": items, "dialogue_total": analysis.dialogue_total,
-                                     "unassigned_dialogue": analysis.unassigned_dialogue})
+            method_label = (
+                "Local AI book-context analysis"
+                if ai_method.startswith("local_llm")
+                else "Source-grounded fallback; local AI runtime/model unavailable"
+            )
+            unresolved_count = sum(1 for row in suggestions if not row.get("assigned"))
+            self._job_update(
+                job_id, state="completed", stage="Analysis complete", progress=100,
+                message=f"Analyzed {processed_chapters}/{total_chapters} chapters; indexed {len(suggestions)} dialogue passages • {method_label}",
+                result={
+                    "characters": items,
+                    "dialogue_total": total_dialogue_segments,
+                    "unassigned_dialogue": unresolved_count,
+                    "processed_chapters": processed_chapters,
+                    "total_chapters": total_chapters,
+                    "coverage_complete": processed_chapters == total_chapters and invalid_dialogue_segments == 0 and len(suggestions) == total_dialogue_segments,
+                    "truncated": False,
+                    "analysis_method": ai_method,
+                    "analysis_warnings": ai_warnings[:20],
+                },
+            )
         except Exception as exc:
             log.exception("Premium V2 character analysis failed")
             self._job_update(job_id, state="failed", stage="Analysis failed", message=str(exc),
