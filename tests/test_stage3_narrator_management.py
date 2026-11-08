@@ -277,8 +277,12 @@ class Stage3NarratorManagementTests(unittest.TestCase):
         # GEN-07 permits all-dialogue narrator routing only when no character
         # voice profile is configured. The normal cast-aware gate remains strict.
         state = {"characters": [{"name": "Mira", "voice_profile": "Mira Voice"}]}
-        with self.assertRaisesRegex(ValueError, "dialogue passage.*need speaker review"):
-            self.bridge._resolve_narrator_for_generation(project, state, [chapter])
+        with patch(
+            "app.ui.premium_v2_host.load_profiles",
+            return_value=[narrator_profile, self._profile("Mira Voice")],
+        ):
+            with self.assertRaisesRegex(ValueError, "dialogue passage.*need speaker review"):
+                self.bridge._resolve_narrator_for_generation(project, state, [chapter])
 
     def test_generation_fails_closed_when_effective_narrator_profile_is_missing(self):
         chapter = Chapter(1, "One", "The sun rose.")
