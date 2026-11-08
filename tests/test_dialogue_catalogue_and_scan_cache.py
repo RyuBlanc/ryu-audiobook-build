@@ -52,48 +52,73 @@ class DialogueCatalogueAndScanCacheTests(unittest.TestCase):
         self.assertEqual(len(conflicted), 1)
         self.assertNotEqual(conflicted[0].suggested_speaker, "Tara")
 
-    def test_models_inventory_refresh_is_cached_and_force_refreshes(self):
+    def _catalog_scan_bridge(self):
         bridge = host.PremiumV2Bridge.__new__(host.PremiumV2Bridge)
-        builder = Mock(side_effect=[[{"model_id": "qwen"}], [{"model_id": "piper"}]])
-        with patch("app.tts.model_registry.build_inventory", builder):
+        bridge._jobs_lock = host.threading.RLock()
+        bridge._catalog_scan_lock = host.threading.RLock()
+        bridge._catalog_scan_jobs = {}
+        bridge._jobs = {}
+        bridge._new_job = Mock(side_effect=["scan-1", "scan-2", "scan-3"])
+        bridge._job_update = Mock()
+        return bridge
+
+    def test_models_inventory_cache_miss_queues_one_background_scan_and_keeps_stale_snapshot(self):
+        bridge = self._catalog_scan_bridge()
+        bridge._model_inventory_cache = [{"model_id": "cached"}]
+        bridge._model_inventory_cache_at = 0
+        builder = Mock(return_value=[{"model_id": "fresh"}])
+        threads = []
+
+        class DeferredThread:
+            def __init__(self, target, args=(), **_kwargs):
+                self.target, self.args = target, args
+            def start(self):
+                threads.append(self)
+
+        with (
+            patch("app.tts.model_registry.build_inventory", builder),
+            patch.object(host.threading, "Thread", DeferredThread),
+        ):
             first = bridge._models_list({})
-            second = bridge._models_list({})
-            refreshed = bridge._models_list({"force_refresh": True})
-        self.assertEqual(first, second)
-        self.assertEqual(first, [{"model_id": "qwen"}])
-        self.assertEqual(refreshed, [{"model_id": "piper"}])
-        self.assertEqual(builder.call_count, 2)
+            second = bridge._models_list({"force_refresh": True})
 
-    def test_sound_catalog_scan_is_cached_and_import_style_refresh_bypasses_cache(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            bridge = host.PremiumV2Bridge.__new__(host.PremiumV2Bridge)
-            app_root = root / "app"
-            audio_root = app_root / "Audio Library"
-            audio_root.mkdir(parents=True)
-            bundled_root = root / "bundle"
-            (bundled_root / "assets" / "starter_audio").mkdir(parents=True)
-            first_file = audio_root / "first.wav"
-            first_file.write_bytes(b"first")
-            with (
-                patch.object(host, "app_root", return_value=app_root),
-                patch.object(sys, "_MEIPASS", str(bundled_root), create=True),
-                patch(
-                    "app.audio.library.metadata_for",
-                    side_effect=lambda path: {
-                        "role": "music", "category": "fantasy", "title": Path(path).stem
-                    },
-                ),
-            ):
-                first = bridge._sound_catalog({})
-                second_file = audio_root / "second.wav"
-                second_file.write_bytes(b"second")
-                cached = bridge._sound_catalog({})
-                refreshed = bridge._sound_catalog({"force_refresh": True})
+        self.assertEqual(first, [{"model_id": "cached"}])
+        self.assertEqual(second, first)
+        self.assertEqual(builder.call_count, 0, "A bridge read must never perform the cold filesystem scan.")
+        self.assertEqual(len(threads), 1, "Concurrent refresh requests must share one scan.")
+        threads[0].target(*threads[0].args)
+        self.assertEqual(builder.call_count, 1)
+        self.assertEqual(bridge._models_list({}), [{"model_id": "fresh"}])
+        self.assertEqual(bridge._catalog_scan_jobs, {})
+        self.assertIn("completed", [call.kwargs.get("state") for call in bridge._job_update.call_args_list])
 
-            self.assertEqual(len(first), 1)
-            self.assertEqual(len(cached), 1)
-            self.assertEqual(len(refreshed), 2)
+    def test_sound_catalog_force_refresh_runs_off_dispatch_thread_and_preserves_snapshot_on_failure(self):
+        bridge = self._catalog_scan_bridge()
+        bridge._sound_catalog_cache = [{"path": "old.wav"}]
+        bridge._sound_catalog_cache_at = 0
+        scanner = Mock(side_effect=RuntimeError("simulated disk read failure"))
+        bridge._build_sound_catalog = scanner
+        threads = []
+
+        class DeferredThread:
+            def __init__(self, target, args=(), **_kwargs):
+                self.target, self.args = target, args
+            def start(self):
+                threads.append(self)
+
+        with patch.object(host.threading, "Thread", DeferredThread):
+            first = bridge._sound_catalog({"force_refresh": True})
+            second = bridge._sound_catalog({"force_refresh": True})
+
+        self.assertEqual(first, [{"path": "old.wav"}])
+        self.assertEqual(second, first)
+        self.assertEqual(scanner.call_count, 0, "Forced catalogue refresh must not scan in the caller/Qt thread.")
+        self.assertEqual(len(threads), 1)
+        threads[0].target(*threads[0].args)
+        self.assertEqual(scanner.call_count, 1)
+        self.assertEqual(bridge._sound_catalog_cache, [{"path": "old.wav"}])
+        self.assertEqual(bridge._catalog_scan_jobs, {})
+        self.assertIn("failed", [call.kwargs.get("state") for call in bridge._job_update.call_args_list])
 
 
 if __name__ == "__main__":
