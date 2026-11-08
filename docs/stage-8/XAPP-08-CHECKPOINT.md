@@ -9,3 +9,6 @@ This checkpoint implements the explicit per-book narrator-only toggle and its ba
 The artifact build is intentionally requested separately from ordinary feature commits. This document exists to make the artifact-checkpoint commit unambiguous in the Actions run record.
 
 The Stage 5.3 full-generation preflight also asserts that narrator mode is persisted in project state and exposed in the immediate generation response and durable job result. Real full-book audio and recovery acceptance remain separate.
+
+
+**Automated evidence:** Build #2911 — SUCCESS, 1,399 tests passed on the implementation checkpoint SHA above. The build job was skipped; this is regression evidence, not a package.
