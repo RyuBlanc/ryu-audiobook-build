@@ -493,6 +493,7 @@ class PremiumV2Bridge(QObject):
                 "pronunciation.settings.get": self._pronunciation_settings_get,
                 "pronunciation.settings.save": self._pronunciation_settings_save,
                 "pronunciation.analyze": self._pronunciation_analyze,
+                "production.narrator_only.save": self._production_narrator_only_save,
                 "production.generate_book": self._production_generate_book,
                 "production.preview": self._production_preview,
                 "sound.preview_book": self._sound_preview_book,
@@ -658,6 +659,7 @@ class PremiumV2Bridge(QObject):
             "pronunciation.settings.get": True,
             "pronunciation.settings.save": True,
             "pronunciation.analyze": True,
+            "production.narrator_only.save": True,
             "production.generate_book": True,
             "production.preview": True,
             "sound.preview_book": True,
@@ -3925,9 +3927,8 @@ class PremiumV2Bridge(QObject):
         try:
             if cancel_event is not None and cancel_event.is_set():
                 raise PreviewCancelledError("Preview cancelled by user.")
-            # Keep Voice Studio previews consistent with production: saved
-            # character assignments must route quoted dialogue through their
-            # selected profiles, while narration continues to use the narrator.
+            # Cast routing is explicitly disabled for narrator-only Production
+            # previews; persisted assignments must not leak into that mode.
             cast_assignments: dict[str, str] = {}
             cast_profiles: dict[str, Any] = {}
             # Character Studio's selected-line audition must use the draft-selected
@@ -7074,13 +7075,35 @@ class PremiumV2Bridge(QObject):
             )
         return rows, issues
 
+    def _production_narrator_only_save(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Persist the narrator-only opt-in to the active book, never globally."""
+        project = self._active_project()
+        expected_folder = str(payload.get("expected_project_folder") or "").strip()
+        if expected_folder and Path(expected_folder).expanduser().resolve() != project.folder.resolve():
+            raise ValueError(
+                "The active project changed before Narrator-Only Generation could be saved. "
+                "Reopen Production and retry."
+            )
+        enabled = payload.get("enabled", False)
+        if not isinstance(enabled, bool):
+            raise ValueError("Narrator-Only Generation must be enabled or disabled explicitly.")
+        state = load_state(project.folder)
+        state["narrator_only_generation"] = enabled
+        state["modified_at"] = self._now()
+        save_state(project.folder, state)
+        return {
+            "saved": True,
+            "enabled": enabled,
+            "project_folder": str(project.folder),
+        }
+
     def _resolve_narrator_for_generation(self, project, state: dict[str, Any], chapters):
         """Resolve narrator and choose explicit narrator-only or cast-aware routing.
 
-        GEN-07: with zero configured character voice profiles, the saved
-        narrator intentionally reads all source passages, including dialogue.
-        No artificial character assignments are created. Once any character
-        profile is configured, the normal speaker-review gate applies.
+        Narrator-only routing is an explicit per-book opt-in persisted in
+        project state. When enabled, the saved narrator reads every passage,
+        including dialogue. When disabled, normal cast-aware speaker review
+        applies even when no character profiles are configured.
         """
         series = self._project_series_name(project, state)
         selection = self._narrator_series_default_read(project, state, series)
@@ -7107,14 +7130,15 @@ class PremiumV2Bridge(QObject):
             if str(row.get("voice_profile") or "").strip()
         ]
         effective_selection = dict(selection)
-        if not configured_profiles:
-            effective_selection.update({
-                "generation_mode": "narrator_only",
-                "narrator_only": True,
-                "character_voice_profile_count": 0,
-                "dialogue_routing": "narrator_for_all_passages",
-                "effective_character_rows": character_rows,
-            })
+        narrator_only = state.get("narrator_only_generation", False) is True
+        effective_selection.update({
+            "generation_mode": "narrator_only" if narrator_only else "character_cast",
+            "narrator_only": narrator_only,
+            "character_voice_profile_count": len(configured_profiles),
+            "dialogue_routing": "narrator_for_all_passages" if narrator_only else "saved_character_assignments",
+            "effective_character_rows": character_rows,
+        })
+        if narrator_only:
             return profile, effective_selection
 
         eligible_chapter_ids = {str(getattr(chapter, "chapter_id", "") or "") for chapter in chapters}
@@ -7656,6 +7680,7 @@ class PremiumV2Bridge(QObject):
         state = load_state(project.folder)
         series = self._project_series_name(project, state)
         narrator = self._narrator_series_default_read(project, state, series)
+        narrator_only = state.get("narrator_only_generation", False) is True
         name = str(narrator.get("effective_profile_name") or "").strip()
         if not name:
             raise ValueError(
@@ -7680,7 +7705,7 @@ class PremiumV2Bridge(QObject):
             "profile_name": profile.name,
             "chapter_number": chapter_number,
             "chapter_id": actual_chapter_id,
-            "route_character_cast": True,
+            "route_character_cast": not narrator_only,
             "apply_pronunciation_rules": True,
             "include_sound_design": True,
             "_production_preview": True,
