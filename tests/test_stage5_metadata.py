@@ -643,6 +643,7 @@ class ProductionPreviewSaveTests(unittest.TestCase):
             _preview_root, project_folder, source, job = self._preview_job(root)
             bridge = ProductionPreviewSaveHarness(job)
             requested_destination = root / "Downloads" / "saved-preview.wav"
+            requested_destination.parent.mkdir(parents=True, exist_ok=True)
             expected_destination = requested_destination.with_suffix(".m4a")
             payload = {
                 "job_id": job["job_id"],
