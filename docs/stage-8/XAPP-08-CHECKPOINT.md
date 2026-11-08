@@ -2,7 +2,7 @@
 
 **Implementation branch:** `fix/xapp-08-explicit-narrator-only-2026-11-08`  
 **Base:** `82a39ffa2b54b8ce7cab5468affde0cbaf02db0e` (Build Windows App #2905)  
-**Implementation checkpoint:** `57c92bbd3d7cbba88b5a031ab88c4be987ae049b`
+**Implementation checkpoint:** `c881d9349a48208d5deeac1b6e0f85101d467eb5`
 
 This checkpoint implements the explicit per-book narrator-only toggle and its backend persistence, preview routing, and generation contract. It does not close real-audio or full-book runtime acceptance.
 
