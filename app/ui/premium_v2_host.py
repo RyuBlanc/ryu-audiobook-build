@@ -7546,7 +7546,8 @@ class PremiumV2Bridge(QObject):
         # from its own durable queue snapshot first; only use project state as
         # a compatibility fallback while this callback still owns that state.
         with self._jobs_lock:
-            job_row = dict(self._jobs.get(callback_job_id) or {})
+            durable_jobs = getattr(self, "_jobs", {})
+            job_row = dict(durable_jobs.get(callback_job_id) or {}) if isinstance(durable_jobs, dict) else {}
         prior_result = job_row.get("result")
         prior_result = dict(prior_result) if isinstance(prior_result, dict) else {}
         if "narrator_only" in prior_result:
@@ -7659,8 +7660,11 @@ class PremiumV2Bridge(QObject):
         # Persist the same generation identity to project state and the
         # terminal queue/history snapshot. This is deliberately derived from
         # the job's start snapshot above, not a later frontend selection.
-        state.update(terminal_identity)
-        state["narrator_only_generation"] = narrator_only
+        state.update({
+            "generation_mode": generation_mode,
+            "character_voice_profile_count": character_voice_profile_count,
+            "narrator_only_generation": narrator_only,
+        })
 
         if success:
             source_stat = actual.stat()
