@@ -95,6 +95,46 @@ class Stage8210ResumeChunkIntegrityTests(unittest.TestCase):
                 self.assertGreater(wav_file.getnframes(), 0)
                 self.assertGreater(wav_file.getframerate(), 0)
 
+
+    def test_changed_pronunciation_rule_invalidates_cached_audio_and_resynthesizes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "working_audio"
+            provider = DummyProvider()
+            chapter = Chapter(1, "Chapter One", "Mira spoke to Yamato.")
+            first = generate_chapter(
+                chapter, provider, "Narrator", root,
+                pronunciation_dictionary=[{
+                    "written_form": "Mira", "spoken_form": "Mee-rah", "enabled": True
+                }],
+                narration_speed=1.0, pacing_profile="off",
+            )
+            first_manifest = json.loads((first.output_path / "manifest.json").read_text(encoding="utf-8"))
+            first_signature = first_manifest["generation_signature"]
+            calls_before_change = provider.calls
+
+            second = generate_chapter(
+                chapter, provider, "Narrator", root,
+                pronunciation_dictionary=[{
+                    "written_form": "Mira", "spoken_form": "My-rah", "enabled": True
+                }],
+                narration_speed=1.0, pacing_profile="off",
+            )
+            second_manifest = json.loads((second.output_path / "manifest.json").read_text(encoding="utf-8"))
+            self.assertNotEqual(first_signature, second_manifest["generation_signature"])
+            self.assertGreater(provider.calls, calls_before_change)
+            self.assertEqual(second.chunks_completed, second.chunks_total)
+
+            calls_before_same_rule = provider.calls
+            third = generate_chapter(
+                chapter, provider, "Narrator", root,
+                pronunciation_dictionary=[{
+                    "written_form": "Mira", "spoken_form": "My-rah", "enabled": True
+                }],
+                narration_speed=1.0, pacing_profile="off",
+            )
+            self.assertEqual(provider.calls, calls_before_same_rule)
+            self.assertEqual(third.chunks_completed, third.chunks_total)
+
     def test_assembler_uses_only_manifest_chunks_not_orphaned_wavs(self):
         with tempfile.TemporaryDirectory() as temp:
             chapter_dir = Path(temp) / "001_Chapter_One"
