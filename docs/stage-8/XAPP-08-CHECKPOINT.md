@@ -22,3 +22,6 @@ The Stage 5.3 full-generation preflight also asserts that narrator mode is persi
 **Critical implementation correction:** narrator-only full generation now skips character-profile resolution and `CastAwareProvider` construction. This ensures the selected saved narrator is the only TTS profile used for the book. The new production-path regression test `test_narrator_only_full_generation_bypasses_all_character_profiles` covers this behavior; a fresh matching-head Windows test and package checkpoint is required.
 
 **New regression:** narrator-only full generation must bypass the cast provider, even when Character Studio has an assigned voice. Test: `test_narrator_only_full_generation_bypasses_all_character_profiles`.
+
+
+**Current implementation source:** `76f4b5edfedbe25d9af09c07a8fa5add2b022b4b`. **Exact-head package marker follows this record update.**
