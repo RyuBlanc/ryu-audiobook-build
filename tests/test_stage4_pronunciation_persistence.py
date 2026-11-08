@@ -277,6 +277,9 @@ class PronunciationPersistenceTests(unittest.TestCase):
                   alternatives=["Yah-mah-toe"])
         self.save(self.bridge_a, "Rimuru", "Ree-moo-roo", scope="Series · Slime",
                   origin="manual", enabled=True)
+        state = host.load_state(self.project_a)
+        state["series"] = "Slime"
+        host.save_state(self.project_a, state)
         exported = host.PremiumV2Bridge._pronunciation_export(self.bridge_a, {})
         self.assertEqual("ryu.pronunciation-dictionary", exported["schema"])
         self.assertEqual(1, exported["version"])
