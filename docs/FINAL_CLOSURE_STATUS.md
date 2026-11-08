@@ -86,3 +86,31 @@ This dated overlay supersedes the historical branch/build references above for t
 - Verify navigation, selection, filtering and scrolling in the packaged Windows application at the required display sizes/scales.
 - This work does not close XAPP-01–03, XAPP-05–20, real-book AI analysis, canonical passage persistence, voice-routing, Qwen hardware, catalogue responsiveness, generation/audio or release gates.
 
+
+## 8 November 2026 — Character Studio source-count and word-count correction
+
+**Latest verified code commit:** `ec8b7a6e14350fbc19633d9e38e4d286a9f35235`  
+**Branch:** `fix/application-wide-closure-2026-11-08`
+
+Additional source corrections after the initial large-review overlay:
+
+- `46e1e35b54ff7c25b968af76e4b9dadc39e5b4c4` — chapter Assigned, Pending and Skipped metrics now use the complete source-backed passage rows for the chapter, including saved manual assignments. AI suggestion count remains based on actual suggestion evidence rather than being conflated with manual assignments.
+- `ec8b7a6e14350fbc19633d9e38e4d286a9f35235` — corrected chapter word-count tokenization to split on actual whitespace.
+- `215d5feec368355ca34726573372b32913452b7a` — test-first coverage for source-backed manual/AI passage count reconciliation.
+- `a7256a9fbf85493a8dc59a39bfc43c33e52387d2` — test-first coverage for whitespace tokenization. This run correctly failed on the over-escaped source regex before the fix.
+
+### Exact-head CI evidence
+
+- Build #2844 — commit `46e1e35b54ff7c25b968af76e4b9dadc39e5b4c4`: **1,370 tests passed**. [Actions run](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42452888537).
+- Build #2845 — commit `a7256a9fbf85493a8dc59a39bfc43c33e52387d2`: failed on the intended chapter word-count regex assertion; 1,370 tests ran, one new assertion failed. The earlier Qt and Stage 6 preflights were successful. This was not waived or hidden.
+- Build #2846 — commit `ec8b7a6e14350fbc19633d9e38e4d286a9f35235`: **1,370 tests passed** after the source correction. [Actions run](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42453314541).
+
+### Acceptance still required
+
+- Exercise chapters containing manual-only saved assignments, AI suggestions, skipped spans, dash-led dialogue and non-English quotations in the installed Windows app.
+- Verify displayed word counts against representative saved chapter text and the full source-backed passage set.
+- The successful CI results above do not establish an actual long-book run or installed-Windows acceptance.
+- XAPP-03's persisted revision-aware canonical passage index and the historic 1,175-versus-1,196 reconciliation remain open; sharing a segmentation primitive and correcting chapter UI counts do not complete that separate requirement.
+- XAPP-09's synchronous cold/forced Models and Sound catalogue scan paths remain open.
+- The prior Build #2842 package attempt is on commit `2fc1434bc14e5962c5ebb9d2a470e8f379da63c2`, which predates these source corrections; it must not be presented as the package for `ec8b7a6`.
+
