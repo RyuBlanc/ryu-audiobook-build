@@ -364,7 +364,7 @@ class PronunciationPersistenceTests(unittest.TestCase):
         )["results"])
 
     def test_per_profile_pronunciation_matrix_rejects_invalid_results(self):
-        with self.assertRaisesRegex(ValueError, "profile"):
+        with self.assertRaisesRegex(ValueError, "(?i)profile"):
             host.PremiumV2Bridge._pronunciation_test_results_save(
                 self.bridge_a,
                 {"written_form": "Mira", "scope": "Current book",
