@@ -58,22 +58,32 @@ class NarratorOnlyGenerationTests(unittest.TestCase):
         self.assertEqual(selection["generation_mode"], "narrator_only")
         self.assertEqual(selection["dialogue_routing"], "narrator_for_all_passages")
 
-    def test_no_character_profiles_allows_unassigned_dialogue_with_saved_narrator(self):
+    def test_cast_aware_default_does_not_silently_activate_narrator_only(self):
+        project = SimpleNamespace(title="Cast-aware book")
+        profile, selection = NarratorResolverHarness(
+            SimpleNamespace(name="Saved Narrator")
+        )._resolve_narrator_for_generation(
+            project, {"characters": []}, [Chapter(1, "Opening", '“Hello there,” she said.')]
+        )
+        self.assertEqual(profile.name, "Saved Narrator")
+        self.assertFalse(selection["narrator_only"])
+        self.assertEqual(selection["generation_mode"], "character_cast")
+
+    def test_narrator_only_is_explicit_book_opt_in_and_routes_all_passages(self):
         project = SimpleNamespace(title="Narrator-only book")
         chapters = [Chapter(1, "Opening", '“Hello there,” she said.')]
-
         with patch(
             "app.chapters.speaker_segmentation.segment_chapter_speakers",
             side_effect=AssertionError("Narrator-only mode must not demand character review"),
         ):
             profile, selection = NarratorResolverHarness(
                 SimpleNamespace(name="Saved Narrator")
-            )._resolve_narrator_for_generation(project, {"characters": []}, chapters)
-
+            )._resolve_narrator_for_generation(
+                project, {"characters": [], "narrator_only_generation": True}, chapters
+            )
         self.assertEqual(profile.name, "Saved Narrator")
-        self.assertEqual(selection["generation_mode"], "narrator_only")
         self.assertTrue(selection["narrator_only"])
-        self.assertEqual(selection["character_voice_profile_count"], 0)
+        self.assertEqual(selection["generation_mode"], "narrator_only")
         self.assertEqual(selection["dialogue_routing"], "narrator_for_all_passages")
 
     def test_zero_profiles_with_226_unassigned_characters_is_cast_aware_by_default(self):
