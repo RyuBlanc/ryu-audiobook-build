@@ -963,6 +963,8 @@ def ensure_best_runtime_for_gpu(progress=None) -> str | None:
             detail = verify_runtime(progress)
             installed = json.loads(MARKER.read_text(encoding="utf-8"))
             selected_backend = str(installed.get("accelerator") or "cpu").casefold()
+            from app.tts.qwen_accelerator import detect_accelerators
+            detect_accelerators(refresh=True)
             refreshed = best_accelerator()
             if (
                 selected_backend not in {"cuda", "rocm", "xpu"}

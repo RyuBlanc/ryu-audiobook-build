@@ -35,6 +35,10 @@ class ProductionPronunciationConnectivityTests(unittest.TestCase):
         profile = SimpleNamespace(name="Saved Narrator", voice_id="narrator-voice")
         manager = Mock()
         bridge = SimpleNamespace(
+            _effective_generation_character_rows=lambda state, series, **kwargs: host.PremiumV2Bridge._effective_generation_character_rows(
+                bridge, state, series, **kwargs
+            ),
+            _character_series_for_voice_assignment=host.PremiumV2Bridge._character_series_for_voice_assignment,
             _assert_no_active_model_lifecycle=Mock(),
             close_preview_provider_cache=Mock(),
             _active_project=Mock(return_value=project),

@@ -7,6 +7,7 @@ from .brain import AudiobookBrain, _numeric_score
 from app.chapters.characters import _is_plausible_name
 from app.tts.pronunciation_suggester import (
     is_likely_character_name_candidate,
+    is_pronunciation_override_candidate,
     suggest_pronunciation,
 )
 
@@ -228,6 +229,8 @@ def _safe_merge(self, out: dict, data: Any, seen: set[str], source_text: str = "
         # terms; require unrecognized Latin terms to look like plausible names.
         if not is_likely_character_name_candidate(
             written, known_names=known_names, script=script
+        ) or not is_pronunciation_override_candidate(
+            written, source_language=language, script=script, known_names=known_names
         ):
             continue
         item = dict(raw)

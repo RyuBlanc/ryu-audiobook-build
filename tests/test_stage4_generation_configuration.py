@@ -89,6 +89,10 @@ class EffectiveGenerationConfigurationTests(unittest.TestCase):
                 "characters": [],
             }
             bridge = SimpleNamespace(
+                _effective_generation_character_rows=lambda state, series, **kwargs: host.PremiumV2Bridge._effective_generation_character_rows(
+                    bridge, state, series, **kwargs
+                ),
+                _character_series_for_voice_assignment=host.PremiumV2Bridge._character_series_for_voice_assignment,
                 _assert_no_active_model_lifecycle=Mock(),
                 _assert_no_active_audio_synthesis=Mock(),
                 close_preview_provider_cache=Mock(),

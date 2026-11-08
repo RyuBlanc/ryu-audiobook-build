@@ -2,7 +2,7 @@
 
 **Source of truth:** Master Bug & Change Register (Sections 0–24), Stage 8 Detailed Requirements, and the six-package Stage 8 execution plan supplied on 7 November 2026.
 **Repository:** `RyuBlanc/ryu-audiobook-build`
-**Working branch:** `stage-7/step-6-safe-auto-fallback`
+**Current repair branch:** `fix/application-wide-closure-2026-11-08`
 **Implementation commits:** regression test `ef8044248daf2f109025861d231831f54cd19ca4`; assembler fix `cb25247c4dc95ff9f8ae518fe40dd7a52e17d583`; defect record `025a467112e60244bec541b5943283b838119ed5`.
 
 ## Status rules
@@ -16,6 +16,27 @@
 - **BLOCKED / UNSUPPORTED — EXPLICITLY DOCUMENTED:** only with a specific reason and explicit treatment.
 
 Do not treat Build #2680's 1,258 passing tests as proof for code committed afterwards. Do not mark a requirement complete from a static element/function-name test. Manual Windows/audio acceptance remains distinct from CI.
+
+
+## Current evidence overlay — 8 November 2026 (supersedes earlier snapshots)
+
+This overlay reflects the latest packaged candidate, Build #2887. It supersedes the older #2866/#2847 statements in prior historical notes; those remain history, not current release evidence.
+
+| Requirement area | Current evidence | Acceptance status |
+|---|---|---|
+| Character Studio large review queue / chapter navigator | #2841/#2846: queue pagination, chapter filters/metrics, source-backed counts and correct word counts. #2887 cumulative suite passed. | Automated regressions passed. Actual full-book navigation and source comparison on the user's saved novel remain pending. |
+| False-character cleanup / pronunciation | #2878–#2886 sequence: English prose/interjections rejected, user-confirmed aliases preserved, pronunciation worker isolated from UI bridge, foreign single-token names require source occurrence and non-English evidence; #2882/#2886/#2887 passed cumulative regression. | Automated regression evidence passed. Must verify cleanup of the existing saved cast and pronunciation output against the actual book. |
+| Canonical dialogue passage index (XAPP-03) | Project-local revision-aware atomic index with stable IDs, source slices/offsets, chapter/source/assignment revisions and assignment states; consumed by Character Studio and cast-aware Production. Unit tests cover stale source slices, revision rebuild and stable IDs. | Automated evidence present. Actual 1,175 vs 1,196 book count reconciliation and installed-app review remain runtime acceptance pending. |
+| Models/Sound responsiveness (XAPP-09) | Single-flight background catalogue jobs; last-known-good snapshots; UI awaits scan completion asynchronously. | Automated regression evidence present. Large target-PC filesystem scans concurrent with preview/generation remain runtime acceptance pending. |
+| Sound Design / Music Library | #2887 package pipeline includes packaged Sound Design/Music UI acceptance and matching-head Windows artifact. | Automated/package acceptance passed. Human listening, licensing/source inspection and actual project mix parity remain open. |
+| Windows packaging and Defender | Build #2887 exact head `5f811eb60a912353926704b6ba7c8fbfed41e0cc`; installer, portable, SHA manifest and Piper benchmark uploaded. Windows install/launch/upgrade/uninstall and user-data preservation steps passed. Defender separately reported no threats for app, HTML installer and core installer. | Packaged CI checkpoint passed. User-machine installation and prior endpoint-specific alert disposition remain separate. |
+| Frozen Master requirement set | 128-row inventory below remains authoritative. | Not complete. No bulk closure inferred from CI. |
+
+**Exact Build #2887:** [Actions run](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42477948917), **1,387 tests passed**, Windows build succeeded, app version 1.1.1. Installer artifact ID `13616938581`; portable `13616784388`; SHA manifest `13617037536`; Piper benchmark `13617435436`.
+
+**500 MB installer target:** explicitly deprioritized by the user and non-blocking for functional closure. Preserve required offline voice models and starter assets.
+
+**Still open:** actual-book quality/count reconciliation; saved voice identity heard through preview and production after restart; Qwen device/task benchmarks and 30-second under-60-second target on agreed hardware; narrator-only and multi-character full M4B playback/recovery; real Task Manager timing/cancellation/restart; complete control/persistence/restart audit; target display/DPI/multi-monitor runtime; pronunciation dictionary/profile/conflict/audio-invalidation; Help & Guide final parity; and any frozen Master items without a matching behavioral test/runtime proof.
 
 ## Frozen requirement IDs
 

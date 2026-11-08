@@ -42,6 +42,7 @@ from app.core.character_library import (
     character_library_path as reusable_character_library_path,
     list_characters as list_reusable_characters,
     list_deleted_characters as list_reusable_deleted_characters,
+    prune_invalid_character_records,
     restore_character as restore_reusable_character,
     soft_delete_character as soft_delete_reusable_character,
     sync_characters as sync_reusable_characters,
@@ -53,7 +54,10 @@ from app.documents.parser import (
     extract_text, validate_chapter_text_coverage,
 )
 from app.chapters.detector import detect_chapters
-from app.chapters.characters import analyze_book, merge_character_analysis_record
+from app.chapters.characters import (
+    analyze_book, merge_character_analysis_record, is_likely_character_name,
+    is_user_confirmed_character_record,
+)
 from app.chapters.dialogue_review import retain_current_dialogue_skips
 from app.tts.manager import GenerationManager
 from app.tts.preview import build_voice_preview
@@ -384,6 +388,10 @@ class PremiumV2Bridge(QObject):
         self._active_project_cache: tuple[str, tuple[int, int, int, int], Project] | None = None
         self._active_project_migrated_folders: set[str] = set()
         self._jobs_lock = threading.RLock()
+        self._catalog_scan_lock = threading.RLock()
+        self._catalog_cache_lock = threading.RLock()
+        self._catalog_scan_jobs: dict[str, str] = {}
+        self._catalog_scan_generation: dict[str, int] = {"models": 0, "sound": 0}
         self._performance_history_lock = threading.RLock()
         # Serialize review-skip writes with the character-analysis worker's final
         # reconciliation so a click during a long analysis cannot be overwritten.
@@ -396,6 +404,7 @@ class PremiumV2Bridge(QObject):
         self._generators: dict[str, GenerationManager] = {}
         self._import_cancel_events: dict[str, threading.Event] = {}
         self._preview_cancel_events: dict[str, threading.Event] = {}
+        self._analysis_cancel_events: dict[str, threading.Event] = {}
         self._preview_provider_cache_lock = threading.RLock()
         self._preview_provider_cache: dict[str, Any] | None = None
         self._preview_provider_cache_timer: threading.Timer | None = None
@@ -458,6 +467,7 @@ class PremiumV2Bridge(QObject):
                 "production.preview.save": self._production_preview_save,
                 "character.list": self._character_list,
                 "character.narration.segments.list": self._character_narration_segments_list,
+                "character.dialogue.index.get": self._character_dialogue_index_get,
                 "character.create": self._character_create,
                 "character.dialogue.suggestions.list": self._character_dialogue_suggestions_list,
                 "character.dialogue.suggestion.skip": self._character_dialogue_suggestion_skip,
@@ -473,6 +483,10 @@ class PremiumV2Bridge(QObject):
                 "character.update": self._character_update,
                 "character.delete": self._character_delete,
                 "pronunciation.list": self._pronunciation_list,
+                "pronunciation.export": self._pronunciation_export,
+                "pronunciation.import": self._pronunciation_import,
+                "pronunciation.test_results.get": self._pronunciation_test_results_get,
+                "pronunciation.test_results.save": self._pronunciation_test_results_save,
                 "pronunciation.save": self._pronunciation_save,
                 "pronunciation.delete": self._pronunciation_delete,
                 "pronunciation.delete_many": self._pronunciation_delete_many,
@@ -501,6 +515,7 @@ class PremiumV2Bridge(QObject):
                 "storage.cleanup_source": self._storage_cleanup_source,
                 "storage.cleanup_temp": self._storage_cleanup_temp,
                 "models.list": self._models_list,
+                "models.refresh": self._models_refresh,
                 "models.files": self._models_files,
                 "models.open_folder": self._models_open_folder,
                 "models.copy_path": self._models_copy_path,
@@ -519,6 +534,7 @@ class PremiumV2Bridge(QObject):
                 "diagnostics.export_logs": self._diagnostics_export_logs,
                 "system.open_output": self._system_open_output,
                 "sound.catalog": self._sound_catalog,
+                "sound.refresh": self._sound_refresh,
                 "sound.import": self._sound_import,
                 "sound.assign": self._sound_assign,
                 "sound.save_manifest": self._sound_save_manifest,
@@ -616,6 +632,7 @@ class PremiumV2Bridge(QObject):
             "production.preview.save": True,
             "character.list": True,
             "character.narration.segments.list": True,
+            "character.dialogue.index.get": True,
             "character.create": True,
             "character.dialogue.suggestions.list": True,
             "character.dialogue.suggestion.skip": True,
@@ -631,6 +648,10 @@ class PremiumV2Bridge(QObject):
             "character.update": True,
             "character.delete": True,
             "pronunciation.list": True,
+            "pronunciation.export": True,
+            "pronunciation.import": True,
+            "pronunciation.test_results.get": True,
+            "pronunciation.test_results.save": True,
             "pronunciation.save": True,
             "pronunciation.delete": True,
             "pronunciation.delete_many": True,
@@ -659,6 +680,7 @@ class PremiumV2Bridge(QObject):
             "storage.cleanup_source": True,
             "storage.cleanup_temp": True,
             "models.list": True,
+            "models.refresh": True,
             "models.files": True,
             "models.open_folder": True,
             "models.copy_path": True,
@@ -677,6 +699,7 @@ class PremiumV2Bridge(QObject):
             "diagnostics.export_logs": True,
             "system.open_output": True,
             "sound.catalog": True,
+            "sound.refresh": True,
             "sound.import": True,
             "sound.assign": True,
             "sound.save_manifest": True,
@@ -1547,6 +1570,38 @@ class PremiumV2Bridge(QObject):
             exact_text = str(chapter.text or "")[start:end]
             if exact_text != dialogue_text:
                 raise ValueError("The selected passage changed before it could be saved. Refresh the chapter and select it again.")
+            passage_id = str(payload.get("passage_id") or "").strip()
+            chapter_revision = str(payload.get("chapter_revision") or "").strip()
+            if passage_id or chapter_revision:
+                from app.chapters.passage_index import load_or_build_passage_index
+                passage_index = load_or_build_passage_index(
+                    project.folder, project.chapters,
+                    suggested_passages=state.get("character_dialogue_suggestions") or [],
+                )
+                canonical = next(
+                    (
+                        row for row in passage_index["passages"]
+                        if str(row.get("passage_id") or "") == passage_id
+                        and str(row.get("chapter_id") or "") == str(chapter.chapter_id)
+                    ),
+                    None,
+                ) if passage_id else next(
+                    (
+                        row for row in passage_index["passages"]
+                        if str(row.get("chapter_id") or "") == str(chapter.chapter_id)
+                        and int(row.get("start", -1)) == start
+                        and int(row.get("end", -1)) == end
+                    ),
+                    None,
+                )
+                if (
+                    canonical is None
+                    or int(canonical.get("start", -1)) != start
+                    or int(canonical.get("end", -1)) != end
+                    or str(canonical.get("text") or "") != exact_text
+                    or (chapter_revision and str(canonical.get("chapter_revision") or "") != chapter_revision)
+                ):
+                    raise ValueError("The dialogue passage changed or its canonical passage ID is stale. Refresh Character Studio and select it again.")
             from app.chapters.assignment_utils import normalize_assignment
             existing = list(getattr(chapter, "dialogue_assignments", []) or [])
             overlapping = [item for item in existing if isinstance(item, dict)
@@ -3368,13 +3423,29 @@ class PremiumV2Bridge(QObject):
         if start < 0 or end <= start or end > len(source_text) or source_text[start:end] != selected_text:
             raise ValueError("The selected passage changed or its source positions are stale. Save the chapter and select the narration again.")
 
-        from app.chapters.speaker_segmentation import segment_chapter_speakers
-        segments = segment_chapter_speakers(chapter)
-        intersecting = [
-            segment for segment in segments
-            if int(segment.end) > start and int(segment.start) < end
-        ]
-        if not intersecting or any(segment.kind != "narration" for segment in intersecting):
+        if getattr(project, "folder", None) is None:
+            # Unsaved test harnesses retain the pure source segmenter. Installed
+            # projects use the persisted index shared with Character Studio/Production.
+            from app.chapters.speaker_segmentation import segment_chapter_speakers
+            segments = segment_chapter_speakers(chapter)
+            intersecting = [
+                segment for segment in segments
+                if int(segment.end) > start and int(segment.start) < end
+            ]
+            invalid_narration = any(segment.kind != "narration" for segment in intersecting)
+        else:
+            from app.chapters.passage_index import load_or_build_passage_index
+            passage_index = load_or_build_passage_index(
+                project.folder, project.chapters,
+                suggested_passages=state.get("character_dialogue_suggestions") or [],
+            )
+            intersecting = [
+                row for row in passage_index["passages"]
+                if str(row.get("chapter_id") or "") == str(chapter.chapter_id)
+                and int(row.get("end", 0)) > start and int(row.get("start", 0)) < end
+            ]
+            invalid_narration = any(row.get("kind") != "narration" for row in intersecting)
+        if not intersecting or invalid_narration:
             raise ValueError(
                 "Narrator Preview accepts narration only. Select text classified as Narrator; "
                 "character dialogue and Needs Speaker Review passages cannot be previewed as narration."
@@ -4177,15 +4248,140 @@ class PremiumV2Bridge(QObject):
                     self._preview_cancel_events.pop(job_id, None)
 
     def _character_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
-        state = load_state(self._active_project().folder)
+        """Return a clean saved cast and remove legacy false detections on first review."""
+        project = self._active_project()
+        state = load_state(project.folder)
         rows = state.get("characters") or []
-        return rows if isinstance(rows, list) else []
+        if not isinstance(rows, list):
+            return []
+        default_series = self._project_series_name(project, state)
+        assignment_names: dict[str, set[str]] = {}
+        series_to_prune = {default_series} if default_series else set()
+        for chapter in getattr(project, "chapters", []) or []:
+            for assignment in (getattr(chapter, "dialogue_assignments", []) or []):
+                if not isinstance(assignment, dict):
+                    continue
+                series = str(assignment.get("series") or default_series).strip()
+                if not series:
+                    continue
+                series_to_prune.add(series)
+                speakers = assignment.get("speakers")
+                if not isinstance(speakers, (list, tuple)):
+                    speakers = [assignment.get("speaker")] if assignment.get("speaker") else []
+                assignment_names.setdefault(series.casefold(), set()).update(
+                    str(value or "").strip().casefold()
+                    for value in speakers if str(value or "").strip()
+                )
+
+        cleaned: list[dict[str, Any]] = []
+        for raw in rows:
+            if not isinstance(raw, dict):
+                continue
+            row = dict(raw)
+            name = str(row.get("name") or row.get("primary_name") or "").strip()
+            series = str(row.get("series") or "").strip()
+            if not series:
+                scope = str(row.get("scope") or "").strip()
+                series = (
+                    re.sub(r"(?i)^\s*series\s*[·:-]\s*", "", scope).strip()
+                    if re.match(r"(?i)^\s*series\s*[·:-]", scope) else default_series
+                )
+            if series:
+                series_to_prune.add(series)
+            assignment_backed = name.casefold() in assignment_names.get(series.casefold(), set())
+            trusted = is_user_confirmed_character_record(row) or assignment_backed
+            if not name or not is_likely_character_name(name, trusted=trusted):
+                continue
+            aliases = row.get("aliases") or []
+            if isinstance(aliases, str):
+                aliases = [aliases]
+            alias_trusted = trusted or bool(row.get("manual_aliases"))
+            clean_aliases = list(dict.fromkeys(
+                str(alias).strip()
+                for alias in aliases if str(alias or "").strip()
+                and str(alias).strip().casefold() != name.casefold()
+                and is_likely_character_name(str(alias), trusted=alias_trusted)
+            )) if isinstance(aliases, (list, tuple)) else []
+            if clean_aliases != (aliases if isinstance(aliases, list) else list(aliases or [])):
+                row["aliases"] = clean_aliases
+            cleaned.append(row)
+
+        if cleaned != rows:
+            state["characters"] = cleaned
+            state["modified_at"] = self._now()
+            save_state(project.folder, state)
+
+        # Shared Library false detections are moved into its Recovery Bin.
+        for series in sorted(series_to_prune, key=str.casefold):
+            try:
+                prune_invalid_character_records(
+                    series,
+                    protected_names=assignment_names.get(series.casefold(), set()),
+                )
+            except Exception:
+                log.exception("Could not clean legacy Character Library rows for %s", series)
+        return cleaned
+
+    def _character_dialogue_index_get(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Return the persisted passage index, revision and reconciled chapter counts."""
+        from app.chapters.passage_index import load_or_build_passage_index
+
+        project = self._active_project()
+        state = load_state(project.folder)
+        index = load_or_build_passage_index(
+            project.folder, project.chapters,
+            suggested_passages=state.get("character_dialogue_suggestions") or [],
+        )
+        raw_number = payload.get("chapter_number")
+        requested_number = None
+        if raw_number not in (None, ""):
+            try:
+                requested_number = int(raw_number)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError("Choose a valid chapter number for the dialogue index.") from exc
+
+        chapter_rows = index["chapters"]
+        passage_rows = index["passages"]
+        if requested_number is not None:
+            chapter_rows = [
+                row for row in chapter_rows
+                if int(row.get("chapter_number") or 0) == requested_number
+            ]
+            chapter_ids = {str(row.get("chapter_id") or "") for row in chapter_rows}
+            passage_rows = [
+                row for row in passage_rows
+                if str(row.get("chapter_id") or "") in chapter_ids
+            ]
+            counts = dict(chapter_rows[0]["counts"]) if chapter_rows else {
+                key: 0 for key in index["counts"]
+            }
+        else:
+            counts = dict(index["counts"])
+
+        offset = max(0, int(payload.get("offset") or 0))
+        try:
+            limit = max(1, min(500, int(payload.get("limit") or 250)))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("Dialogue index page size must be a positive integer.") from exc
+        include_passages = payload.get("include_passages", True) is not False
+        total = len(passage_rows)
+        page = passage_rows[offset:offset + limit] if include_passages else []
+        return {
+            "schema_version": index["schema_version"],
+            "source_revision": index["source_revision"],
+            "assignment_revision": index["assignment_revision"],
+            "index_revision": index["index_revision"],
+            "counts": counts,
+            "chapters": chapter_rows,
+            "passages": [dict(row) for row in page],
+            "offset": offset,
+            "limit": limit,
+            "total_passages": total,
+            "has_more": bool(include_passages and offset + len(page) < total),
+        }
 
     def _character_narration_segments_list(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
-        """Return source-backed speaker segmentation for the active project's chapters."""
-        from dataclasses import asdict
-        from app.chapters.speaker_segmentation import segment_chapter_speakers
-
+        """Return Character Studio rows from the persisted canonical source index."""
         project = self._active_project()
         raw_number = payload.get("chapter_number")
         requested_number = None
@@ -4195,23 +4391,58 @@ class PremiumV2Bridge(QObject):
             except (TypeError, ValueError, OverflowError) as exc:
                 raise ValueError("Choose a valid chapter number for narrator segmentation.") from exc
 
-        results: list[dict[str, Any]] = []
+        if getattr(project, "folder", None) is None:
+            # Unsaved Project-like test harnesses have no durable folder. They
+            # retain the deterministic pure segmenter; installed projects use
+            # the revision-aware index as their single source of passage truth.
+            from dataclasses import asdict
+            from app.chapters.speaker_segmentation import segment_chapter_speakers
+            results = [
+                asdict(segment)
+                for chapter in project.chapters
+                if requested_number is None or int(chapter.number) == requested_number
+                for segment in segment_chapter_speakers(chapter)
+            ]
+            for chapter in project.chapters:
+                if requested_number is not None and int(chapter.number) != requested_number:
+                    continue
+                chapter.narrator_passages = [
+                    {
+                        "start": row["start"], "end": row["end"], "text": row["text"],
+                        "role": "Narrator", "kind": "narration",
+                        "source": row["source"], "automatic": True,
+                    }
+                    for row in results if row.get("chapter_number") == chapter.number
+                    and row.get("kind") == "narration"
+                ]
+            return results
+
+        from app.chapters.passage_index import load_or_build_passage_index
+        state = load_state(project.folder)
+        index = load_or_build_passage_index(
+            project.folder, project.chapters,
+            suggested_passages=state.get("character_dialogue_suggestions") or [],
+        )
+        results = [
+            dict(row) for row in index["passages"]
+            if requested_number is None or int(row.get("chapter_number") or 0) == requested_number
+        ]
+        # Retain the historical in-memory narrator view for legacy callers, but
+        # the persisted revision-aware index remains the sole offset authority.
         for chapter in project.chapters:
             if requested_number is not None and int(chapter.number) != requested_number:
                 continue
-            rows = [asdict(segment) for segment in segment_chapter_speakers(chapter)]
-            # Persist a deterministic, source-bound view cache for diagnostics and
-            # fast subsequent reads. It is rebuilt from chapter source on every
-            # request, so edits/splits/merges cannot leave stale offsets authoritative.
             chapter.narrator_passages = [
                 {
                     "start": row["start"], "end": row["end"], "text": row["text"],
                     "role": "Narrator", "kind": "narration",
                     "source": row["source"], "automatic": True,
+                    "passage_id": row["passage_id"],
+                    "chapter_revision": row["chapter_revision"],
                 }
-                for row in rows if row.get("kind") == "narration"
+                for row in results
+                if row.get("chapter_id") == chapter.chapter_id and row.get("kind") == "narration"
             ]
-            results.extend(rows)
         return results
 
     def _character_analysis_status(self, _payload: dict[str, Any]) -> dict[str, Any]:
@@ -4235,12 +4466,26 @@ class PremiumV2Bridge(QObject):
         }
 
     def _character_dialogue_suggestions_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
-        """Return source-backed dialogue suggestions created from the active project's chapters."""
+        """Return source-backed AI review suggestions with canonical passage identities."""
+        from app.chapters.passage_index import load_or_build_passage_index
+
         project = self._active_project()
         state = load_state(project.folder)
         stored = state.get("character_dialogue_suggestions") or []
         if not isinstance(stored, list):
             return []
+        index = load_or_build_passage_index(
+            project.folder, project.chapters, suggested_passages=stored
+        )
+        canonical_by_span = {
+            (
+                int(row.get("chapter_number") or 0),
+                int(row.get("start") or 0),
+                int(row.get("end") or 0),
+            ): row
+            for row in index["passages"]
+            if isinstance(row, dict)
+        }
         rows = []
         chapters_by_number = {int(chapter.number): chapter for chapter in project.chapters}
         for raw in stored:
@@ -4254,12 +4499,25 @@ class PremiumV2Bridge(QObject):
             if chapter is None or start < 0 or end <= start or end > len(chapter.text or ""):
                 continue
             source_text = str(chapter.text or "")
-            if source_text[start:end] != str(raw.get("source_text") or ""):
+            expected_text = str(raw.get("source_text") or raw.get("text") or "")
+            if source_text[start:end] != expected_text:
+                continue
+            canonical = canonical_by_span.get((number, start, end))
+            if canonical is None:
                 continue
             row = dict(raw)
             row["chapter_title"] = str(chapter.title or f"Chapter {number}")
             row["text"] = source_text[start:end]
-            row["assigned_speakers"] = []
+            row["source_text"] = source_text[start:end]
+            row["passage_id"] = str(canonical.get("passage_id") or "")
+            row["chapter_revision"] = str(canonical.get("chapter_revision") or "")
+            row["source_revision"] = str(canonical.get("source_revision") or "")
+            row["assignment_state"] = str(canonical.get("assignment_state") or "pending")
+            row["needs_review"] = bool(canonical.get("needs_review"))
+            row["assigned_speakers"] = list(canonical.get("speakers") or [])
+            row["assigned"] = row["assignment_state"] == "assigned"
+            row["conflict"] = row["assignment_state"] == "conflict"
+            row["ai_suggestions"] = list(canonical.get("ai_suggestions") or row.get("suggestions") or [])
             assignment = next((item for item in (chapter.dialogue_assignments or [])
                                if isinstance(item, dict) and item.get("start") == start
                                and item.get("end") == end and source_text[start:end] == str(item.get("text") or "")), None)
@@ -4268,7 +4526,7 @@ class PremiumV2Bridge(QObject):
                     list(assignment.get("speakers") or []) if isinstance(assignment.get("speakers"), list)
                     else ([str(assignment.get("speaker"))] if assignment.get("speaker") else [])
                 )
-            row["assigned"] = bool(row["assigned_speakers"])
+                row["assigned"] = row["assignment_state"] == "assigned"
             skipped = state.get("character_dialogue_skips") or []
             row["skipped"] = str(row.get("id") or "") in {str(value) for value in skipped}
             rows.append(row)
@@ -4351,7 +4609,7 @@ class PremiumV2Bridge(QObject):
                 "name": name, "role": str(payload.get("role") or "Character")[:160],
                 "dialogue_count": 0, "examples": [], "confidence": 1.0,
                 "aliases": aliases, "voice_profile": profile_name or None,
-                "series": series, "user_created": True,
+                "series": series, "user_created": True, "manual": True, "manual_aliases": True,
                 "short_description": str(payload.get("short_description") or "")[:1000],
                 "notes": str(payload.get("notes") or "")[:4000], "scope": "Series · " + series,
             }
@@ -4360,11 +4618,30 @@ class PremiumV2Bridge(QObject):
             match.update({
                 "name": name, "aliases": aliases or list(match.get("aliases") or []),
                 "series": series, "scope": "Series · " + series, "user_created": True,
+                "manual": True, "manual_aliases": True,
                 "short_description": str(payload.get("short_description", match.get("short_description", "")) or "")[:1000],
                 "notes": str(payload.get("notes", match.get("notes", "")) or "")[:4000],
             })
             if "voice_profile" in payload:
                 match["voice_profile"] = profile_name or None
+        # Explicitly adding this identity again from Character Studio/Library
+        # is the user's restore action for a previously dismissed detection.
+        restored_names = {name.casefold(), *(alias.casefold() for alias in aliases)}
+        exclusions = [
+            dict(row) for row in (state.get("character_detection_exclusions") or [])
+            if isinstance(row, dict)
+        ]
+        state["character_detection_exclusions"] = [
+            row for row in exclusions
+            if not (
+                str(row.get("series") or "").strip().casefold() == series.casefold()
+                and restored_names.intersection({
+                    str(value or "").strip().casefold()
+                    for value in [row.get("name"), *(row.get("aliases") or [])]
+                    if str(value or "").strip()
+                })
+            )
+        ]
         state["characters"] = characters
         state["modified_at"] = self._now()
         save_state(project.folder, state)
@@ -4394,12 +4671,28 @@ class PremiumV2Bridge(QObject):
             raise ValueError("Import a book with chapters before analysing characters.")
         job_id = self._new_job("character-analysis", "Analyze story characters",
                                "Analyze saved chapters and dialogue evidence", project)
+        self._analysis_cancel_events[job_id] = threading.Event()
         self._job_update(job_id, state="running", started_at=self._now(), stage="Analyzing dialogue", progress=5)
-        threading.Thread(target=self._character_worker, args=(job_id, project), daemon=True).start()
+        try:
+            threading.Thread(target=self._character_worker, args=(job_id, project), daemon=True).start()
+        except Exception as exc:
+            self._analysis_cancel_events.pop(job_id, None)
+            self._job_update(job_id, state="failed", stage="Could not start analysis",
+                             message=str(exc), error={"code":"character_analysis_start_failed","message":str(exc)},
+                             recoverable=True)
+            raise
         return {"job_id": job_id, "state": "running"}
 
     def _character_worker(self, job_id: str, project) -> None:
+        cancel_event = self._analysis_cancel_events.get(str(job_id))
+        analysis_committed = False
+
+        def check_cancelled() -> None:
+            if cancel_event is not None and cancel_event.is_set():
+                raise InterruptedError("Character analysis cancellation requested.")
+
         try:
+            check_cancelled()
             state = load_state(project.folder)
             # Re-analysis rebuilds recommendations, but the user’s skip decisions
             # belong to the exact source passages already reviewed. Keep the
@@ -4410,31 +4703,16 @@ class PremiumV2Bridge(QObject):
             saved_rows = [dict(row) for row in (state.get("characters") or []) if isinstance(row, dict)]
             library_rows = list_reusable_characters(series_name)
             raw_text = "\n\n".join(str(chapter.text or "") for chapter in project.chapters)
-            from app.chapters.characters import NAME_STOPWORDS, _discover_explicit_speakers
+            from app.chapters.characters import (
+                Character, _discover_explicit_speakers, is_likely_character_name,
+                character_detection_exclusion_keys,
+            )
             from app.chapters.character_learning import (
                 load_learning_examples, prepare_learning_index, rank_speaker_suggestions,
                 source_grounded_speaker_for_continuity,
             )
             explicit_names = {str(name).casefold() for name in _discover_explicit_speakers(raw_text)}
-            stopwords = {str(value).casefold() for value in NAME_STOPWORDS}
-            trusted_rows = []
-            trusted_keys = set()
-            for row in [*saved_rows, *library_rows]:
-                name = str(row.get("name") or row.get("primary_name") or "").strip()
-                aliases = row.get("aliases") or []
-                aliases = aliases if isinstance(aliases, (list, tuple)) else []
-                # Previously auto-detected labels are not automatically trusted.
-                # A saved voice, manual creation/edit, series-level registry entry,
-                # or prior confirmed dialogue assignment is user-backed evidence.
-                trusted = bool(
-                    row.get("user_created") or row.get("manual") or row.get("voice_profile")
-                    or row.get("voice_name") or row.get("short_description") or row.get("notes")
-                    or (row.get("series") and row.get("primary_name"))
-                )
-                if trusted and name:
-                    trusted_rows.append(row)
-                    trusted_keys.add(name.casefold())
-                    trusted_keys.update(str(alias).strip().casefold() for alias in aliases if str(alias or "").strip())
+            protected_assignment_names = []
             for chapter in project.chapters:
                 for assignment in (getattr(chapter, "dialogue_assignments", []) or []):
                     if not isinstance(assignment, dict):
@@ -4442,28 +4720,216 @@ class PremiumV2Bridge(QObject):
                     raw_speakers = assignment.get("speakers")
                     if not isinstance(raw_speakers, (list, tuple)):
                         raw_speakers = [assignment.get("speaker")] if assignment.get("speaker") else []
+                    assignment_series = str(assignment.get("series") or series_name).strip()
+                    protected_assignment_names.extend(
+                        {"name": str(speaker or "").strip(), "series": assignment_series}
+                        for speaker in raw_speakers if str(speaker or "").strip()
+                    )
+            excluded_detection_keys = character_detection_exclusion_keys(
+                state.get("character_detection_exclusions") or [],
+                series_name,
+                protected_names=protected_assignment_names,
+            )
+            trusted_rows = []
+            trusted_keys = set()
+            for row in [*saved_rows, *library_rows]:
+                name = str(row.get("name") or row.get("primary_name") or "").strip()
+                aliases = row.get("aliases") or []
+                aliases = aliases if isinstance(aliases, (list, tuple)) else []
+                row_identity_names = {name.casefold(), *(
+                    str(alias).strip().casefold() for alias in aliases if str(alias or "").strip()
+                )}
+                # A project dismissal outranks local/shared-library records. A
+                # later confirmed dialogue assignment removes the exclusion above.
+                if row_identity_names.intersection(excluded_detection_keys):
+                    continue
+                # Previously auto-detected labels are not automatically trusted.
+                # A saved voice, manual creation/edit, series-level registry entry,
+                # or prior confirmed dialogue assignment is user-backed evidence.
+                trusted = bool(
+                    row.get("user_created") or row.get("manual") or row.get("voice_profile")
+                    or row.get("voice_name")
+                )
+                # Re-check rows already saved by earlier analysis. A voice profile
+                # must not preserve an English false-positive such as "Oh" or "Any".
+                if not name or not is_likely_character_name(
+                    name, trusted=trusted, explicit=name.casefold() in explicit_names
+                ):
+                    continue
+                if trusted:
+                    clean_aliases = [
+                        str(alias).strip() for alias in aliases
+                        if str(alias or "").strip()
+                        and is_likely_character_name(
+                            str(alias),
+                            explicit=str(alias).strip().casefold() in explicit_names,
+                        )
+                    ]
+                    row["aliases"] = clean_aliases
+                    trusted_rows.append(row)
+                    trusted_keys.add(name.casefold())
+                    trusted_keys.update(alias.casefold() for alias in clean_aliases)
+            for chapter in project.chapters:
+                for assignment in (getattr(chapter, "dialogue_assignments", []) or []):
+                    if not isinstance(assignment, dict):
+                        continue
+                    raw_speakers = assignment.get("speakers")
+                    if not isinstance(raw_speakers, (list, tuple)):
+                        raw_speakers = [assignment.get("speaker")] if assignment.get("speaker") else []
+                    assignment_series = str(assignment.get("series") or series_name).strip()
+                    if not assignment_series or assignment_series.casefold() != series_name.casefold():
+                        continue
                     for speaker in raw_speakers:
                         clean_speaker = str(speaker or "").strip()
-                        if clean_speaker:
+                        if clean_speaker and is_likely_character_name(clean_speaker, trusted=True):
                             trusted_keys.add(clean_speaker.casefold())
                             trusted_rows.append({"name": clean_speaker, "aliases": [],
-                                                 "series": str(assignment.get("series") or series_name)})
+                                                 "series": assignment_series})
 
             analysis = analyze_book(project.chapters)
+            ai_report: dict[str, Any] = {}
+            ai_method = "source_grounded_fallback"
+            ai_warnings: list[str] = []
+            brain = None
+            try:
+                from app.ai.brain import AudiobookBrain
+                initial_cast = [
+                    {
+                        "name": str(row.get("name") or row.get("primary_name") or "").strip(),
+                        "aliases": list(row.get("aliases") or []) if isinstance(row.get("aliases") or [], (list, tuple)) else [],
+                        "series": str(row.get("series") or series_name),
+                    }
+                    for row in trusted_rows
+                    if str(row.get("name") or row.get("primary_name") or "").strip()
+                ]
+                brain = AudiobookBrain(Path(project.folder))
+
+                def update_ai_progress(fraction: float, message: str) -> None:
+                    # The brain reports progress between local inference passes.
+                    # Raising here stops the worker at a safe model boundary.
+                    check_cancelled()
+                    percent = max(8, min(68, 8 + int(max(0.0, min(1.0, float(fraction))) * 60)))
+                    self._job_update(
+                        job_id, state="running", stage="Local AI • " + str(message or "Analyzing book"),
+                        progress=percent, message=str(message or "Analyzing the complete book"),
+                    )
+
+                ai_report = brain.analyze_book(
+                    project.chapters,
+                    progress=update_ai_progress,
+                    learning_context={"learning_scope": series_name, "characters": initial_cast},
+                )
+                ai_method = "local_llm"
+                for chapter_report in ai_report.get("chapters", []) if isinstance(ai_report, dict) else []:
+                    if not isinstance(chapter_report, dict):
+                        continue
+                    chapter_number = int(chapter_report.get("chapter") or 0)
+                    for warning in chapter_report.get("warnings", []) or []:
+                        warning_text = str(warning or "").strip()
+                        if warning_text:
+                            ai_warnings.append(f"Chapter {chapter_number}: {warning_text}")
+                if ai_warnings:
+                    ai_method = "local_llm_with_fallback_or_warnings"
+            except Exception as exc:
+                if cancel_event is not None and cancel_event.is_set():
+                    raise InterruptedError("Character analysis cancelled during local AI inference.") from exc
+                ai_warnings.append(
+                    "Local AI analysis was unavailable; source-grounded fallback was used: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                log.warning("Local Audiobook Brain unavailable for %s: %s", project.title, exc)
+                ai_method = "source_grounded_fallback"
+            finally:
+                if brain is not None:
+                    try:
+                        brain.close()
+                    except Exception:
+                        log.exception("Could not close the Local Audiobook Brain runtime")
+
+            ai_dialogue_by_chapter: dict[int, list[dict[str, Any]]] = {}
+            ai_candidate_confidence: dict[str, float] = {}
+            ai_character_aliases: dict[str, list[str]] = {}
+            ai_chapter_reports = ai_report.get("chapters", []) if isinstance(ai_report, dict) else []
+            for chapter_report in ai_chapter_reports:
+                if not isinstance(chapter_report, dict):
+                    continue
+                chapter_number = int(chapter_report.get("chapter") or 0)
+                ai_dialogue_by_chapter.setdefault(chapter_number, []).extend(
+                    row for row in (chapter_report.get("dialogue") or []) if isinstance(row, dict)
+                )
+                for ai_character in chapter_report.get("characters", []) or []:
+                    if not isinstance(ai_character, dict):
+                        continue
+                    name = str(ai_character.get("name") or "").strip()
+                    key = name.casefold()
+                    if not name or key in excluded_detection_keys or not is_likely_character_name(
+                        name, trusted=key in trusted_keys, explicit=key in explicit_names
+                    ):
+                        continue
+                    occurrence_count = raw_text.casefold().count(key)
+                    if occurrence_count < 1:
+                        continue
+                    try:
+                        confidence = max(0.0, min(1.0, float(ai_character.get("confidence") or 0.0)))
+                    except (TypeError, ValueError, OverflowError):
+                        confidence = 0.0
+                    if occurrence_count < 2 and key not in trusted_keys and key not in explicit_names and confidence < 0.90:
+                        continue
+                    ai_candidate_confidence[key] = max(ai_candidate_confidence.get(key, 0.0), confidence)
+                    aliases = ai_character.get("aliases") or []
+                    if isinstance(aliases, (list, tuple)):
+                        clean_aliases = [
+                            str(alias).strip() for alias in aliases
+                            if str(alias).strip()
+                            and is_likely_character_name(
+                                str(alias),
+                                explicit=str(alias).strip().casefold() in explicit_names,
+                            )
+                            and str(alias).strip().casefold() in raw_text.casefold()
+                        ]
+                        ai_character_aliases[key] = list(dict.fromkeys([
+                            *(ai_character_aliases.get(key) or []), *clean_aliases
+                        ]))
+
+            existing_candidates = {str(row.name).casefold(): row for row in analysis.characters}
+            for key, confidence in ai_candidate_confidence.items():
+                candidate = existing_candidates.get(key)
+                if candidate is None:
+                    ai_name = next((
+                        str(item.get("name") or "").strip()
+                        for chapter_report in ai_chapter_reports if isinstance(chapter_report, dict)
+                        for item in (chapter_report.get("characters") or [])
+                        if isinstance(item, dict) and str(item.get("name") or "").strip().casefold() == key
+                    ), "")
+                    if not ai_name:
+                        continue
+                    candidate = Character(
+                        name=ai_name, role="AI Identified Character",
+                        confidence=confidence, aliases=ai_character_aliases.get(key, []),
+                    )
+                    analysis.characters.append(candidate)
+                    existing_candidates[key] = candidate
+                else:
+                    candidate.confidence = max(float(candidate.confidence or 0.0), confidence)
+                    candidate.aliases = list(dict.fromkeys([
+                        *(candidate.aliases or []), *(ai_character_aliases.get(key) or [])
+                    ]))
             # Filter ordinary capitalized words out of the cast unless the text
             # supplies explicit attribution, the name is already trusted, or it
             # appears repeatedly enough in narration to be a credible identity.
             def credible_candidate(candidate) -> bool:
                 name = str(getattr(candidate, "name", "") or "").strip()
                 key = name.casefold()
-                if not name or key in stopwords:
+                explicit = key in explicit_names
+                trusted = key in trusted_keys
+                if not name or key in excluded_detection_keys or not is_likely_character_name(name, trusted=trusted, explicit=explicit):
                     return False
-                if key in trusted_keys or key in explicit_names:
+                if trusted or explicit:
                     return True
-                count = len(re.findall(r"(?<!\w)" + re.escape(name) + r"(?!\w)", raw_text, re.IGNORECASE))
-                if len(name.split()) > 1:
-                    return count >= 2
-                return count >= 4
+                count = raw_text.casefold().count(key)
+                if ai_candidate_confidence.get(key, 0.0) >= 0.90 and count >= 1:
+                    return True
+                return count >= (3 if len(name.split()) > 1 else 4)
 
             analysis.characters = [candidate for candidate in analysis.characters if credible_candidate(candidate)]
             old = {str(c.get("name", "")).casefold(): c for c in saved_rows}
@@ -4491,6 +4957,12 @@ class PremiumV2Bridge(QObject):
             # Analysis refreshes must not silently discard characters the user
             # manually created or imported from the reusable Character Library.
             for old_name, prior in old.items():
+                prior_name = str(prior.get("name") or old_name).strip()
+                prior_trusted = is_user_confirmed_character_record(prior)
+                if not is_likely_character_name(
+                    prior_name, trusted=prior_trusted, explicit=prior_name.casefold() in explicit_names
+                ):
+                    continue
                 if old_name and old_name not in item_names and (
                     old_name in trusted_keys or bool(prior.get("user_created")) or bool(prior.get("voice_profile"))
                 ):
@@ -4506,7 +4978,6 @@ class PremiumV2Bridge(QObject):
             # exact source offsets. The UI may recommend a name, but never auto-assigns it.
             from app.chapters.dialogue import dialogue_segments
             suggestions = []
-            max_suggestions = 3000
             known_cast = [*trusted_rows, *items]
             # Deduplicate canonical names while preserving every saved alias.
             dedup_known = {}
@@ -4540,23 +5011,33 @@ class PremiumV2Bridge(QObject):
             for learning_series in sorted(learning_series_names, key=str.casefold):
                 learning_examples.extend(load_learning_examples(learning_series))
             learning_index = prepare_learning_index(learning_examples)
-            for chapter in project.chapters:
-                if len(suggestions) >= max_suggestions:
-                    break
+            total_dialogue_segments = 0
+            invalid_dialogue_segments = 0
+            processed_chapters = 0
+            total_chapters = len(project.chapters)
+            for chapter_index, chapter in enumerate(project.chapters, 1):
+                check_cancelled()
+                self._job_update(
+                    job_id, state="running", stage="Indexing dialogue passages",
+                    progress=min(94, 68 + int((chapter_index - 1) / max(1, total_chapters) * 26)),
+                    message=f"Mapping source-grounded dialogue in chapter {chapter_index}/{total_chapters}",
+                )
+                processed_chapters += 1
                 last_speaker = ""
                 last_speaker_series = ""
                 last_speaker_end = -1
                 segments = dialogue_segments(chapter)
+                total_dialogue_segments += len(segments)
                 saved_assignments = [
                     row for row in (getattr(chapter, "dialogue_assignments", []) or [])
                     if isinstance(row, dict)
                 ]
                 for segment in segments:
-                    if len(suggestions) >= max_suggestions:
-                        break
+                    check_cancelled()
                     source = str(chapter.text or "")
                     start, end = int(segment.start), int(segment.end)
                     if start < 0 or end <= start or end > len(source):
+                        invalid_dialogue_segments += 1
                         continue
                     exact = source[start:end]
                     detected = [
@@ -4564,6 +5045,46 @@ class PremiumV2Bridge(QObject):
                         for name, confidence, evidence in (segment.suggestions or [])
                         if str(name).strip()
                     ]
+                    def normalize_dialogue_match(value: str) -> str:
+                        # Preserve Unicode letters and digits. The old ASCII-only
+                        # [0-9a-z] filter erased Japanese, Chinese, Korean and other
+                        # non-Latin quotes, preventing valid local-AI speaker evidence
+                        # from being matched back to its exact source passage.
+                        normalized = unicodedata.normalize("NFKC", str(value or "")).casefold()
+                        return "".join(character for character in normalized if character.isalnum())
+                    source_key = normalize_dialogue_match(exact)
+                    for ai_row in ai_dialogue_by_chapter.get(int(chapter.number), []):
+                        quote_key = normalize_dialogue_match(str(ai_row.get("quote") or ""))
+                        if not quote_key or len(quote_key) < 5:
+                            continue
+                        if quote_key not in source_key and not (len(source_key) >= 12 and source_key in quote_key):
+                            continue
+                        ai_speaker = str(ai_row.get("speaker") or "").strip()
+                        if not ai_speaker:
+                            continue
+                        canonical_speaker = ""
+                        for cast_row in known_cast:
+                            canonical = str(cast_row.get("name") or "").strip()
+                            aliases = cast_row.get("aliases") or []
+                            alias_names = aliases if isinstance(aliases, (list, tuple)) else []
+                            if ai_speaker.casefold() == canonical.casefold() or any(
+                                ai_speaker.casefold() == str(alias).strip().casefold()
+                                for alias in alias_names
+                            ):
+                                canonical_speaker = canonical
+                                break
+                        if not canonical_speaker:
+                            continue
+                        try:
+                            ai_confidence = max(0.0, min(1.0, float(ai_row.get("confidence") or 0.0)))
+                        except (TypeError, ValueError, OverflowError):
+                            ai_confidence = 0.0
+                        ai_evidence = str(ai_row.get("evidence") or "Book-context speaker analysis")
+                        detected.append({
+                            "name": canonical_speaker,
+                            "confidence": round(ai_confidence, 4),
+                            "evidence": "Local AI book-context analysis: " + ai_evidence,
+                        })
                     # Pronoun continuity is local: never carry an old speaker anchor
                     # indefinitely through unrelated dialogue in a long chapter.
                     continuity_is_local = bool(last_speaker and 0 <= start - last_speaker_end <= 420)
@@ -4637,6 +5158,63 @@ class PremiumV2Bridge(QObject):
 
                 # Keep unrelated latest state keys intact while replacing analysis-owned
                 # outputs with results calculated from the source snapshot.
+                # A user may dismiss a false detection or add/confirm a cast
+                # member while inference is running. Reconcile the latest persisted
+                # exclusion/confirmation state before committing stale worker output.
+                latest_saved_characters = [
+                    dict(row) for row in (latest_state.get("characters") or [])
+                    if isinstance(row, dict)
+                ]
+                latest_protected_names = list(protected_assignment_names)
+                for row in latest_saved_characters:
+                    if row.get("user_created") or row.get("manual") or row.get("voice_profile"):
+                        latest_protected_names.append({
+                            "name": str(row.get("name") or "").strip(),
+                            "aliases": list(row.get("aliases") or []),
+                            "series": str(row.get("series") or series_name).strip(),
+                        })
+                latest_excluded_keys = character_detection_exclusion_keys(
+                    latest_state.get("character_detection_exclusions") or [],
+                    series_name,
+                    protected_names=latest_protected_names,
+                )
+                def excluded_row(row: dict[str, Any]) -> bool:
+                    names = {
+                        str(row.get("name") or row.get("primary_name") or "").strip().casefold(),
+                        *(str(alias).strip().casefold() for alias in (row.get("aliases") or [])
+                          if str(alias or "").strip()),
+                    }
+                    return bool(names.intersection(latest_excluded_keys))
+                items = [row for row in items if not excluded_row(row)]
+                item_keys = {
+                    (str(row.get("name") or "").strip().casefold(),
+                     str(row.get("series") or series_name).strip().casefold())
+                    for row in items
+                }
+                for row in latest_saved_characters:
+                    key = (str(row.get("name") or "").strip().casefold(),
+                           str(row.get("series") or series_name).strip().casefold())
+                    if (row.get("user_created") or row.get("manual") or row.get("voice_profile")) and key[0] and key not in item_keys and not excluded_row(row):
+                        items.append(row)
+                        item_keys.add(key)
+                for suggestion in suggestions:
+                    if not isinstance(suggestion, dict):
+                        continue
+                    candidates = [
+                        candidate for candidate in (suggestion.get("suggestions") or [])
+                        if isinstance(candidate, dict)
+                        and str(candidate.get("name") or "").strip().casefold() not in latest_excluded_keys
+                    ]
+                    suggestion["suggestions"] = candidates
+                    if str(suggestion.get("suggested_speaker") or "").strip().casefold() in latest_excluded_keys:
+                        try:
+                            best_confidence = float((candidates[0] if candidates else {}).get("confidence") or 0.0)
+                        except (TypeError, ValueError, OverflowError):
+                            best_confidence = 0.0
+                        suggestion["suggested_speaker"] = (
+                            str(candidates[0].get("name") or "") if candidates and best_confidence >= 0.78 else ""
+                        )
+                        suggestion["confidence"] = round(best_confidence, 4)
                 latest_state["characters"] = items
                 latest_state["character_dialogue_suggestions"] = suggestions
                 latest_state["character_dialogue_skips"] = retain_current_dialogue_skips(
@@ -4644,22 +5222,63 @@ class PremiumV2Bridge(QObject):
                     latest_dialogue_suggestions,
                     suggestions,
                 )
-                latest_state["character_analysis"] = {"dialogue_total": analysis.dialogue_total,
-                                                      "unassigned_dialogue": analysis.unassigned_dialogue,
-                                                      "suggestion_count": len(suggestions),
-                                                      "updated_at": self._now()}
+                unresolved_count = sum(1 for row in suggestions if not row.get("assigned"))
+                latest_state["character_analysis"] = {
+                    "dialogue_total": total_dialogue_segments,
+                    "unassigned_dialogue": unresolved_count,
+                    "suggestion_count": len(suggestions),
+                    "processed_chapters": processed_chapters,
+                    "total_chapters": total_chapters,
+                    "dialogue_segment_total": total_dialogue_segments,
+                    "invalid_dialogue_segments": invalid_dialogue_segments,
+                    "coverage_percent": 100 if total_chapters == processed_chapters else int(100 * processed_chapters / max(1, total_chapters)),
+                    "coverage_complete": processed_chapters == total_chapters and invalid_dialogue_segments == 0 and len(suggestions) == total_dialogue_segments,
+                    "truncated": False,
+                    "analysis_method": ai_method,
+                    "analysis_warnings": ai_warnings[:20],
+                    "updated_at": self._now(),
+                }
                 latest_state["modified_at"] = self._now()
+                check_cancelled()
                 save_state(project.folder, latest_state)
+                analysis_committed = True
                 state = latest_state
             self._sync_saved_cast(project, items, state, update_names=False, update_voice=False)
-            self._job_update(job_id, state="completed", stage="Analysis complete", progress=100,
-                             message=f"Detected {len(items)} character candidate(s) from saved chapter text",
-                             result={"characters": items, "dialogue_total": analysis.dialogue_total,
-                                     "unassigned_dialogue": analysis.unassigned_dialogue})
+            method_label = (
+                "Local AI book-context analysis"
+                if ai_method.startswith("local_llm")
+                else "Source-grounded fallback; local AI runtime/model unavailable"
+            )
+            unresolved_count = sum(1 for row in suggestions if not row.get("assigned"))
+            self._job_update(
+                job_id, state="completed", stage="Analysis complete", progress=100,
+                message=f"Analyzed {processed_chapters}/{total_chapters} chapters; indexed {len(suggestions)} dialogue passages • {method_label}",
+                result={
+                    "characters": items,
+                    "dialogue_total": total_dialogue_segments,
+                    "unassigned_dialogue": unresolved_count,
+                    "processed_chapters": processed_chapters,
+                    "total_chapters": total_chapters,
+                    "coverage_complete": processed_chapters == total_chapters and invalid_dialogue_segments == 0 and len(suggestions) == total_dialogue_segments,
+                    "truncated": False,
+                    "analysis_method": ai_method,
+                    "analysis_warnings": ai_warnings[:20],
+                },
+            )
         except Exception as exc:
-            log.exception("Premium V2 character analysis failed")
-            self._job_update(job_id, state="failed", stage="Analysis failed", message=str(exc),
-                             error={"code": "character_analysis_failed", "message": str(exc)}, recoverable=True)
+            if cancel_event is not None and cancel_event.is_set() and not analysis_committed:
+                self._job_update(
+                    job_id, state="cancelled", stage="Analysis cancelled",
+                    message="Character analysis was cancelled at a safe boundary. No partial cast or dialogue index was committed.",
+                    result={"cancelled": True, "partial_results_committed": False},
+                    recoverable=False,
+                )
+            else:
+                log.exception("Premium V2 character analysis failed")
+                self._job_update(job_id, state="failed", stage="Analysis failed", message=str(exc),
+                                 error={"code": "character_analysis_failed", "message": str(exc)}, recoverable=True)
+        finally:
+            self._analysis_cancel_events.pop(str(job_id), None)
 
     def _character_assign(self, payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
@@ -4809,6 +5428,8 @@ class PremiumV2Bridge(QObject):
             "scope": ("Series · " + series_value) if series_value else str(scope_value or "Current book only").strip()[:80],
             "series": series_value,
             "voice_profile": profile_name or None,
+            "manual": True,
+            "manual_aliases": True,
         })
         state["characters"] = characters
         state["modified_at"] = self._now()
@@ -4885,56 +5506,89 @@ class PremiumV2Bridge(QObject):
         return {"character": item, "saved": True}
 
     def _character_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Remove an unreferenced character from exactly one active-project series."""
+        """Dismiss one unreferenced project cast row and persist its re-detection exclusion."""
         project = self._active_project()
         name = str(payload.get("name") or "").strip()
         if not name:
             raise ValueError("Choose a character to delete.")
-        state = load_state(project.folder)
-        characters = list(state.get("characters") or [])
-        default_series = self._project_series_name(project, state)
-        requested_series = str(payload.get("series") or "").strip()
-        matches = [
-            row for row in characters
-            if isinstance(row, dict)
-            and str(row.get("name") or "").strip().casefold() == name.casefold()
-            and (
-                not requested_series
-                or str(row.get("series") or default_series).strip().casefold() == requested_series.casefold()
-            )
-        ]
-        if not matches:
-            raise ValueError("The selected character is no longer in the saved cast for that series.")
-        if len(matches) > 1:
-            raise ValueError("This character name exists in more than one series. Select the series before deleting.")
-        selected = matches[0]
-        selected_series = str(selected.get("series") or default_series).strip()
-        identity_names = {
-            str(value or "").strip().casefold()
-            for value in [selected.get("name"), *(selected.get("aliases") or [])]
-            if str(value or "").strip()
+        review_lock = getattr(self, "_character_review_state_lock", threading.RLock())
+        with review_lock:
+            state = load_state(project.folder)
+            characters = list(state.get("characters") or [])
+            default_series = self._project_series_name(project, state)
+            requested_series = str(payload.get("series") or "").strip()
+            matches = [
+                row for row in characters
+                if isinstance(row, dict)
+                and str(row.get("name") or "").strip().casefold() == name.casefold()
+                and (
+                    not requested_series
+                    or str(row.get("series") or default_series).strip().casefold() == requested_series.casefold()
+                )
+            ]
+            if not matches:
+                raise ValueError("The selected character is no longer in the saved cast for that series.")
+            if len(matches) > 1:
+                raise ValueError("This character name exists in more than one series. Select the series before deleting.")
+            selected = matches[0]
+            selected_series = str(selected.get("series") or default_series).strip()
+            if not selected_series:
+                raise ValueError("The selected character has no series identity. Assign a series before dismissing it.")
+            raw_aliases = selected.get("aliases") or []
+            aliases = raw_aliases if isinstance(raw_aliases, (list, tuple)) else ([raw_aliases] if raw_aliases else [])
+            aliases = list(dict.fromkeys(
+                str(value).strip()[:160] for value in aliases
+                if str(value or "").strip() and str(value).strip().casefold() != name.casefold()
+            ))[:5]
+            identity_names = {name.casefold(), *(value.casefold() for value in aliases)}
+            # Do not leave saved dialogue spans pointing at a character that no longer exists.
+            for chapter in project.chapters:
+                for assignment in list(getattr(chapter, "dialogue_assignments", []) or []):
+                    if not isinstance(assignment, dict):
+                        continue
+                    assignment_series = str(assignment.get("series") or default_series).strip()
+                    if assignment_series and selected_series and assignment_series.casefold() != selected_series.casefold():
+                        continue
+                    raw_speakers = assignment.get("speakers")
+                    if not isinstance(raw_speakers, (list, tuple)):
+                        raw_speakers = [assignment.get("speaker")] if assignment.get("speaker") else []
+                    speakers = {str(value or "").strip().casefold() for value in raw_speakers if str(value or "").strip()}
+                    if speakers.intersection(identity_names):
+                        raise ValueError(
+                            f"Cannot delete/dismiss '{name}' while saved dialogue assignments still refer to this character. "
+                            "Unassign or reassign those passages first."
+                        )
+            exclusions = [
+                dict(row) for row in (state.get("character_detection_exclusions") or [])
+                if isinstance(row, dict)
+            ]
+            existing = next((
+                row for row in exclusions
+                if str(row.get("name") or "").strip().casefold() == name.casefold()
+                and str(row.get("series") or "").strip().casefold() == selected_series.casefold()
+            ), None)
+            if existing is None:
+                exclusions.append({
+                    "name": name,
+                    "aliases": aliases,
+                    "series": selected_series,
+                    "reason": "user-dismissed-from-project-cast",
+                    "created_at": self._now(),
+                })
+            else:
+                existing["aliases"] = list(dict.fromkeys([
+                    *(existing.get("aliases") or []), *aliases
+                ]))[:5]
+                existing["reason"] = "user-dismissed-from-project-cast"
+                existing["created_at"] = self._now()
+            state["character_detection_exclusions"] = exclusions
+            state["characters"] = [row for row in characters if row is not selected]
+            state["modified_at"] = self._now()
+            save_state(project.folder, state)
+        return {
+            "name": name, "series": selected_series, "deleted": True,
+            "detection_excluded": True, "remaining": len(state["characters"]),
         }
-        # Do not leave saved dialogue spans pointing at a character that no longer exists.
-        for chapter in project.chapters:
-            for assignment in list(getattr(chapter, "dialogue_assignments", []) or []):
-                if not isinstance(assignment, dict):
-                    continue
-                assignment_series = str(assignment.get("series") or default_series).strip()
-                if assignment_series and selected_series and assignment_series.casefold() != selected_series.casefold():
-                    continue
-                raw_speakers = assignment.get("speakers")
-                if not isinstance(raw_speakers, (list, tuple)):
-                    raw_speakers = [assignment.get("speaker")] if assignment.get("speaker") else []
-                speakers = {str(value or "").strip().casefold() for value in raw_speakers if str(value or "").strip()}
-                if speakers.intersection(identity_names):
-                    raise ValueError(
-                        f"Cannot delete '{name}' while saved dialogue assignments still refer to this character. "
-                        "Unassign or reassign those passages first."
-                    )
-        state["characters"] = [row for row in characters if row is not selected]
-        state["modified_at"] = self._now()
-        save_state(project.folder, state)
-        return {"name": name, "series": selected_series, "deleted": True, "remaining": len(state["characters"])}
 
     def _character_library_path(self) -> Path:
         return reusable_character_library_path()
@@ -5131,7 +5785,7 @@ class PremiumV2Bridge(QObject):
         registry_path: Path | None = None,
     ) -> None:
         """Merge the real saved cast into its correct series groups in the shared registry."""
-        if not isinstance(characters, list) or not characters:
+        if not isinstance(characters, list):
             return
         state = state if isinstance(state, dict) else load_state(project.folder)
         default_series = self._project_series_name(project, state)
@@ -5167,6 +5821,9 @@ class PremiumV2Bridge(QObject):
                 "line_count": row.get("dialogue_count", row.get("line_count", row.get("lines", 0))),
                 "chapter_count": chapter_count,
                 "confidence": row.get("confidence", 100),
+                "user_created": bool(row.get("user_created")),
+                "manual": bool(row.get("manual")),
+                "manual_aliases": bool(row.get("manual_aliases")),
             }
             grouped.setdefault(series, []).append(normalized)
         for series, rows in grouped.items():
@@ -5178,6 +5835,26 @@ class PremiumV2Bridge(QObject):
                 update_names=update_names,
                 update_voice=update_voice,
                 path=registry_path,
+            )
+        assignment_names: dict[str, set[str]] = {}
+        for chapter in getattr(project, "chapters", []) or []:
+            for assignment in (getattr(chapter, "dialogue_assignments", []) or []):
+                if not isinstance(assignment, dict):
+                    continue
+                series = str(assignment.get("series") or default_series).strip()
+                if not series:
+                    continue
+                speakers = assignment.get("speakers")
+                if not isinstance(speakers, (list, tuple)):
+                    speakers = [assignment.get("speaker")] if assignment.get("speaker") else []
+                assignment_names.setdefault(series.casefold(), set()).update(
+                    str(value or "").strip().casefold()
+                    for value in speakers if str(value or "").strip()
+                )
+        for series in sorted({default_series, *grouped.keys()} - {""}, key=str.casefold):
+            prune_invalid_character_records(
+                series, path=registry_path,
+                protected_names=assignment_names.get(series.casefold(), set()),
             )
 
     def _character_library_bootstrap(self) -> None:
@@ -5350,6 +6027,9 @@ class PremiumV2Bridge(QObject):
                     "notes": notes,
                     "confidence": 100,
                     "voice": voice_profile,
+                    "user_created": True,
+                    "manual": True,
+                    "manual_aliases": True,
                 }],
                 source_project_folder=str(active_project.folder) if active_project else "",
                 source_project_title=str(active_project.title) if active_project else "",
@@ -5516,6 +6196,193 @@ class PremiumV2Bridge(QObject):
             "global_library",
         ))
         return entries
+
+    def _pronunciation_export(self, _payload: dict[str, Any]) -> dict[str, Any]:
+        """Export the visible book/series/global dictionary without flattening scope."""
+        project = self._active_project()
+        state = load_state(project.folder)
+        entries = PremiumV2Bridge._pronunciation_list(self, {})
+        return {
+            "schema": "ryu.pronunciation-dictionary",
+            "version": 1,
+            "exported_at": self._now(),
+            "project_title": str(getattr(project, "title", "") or ""),
+            "series_name": str(state.get("series") or state.get("series_name") or "").strip(),
+            "entries": entries,
+        }
+
+    def _pronunciation_import(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Validate a versioned dictionary, preview conflicts, then apply only on explicit confirmation."""
+        payload = payload if isinstance(payload, dict) else {}
+        document = payload.get("document")
+        if not isinstance(document, dict):
+            raise ValueError("Choose a valid versioned pronunciation dictionary JSON file.")
+        if document.get("schema") != "ryu.pronunciation-dictionary" or document.get("version") != 1:
+            raise ValueError("Unsupported pronunciation dictionary schema or version.")
+        raw_entries = document.get("entries")
+        if not isinstance(raw_entries, list):
+            raise ValueError("The pronunciation dictionary must contain an entries array.")
+        if len(raw_entries) > 5000:
+            raise ValueError("A pronunciation dictionary import is limited to 5,000 entries.")
+
+        project = self._active_project()
+        state = load_state(project.folder)
+        active_series = str(state.get("series") or state.get("series_name") or "").strip()
+        normalized: list[dict[str, Any]] = []
+        imported_identities: dict[tuple[str, str, str], dict[str, Any]] = {}
+        for index, raw in enumerate(raw_entries):
+            if not isinstance(raw, dict):
+                raise ValueError(f"Pronunciation entry {index + 1} must be an object.")
+            written = _normalize_pronunciation_text(
+                raw.get("written_form") or raw.get("written") or raw.get("word"),
+                "Written term", 500,
+            )
+            spoken = _normalize_pronunciation_text(
+                raw.get("spoken_form") or raw.get("spoken") or raw.get("pronunciation"),
+                "Pronunciation", 1000,
+            )
+            scope_value = raw.get("scope_type") or raw.get("scope") or "current_book"
+            scope_type, scope_id, scope_label = _parse_pronunciation_scope(scope_value, raw.get("scope_id"))
+            if scope_type == "series" and (
+                not active_series or scope_id.casefold() != active_series.casefold()
+            ):
+                raise ValueError(
+                    f"Entry '{written}' belongs to Series · {scope_id}, not the active project series. "
+                    "Open that series project before importing its entries."
+                )
+            origin = str(raw.get("origin") or "manual").strip().casefold()
+            if origin not in {"manual", "ai"}:
+                raise ValueError(f"Entry '{written}' has an unsupported origin.")
+            enabled = raw.get("enabled", True)
+            if not isinstance(enabled, bool):
+                raise ValueError(f"Entry '{written}' enabled value must be true or false.")
+            language = _normalize_pronunciation_text(raw.get("language") or "Auto-detect", "Language", 100)
+            handling_mode = _normalize_pronunciation_text(
+                raw.get("handling_mode") or "automatic", "Handling mode", 100
+            )
+            row: dict[str, Any] = {
+                "written_form": written,
+                "spoken_form": spoken,
+                "language": language,
+                "handling_mode": handling_mode,
+                "scope": scope_label,
+                "scope_type": scope_type,
+                "scope_id": scope_id,
+                "origin": origin,
+                "enabled": enabled,
+            }
+            for field, limit in (("ipa", 200), ("script", 80), ("reason", 500)):
+                value = str(raw.get(field) or "").strip()
+                if value:
+                    row[field] = value[:limit]
+            if raw.get("confidence") is not None:
+                try:
+                    confidence = float(raw.get("confidence"))
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise ValueError(f"Entry '{written}' has invalid confidence.") from exc
+                if not math.isfinite(confidence) or not 0 <= confidence <= 1:
+                    raise ValueError(f"Entry '{written}' confidence must be from 0 to 1.")
+                row["confidence"] = confidence
+            alternatives = raw.get("alternatives", [])
+            if not isinstance(alternatives, list):
+                raise ValueError(f"Entry '{written}' alternatives must be an array.")
+            row["alternatives"] = [
+                str(value).strip()[:300] for value in alternatives[:5] if str(value or "").strip()
+            ]
+            identity = (scope_type, scope_id.casefold(), unicodedata.normalize("NFC", written).casefold())
+            prior_import = imported_identities.get(identity)
+            if prior_import and prior_import["spoken_form"].casefold() != spoken.casefold():
+                raise ValueError(
+                    f"The import file contains conflicting readings for '{written}' in {scope_label}."
+                )
+            imported_identities[identity] = row
+            if not prior_import:
+                normalized.append(row)
+
+        saved = PremiumV2Bridge._pronunciation_list(self, {})
+        saved_by_identity = {
+            (
+                str(row.get("scope_type") or "current_book"),
+                str(row.get("scope_id") or "").casefold(),
+                unicodedata.normalize("NFC", str(row.get("written_form") or "")).casefold(),
+            ): row
+            for row in saved if isinstance(row, dict)
+        }
+        conflicts: list[dict[str, Any]] = []
+        duplicates = 0
+        new_count = 0
+        for row in normalized:
+            identity = (row["scope_type"], row["scope_id"].casefold(), row["written_form"].casefold())
+            existing = saved_by_identity.get(identity)
+            if not existing:
+                new_count += 1
+                continue
+            if str(existing.get("spoken_form") or "").casefold() == row["spoken_form"].casefold():
+                duplicates += 1
+                continue
+            conflicts.append({
+                "written_form": row["written_form"],
+                "scope": row["scope"],
+                "existing_spoken_form": existing.get("spoken_form"),
+                "imported_spoken_form": row["spoken_form"],
+                "existing_origin": existing.get("origin", "manual"),
+                "imported_origin": row["origin"],
+                "protected_manual": existing.get("origin") == "manual" and row["origin"] == "ai",
+            })
+
+        replace_conflicts = payload.get("replace_conflicts") is True
+        apply_changes = payload.get("apply") is True
+        protected = [row for row in conflicts if row["protected_manual"]]
+        preview = {
+            "schema": "ryu.pronunciation-dictionary",
+            "preview": not apply_changes,
+            "total_entries": len(raw_entries),
+            "unique_entries": len(normalized),
+            "new_count": new_count,
+            "duplicate_count": duplicates,
+            "conflict_count": len(conflicts),
+            "protected_manual_count": len(protected),
+            "conflicts": conflicts,
+            "imported": 0,
+        }
+        if not apply_changes:
+            return preview
+        if conflicts and not replace_conflicts:
+            raise ValueError("Import conflicts require an explicit replace confirmation.")
+        if protected:
+            raise ValueError(
+                "An imported AI pronunciation cannot overwrite a saved manual pronunciation. "
+                "Resolve that entry manually in the active scope."
+            )
+
+        imported = 0
+        updated = 0
+        for row in normalized:
+            identity = (row["scope_type"], row["scope_id"].casefold(), row["written_form"].casefold())
+            existing = saved_by_identity.get(identity)
+            if existing and str(existing.get("spoken_form") or "").casefold() == row["spoken_form"].casefold():
+                continue
+            result = PremiumV2Bridge._pronunciation_save(self, {
+                **row,
+                "scope": row["scope"],
+                "scope_id": row["scope_id"],
+                "origin": row["origin"],
+                "enabled": row["enabled"],
+                **({"original_written_form": row["written_form"],
+                    "original_scope": row["scope"],
+                    "original_scope_id": row["scope_id"]} if existing else {}),
+            })
+            if existing or result.get("updated_existing"):
+                updated += 1
+            else:
+                imported += 1
+        return {
+            **preview,
+            "preview": False,
+            "imported": imported,
+            "updated": updated,
+            "conflicts_replaced": len(conflicts),
+        }
 
     def _pronunciation_save(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Add or edit a rule in one scope while retaining its manual/AI provenance."""
@@ -5720,6 +6587,102 @@ class PremiumV2Bridge(QObject):
         save_state(project.folder, state)
         return {"saved": True, "enabled": enabled}
 
+    def _pronunciation_test_results_get(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Return persisted per-profile pronunciation test outcomes for one scoped entry."""
+        payload = payload if isinstance(payload, dict) else {}
+        written = _normalize_pronunciation_text(payload.get("written_form"), "Written term", 500)
+        scope_type, scope_id, _ = _parse_pronunciation_scope(
+            payload.get("scope") or payload.get("scope_type") or "current_book",
+            payload.get("scope_id"),
+        )
+        state = load_state(self._active_project().folder)
+        stored = state.get("pronunciation_test_results")
+        rows = stored if isinstance(stored, list) else []
+        key = unicodedata.normalize("NFC", written).casefold()
+        results = [
+            dict(row) for row in rows if isinstance(row, dict)
+            and str(row.get("scope_type") or "current_book") == scope_type
+            and str(row.get("scope_id") or "").casefold() == scope_id.casefold()
+            and unicodedata.normalize("NFC", str(row.get("written_form") or "")).casefold() == key
+        ]
+        results.sort(key=lambda row: str(row.get("tested_at") or ""), reverse=True)
+        return {"written_form": written, "scope_type": scope_type, "scope_id": scope_id, "results": results}
+
+    def _pronunciation_test_results_save(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Persist each saved-profile preview outcome without persisting ephemeral audio URLs."""
+        payload = payload if isinstance(payload, dict) else {}
+        written = _normalize_pronunciation_text(payload.get("written_form"), "Written term", 500)
+        scope_type, scope_id, scope_label = _parse_pronunciation_scope(
+            payload.get("scope") or payload.get("scope_type") or "current_book",
+            payload.get("scope_id"),
+        )
+        incoming = payload.get("results")
+        if not isinstance(incoming, list) or not incoming or len(incoming) > 50:
+            raise ValueError("Provide between 1 and 50 saved-profile test results.")
+        state = load_state(self._active_project().folder)
+        stored_value = state.get("pronunciation_test_results")
+        stored = [dict(row) for row in stored_value if isinstance(row, dict)] if isinstance(stored_value, list) else []
+        saved = 0
+        key = unicodedata.normalize("NFC", written).casefold()
+        for raw in incoming:
+            if not isinstance(raw, dict):
+                raise ValueError("Each saved-profile test result must be an object.")
+            profile_name = _normalize_pronunciation_text(raw.get("profile_name"), "Profile name", 120)
+            provider = str(raw.get("provider") or "unknown").strip()[:80] or "unknown"
+            status = str(raw.get("status") or "").strip().casefold()
+            if status not in {"passed", "failed"}:
+                raise ValueError("Profile test status must be passed or failed.")
+            row: dict[str, Any] = {
+                "test_id": str(uuid.uuid4()),
+                "written_form": written,
+                "scope_type": scope_type,
+                "scope_id": scope_id,
+                "scope": scope_label,
+                "profile_name": profile_name,
+                "provider": provider,
+                "status": status,
+                "tested_at": self._now(),
+            }
+            for field in ("actual_duration_seconds", "synthesis_seconds", "total_seconds", "real_time_factor"):
+                if raw.get(field) in (None, ""):
+                    continue
+                try:
+                    number = float(raw.get(field))
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise ValueError(f"Profile test {field.replace('_', ' ')} must be a non-negative number.") from exc
+                if not math.isfinite(number) or number < 0:
+                    raise ValueError(f"Profile test {field.replace('_', ' ')} must be a non-negative number.")
+                row[field] = round(number, 4)
+            if status == "passed" and float(row.get("actual_duration_seconds") or 0) <= 0:
+                raise ValueError("A passed profile test must include its measured audio duration.")
+            try:
+                replacements = int(raw.get("pronunciation_replacements") or 0)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError("Pronunciation replacement count must be a non-negative integer.") from exc
+            if replacements < 0:
+                raise ValueError("Pronunciation replacement count must be a non-negative integer.")
+            row["pronunciation_replacements"] = replacements
+            if raw.get("error"):
+                row["error"] = str(raw.get("error"))[:800]
+            identity = (scope_type, scope_id.casefold(), key, profile_name.casefold())
+            prior = next((
+                index for index, existing in enumerate(stored)
+                if (
+                    str(existing.get("scope_type") or "current_book"),
+                    str(existing.get("scope_id") or "").casefold(),
+                    unicodedata.normalize("NFC", str(existing.get("written_form") or "")).casefold(),
+                    str(existing.get("profile_name") or "").casefold(),
+                ) == identity
+            ), None)
+            if prior is None:
+                stored.append(row)
+            else:
+                stored[prior] = row
+            saved += 1
+        state["pronunciation_test_results"] = stored[-2000:]
+        save_state(self._active_project().folder, state)
+        return {"saved": saved, "total_results": len(state["pronunciation_test_results"])}
+
     def _pronunciation_analyze(self, _payload: dict[str, Any]) -> dict[str, Any]:
         """Start the existing local audiobook-AI pronunciation analysis for saved chapters."""
         project = self._active_project()
@@ -5764,7 +6727,7 @@ class PremiumV2Bridge(QObject):
                 for candidate in candidates:
                     candidate = str(candidate or "").strip()
                     if len(candidate) > 1 and re.search(
-                        r"(?i)(?<![\w])" + re.escape(candidate) + r"(?![\\w])", source_text
+                        r"(?i)(?<![\w])" + re.escape(candidate) + r"(?![\w])", source_text
                     ):
                         names.add(candidate)
         suggestions = [{
@@ -5789,7 +6752,32 @@ class PremiumV2Bridge(QObject):
         try:
             from app.ai.brain import AudiobookBrain
             from app.ai.learning_context import load_project_learning_context
-            from app.tts.pronunciation_suggester import is_common_english_phrase
+            from app.tts.pronunciation_suggester import (
+                is_pronunciation_override_candidate, is_likely_character_name_candidate,
+            )
+            from app.chapters.characters import (
+                is_likely_character_name, is_user_confirmed_character_record,
+            )
+            # This worker must not call the UI bridge's _character_list method:
+            # the pronunciation worker can run independently of Character Studio,
+            # and _character_list performs UI-facing persistence cleanup. Use the
+            # saved project cast directly and apply the same authoritative filter.
+            state = load_state(project.folder)
+            confirmed_character_names: set[str] = set()
+            for character in state.get("characters") or []:
+                if not isinstance(character, dict):
+                    continue
+                character_name = str(character.get("name") or "").strip()
+                character_trusted = is_user_confirmed_character_record(character)
+                if character_name and is_likely_character_name(character_name, trusted=character_trusted):
+                    confirmed_character_names.add(character_name.casefold())
+                    aliases = character.get("aliases") or []
+                    if isinstance(aliases, (list, tuple)):
+                        confirmed_character_names.update(
+                            str(alias).strip().casefold() for alias in aliases
+                            if str(alias or "").strip()
+                            and is_likely_character_name(str(alias), trusted=character_trusted)
+                        )
             learning_context = load_project_learning_context(Path(project.folder))
             brain = AudiobookBrain(Path(project.folder))
             try:
@@ -5807,6 +6795,24 @@ class PremiumV2Bridge(QObject):
                 brain.close()
 
             source_text = "\n\n".join(str(chapter.text or "") for chapter in project.chapters)
+            # Add AI-discovered identities only when the canonical name/alias
+            # passes the same character filter and appears as a whole source token.
+            known_pronunciation_names = set(confirmed_character_names)
+            for chapter_report in analysis.get("chapters", []) if isinstance(analysis, dict) else []:
+                if not isinstance(chapter_report, dict):
+                    continue
+                for ai_character in chapter_report.get("characters", []) or []:
+                    if not isinstance(ai_character, dict):
+                        continue
+                    for raw_name in [ai_character.get("name"), *(ai_character.get("aliases") or [])]:
+                        ai_name = str(raw_name or "").strip()
+                        if not ai_name or not is_likely_character_name(ai_name, explicit=True):
+                            continue
+                        if re.search(
+                            r"(?i)(?<![\w])" + re.escape(ai_name) + r"(?![\w])",
+                            source_text,
+                        ):
+                            known_pronunciation_names.add(ai_name.casefold())
             seen = set(existing)
             suggestions = []
             for raw in analysis.get("pronunciation", []) if isinstance(analysis, dict) else []:
@@ -5821,11 +6827,28 @@ class PremiumV2Bridge(QObject):
                 present = (
                     written.casefold() in source_text.casefold()
                     if native_script else
-                    bool(re.search(r"(?i)(?<![\w])" + re.escape(written) + r"(?![\\w])", source_text))
+                    bool(re.search(r"(?i)(?<![\w])" + re.escape(written) + r"(?![\w])", source_text))
                 )
-                if not present or is_common_english_phrase(written):
-                    continue
                 key = unicodedata.normalize("NFC", written).casefold()
+                candidate_is_name = is_likely_character_name_candidate(
+                    written, known_names=known_pronunciation_names, script=raw.get("script")
+                )
+                # Unknown one-token Latin transliterations (for example, Yamato)
+                # are not accepted by the generic pronunciation guard on their
+                # own. Permit this narrow path only when the authoritative
+                # character-name validator accepts the token; it still must be
+                # present in the source, carry explicit non-English language
+                # evidence, and pass the same common-English rejection below.
+                if not candidate_is_name and len(written.split()) == 1:
+                    candidate_is_name = is_likely_character_name(written, explicit=True)
+                pronunciation_evidence = is_pronunciation_override_candidate(
+                    written,
+                    source_language=raw.get("source_language"),
+                    script=raw.get("script"),
+                    known_names=known_pronunciation_names,
+                )
+                if not present or not candidate_is_name or not pronunciation_evidence:
+                    continue
                 if key in seen:
                     continue
                 try:
@@ -5889,8 +6912,176 @@ class PremiumV2Bridge(QObject):
         match = re.match(r"(?i)^series\s*[·:-]\s*(.+)$", scope)
         return match.group(1).strip() if match else str(default_series or "").strip()
 
+    def _effective_generation_character_rows(
+        self,
+        state: dict[str, Any],
+        default_series: str,
+        *,
+        available_profiles=None,
+        strict: bool = True,
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """Resolve Character Studio and legacy Voice Cast into one production cast.
+
+        Character Studio records remain primary. Legacy Voice Cast entries are
+        merged only when their character identity is unambiguous; a name shared
+        by multiple series is never routed to the first matching character.
+        Every non-empty profile reference must resolve to a currently saved
+        Voice Studio profile before it can be treated as configured.
+        """
+        profiles = list(available_profiles if available_profiles is not None else load_profiles())
+        by_name = {
+            str(profile.name or "").strip().casefold(): profile
+            for profile in profiles if str(getattr(profile, "name", "") or "").strip()
+        }
+        by_voice_id: dict[str, list[Any]] = {}
+        for profile in profiles:
+            voice_id = str(getattr(profile, "voice_id", "") or "").strip().casefold()
+            if voice_id:
+                by_voice_id.setdefault(voice_id, []).append(profile)
+
+        issues: list[str] = []
+
+        def resolve_profile(value: Any, *, allow_voice_id: bool = False):
+            key = str(value or "").strip().casefold()
+            if not key:
+                return None
+            match = by_name.get(key)
+            if match is not None:
+                return match
+            if allow_voice_id:
+                candidates = by_voice_id.get(key, [])
+                if len(candidates) == 1:
+                    return candidates[0]
+                if len(candidates) > 1:
+                    issues.append(
+                        f"Voice ID '{str(value).strip()}' matches more than one saved Voice Studio profile."
+                    )
+            return None
+
+        rows = [
+            dict(row) for row in (state.get("characters") or [])
+            if isinstance(row, dict)
+        ]
+
+        # Normalize older alternate assignment fields on Character Studio rows.
+        for row in rows:
+            existing = str(row.get("voice_profile") or "").strip()
+            if not existing:
+                existing = next((
+                    str(row.get(key) or "").strip()
+                    for key in ("voice_profile_name", "assigned_voice_profile", "profile_name", "voice_name")
+                    if str(row.get(key) or "").strip()
+                ), "")
+            profile = resolve_profile(existing) if existing else None
+            if existing and profile is None:
+                issues.append(
+                    f"Character '{row.get('name') or 'Unknown'}' references unavailable saved voice profile '{existing}'."
+                )
+            elif profile is not None:
+                row["voice_profile"] = str(profile.name)
+            elif not str(row.get("voice_profile") or "").strip():
+                legacy_voice_id = str(row.get("voice_id") or "").strip()
+                if legacy_voice_id:
+                    profile = resolve_profile(legacy_voice_id, allow_voice_id=True)
+                    if profile is None:
+                        issues.append(
+                            f"Character '{row.get('name') or 'Unknown'}' has an unresolvable legacy voice ID '{legacy_voice_id}'."
+                        )
+                    else:
+                        row["voice_profile"] = str(profile.name)
+
+        legacy_cast = state.get("voice_cast")
+        legacy_cast = legacy_cast if isinstance(legacy_cast, dict) else {}
+        for raw_name, raw_assignment in legacy_cast.items():
+            name = str(raw_name or "").strip()
+            if not name or name.casefold() == "narrator":
+                continue
+
+            requested_series = ""
+            raw_profile = ""
+            allow_voice_id = False
+            if isinstance(raw_assignment, dict):
+                requested_series = str(raw_assignment.get("series") or "").strip()
+                raw_profile = next((
+                    str(raw_assignment.get(key) or "").strip()
+                    for key in ("voice_profile", "voice_profile_name", "assigned_voice_profile", "profile_name", "voice_name")
+                    if str(raw_assignment.get(key) or "").strip()
+                ), "")
+                if not raw_profile:
+                    raw_profile = str(raw_assignment.get("voice_id") or "").strip()
+                    allow_voice_id = bool(raw_profile)
+            else:
+                raw_profile = str(raw_assignment or "").strip()
+
+            if not raw_profile:
+                continue
+            profile = resolve_profile(raw_profile, allow_voice_id=allow_voice_id)
+            if profile is None:
+                issues.append(
+                    f"Legacy Voice Cast entry '{name}' references unavailable voice profile '{raw_profile}'."
+                )
+                continue
+
+            name_key = name.casefold()
+            matching_rows = []
+            for row in rows:
+                canonical = str(row.get("name") or row.get("primary_name") or "").strip()
+                aliases = row.get("aliases") or []
+                aliases = aliases if isinstance(aliases, (list, tuple)) else ([aliases] if aliases else [])
+                identity_names = {canonical.casefold()}
+                identity_names.update(str(alias or "").strip().casefold() for alias in aliases)
+                if name_key not in identity_names:
+                    continue
+                row_series = self._character_series_for_voice_assignment(row, default_series)
+                if requested_series and row_series.casefold() != requested_series.casefold():
+                    continue
+                matching_rows.append(row)
+
+            if len(matching_rows) > 1:
+                issues.append(
+                    f"Legacy Voice Cast entry '{name}' matches multiple characters; specify its series in Character Studio."
+                )
+                continue
+            if matching_rows:
+                row = matching_rows[0]
+                current = str(row.get("voice_profile") or "").strip()
+                if current and current.casefold() != str(profile.name).casefold():
+                    issues.append(
+                        f"Character '{name}' has conflicting Character Studio and legacy Voice Cast profiles."
+                    )
+                    continue
+                row["voice_profile"] = str(profile.name)
+                if not str(row.get("series") or row.get("series_name") or "").strip():
+                    row["series"] = requested_series or default_series
+                continue
+
+            # Older Voice Cast data may not have a Character Studio row at all.
+            # Preserve its real profile route in an explicit virtual cast record.
+            series = requested_series or default_series
+            rows.append({
+                "name": name,
+                "aliases": [],
+                "series": series,
+                "scope": ("Series · " + series) if series else "Current book only",
+                "voice_profile": str(profile.name),
+                "legacy_voice_cast": True,
+            })
+
+        if strict and issues:
+            raise ValueError(
+                "Saved character voice assignments need attention before generation: "
+                + " ".join(issues[:3])
+            )
+        return rows, issues
+
     def _resolve_narrator_for_generation(self, project, state: dict[str, Any], chapters):
-        """Resolve the effective saved narrator and fail closed on unresolved dialogue."""
+        """Resolve narrator and choose explicit narrator-only or cast-aware routing.
+
+        GEN-07: with zero configured character voice profiles, the saved
+        narrator intentionally reads all source passages, including dialogue.
+        No artificial character assignments are created. Once any character
+        profile is configured, the normal speaker-review gate applies.
+        """
         series = self._project_series_name(project, state)
         selection = self._narrator_series_default_read(project, state, series)
         profile_name = str(selection.get("effective_profile_name") or "").strip()
@@ -5902,16 +7093,59 @@ class PremiumV2Bridge(QObject):
         profile = self._find_profile(profile_name)
         if profile is None or not selection.get("profile_available"):
             raise ValueError(
-                f"Generation is blocked because the effective narrator profile '{profile_name}' "
-                "is unavailable. Restore the saved Voice Studio profile or choose another narrator."
+                f"The effective narrator profile '{profile_name}' is unavailable. "
+                "Restore the saved Voice Studio profile or choose another narrator."
             )
 
-        from app.chapters.speaker_segmentation import segment_chapter_speakers
-        unresolved = []
-        for chapter in chapters:
-            for segment in segment_chapter_speakers(chapter):
-                if segment.needs_review or segment.kind in {"needs_speaker_review", "review_required"}:
-                    unresolved.append((int(chapter.number), str(segment.text or "")))
+        character_rows, _cast_mapping_issues = self._effective_generation_character_rows(
+            state if isinstance(state, dict) else {},
+            series,
+            strict=True,
+        )
+        configured_profiles = [
+            row for row in character_rows
+            if str(row.get("voice_profile") or "").strip()
+        ]
+        effective_selection = dict(selection)
+        if not configured_profiles:
+            effective_selection.update({
+                "generation_mode": "narrator_only",
+                "narrator_only": True,
+                "character_voice_profile_count": 0,
+                "dialogue_routing": "narrator_for_all_passages",
+                "effective_character_rows": character_rows,
+            })
+            return profile, effective_selection
+
+        eligible_chapter_ids = {str(getattr(chapter, "chapter_id", "") or "") for chapter in chapters}
+        if getattr(project, "folder", None) is None:
+            # Projectless tests may use a SimpleNamespace instead of a persisted
+            # Project. Keep this small harness on the exact source segmenter.
+            from app.chapters.speaker_segmentation import segment_chapter_speakers
+            unresolved = [
+                (int(chapter.number), str(segment.text or ""))
+                for chapter in chapters
+                for segment in segment_chapter_speakers(chapter)
+                if segment.needs_review or segment.kind in {"needs_speaker_review", "review_required"}
+            ]
+            passage_index = {"issues": []}
+        else:
+            from app.chapters.passage_index import load_or_build_passage_index
+            passage_index = load_or_build_passage_index(
+                project.folder, project.chapters,
+                suggested_passages=state.get("character_dialogue_suggestions") or [],
+            )
+            unresolved = [
+                (int(row.get("chapter_number") or 0), str(row.get("text") or ""))
+                for row in passage_index["passages"]
+                if str(row.get("chapter_id") or "") in eligible_chapter_ids
+                and bool(row.get("needs_review"))
+            ]
+        unresolved.extend(
+            (int(issue.get("chapter_number") or 0), str(issue.get("text") or ""))
+            for issue in passage_index.get("issues", [])
+            if str(issue.get("chapter_id") or "") in eligible_chapter_ids
+        )
         if unresolved:
             examples = "; ".join(
                 f"Chapter {number}: {text[:64].strip()!r}"
@@ -5922,7 +7156,14 @@ class PremiumV2Bridge(QObject):
                 "Assign a character speaker or correct the narration classification before generating. "
                 + examples
             )
-        return profile, selection
+        effective_selection.update({
+            "generation_mode": "character_cast",
+            "narrator_only": False,
+            "character_voice_profile_count": len(configured_profiles),
+            "dialogue_routing": "saved_character_assignments",
+            "effective_character_rows": character_rows,
+        })
+        return profile, effective_selection
 
     def _production_generate_book(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._assert_no_active_model_lifecycle("start audiobook generation")
@@ -6002,9 +7243,15 @@ class PremiumV2Bridge(QObject):
         cast_assignments: dict[str, str] = {}
         cast_identity_assignments: dict[str, str] = {}
         cast_profiles: dict[str, Any] = {}
-        available_profiles = {p.name.casefold(): p for p in load_profiles()}
+        saved_profiles = load_profiles()
+        available_profiles = {p.name.casefold(): p for p in saved_profiles}
         project_series = self._project_series_name(project, state)
-        for character in state.get("characters") or []:
+        generation_characters = narrator_selection.get("effective_character_rows")
+        if not isinstance(generation_characters, list):
+            generation_characters, _cast_mapping_issues = self._effective_generation_character_rows(
+                state, project_series, available_profiles=saved_profiles, strict=True
+            )
+        for character in generation_characters:
             if not isinstance(character, dict):
                 continue
             assigned_name = str(character.get("voice_profile") or "").strip()
@@ -6104,10 +7351,15 @@ class PremiumV2Bridge(QObject):
             "generation_interruption_reason",
         ):
             state.pop(recovery_key, None)
+        generation_mode = str(narrator_selection.get("generation_mode") or "character_cast")
+        narrator_only = bool(narrator_selection.get("narrator_only"))
         state.update({"voice_profile": profile.name, "voice_id": profile.voice_id,
                       "narrator": profile.name,
                       "narrator_profile_source": str(narrator_selection.get("source") or "none"),
                       "narrator_series_default": str(narrator_selection.get("profile_name") or ""),
+                      "generation_mode": generation_mode,
+                      "narrator_only_generation": narrator_only,
+                      "character_voice_profile_count": int(narrator_selection.get("character_voice_profile_count") or 0),
                       "output_path": None, "generation_target_path": str(output),
                       "status": "generating", "audio_bitrate": bitrate, "generation_job_id": job_id,
                       "generation_started_at": self._now(), "empty_chapters_skipped": empty_skipped,
@@ -6172,13 +7424,19 @@ class PremiumV2Bridge(QObject):
         )
         with self._jobs_lock:
             self._generators[job_id] = manager
+        start_message = f"Starting with {empty_skipped} empty and {excluded_skipped} excluded chapter(s) skipped"
+        if narrator_only:
+            start_message += " • Narrator-only mode: the saved narrator will read narration and all dialogue"
         self._job_update(job_id, state="running", started_at=self._now(), stage="Preparing generation",
-                         progress=1, message=f"Starting with {empty_skipped} empty and {excluded_skipped} excluded chapter(s) skipped",
+                         progress=1, message=start_message,
                          result={"output_path": str(output), "chapter_count": len(chapters),
                                  "empty_chapters_skipped": empty_skipped,
                                  "excluded_chapters_skipped": excluded_skipped,
                                  "chapters_skipped_for_generation": skipped,
-                                 "voice_profile": profile.name})
+                                 "voice_profile": profile.name,
+                                 "generation_mode": generation_mode,
+                                 "narrator_only": narrator_only,
+                                 "character_voice_profile_count": int(narrator_selection.get("character_voice_profile_count") or 0)})
         try:
             manager.start(output, metadata["title"], metadata["author"],
                           Path(state["cover_path"]) if state.get("cover_path") and Path(state["cover_path"]).is_file() else None,
@@ -6194,7 +7452,8 @@ class PremiumV2Bridge(QObject):
         return {"job_id": job_id, "state": "running", "output_path": str(output),
                 "chapter_count": len(chapters), "empty_chapters_skipped": empty_skipped,
                 "excluded_chapters_skipped": excluded_skipped,
-                "chapters_skipped_for_generation": skipped, "voice_profile": profile.name}
+                "chapters_skipped_for_generation": skipped, "voice_profile": profile.name,
+                "generation_mode": generation_mode, "narrator_only": narrator_only}
 
     def _generation_progress(self, job_id: str, chapter: int, total: int, done: int, message: str) -> None:
         msg = str(message or "")
@@ -6498,6 +7757,15 @@ class PremiumV2Bridge(QObject):
                 import_cancel = self._import_cancel_events.get(job_id)
             if row and row.get("state") in {"completed", "failed", "cancelled"}:
                 return dict(row)
+            analysis_cancel = self._analysis_cancel_events.get(job_id)
+            if row and row.get("type") == "character-analysis" and analysis_cancel is not None and row.get("state") in {"queued", "running", "cancel_requested"}:
+                analysis_cancel.set()
+                if row.get("state") == "cancel_requested":
+                    return dict(row)
+                return self._job_update(
+                    job_id, state="cancel_requested", stage="Cancellation requested",
+                    message="Character analysis will stop at the next safe local-AI inference or chapter boundary; saved cast data will be preserved.",
+                )
             if row and preview_cancel is not None and row.get("state") in {"queued", "running", "cancel_requested"}:
                 preview_cancel.set()
                 return self._job_update(job_id, state="cancel_requested", stage="Cancellation requested",
@@ -6872,14 +8140,147 @@ class PremiumV2Bridge(QObject):
                 "Let the model operation finish, then retry."
             )
 
-    def _models_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
-        """Return and cache the authoritative model/runtime inventory."""
-        from app.tts.model_registry import build_inventory
+    def _invalidate_catalog_scan(self, kind: str) -> None:
+        """Mark one catalogue dirty without discarding its last-known-good snapshot."""
+        if kind not in {"models", "sound"}:
+            raise ValueError(f"Unsupported catalogue kind: {kind}")
+        with self._catalog_scan_lock:
+            self._catalog_scan_generation[kind] = int(self._catalog_scan_generation.get(kind, 0)) + 1
+            if kind == "models":
+                self._model_inventory_cache_ready = False
+            else:
+                self._sound_catalog_cache_ready = False
 
-        rows = build_inventory()
-        self._model_inventory_cache = rows
-        self._model_inventory_cache_at = time.monotonic()
-        return rows
+    def _build_model_inventory(self) -> list[dict[str, Any]]:
+        """Perform the expensive authoritative model/filesystem scan; call from a worker."""
+        from app.tts.model_registry import build_inventory
+        return list(build_inventory())
+
+    def _refresh_model_inventory_sync(self) -> list[dict[str, Any]]:
+        """Publish a model inventory built by an existing background lifecycle worker."""
+        rows = self._build_model_inventory()
+        with self._catalog_cache_lock:
+            self._model_inventory_cache = rows
+            self._model_inventory_cache_at = time.monotonic()
+            self._model_inventory_cache_ready = True
+        return list(rows)
+
+    def _queue_catalog_scan(self, kind: str) -> str:
+        """Queue one durable single-flight scan while preserving the last good snapshot."""
+        if kind not in {"models", "sound"}:
+            raise ValueError(f"Unsupported catalogue kind: {kind}")
+        labels = {
+            "models": ("catalog-scan-models", "Refresh installed model inventory",
+                       "Inspect local model weights, runtimes, providers and storage."),
+            "sound": ("catalog-scan-sound", "Refresh Sound Design library",
+                      "Inspect imported and bundled audio assets and their metadata."),
+        }
+        job_type, title, description = labels[kind]
+        with self._catalog_scan_lock:
+            current_id = self._catalog_scan_jobs.get(kind)
+            if current_id:
+                with self._jobs_lock:
+                    current = self._jobs.get(current_id)
+                if current and str(current.get("state") or "").casefold() in {"queued", "running"}:
+                    return current_id
+                self._catalog_scan_jobs.pop(kind, None)
+
+            job_id = self._new_job(job_type, title, description)
+            self._catalog_scan_jobs[kind] = job_id
+            self._job_update(
+                job_id, state="running", started_at=self._now(), progress=5,
+                stage="Preparing background scan",
+                message="The application remains usable while the local catalogue is scanned.",
+            )
+
+        def worker() -> None:
+            try:
+                while True:
+                    with self._catalog_scan_lock:
+                        generation = int(self._catalog_scan_generation.get(kind, 0))
+                    self._job_update(
+                        job_id, state="running", progress=15,
+                        stage=("Scanning installed models and runtimes" if kind == "models"
+                               else "Scanning local and bundled audio assets"),
+                        message="Filesystem enumeration is running in a background worker.",
+                    )
+                    rows = (
+                        self._build_model_inventory() if kind == "models"
+                        else self._build_sound_catalog()
+                    )
+                    with self._catalog_scan_lock:
+                        if int(self._catalog_scan_generation.get(kind, 0)) != generation:
+                            self._job_update(
+                                job_id, state="running", progress=80,
+                                stage="Source changed · rescanning",
+                                message="Files changed during the scan; reconciling against the latest filesystem state.",
+                            )
+                            continue
+                        with self._catalog_cache_lock:
+                            if kind == "models":
+                                self._model_inventory_cache = rows
+                                self._model_inventory_cache_at = time.monotonic()
+                                self._model_inventory_cache_ready = True
+                            else:
+                                self._sound_catalog_cache = rows
+                                self._sound_catalog_cache_at = time.monotonic()
+                                self._sound_catalog_cache_ready = True
+                    self._job_update(
+                        job_id, state="completed", progress=100,
+                        stage="Catalogue refreshed",
+                        message=f"Verified {len(rows)} catalogue entries.",
+                        result={"catalogue": kind, "entry_count": len(rows)},
+                        error=None, recoverable=False,
+                    )
+                    break
+            except Exception as exc:
+                log.exception("Background %s catalogue scan failed", kind)
+                self._job_update(
+                    job_id, state="failed", progress=100,
+                    stage="Catalogue refresh failed",
+                    message="The previous catalogue snapshot was preserved.",
+                    error={"code": kind + "_catalogue_scan_failed", "message": str(exc)},
+                    recoverable=True,
+                )
+            finally:
+                with self._catalog_scan_lock:
+                    if self._catalog_scan_jobs.get(kind) == job_id:
+                        self._catalog_scan_jobs.pop(kind, None)
+
+        try:
+            threading.Thread(
+                target=worker, daemon=True,
+                name="RyuModelInventoryScan" if kind == "models" else "RyuSoundCatalogueScan",
+            ).start()
+        except Exception as exc:
+            with self._catalog_scan_lock:
+                if self._catalog_scan_jobs.get(kind) == job_id:
+                    self._catalog_scan_jobs.pop(kind, None)
+            self._job_update(
+                job_id, state="failed", stage="Could not start catalogue scan",
+                message="The previous catalogue snapshot was preserved.",
+                error={"code": kind + "_catalogue_scan_start_failed", "message": str(exc)},
+                recoverable=True,
+            )
+        return job_id
+
+    def _models_list(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        """Return the last-known inventory immediately and refresh stale data off-thread."""
+        cached = getattr(self, "_model_inventory_cache", None)
+        scanned_at = float(getattr(self, "_model_inventory_cache_at", 0.0) or 0.0)
+        ready = bool(getattr(self, "_model_inventory_cache_ready", False))
+        force_refresh = bool((payload or {}).get("force_refresh"))
+        if force_refresh or not ready or time.monotonic() - scanned_at >= 5.0:
+            try:
+                self._queue_catalog_scan("models")
+            except RuntimeError as exc:
+                log.warning("Model inventory refresh deferred: %s", exc)
+        return list(cached) if isinstance(cached, list) else []
+
+    def _models_refresh(self, _payload: dict[str, Any]) -> dict[str, Any]:
+        """Explicit Refresh Status action; the scan itself never runs on the Qt thread."""
+        job_id = self._queue_catalog_scan("models")
+        return {"job_id": job_id, "state": "running", "catalogue": "models"}
 
     def _models_files(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Return paginated actual file metadata for one inventory component."""
@@ -6987,7 +8388,8 @@ class PremiumV2Bridge(QObject):
                 else:
                     outcome = self._models_install_component(model_id, details, report_progress, force_repair=action == "repair")
                 report_progress("Refreshing actual installed state…")
-                latest = self._models_list({})
+                self._invalidate_catalog_scan("models")
+                latest = self._refresh_model_inventory_sync()
                 self._job_update(job_id, state="completed", progress=100,
                                  stage=f"{verb} complete", message=str(outcome or f"{verb} completed."),
                                  result={"action": action, "model_id": model_id, "detail": str(outcome or ""),
@@ -8358,7 +9760,27 @@ class PremiumV2Bridge(QObject):
             raise RuntimeError("Windows did not open the output folder.")
         return {"opened": True, "path": str(folder.resolve())}
 
-    def _sound_catalog(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
+    def _sound_catalog(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        """Return the last-known audio catalogue immediately; cold scans are workers."""
+        payload = payload if isinstance(payload, dict) else {}
+        cached = getattr(self, "_sound_catalog_cache", None)
+        scanned_at = float(getattr(self, "_sound_catalog_cache_at", 0.0) or 0.0)
+        ready = bool(getattr(self, "_sound_catalog_cache_ready", False))
+        force_refresh = bool(payload.get("force_refresh"))
+        if force_refresh or not ready or time.monotonic() - scanned_at >= 20.0:
+            try:
+                self._queue_catalog_scan("sound")
+            except RuntimeError as exc:
+                log.warning("Sound catalogue refresh deferred: %s", exc)
+        return list(cached) if isinstance(cached, list) else []
+
+    def _sound_refresh(self, _payload: dict[str, Any]) -> dict[str, Any]:
+        """Explicit Sound Design refresh; filesystem work stays outside the bridge thread."""
+        job_id = self._queue_catalog_scan("sound")
+        return {"job_id": job_id, "state": "running", "catalogue": "sound"}
+
+    def _build_sound_catalog(self) -> list[dict[str, Any]]:
+        """Build the actual audio catalogue; called only by a background worker."""
         from app.audio.library import AUDIO_EXTENSIONS, MUSIC_CATEGORY_LABELS, audio_asset_role, metadata_for
         local_root = app_root() / "Audio Library"
         bundled = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2])) / "assets" / "starter_audio"
@@ -8489,7 +9911,8 @@ class PremiumV2Bridge(QObject):
                     }
             except OSError:
                 log.exception("Could not scan sound asset folder %s", root)
-        return sorted(found.values(), key=lambda row: (row["source"], row["title"].casefold()))
+        rows = sorted(found.values(), key=lambda row: (row["source"], row["title"].casefold()))
+        return list(rows)
 
     def _sound_import(self, payload: dict[str, Any]) -> dict[str, Any]:
         paths = payload.get("paths")
@@ -8552,7 +9975,13 @@ class PremiumV2Bridge(QObject):
             imported.append({"title": destination.stem, "path": str(destination.resolve()),
                              "source": "Imported locally", "format": destination.suffix.lower(),
                              "size_bytes": destination.stat().st_size})
-        return {"cancelled": False, "imported": imported, "catalog": self._sound_catalog({})}
+        self._invalidate_catalog_scan("sound")
+        refresh_job_id = self._queue_catalog_scan("sound")
+        return {
+            "cancelled": False, "imported": imported,
+            "catalog": self._sound_catalog({}),
+            "catalog_refresh_job_id": refresh_job_id,
+        }
 
     def _sound_assign(self, payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()

@@ -16,6 +16,10 @@ class ProductionGenerationHarness:
     """Call the actual Premium V2 production handler without constructing a Qt window."""
 
     _production_generate_book = host.PremiumV2Bridge._production_generate_book
+    _effective_generation_character_rows = host.PremiumV2Bridge._effective_generation_character_rows
+    _character_series_for_voice_assignment = staticmethod(
+        host.PremiumV2Bridge._character_series_for_voice_assignment
+    )
 
     def __init__(self, project, profile, job_id="stage53-production-job") -> None:
         self.project = project

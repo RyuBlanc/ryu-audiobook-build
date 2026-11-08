@@ -539,6 +539,14 @@ class AudiobookBrain:
         bible: dict[str, dict[str, Any]] = {}
         results: list[dict[str, Any]] = []
         base_context = dict(learning_context or {})
+        initial_characters = base_context.get("characters")
+        if isinstance(initial_characters, list):
+            for row in initial_characters:
+                if not isinstance(row, dict):
+                    continue
+                name = str(row.get("name") or row.get("primary_name") or "").strip()
+                if name:
+                    bible[name] = dict(row, name=name)
         pronunciation_by_key: dict[str, dict[str, Any]] = {}
 
         def aggregate_pronunciation() -> list[dict[str, Any]]:

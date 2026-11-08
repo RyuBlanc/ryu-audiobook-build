@@ -14,6 +14,7 @@ from app.tts.qwen_model_preference import (
     get_qwen_model_preference,
     get_qwen_backend_preference,
     get_qwen_low_memory_mode,
+    normalize_qwen_backend_preference,
     qwen_model_kinds_for_preference,
 )
 
@@ -36,10 +37,13 @@ def provider_from_profile(profile: VoiceProfile):
             mode, get_qwen_model_preference()
         )
         effective_model_kind = global_model_kind or profile.model_id or "auto"
-        profile_backend = str(profile.backend or "automatic").strip().casefold()
+        # Legacy profiles may incorrectly store the provider ID ("qwen-character")
+        # in the compute-backend field. Never forward provider IDs or malformed
+        # values to the worker; use the global backend preference for Automatic.
+        profile_backend = normalize_qwen_backend_preference(profile.backend)
         effective_backend = (
             get_qwen_backend_preference()
-            if profile_backend in {"auto", "automatic", ""}
+            if profile_backend == "automatic"
             else profile_backend
         )
         return (

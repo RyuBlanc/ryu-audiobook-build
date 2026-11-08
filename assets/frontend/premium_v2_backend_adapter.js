@@ -269,6 +269,8 @@
   let mixLevelsRevision = 0, mixLevelsSavePromise = null;
   let soundManifestSavePromise = null, soundManifestSaveRevision = 0, soundManifestPendingOverrides = Object.create(null);
   let cueClearAllStaged = false;
+  let modelInventoryLoadPromise = null, modelInventoryScanRequested = false, modelInventoryLoadedAt = 0, forceModelInventoryRefreshPending = false;
+  let soundCatalogLoadPromise = null, soundCatalogScanRequested = false, soundCatalogLoadedAt = 0, forceSoundCatalogRefreshPending = false;
   let providerCatalogs = Object.create(null), providerCatalogEpochs = Object.create(null), voiceListEpoch = 0, modelListEpoch = 0, projectListEpoch = 0, characterListEpoch = 0, termsListEpoch = 0, soundListEpoch = 0, historyListEpoch = 0, librarySearchTimer = null, soundSearchTimer = null;
   let dashboardProject = null, selectedAudiobookFolder = null, miniPlayerDismissed = false;
   let metadataDialogProjectFolder = '', metadataDialogDirty = false, metadataDialogEpoch = 0;
@@ -464,8 +466,134 @@
     const analyzedItems = items.filter(item =>
       item.source === 'local-dialogue-analysis' || analyzedIds.has(String(item.id || ''))
     );
+    const selectedNumber = Number(window.ryuPremiumAiChapterNumber || characterStudioSelectedChapter || window.ryuPremiumSelectedChapter || chapters[0]?.number || 0);
+    const selectedChapter = chapters.find(chapter => Number(chapter.number) === selectedNumber) || chapters[0] || null;
+    const pendingQueue = analyzedItems.filter(item =>
+      Number(item.chapter_number) === Number(selectedChapter?.number) &&
+      !item.assigned && !item.skipped
+    );
+    const queueSignature = String(selectedChapter?.number || 0) + '|' +
+      pendingQueue.map(item => String(item.id || '')).join('|');
+    if (window.ryuPremiumDialogueReviewQueueSignature !== queueSignature) {
+      window.ryuPremiumDialogueReviewQueueSignature = queueSignature;
+      window.ryuPremiumDialogueReviewVisibleCount = 120;
+    }
+    const visibleCount = Math.min(
+      pendingQueue.length,
+      Math.max(120, Number(window.ryuPremiumDialogueReviewVisibleCount || 120))
+    );
+    const nextVisibleCount = Math.min(pendingQueue.length, visibleCount + 120);
+    let chapterNav = $('aiChapterNavigator');
+    if (queue && !chapterNav) {
+      chapterNav = document.createElement('div');
+      chapterNav.id = 'aiChapterNavigator';
+      chapterNav.className = 'ryu-ai-chapter-navigator';
+      chapterNav.style.cssText = 'display:grid;gap:6px;max-height:230px;overflow:auto;margin:0 0 12px;padding-right:3px;';
+      queue.parentElement?.insertBefore(chapterNav, queue);
+    }
+    if (chapterNav) {
+      const priorScroll = chapterNav.scrollTop;
+      const chapterFilter = String(window.ryuPremiumAiChapterFilter || '').trim().toLocaleLowerCase();
+      const statusFilter = String(window.ryuPremiumAiChapterStatusFilter || 'all');
+      const chapterButtons = chapters.map(chapter => {
+        const number = Number(chapter.number);
+        const chapterPassages = items.filter(item => Number(item.chapter_number) === number);
+        const assignedCount = chapterPassages.filter(item => item.assigned && !item.skipped).length;
+        const aiSuggestedCount = chapterPassages.filter(item =>
+          !item.skipped && Array.isArray(item.suggestions) && item.suggestions.length > 0
+        ).length;
+        const skippedCount = chapterPassages.filter(item => item.skipped).length;
+        const pendingRows = chapterPassages.filter(item => !item.assigned && !item.skipped);
+        const wordCount = Math.max(
+          0,
+          Number(chapter.word_count) ||
+            String(chapter.text || '').trim().split(/\s+/).filter(Boolean).length
+        );
+        const status = !characterAnalysisStatus.analyzed ? 'Not analysed yet' :
+          (pendingRows.length ? 'Needs review' : 'Review complete');
+        const statusKey = !characterAnalysisStatus.analyzed ? 'not-analysed' :
+          (pendingRows.length ? 'needs-review' : 'complete');
+        const searchText = (number + ' ' + String(chapter.title || '')).toLocaleLowerCase();
+        const matchesSearch = !chapterFilter || searchText.includes(chapterFilter);
+        const matchesStatus = statusFilter === 'all' || statusFilter === statusKey;
+        const hidden = matchesSearch && matchesStatus ? '' : ' hidden';
+        const active = number === Number(selectedChapter?.number);
+        return '<button type="button" class="chapter-pick ' + (active ? 'active' : '') +
+          '" data-ai-chapter-number="' + number + '" data-ai-chapter-status="' + statusKey +
+          '" data-ai-chapter-search="' + esc(searchText) + '" aria-current="' + (active ? 'page' : 'false') + '"' + hidden +
+          ' style="display:flex;flex-direction:column;align-items:flex-start;gap:3px;width:100%;text-align:left;padding:9px 11px;border-radius:9px;border:1px solid ' +
+          (active ? 'var(--accent,#c92c57)' : 'var(--border,#303744)') +
+          ';background:' + (active ? 'rgba(197,39,82,.16)' : 'rgba(255,255,255,.02)') +
+          ';color:inherit;cursor:pointer"><b>Chapter ' + number + ' · ' +
+          esc(String(chapter.title || 'Untitled chapter')) + '</b><small>' +
+          esc(status + ' · ' + pendingRows.length + ' pending') +
+          '</small><small style="white-space:normal;line-height:1.45">' +
+          esc(wordCount.toLocaleString() + ' words · ' + chapterPassages.length + ' detected · ' +
+            assignedCount + ' assigned · ' + aiSuggestedCount + ' AI suggestions · ' +
+            pendingRows.length + ' needs review · ' + skippedCount + ' skipped') +
+          '</small></button>';
+      }).join('');
+      const statusOptions = [
+        ['all', 'All statuses'],
+        ['not-analysed', 'Not analysed'],
+        ['needs-review', 'Needs review'],
+        ['complete', 'Review complete']
+      ].map(([value, label]) =>
+        '<option value="' + value + '"' + (statusFilter === value ? ' selected' : '') + '>' + label + '</option>'
+      ).join('');
+      chapterNav.innerHTML =
+        '<div class="ryu-character-subsection">Chapters · select to review</div>' +
+        '<label style="display:grid;gap:4px"><span class="muted">Search chapter number or title</span>' +
+        '<input type="search" data-ai-chapter-filter aria-label="Search chapters by number or title" placeholder="Search chapters…" value="' +
+        esc(String(window.ryuPremiumAiChapterFilter || '')) + '" style="width:100%;min-width:0"></label>' +
+        '<label style="display:grid;gap:4px"><span class="muted">Filter by review status</span>' +
+        '<select data-ai-chapter-status-filter aria-label="Filter chapters by review status" style="width:100%;min-width:0">' +
+        statusOptions + '</select></label>' +
+        (chapterButtons || '<div class="ryu-character-empty">No chapters are loaded.</div>') +
+        '<div data-ai-chapter-filter-empty hidden class="ryu-character-empty">No chapters match these filters.</div>';
+      chapterNav.scrollTop = priorScroll;
+      if (!chapterNav.dataset.liveBound) {
+        chapterNav.dataset.liveBound = '1';
+        const applyChapterFilters = () => {
+          const term = String(window.ryuPremiumAiChapterFilter || '').trim().toLocaleLowerCase();
+          const selectedStatus = String(window.ryuPremiumAiChapterStatusFilter || 'all');
+          let visible = 0;
+          chapterNav.querySelectorAll('[data-ai-chapter-number]').forEach(button => {
+            const matchesSearch = !term || String(button.dataset.aiChapterSearch || '').includes(term);
+            const matchesStatus = selectedStatus === 'all' || button.dataset.aiChapterStatus === selectedStatus;
+            button.hidden = !(matchesSearch && matchesStatus);
+            if (!button.hidden) visible++;
+          });
+          const empty = chapterNav.querySelector('[data-ai-chapter-filter-empty]');
+          if (empty) empty.hidden = visible > 0;
+        };
+        chapterNav.addEventListener('input', event => {
+          const input = event.target.closest('[data-ai-chapter-filter]');
+          if (!input) return;
+          window.ryuPremiumAiChapterFilter = String(input.value || '');
+          applyChapterFilters();
+        });
+        chapterNav.addEventListener('change', event => {
+          const select = event.target.closest('[data-ai-chapter-status-filter]');
+          if (!select) return;
+          window.ryuPremiumAiChapterStatusFilter = String(select.value || 'all');
+          applyChapterFilters();
+        });
+        chapterNav.addEventListener('click', event => {
+          const button = event.target.closest('[data-ai-chapter-number]');
+          if (!button) return;
+          const number = Number(button.dataset.aiChapterNumber);
+          if (!chapters.some(chapter => Number(chapter.number) === number)) return;
+          window.ryuPremiumAiChapterNumber = number;
+          window.ryuPremiumSelectedChapter = number;
+          characterStudioSelectedChapter = number;
+          window.ryuPremiumSelectedDialogueId = '';
+          renderDialogueReview();
+        });
+      }
+    }
     const renderSignature = JSON.stringify([
-      characterAnalysisStatus.analyzed, items.map(item => [
+      characterAnalysisStatus.analyzed, selectedChapter?.number, queueSignature, visibleCount, items.map(item => [
         item.id,item.chapter_number,item.start,item.end,item.text,item.speakers,item.assigned,
         item.assignmentSource,item.skipped,(item.suggestions||[]).map(candidate=>[candidate.name,candidate.confidence,candidate.evidence])
       ])
@@ -489,8 +617,6 @@
     if (progressLabel) progressLabel.textContent = !characterAnalysisStatus.analyzed
       ? 'Run Analyze book' : (counted.length ? percent + '% assigned' : 'No suggestions');
     if (pendingBadge) pendingBadge.textContent = characterAnalysisStatus.analyzed ? remaining + ' left' : 'Not analyzed';
-    const selectedNumber = Number(window.ryuPremiumAiChapterNumber || characterStudioSelectedChapter || window.ryuPremiumSelectedChapter || chapters[0]?.number || 0);
-    const selectedChapter = chapters.find(chapter => Number(chapter.number) === selectedNumber) || chapters[0] || null;
     if (title) title.textContent = selectedChapter
       ? 'Chapter ' + selectedChapter.number + ' · ' + String(selectedChapter.title || 'Untitled chapter')
       : 'Dialogue review';
@@ -500,11 +626,10 @@
         ? 'Green passages are saved assignments; orange passages have real analysis suggestions; plain passages have no saved assignment or supported prediction.'
         : 'Open a local project to review its source text and dialogue assignments.');
     if (queue) {
-      const pending = analyzedItems.filter(item => !item.assigned && !item.skipped);
       if (!characterAnalysisStatus.analyzed) {
         queue.innerHTML = '<div class="ryu-character-empty"><b>Analysis has not run</b>Select Run analysis again to create review suggestions from the active project. Manual source-text assignment is still available.</div>';
       } else {
-        queue.innerHTML = pending.slice(0, 120).map(item => {
+        const visibleRows = pendingQueue.slice(0, visibleCount).map(item => {
           const preview = item.text.length > 75 ? item.text.slice(0, 72) + '…' : item.text;
           const candidate = item.suggestions?.[0];
           const note = candidate
@@ -514,7 +639,15 @@
             '" data-ai-line="' + esc(item.id) + '" data-dialogue-id="' + esc(item.id) + '">' +
             '<span>Chapter ' + Number(item.chapter_number) + ' · ' + esc(item.chapter_title) + '</span><b>' + esc(preview) +
             '</b><small>' + esc(note) + '</small></button>';
-        }).join('') || '<div class="ryu-character-empty"><b>Review queue is clear</b>All analyzed passages are assigned or skipped, or the analysis found no suggestions. Run analysis again to refresh suggestions.</div>';
+        }).join('');
+        const remaining = Math.max(0, pendingQueue.length - visibleCount);
+        const loadMore = remaining > 0
+          ? '<button type="button" class="btn small secondary" data-ai-load-more data-ai-next-count="' + nextVisibleCount +
+            '" aria-label="Show more passages; ' + remaining + ' remaining" style="width:100%;margin-top:8px">Show more passages · ' +
+            Math.min(120, remaining) + ' more (' + remaining + ' remaining)</button>'
+          : '';
+        queue.innerHTML = (visibleRows + loadMore) ||
+          '<div class="ryu-character-empty"><b>Review queue is clear</b>All analyzed passages are assigned or skipped, or the analysis found no suggestions. Run analysis again to refresh suggestions.</div>';
       }
     }
     renderAiChapterDocument();
@@ -2118,6 +2251,9 @@
 
   async function refreshVoices() {
     const requestToken = ++voiceListEpoch;
+    // Qwen/provider readiness is gated by the same model registry used in Models
+    // Center. Ensure its initial cold scan completes off-thread before cataloguing voices.
+    await loadModelInventory(false);
     const loadedVoices = await call('voice.list');
     if (requestToken !== voiceListEpoch) return voices;
     voices = Array.isArray(loadedVoices) ? loadedVoices : [];
@@ -3856,14 +3992,8 @@
     }
     const voice = $('editCharacterVoice');
     if (voice) {
-      voice.title = 'Voice assignments are managed in Character Studio so all volumes stay consistent.';
-      if (!modal.__ryuVoiceLockObserver && typeof MutationObserver !== 'undefined') {
-        modal.__ryuVoiceLockObserver = new MutationObserver(() => {
-          if (!modal.classList.contains('show')) voice.disabled = false;
-        });
-        modal.__ryuVoiceLockObserver.observe(modal, {attributes:true, attributeFilter:['class']});
-      }
-      if (modal.classList.contains('show')) voice.disabled = true;
+      voice.title = 'Choose a saved Voice Studio profile for this character, or select Unassigned.';
+      voice.disabled = voice.options.length <= 1;
     }
   }
   function ensureCharacterRecoveryButton() {
@@ -4031,9 +4161,91 @@
   function pronunciationSelectionKey(term) {
     return pronunciationScopeKey(term) + '|' + String(term.written_form || term.word || '').normalize('NFC').toLocaleLowerCase();
   }
+  function ensurePronunciationDictionaryTools(body) {
+    if (!body || body.closest('.page')?.querySelector('[data-pron-dictionary-tools]')) return;
+    const table = body.closest('table');
+    if (!table?.parentNode) return;
+    const tools = document.createElement('div');
+    tools.dataset.pronDictionaryTools = '1';
+    tools.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0 12px';
+    tools.innerHTML =
+      '<button type="button" class="btn small secondary" data-pron-import>Import dictionary JSON</button>' +
+      '<button type="button" class="btn small ghost" data-pron-export>Export dictionary JSON</button>' +
+      '<button type="button" class="btn small secondary" data-pron-test-matrix>Test selected entry across saved profiles</button>' +
+      '<span class="muted" style="font-size:12px">Select exactly one enabled entry. Each saved profile is tested sequentially using the real pronunciation rule.</span>' +
+      '<div data-pron-test-results style="width:100%;display:grid;gap:8px"></div>';
+    table.parentNode.insertBefore(tools, table);
+  }
+
+  async function exportPronunciationDictionary() {
+    const exported = await call('pronunciation.export');
+    const blob = new Blob([JSON.stringify(exported, null, 2)], {type:'application/json;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    anchor.href = url;
+    anchor.download = 'ryu-pronunciation-dictionary-' + stamp + '.json';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    message('Exported ' + (Array.isArray(exported.entries) ? exported.entries.length : 0) +
+      ' pronunciation entry/entries with their original scopes.');
+  }
+
+  async function importPronunciationDictionary() {
+    const picker = document.createElement('input');
+    picker.type = 'file';
+    picker.accept = '.json,application/json';
+    picker.onchange = async () => {
+      const file = picker.files?.[0];
+      if (!file) return;
+      if (file.size > 5 * 1024 * 1024) {
+        message('Pronunciation dictionary imports are limited to 5 MB.', true);
+        return;
+      }
+      try {
+        const importedDocument = JSON.parse(await file.text());
+        const preview = await call('pronunciation.import', {document:importedDocument, apply:false});
+        const conflicts = Array.isArray(preview.conflicts) ? preview.conflicts : [];
+        if (Number(preview.protected_manual_count || 0) > 0) {
+          throw new Error('The file contains ' + preview.protected_manual_count +
+            ' AI reading(s) that would overwrite a saved manual rule. Resolve those manually before importing.');
+        }
+        let replaceConflicts = false;
+        if (conflicts.length) {
+          const details = conflicts.slice(0, 8).map(row =>
+            row.written_form + ' · ' + row.scope + ': ' + row.existing_spoken_form +
+            ' → ' + row.imported_spoken_form
+          ).join('\n');
+          replaceConflicts = window.confirm(
+            'The import contains ' + conflicts.length + ' conflicting pronunciation rule(s).\n\n' +
+            details + (conflicts.length > 8 ? '\n… and ' + (conflicts.length - 8) + ' more.' : '') +
+            '\n\nReplace these existing readings? Cancel keeps every saved rule unchanged.'
+          );
+          if (!replaceConflicts) {
+            message('Import cancelled. Existing pronunciation rules were not changed.');
+            return;
+          }
+        }
+        const result = await call('pronunciation.import', {
+          document:importedDocument, apply:true, replace_conflicts:replaceConflicts
+        });
+        await refreshTerms();
+        message('Imported ' + Number(result.imported || 0) + ' new pronunciation rule(s), updated ' +
+          Number(result.updated || 0) + ', skipped ' + Number(result.duplicate_count || 0) +
+          ' duplicate(s).');
+      } catch (error) {
+        message(error?.message || String(error), true);
+      }
+    };
+    picker.click();
+  }
+
   function renderPronunciationRows() {
     const body = $('pronDictionaryBody');
     if (!body) return;
+    ensurePronunciationDictionaryTools(body);
     const query = String($('pronSearchAdvanced')?.value || '').trim().toLocaleLowerCase();
     const scopeFilter = $('pronScopeFilter')?.value || 'all';
     const originFilter = $('pronOriginFilter')?.value || 'all';
@@ -4166,6 +4378,140 @@
         '<button type="button" class="btn small ghost" data-pron-ai-dismiss="' + index + '">Dismiss</button></div>'
       ).join('');
   }
+  function renderPronunciationMatrixResults(panel, entry, results) {
+    if (!panel) return;
+    const rows = Array.isArray(results) ? results : [];
+    if (!rows.length) {
+      panel.innerHTML = '<p class="muted">No profile test results have been saved for this entry yet.</p>';
+      return;
+    }
+    panel.innerHTML =
+      '<h4 style="margin:6px 0">Saved-profile test results · ' + esc(entry.written_form || entry.word || '') + '</h4>' +
+      rows.map((row, index) => {
+        const passed = row.status === 'passed';
+        const title = esc(row.profile_name || 'Unknown profile') + ' · ' + esc(row.provider || 'unknown provider');
+        const detail = passed
+          ? Number(row.actual_duration_seconds || 0).toFixed(1) + 's audio · ' +
+            Number(row.synthesis_seconds || 0).toFixed(2) + 's synthesis · ' +
+            Number(row.pronunciation_replacements || 0) + ' replacement(s)'
+          : esc(row.error || 'Profile test failed');
+        const audio = row.audio_url
+          ? '<audio controls preload="none" src="' + esc(row.audio_url) +
+            '" aria-label="Pronunciation test audio for ' + title + '" style="width:100%;max-width:420px"></audio>'
+          : '';
+        return '<div style="border:1px solid var(--border,#39404c);border-radius:8px;padding:9px;display:grid;gap:5px">' +
+          '<b>' + title + '</b><span style="color:' + (passed ? 'var(--success,#258a56)' : 'var(--danger,#bd4141)') +
+          '">' + (passed ? 'Passed · pronunciation rule applied' : 'Failed · pronunciation test not accepted') +
+          '</span><small>' + detail + '</small>' + audio +
+          '<small class="muted">' + esc(row.tested_at || '') + '</small></div>';
+      }).join('');
+  }
+
+  async function loadPronunciationMatrixHistory(entry) {
+    const panel = document.querySelector('[data-pron-test-results]');
+    if (!panel || !entry) return [];
+    const data = await call('pronunciation.test_results.get', {
+      written_form:entry.written_form || entry.word || '',
+      scope:entry.scope || entry.scope_type || 'current_book',
+      scope_id:entry.scope_id || ''
+    });
+    const results = Array.isArray(data?.results) ? data.results : [];
+    renderPronunciationMatrixResults(panel, entry, results);
+    return results;
+  }
+
+  async function runPronunciationProfileMatrix() {
+    const selected = terms.filter(term => pronunciationSelectionKeys.has(pronunciationSelectionKey(term)));
+    if (selected.length !== 1) {
+      throw new Error('Select exactly one pronunciation dictionary row before testing saved profiles.');
+    }
+    const entry = selected[0];
+    if (entry.enabled === false) {
+      throw new Error('Enable this pronunciation entry before running the saved-profile test matrix.');
+    }
+    if (!pronunciationEnabled) {
+      throw new Error('Global pronunciation is OFF. Turn it on before testing this entry in production synthesis.');
+    }
+    const written = String(entry.written_form || entry.word || '').trim();
+    if (!written) throw new Error('The selected dictionary entry has no written form.');
+    await refreshVoices();
+    const profiles = voices.filter(profile => profile && profile.saved === true && profile.name);
+    if (!profiles.length) throw new Error('No saved Voice Studio profiles are available for pronunciation testing.');
+    const panel = document.querySelector('[data-pron-test-results]');
+    if (!panel) throw new Error('The saved-profile test results panel is not available. Refresh Pronunciation Studio.');
+    panel.innerHTML = '<p class="muted">Testing ' + esc(written) + ' sequentially across ' +
+      profiles.length + ' saved profile(s)… Do not close the project during the test.</p>';
+    const outcomes = [];
+    for (const profile of profiles) {
+      const row = {
+        profile_name:String(profile.name),
+        provider:String(profile.provider || 'unknown'),
+        status:'failed',
+        error:'The preview did not complete.'
+      };
+      try {
+        const started = await call('voice.preview', {
+          profile_name:profile.name,
+          text:written,
+          duration_seconds:10,
+          route_character_cast:false,
+          apply_pronunciation_rules:true
+        });
+        if (!started?.job_id) throw new Error('The preview job was not created.');
+        let completedJob = null;
+        await monitorJob(started.job_id, async job => { completedJob = job; });
+        const result = completedJob?.result || {};
+        if (completedJob?.state !== 'completed' || !result.file_url) {
+          throw new Error(completedJob?.error?.message || completedJob?.message ||
+            'The preview completed without playable audio.');
+        }
+        const replacements = Number(result.pronunciation_replacements || 0);
+        if (!Number.isFinite(replacements) || replacements < 1) {
+          throw new Error('The pronunciation rule was not applied to this preview. Check its scope, global setting and written form.');
+        }
+        row.status = 'passed';
+        row.actual_duration_seconds = Number(result.actual_duration_seconds || 0);
+        row.synthesis_seconds = Number(result.synthesis_seconds || 0);
+        row.total_seconds = Number(result.total_seconds || 0);
+        row.real_time_factor = Number(result.real_time_factor || 0);
+        row.pronunciation_replacements = replacements;
+        row.audio_url = String(result.file_url);
+        delete row.error;
+      } catch (error) {
+        row.status = 'failed';
+        row.error = String(error?.message || error || 'Profile test failed').slice(0, 800);
+      }
+      outcomes.push(row);
+      // Persist after each voice so a later provider failure cannot discard earlier evidence.
+      const saved = await call('pronunciation.test_results.save', {
+        written_form:written,
+        scope:entry.scope || entry.scope_type || 'current_book',
+        scope_id:entry.scope_id || '',
+        results:[{
+          profile_name:row.profile_name,
+          provider:row.provider,
+          status:row.status,
+          actual_duration_seconds:row.actual_duration_seconds,
+          synthesis_seconds:row.synthesis_seconds,
+          total_seconds:row.total_seconds,
+          real_time_factor:row.real_time_factor,
+          pronunciation_replacements:row.pronunciation_replacements,
+          error:row.error
+        }]
+      });
+      if (!saved || Number(saved.saved || 0) !== 1) {
+        throw new Error('Could not persist the test result for ' + profile.name + '.');
+      }
+      renderPronunciationMatrixResults(panel, entry, outcomes);
+      panel.scrollIntoView?.({block:'nearest',behavior:'smooth'});
+    }
+    const passed = outcomes.filter(row => row.status === 'passed').length;
+    const failed = outcomes.length - passed;
+    message('Pronunciation profile matrix completed: ' + passed + ' passed, ' + failed +
+      ' failed. Results are saved against ' + written + '.');
+    return outcomes;
+  }
+
   async function refreshTerms() {
     const requestToken = ++termsListEpoch;
     const [loaded, settings] = await Promise.all([
@@ -4232,9 +4578,103 @@
       }
     });
   }
+  async function waitForCatalogueScan(jobId, label) {
+    if (!jobId) throw new Error('The ' + label + ' refresh did not create a background job.');
+    return new Promise((resolve, reject) => {
+      let checking = false;
+      let settled = false;
+      let timer = null;
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearInterval(timer);
+        timer = null;
+        callback(value);
+      };
+      const tick = async () => {
+        if (settled || checking) return;
+        checking = true;
+        try {
+          const jobs = await call('job.list', {include_hidden:true});
+          const job = Array.isArray(jobs) ? jobs.find(row => row.job_id === jobId) : null;
+          if (!job) throw new Error('The ' + label + ' refresh job disappeared before reporting a result.');
+          if (job.state === 'completed') finish(resolve, job);
+          else if (['failed','cancelled'].includes(job.state)) {
+            finish(reject, new Error(job.error?.message || job.message ||
+              ('The ' + label + ' refresh ' + job.state + '.')));
+          }
+        } catch (error) {
+          finish(reject, error);
+        } finally {
+          checking = false;
+        }
+      };
+      timer = setInterval(() => { void tick(); }, 750);
+      void tick();
+    });
+  }
+
+  async function loadModelInventory(forceRefresh = false) {
+    if (modelInventoryLoadPromise) return modelInventoryLoadPromise;
+    const task = (async () => {
+      if (!forceRefresh && modelInventoryScanRequested &&
+          Date.now() - modelInventoryLoadedAt < 5000) {
+        return await call('models.list');
+      }
+      // Read the last-known-good snapshot immediately. A cold/expired request
+      // starts a single-flight worker; this bridge call never enumerates files.
+      await call('models.list');
+      modelInventoryScanRequested = true;
+      const scan = await call('models.refresh');
+      await waitForCatalogueScan(scan?.job_id, 'model inventory');
+      const rows = await call('models.list');
+      modelInventoryLoadedAt = Date.now();
+      return rows;
+    })();
+    modelInventoryLoadPromise = task;
+    try {
+      return await task;
+    } catch (error) {
+      modelInventoryScanRequested = false;
+      modelInventoryLoadedAt = 0;
+      throw error;
+    } finally {
+      if (modelInventoryLoadPromise === task) modelInventoryLoadPromise = null;
+    }
+  }
+
+  async function loadSoundCatalogue(forceRefresh = false) {
+    if (soundCatalogLoadPromise) return soundCatalogLoadPromise;
+    const task = (async () => {
+      if (!forceRefresh && soundCatalogScanRequested &&
+          Date.now() - soundCatalogLoadedAt < 20000) {
+        return await call('sound.catalog');
+      }
+      await call('sound.catalog');
+      soundCatalogScanRequested = true;
+      const scan = await call('sound.refresh');
+      await waitForCatalogueScan(scan?.job_id, 'Sound Design catalogue');
+      const rows = await call('sound.catalog');
+      soundCatalogLoadedAt = Date.now();
+      return rows;
+    })();
+    soundCatalogLoadPromise = task;
+    try {
+      return await task;
+    } catch (error) {
+      soundCatalogScanRequested = false;
+      soundCatalogLoadedAt = 0;
+      throw error;
+    } finally {
+      if (soundCatalogLoadPromise === task) soundCatalogLoadPromise = null;
+    }
+  }
+
   async function refreshSounds() {
     const requestToken = ++soundListEpoch;
-    const loaded = await call('sound.catalog');
+    const forceRefresh = forceSoundCatalogRefreshPending;
+    forceSoundCatalogRefreshPending = false;
+    const loaded = await loadSoundCatalogue(forceRefresh);
     if (requestToken !== soundListEpoch) return sounds;
     sounds = Array.isArray(loaded) ? loaded : [];
     const selectedMusicTrack = selectedSoundPath
@@ -4304,7 +4744,7 @@
     // that epoch owns Music Library grid renders, and cue refreshes may overlap a
     // source/category refresh triggered immediately after a music import.
     const [loadedCatalog, loadedAssignments] = await Promise.all([
-      call('sound.catalog'),
+      loadSoundCatalogue(false),
       call('sound.cues.get')
     ]);
     if (requestToken !== cueListEpoch) return cueAssignments;
@@ -5609,6 +6049,7 @@
   }
 
   async function refreshChapterBgm() {
+    await loadSoundCatalogue(false);
     chapterBgmState = await call('sound.chapter_bgm.get');
     const fadeIn = Number(chapterBgmState.fade_in_seconds ?? 2);
     const fadeOut = Number(chapterBgmState.fade_out_seconds ?? 3);
@@ -5925,6 +6366,7 @@
   function backgroundGenerationJobActions(job, id, action, canControlGeneration, canCancelImport, canCancelPreview) {
     const state = String(job.state || 'unknown').toLowerCase();
     const isGeneration = Boolean(canControlGeneration);
+    const canCancelAnalysis = String(job.type || '').toLowerCase() === 'character-analysis';
     const actions = [];
     if (isGeneration && state === 'running') {
       actions.push(action('pause','Pause','secondary'));
@@ -5938,7 +6380,8 @@
     } else if (state === 'queued' ||
         (isGeneration && ['running','paused','pause_requested'].includes(state)) ||
         (canCancelImport && state === 'running') ||
-        (canCancelPreview && ['queued','running'].includes(state))) {
+        (canCancelPreview && ['queued','running'].includes(state)) ||
+        (canCancelAnalysis && ['queued','running'].includes(state))) {
       actions.push(action('cancel','Cancel','ghost'));
     }
     if (state === 'failed' && job.recoverable && isGeneration) {
@@ -5947,7 +6390,7 @@
     } else if (state === 'cancelled' && isGeneration) {
       actions.push(action('retry','Retry','secondary'));
     }
-    if (['running','pause_requested'].includes(state) && !isGeneration && !canCancelImport && !canCancelPreview) {
+    if (['running','pause_requested'].includes(state) && !isGeneration && !canCancelImport && !canCancelPreview && !canCancelAnalysis) {
       actions.push('<small>Cancellation and pause are not supported for this operation.</small>');
     }
     return actions.join('');
@@ -6803,9 +7246,24 @@
         '</b><small>' + esc(row.series) + ' · ' + esc(row.profile || 'No audio profile assigned') +
         (row.source === 'library' ? ' · Character Library' : ' · This project') + '</small></button>';
     }).join('') || '<p class="muted">No saved characters exist yet. Use New character to create one in a series.</p>';
+    const savedVoiceProfiles = characterSavedProfiles();
+    const profileOptions = ['<option value="">No character voice profile yet</option>',
+      ...savedVoiceProfiles.map(profile => '<option value="' + esc(profile.name) + '">' +
+        esc(profile.name) + ' · ' + esc(profile.provider || 'Voice') + '</option>')
+    ].join('');
+    const profileSelector = '<div class="ryu-character-subsection" style="margin-top:12px">Character audio profile</div>' +
+      '<label class="ryu-ai-profile-selector" style="display:grid;gap:6px;margin:0 0 12px">' +
+      '<span>Assign a saved Voice Studio profile now (or assign one later)</span>' +
+      '<select id="aiCharacterVoiceProfile" style="width:100%;min-width:0">' + profileOptions + '</select></label>';
     if ($('predictionList')) $('predictionList').innerHTML =
       '<div class="ryu-character-subsection">AI suggestions</div>' + candidateHtml +
-      '<div class="ryu-character-subsection">Saved / manually created characters</div>' + savedHtml;
+      '<div class="ryu-character-subsection">Saved / manually created characters</div>' + savedHtml +
+      profileSelector;
+    const initialChoice = $('predictionList')?.querySelector('.prediction-option.active');
+    const initialProfile = String(initialChoice?.dataset.profile || '');
+    if ($('aiCharacterVoiceProfile') && savedVoiceProfiles.some(profile => profile.name === initialProfile)) {
+      $('aiCharacterVoiceProfile').value = initialProfile;
+    }
     if ($('confirmAiCharacter')) $('confirmAiCharacter').disabled = !(suggestions.length || savedOptions.length);
     const removeButton = ensureDialogueUnassignButton();
     if (removeButton) removeButton.hidden = !(item.assignmentPresent || item.assigned);
@@ -6828,7 +7286,7 @@
         '<option value="' + esc(profile.name) + '">' + esc(profile.name) + ' · ' + esc(profile.provider || 'Voice') + '</option>'
       ).join('');
       $('editCharacterVoice').value = selected.voice_profile || '';
-      $('editCharacterVoice').disabled = true;
+      $('editCharacterVoice').disabled = saved.length === 0;
     }
     if ($('editCharacterScope')) $('editCharacterScope').value = selected.scope || 'Current book only';
     populateEditCharacterSeriesOptions(characterSeries(selected));
@@ -6849,7 +7307,7 @@
       name,
       short_description:$('editCharacterShort')?.value || '',
       aliases:$('editCharacterAliases')?.value || '',
-      voice_profile:String(current.voice_profile || ''),
+      voice_profile:String($('editCharacterVoice')?.value ?? current.voice_profile ?? ''),
       series, scope:series ? 'Series · ' + series : 'Current book only',
       notes:$('editCharacterNotes')?.value || ''
     });
@@ -6866,7 +7324,7 @@
     const current = selectedCharacterRow();
     if (!current) throw new Error('Select a real project character before deleting.');
     const name = characterCanonical(current);
-    if (!window.confirm('Remove "' + name + '" from this project cast? Reusable Character Library data is retained.')) return;
+    if (!window.confirm('Dismiss "' + name + '" from this project cast and prevent Character Analysis from automatically adding it again in "' + characterSeries(current) + '"? Saved dialogue assignments must be cleared first. The reusable Character Library entry is retained; explicitly adding it again from the Library restores detection for this series.')) return;
     await call('character.delete', {name, series:characterSeries(current)});
     window.ryuPremiumSelectedCharacter = '';
     window.ryuPremiumSelectedCharacterSeries = '';
@@ -7049,6 +7507,11 @@
       if (button.matches('#predictionList .prediction-option')) {
         handle(() => {
           document.querySelectorAll('#predictionList .prediction-option').forEach(item => item.classList.toggle('active', item === button));
+          if ($('aiCharacterVoiceProfile')) {
+            const preferred = String(button.dataset.profile || '');
+            $('aiCharacterVoiceProfile').value = characterSavedProfiles().some(profile => profile.name === preferred)
+              ? preferred : '';
+          }
           if ($('confirmAiCharacter')) $('confirmAiCharacter').disabled = false;
         });
         return;
@@ -7060,8 +7523,9 @@
           if (!name) throw new Error('Select an AI suggestion or a saved character first.');
           const assignmentSource = selected.dataset.source === 'ai' ? 'ai' : 'manual';
           const assignmentConfidence = assignmentSource === 'ai' ? Number(selected.dataset.confidence || 0) : 1.0;
+          const selectedProfile = String($('aiCharacterVoiceProfile')?.value ?? selected.dataset.profile ?? '').trim();
           await assignPassageToCharacter(name, String(selected.dataset.series || activeCharacterProjectSeries()),
-            String(selected.dataset.profile || ''), assignmentSource, assignmentConfidence);
+            selectedProfile, assignmentSource, assignmentConfidence);
           $('aiPredictionModal')?.classList.remove('show');
           window.ryuPremiumSelectedDialogueId = '';
         });
@@ -8491,7 +8955,9 @@
   }
   async function refreshModels() {
     const requestToken = ++modelListEpoch;
-    const loadedRows = await call('models.list');
+    const forceRefresh = forceModelInventoryRefreshPending;
+    forceModelInventoryRefreshPending = false;
+    const loadedRows = await loadModelInventory(forceRefresh);
     if (requestToken !== modelListEpoch) return window.ryuModelInventoryRows || [];
     const rows = Array.isArray(loadedRows) ? loadedRows : [];
     window.ryuModelInventoryRows = rows;
@@ -8521,6 +8987,7 @@
           refreshButton.disabled = true;
           refreshButton.textContent = 'Refreshing…';
           try {
+            forceModelInventoryRefreshPending = true;
             await refreshModels();
             await refreshVoices();
             message('Model status refreshed from the local installation and saved voice catalogue.');
@@ -8717,10 +9184,24 @@
         summary: 'Review the cast and make sure each dialogue line uses the intended voice.',
         items: [
           'Run Analyze after importing or substantially editing the book. Review character candidates, confidence and dialogue examples before accepting suggestions.',
-          'Use Assigned Cast to review the character, series, dialogue-line count and chapter count. Assigned Voice and AI-assignment percentages should reflect saved project data.',
-          'Manual assignments are shown separately from AI suggestions. Review low-confidence matches and correct aliases or speaker names when needed.',
+          'Use the left chapter list in both Manual and AI review to open the full text of a specific chapter. The AI pending queue is filtered to the selected chapter; selecting a passage opens the source-backed review panel.',
+          'Use Assigned Cast to review the character, series, dialogue-line count and chapter count. Assigned Voice and AI-assignment percentages reflect saved project assignments, not suggested matches.',
+          'Manual assignments are shown separately from AI suggestions. Review low-confidence matches and correct aliases or speaker names when needed. Accepting an AI suggestion saves an assignment; a suggestion alone does not change the cast.',
+          'When reviewing an AI or manual passage, you can choose a saved Voice Studio profile in the review panel. Edit Character also lets you change the saved profile for an existing project character.',
           'Use the selected dialogue and selected saved profile to Test Voice. Stop, resume or replay the test from the in-app controls.',
-          'Create or edit a character when the speaker is missing. Unassigned narration follows the project Narrator fallback; confirm the default narrator voice before full generation.'
+          'Unquoted narration is automatically routed to the project Narrator. Quoted or dash-led dialogue remains in Needs Speaker Review during normal cast-aware generation until it has a character assignment.'
+        ]
+      },
+      {
+        title: 'Narrator-only audiobook generation (GEN-07)',
+        summary: 'Generate a complete audiobook with the narrator voice when no character voice profiles are configured.',
+        items: [
+          'Narrator-only mode is available when the active project has zero saved character voice-profile assignments. A list of detected or manually created character candidates without voice profiles does not prevent this mode.',
+          'Choose a valid, available saved narrator profile using the project narrator or its series default. The narrator must still be configured; missing narrator profiles continue to block generation.',
+          'In narrator-only mode, the narrator intentionally reads every passage, including quoted and dash-led dialogue. You do not need to create character profiles or assign speakers just to generate this version.',
+          'The Production job identifies Narrator-only mode and records the effective narrator and zero configured character profiles. Preview and final generation use the same narrator-only route.',
+          'As soon as any character voice profile is configured in the project, normal cast-aware rules apply. Unassigned dialogue must then be reviewed or assigned before full generation; the app does not silently route a partial cast to the narrator.',
+          'Required project metadata, valid chapters, output-folder permissions and the selected narrator remain mandatory in both modes.'
         ]
       },
       {
@@ -8793,8 +9274,9 @@
         items: [
           'History is the durable record of terminal operations, including completed, failed and cancelled tasks. Use date filters and search to locate an operation.',
           'Background Jobs shows active and queued work. Open job details to inspect progress, logs, error messages and the project or chapter involved.',
-          'Use View, Cancel, Retry or Recover only when the job state offers that action. A retry should preserve valid completed work and report what will be regenerated.',
-          'History and Background Jobs should agree about the final state of an operation. If a job disappears from the active queue, check History for its terminal result.'
+          'Use View, Cancel, Retry or Recover only when the job state offers that action. Character Analysis can be cancelled at a safe inference or chapter boundary; a cancelled analysis does not replace the saved cast with partial results.',
+          'A running synthesis or inference may finish its current safe unit before cancellation takes effect. Check the terminal job state in History instead of assuming the task stopped at the instant Cancel was selected.',
+          'A retry should preserve valid completed work and report what will be regenerated. History and Background Jobs should agree about the final state of an operation. If a job disappears from the active queue, check History for its terminal result.'
         ]
       },
       {
@@ -8805,6 +9287,7 @@
           'Install missing components, Repair unhealthy installations, Verify files or Uninstall unused models from the model action menu.',
           'Active generation or preview jobs protect models they are using. Wait for those jobs to finish before uninstalling or moving a model.',
           'For Qwen, set the global Base model size preference to 0.6B or 1.7B in Models & Voice Engines. VoiceDesign itself uses its 1.7B model and also requires a compatible Base model for long-form voice identity consistency.',
+          'The compute backend can be Automatic or an explicitly selected supported CPU/GPU backend. Automatic attempts a compatible GPU runtime when available; treat a GPU as active only after a real inference reports that device, not merely because Windows lists an adapter.',
           'Uninstalling a model must not delete projects, saved voice profiles or user audio. Check the displayed path before removing files.',
           'Use Settings > Storage to choose supported model, project-library and audio-asset roots. Keep external drives connected during migration and verification.'
         ]
@@ -9423,7 +9906,7 @@
       }
     });
 
-    if ($('checkModelUpdates')) $('checkModelUpdates').onclick=act(async()=>{await refreshModels();message('Local model catalogue refreshed. This checks the local catalogue; it does not contact an online update service.');});
+    if ($('checkModelUpdates')) $('checkModelUpdates').onclick=act(async()=>{forceModelInventoryRefreshPending = true;await refreshModels();message('Local model catalogue refreshed. This checks the local catalogue; it does not contact an online update service.');});
     if ($('startQwenInstall')) $('startQwenInstall').onclick=act(async()=>{
       const choice=document.querySelector('input[name="qwenInstall"]:checked')?.value||'customvoice';
       const data=await call('models.install',{selection:choice});
@@ -10499,6 +10982,9 @@
               target_kind: soundButton.id === 'importMusicTracks' ? 'music' : 'cue',
               category: soundButton.id === 'importMusicTracks' ? ($('musicImportCategory')?.value || 'universal') : 'universal'
             });
+            soundCatalogScanRequested = false;
+            soundCatalogLoadedAt = 0;
+            forceSoundCatalogRefreshPending = true;
             await refreshSounds();
             await refreshSoundCues();
             await refreshChapterBgm();
@@ -11058,6 +11544,19 @@
         })().catch(err => message(err?.message || String(err), true));
         return;
       }
+      if (button.matches('#aiQueue [data-ai-load-more]')) {
+        stop();
+        const nextCount = Number(button.dataset.aiNextCount);
+        const currentCount = Number(window.ryuPremiumDialogueReviewVisibleCount || 120);
+        if (!Number.isInteger(nextCount) || nextCount <= currentCount) {
+          message('The review queue changed. Refresh the chapter and try again.', true);
+          renderDialogueReview();
+          return;
+        }
+        window.ryuPremiumDialogueReviewVisibleCount = nextCount;
+        renderDialogueReview();
+        return;
+      }
       // Automatic per-line AI speaker suggestions remain prototype-only. Manual source-backed dialogue speaker assignments are persisted.
       if (button.matches('[data-ai-line][data-dialogue-id]')) {
         stop();
@@ -11154,6 +11653,18 @@
       if (!button) return;
       const stop = () => { event.preventDefault(); event.stopImmediatePropagation(); };
       const run = fn => { stop(); void Promise.resolve().then(fn).catch(error => message(error?.message || String(error),true)); };
+      if (button.matches('[data-pron-test-matrix]')) {
+        run(runPronunciationProfileMatrix);
+        return;
+      }
+      if (button.matches('[data-pron-import]')) {
+        run(importPronunciationDictionary);
+        return;
+      }
+      if (button.matches('[data-pron-export]')) {
+        run(exportPronunciationDictionary);
+        return;
+      }
       if (button.id === 'addPronunciationAdvanced') {
         run(() => {
           window.ryuPronunciationEditing = null;
