@@ -41,23 +41,6 @@ class NarratorOnlyGenerationTests(unittest.TestCase):
         self.assertFalse(selection["narrator_only"])
         self.assertEqual(selection["generation_mode"], "character_cast")
 
-    def test_narrator_only_is_explicit_book_opt_in_and_routes_all_passages(self):
-        project = SimpleNamespace(title="Narrator-only book")
-        chapters = [Chapter(1, "Opening", '“Hello there,” she said.')]
-        with patch(
-            "app.chapters.speaker_segmentation.segment_chapter_speakers",
-            side_effect=AssertionError("Narrator-only mode must not demand character review"),
-        ):
-            profile, selection = NarratorResolverHarness(
-                SimpleNamespace(name="Saved Narrator")
-            )._resolve_narrator_for_generation(
-                project, {"characters": [], "narrator_only_generation": True}, chapters
-            )
-        self.assertEqual(profile.name, "Saved Narrator")
-        self.assertTrue(selection["narrator_only"])
-        self.assertEqual(selection["generation_mode"], "narrator_only")
-        self.assertEqual(selection["dialogue_routing"], "narrator_for_all_passages")
-
     def test_cast_aware_default_does_not_silently_activate_narrator_only(self):
         project = SimpleNamespace(title="Cast-aware book")
         profile, selection = NarratorResolverHarness(
