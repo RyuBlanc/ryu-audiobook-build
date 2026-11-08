@@ -20,7 +20,11 @@ Do not treat Build #2680's 1,258 passing tests as proof for code committed after
 
 ## Current evidence overlay — 8 November 2026 (supersedes earlier snapshots)
 
-This overlay reflects the latest packaged candidate, Build #2887. It supersedes the older #2866/#2847 statements in prior historical notes; those remain history, not current release evidence.
+This overlay separates the latest packaged candidate from the latest regression-only source head. Build #2922 is the latest verified Windows package checkpoint currently evidenced here; Build #2929 is a newer regression-only checkpoint and must not be represented as a package build. The older #2866/#2847/#2887 snapshots remain historical evidence, not current release evidence.
+
+**Latest source-head evidence — 8 November 2026:** the XAPP-08 branch head `712d84468b6f9a1ae49b3870cebc91056274af5d` (Build #2929) passed the Windows regression job with **1,406 tests**. The `build` job was skipped by the feature-branch workflow condition. The preceding #2925 test failed on a test expectation that compared both recovery jobs against the last loop's generation mode; #2926 corrected the assertion to use the expected identity keyed by each original job ID, and #2929 passed. The newly added Recover-to-GenerationManager regression is on `stage-5/xapp08-recovery-reentry-2026-11-08` and is awaiting its matching-head CI result.
+
+**Latest packaged checkpoint — Build #2922:** commit `cb8afef216bc39f2b0966c04a2abed07eee7aa22` on `fix/xapp-08-explicit-narrator-only-2026-11-08` passed both `tests` and `build` jobs. Installer, portable app, SHA-256 manifest and Stage 7 Piper benchmark artifacts were uploaded. Because #2922 predates the later #2923–#2929 source commits, its artifacts are not a package of the #2929 head or this recovery-reentry candidate.
 
 | Requirement area | Current evidence | Acceptance status |
 |---|---|---|
@@ -115,7 +119,7 @@ This inventory extracts all stable requirement IDs from the Master Bug & Change 
 | PROD-11 | P1 | Music summary. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | PROD-12 | P1 | Output summary. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | PROD-13 | P1 | Live Readiness Center. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| PROD-14 | P0 | Consistent job state. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
+| PROD-14 | P0 | Consistent job state. | AUTOMATED TESTS PASSED — RUNTIME ACCEPTANCE PENDING | #2929 (commit 712d844): 1,406-test Windows regression run passed; History/Task Manager generation-mode visibility contract and backend terminal identity are covered. Installed Windows UI verification and exact-head package remain pending. |
 | PROD-15 | P1 | Chapter-specific preview audio and download. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | AB-01 | P2 | Compact audiobook cards. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | AB-02 | P0 | Fix audio file loading. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
