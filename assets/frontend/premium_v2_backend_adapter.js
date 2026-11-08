@@ -4171,7 +4171,9 @@
     tools.innerHTML =
       '<button type="button" class="btn small secondary" data-pron-import>Import dictionary JSON</button>' +
       '<button type="button" class="btn small ghost" data-pron-export>Export dictionary JSON</button>' +
-      '<span class="muted" style="font-size:12px">Imports preserve book/series/global scope; conflicts require confirmation.</span>';
+      '<button type="button" class="btn small secondary" data-pron-test-matrix>Test selected entry across saved profiles</button>' +
+      '<span class="muted" style="font-size:12px">Select exactly one enabled entry. Each saved profile is tested sequentially using the real pronunciation rule.</span>' +
+      '<div data-pron-test-results style="width:100%;display:grid;gap:8px"></div>';
     table.parentNode.insertBefore(tools, table);
   }
 
@@ -4376,6 +4378,140 @@
         '<button type="button" class="btn small ghost" data-pron-ai-dismiss="' + index + '">Dismiss</button></div>'
       ).join('');
   }
+  function renderPronunciationMatrixResults(panel, entry, results) {
+    if (!panel) return;
+    const rows = Array.isArray(results) ? results : [];
+    if (!rows.length) {
+      panel.innerHTML = '<p class="muted">No profile test results have been saved for this entry yet.</p>';
+      return;
+    }
+    panel.innerHTML =
+      '<h4 style="margin:6px 0">Saved-profile test results · ' + esc(entry.written_form || entry.word || '') + '</h4>' +
+      rows.map((row, index) => {
+        const passed = row.status === 'passed';
+        const title = esc(row.profile_name || 'Unknown profile') + ' · ' + esc(row.provider || 'unknown provider');
+        const detail = passed
+          ? Number(row.actual_duration_seconds || 0).toFixed(1) + 's audio · ' +
+            Number(row.synthesis_seconds || 0).toFixed(2) + 's synthesis · ' +
+            Number(row.pronunciation_replacements || 0) + ' replacement(s)'
+          : esc(row.error || 'Profile test failed');
+        const audio = row.audio_url
+          ? '<audio controls preload="none" src="' + esc(row.audio_url) +
+            '" aria-label="Pronunciation test audio for ' + title + '" style="width:100%;max-width:420px"></audio>'
+          : '';
+        return '<div style="border:1px solid var(--border,#39404c);border-radius:8px;padding:9px;display:grid;gap:5px">' +
+          '<b>' + title + '</b><span style="color:' + (passed ? 'var(--success,#258a56)' : 'var(--danger,#bd4141)') +
+          '">' + (passed ? 'Passed · pronunciation rule applied' : 'Failed · pronunciation test not accepted') +
+          '</span><small>' + detail + '</small>' + audio +
+          '<small class="muted">' + esc(row.tested_at || '') + '</small></div>';
+      }).join('');
+  }
+
+  async function loadPronunciationMatrixHistory(entry) {
+    const panel = document.querySelector('[data-pron-test-results]');
+    if (!panel || !entry) return [];
+    const data = await call('pronunciation.test_results.get', {
+      written_form:entry.written_form || entry.word || '',
+      scope:entry.scope || entry.scope_type || 'current_book',
+      scope_id:entry.scope_id || ''
+    });
+    const results = Array.isArray(data?.results) ? data.results : [];
+    renderPronunciationMatrixResults(panel, entry, results);
+    return results;
+  }
+
+  async function runPronunciationProfileMatrix() {
+    const selected = terms.filter(term => pronunciationSelectionKeys.has(pronunciationSelectionKey(term)));
+    if (selected.length !== 1) {
+      throw new Error('Select exactly one pronunciation dictionary row before testing saved profiles.');
+    }
+    const entry = selected[0];
+    if (entry.enabled === false) {
+      throw new Error('Enable this pronunciation entry before running the saved-profile test matrix.');
+    }
+    if (!pronunciationEnabled) {
+      throw new Error('Global pronunciation is OFF. Turn it on before testing this entry in production synthesis.');
+    }
+    const written = String(entry.written_form || entry.word || '').trim();
+    if (!written) throw new Error('The selected dictionary entry has no written form.');
+    await refreshVoices();
+    const profiles = voices.filter(profile => profile && profile.saved === true && profile.name);
+    if (!profiles.length) throw new Error('No saved Voice Studio profiles are available for pronunciation testing.');
+    const panel = document.querySelector('[data-pron-test-results]');
+    if (!panel) throw new Error('The saved-profile test results panel is not available. Refresh Pronunciation Studio.');
+    panel.innerHTML = '<p class="muted">Testing ' + esc(written) + ' sequentially across ' +
+      profiles.length + ' saved profile(s)… Do not close the project during the test.</p>';
+    const outcomes = [];
+    for (const profile of profiles) {
+      const row = {
+        profile_name:String(profile.name),
+        provider:String(profile.provider || 'unknown'),
+        status:'failed',
+        error:'The preview did not complete.'
+      };
+      try {
+        const started = await call('voice.preview', {
+          profile_name:profile.name,
+          text:written,
+          duration_seconds:10,
+          route_character_cast:false,
+          apply_pronunciation_rules:true
+        });
+        if (!started?.job_id) throw new Error('The preview job was not created.');
+        let completedJob = null;
+        await monitorJob(started.job_id, async job => { completedJob = job; });
+        const result = completedJob?.result || {};
+        if (completedJob?.state !== 'completed' || !result.file_url) {
+          throw new Error(completedJob?.error?.message || completedJob?.message ||
+            'The preview completed without playable audio.');
+        }
+        const replacements = Number(result.pronunciation_replacements || 0);
+        if (!Number.isFinite(replacements) || replacements < 1) {
+          throw new Error('The pronunciation rule was not applied to this preview. Check its scope, global setting and written form.');
+        }
+        row.status = 'passed';
+        row.actual_duration_seconds = Number(result.actual_duration_seconds || 0);
+        row.synthesis_seconds = Number(result.synthesis_seconds || 0);
+        row.total_seconds = Number(result.total_seconds || 0);
+        row.real_time_factor = Number(result.real_time_factor || 0);
+        row.pronunciation_replacements = replacements;
+        row.audio_url = String(result.file_url);
+        delete row.error;
+      } catch (error) {
+        row.status = 'failed';
+        row.error = String(error?.message || error || 'Profile test failed').slice(0, 800);
+      }
+      outcomes.push(row);
+      // Persist after each voice so a later provider failure cannot discard earlier evidence.
+      const saved = await call('pronunciation.test_results.save', {
+        written_form:written,
+        scope:entry.scope || entry.scope_type || 'current_book',
+        scope_id:entry.scope_id || '',
+        results:[{
+          profile_name:row.profile_name,
+          provider:row.provider,
+          status:row.status,
+          actual_duration_seconds:row.actual_duration_seconds,
+          synthesis_seconds:row.synthesis_seconds,
+          total_seconds:row.total_seconds,
+          real_time_factor:row.real_time_factor,
+          pronunciation_replacements:row.pronunciation_replacements,
+          error:row.error
+        }]
+      });
+      if (!saved || Number(saved.saved || 0) !== 1) {
+        throw new Error('Could not persist the test result for ' + profile.name + '.');
+      }
+      renderPronunciationMatrixResults(panel, entry, outcomes);
+      panel.scrollIntoView?.({block:'nearest',behavior:'smooth'});
+    }
+    const passed = outcomes.filter(row => row.status === 'passed').length;
+    const failed = outcomes.length - passed;
+    message('Pronunciation profile matrix completed: ' + passed + ' passed, ' + failed +
+      ' failed. Results are saved against ' + written + '.');
+    return outcomes;
+  }
+
   async function refreshTerms() {
     const requestToken = ++termsListEpoch;
     const [loaded, settings] = await Promise.all([
@@ -11517,6 +11653,10 @@
       if (!button) return;
       const stop = () => { event.preventDefault(); event.stopImmediatePropagation(); };
       const run = fn => { stop(); void Promise.resolve().then(fn).catch(error => message(error?.message || String(error),true)); };
+      if (button.matches('[data-pron-test-matrix]')) {
+        run(runPronunciationProfileMatrix);
+        return;
+      }
       if (button.matches('[data-pron-import]')) {
         run(importPronunciationDictionary);
         return;
