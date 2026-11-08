@@ -588,11 +588,21 @@ def character_detection_exclusion_keys(
                 str(alias).strip().casefold()
                 for alias in aliases if str(alias or "").strip()
             )
-    protected = {
-        str(value).strip().casefold()
-        for value in (protected_names or ())
-        if str(value or "").strip()
-    }
+    protected: set[str] = set()
+    for value in (protected_names or ()):
+        if isinstance(value, dict):
+            protected_series = str(value.get("series") or "").strip().casefold()
+            if protected_series and protected_series != wanted_series:
+                continue
+            names = [value.get("name"), *(value.get("aliases") or [])]
+        else:
+            # A plain string is interpreted as a confirmed name in the requested
+            # series for simple callers and legacy tests.
+            names = [value]
+        protected.update(
+            str(name).strip().casefold()
+            for name in names if str(name or "").strip()
+        )
     return result - protected
 
 
