@@ -7531,8 +7531,23 @@ class PremiumV2Bridge(QObject):
         self._job_update(job_id, **changes)
 
     def _generation_finished(self, job_id: str, project, summary, output: Path, voice_name: str) -> None:
-        actual = Path(summary.output_path) if getattr(summary, "output_path", None) else output
-        valid = actual.is_file() and actual.stat().st_size > 0
+        reported_output = getattr(summary, "output_path", None)
+        expected_output = Path(output).expanduser().resolve()
+        actual = Path(reported_output).expanduser() if reported_output else expected_output
+        try:
+            reported_output_matches_target = (
+                bool(reported_output) and actual.resolve() == expected_output
+            )
+        except (OSError, RuntimeError):
+            reported_output_matches_target = False
+        # A previous M4B is intentionally preserved on disk during a new
+        # generation. Never infer success from that filename alone: this worker
+        # must report the exact output it assembled for this attempt.
+        valid = (
+            reported_output_matches_target
+            and actual.is_file()
+            and actual.stat().st_size > 0
+        )
         success = valid and not summary.cancelled and not summary.packaging_failed and not summary.chapters_failed and summary.chapters_completed == summary.chapters_total
         playback_output = None
         playback_error = ""
@@ -7698,8 +7713,14 @@ class PremiumV2Bridge(QObject):
             if playback_error:
                 state["playback_error"] = playback_error
             save_state(project.folder, state)
-            detail = playback_error or summary.packaging_error or ("; ".join(str(v) for v in (summary.failure_details or {}).values())
-                                                if summary.failure_details else "Generated output did not pass final validation.")
+            detail = playback_error or summary.packaging_error or (
+                "; ".join(str(v) for v in (summary.failure_details or {}).values())
+                if summary.failure_details else (
+                    "Generation did not report the expected output file for this attempt."
+                    if not reported_output_matches_target
+                    else "Generated output did not pass final validation."
+                )
+            )
             current = self._jobs.get(job_id, {}).get("progress", 0)
             self._job_update(job_id, state=status, stage="Generation " + status,
                              progress=min(98, int(current or 0)), message=detail,
