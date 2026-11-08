@@ -241,13 +241,17 @@ class Stage6AudiobookLibraryContractTests(unittest.TestCase):
         gate_start = self.adapter.index("function renderProductionMetadataGate(")
         gate_end = self.adapter.index("function populateMetadataHistory(", gate_start)
         gate = self.adapter[gate_start:gate_end]
-        self.assertIn("start.disabled = !complete || unsaved || audioActive;", gate)
+        self.assertIn("const generationBlockReason = productionGenerationBlockReason(active);", gate)
+        self.assertIn("start.disabled = Boolean(generationBlockReason) || audioActive;", gate)
+        self.assertIn("productionJobIsActive(productionJobSnapshots.full)", gate)
+        self.assertIn("productionJobIsActive(productionJobSnapshots.preview)", gate)
 
         generation_start = self.adapter.index("function renderProductionGeneration(")
         generation_end = self.adapter.index("async function refreshChapterBgm(", generation_start)
         generation = self.adapter[generation_start:generation_end]
-        self.assertIn("const metadataComplete = project?.metadata_complete === true && !metadataDialogDirty;", generation)
-        self.assertIn("fullStart.disabled = anyAudioActive || !metadataComplete;", generation)
+        self.assertIn("const generationBlockReason = productionGenerationBlockReason(project);", generation)
+        self.assertIn("fullStart.disabled = anyAudioActive || Boolean(generationBlockReason);", generation)
+        self.assertIn("fullStart.title = anyAudioActive", generation)
         self.assertIn("previewStart.disabled = anyAudioActive;", generation)
 
         save_start = self.adapter.index("project.metadata.save")
