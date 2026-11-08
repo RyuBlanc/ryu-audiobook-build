@@ -269,8 +269,8 @@
   let mixLevelsRevision = 0, mixLevelsSavePromise = null;
   let soundManifestSavePromise = null, soundManifestSaveRevision = 0, soundManifestPendingOverrides = Object.create(null);
   let cueClearAllStaged = false;
-  let modelInventoryLoadPromise = null, modelInventoryScanRequested = false, modelInventoryLoadedAt = 0;
-  let soundCatalogLoadPromise = null, soundCatalogScanRequested = false, soundCatalogLoadedAt = 0;
+  let modelInventoryLoadPromise = null, modelInventoryScanRequested = false, modelInventoryLoadedAt = 0, forceModelInventoryRefreshPending = false;
+  let soundCatalogLoadPromise = null, soundCatalogScanRequested = false, soundCatalogLoadedAt = 0, forceSoundCatalogRefreshPending = false;
   let providerCatalogs = Object.create(null), providerCatalogEpochs = Object.create(null), voiceListEpoch = 0, modelListEpoch = 0, projectListEpoch = 0, characterListEpoch = 0, termsListEpoch = 0, soundListEpoch = 0, historyListEpoch = 0, librarySearchTimer = null, soundSearchTimer = null;
   let dashboardProject = null, selectedAudiobookFolder = null, miniPlayerDismissed = false;
   let metadataDialogProjectFolder = '', metadataDialogDirty = false, metadataDialogEpoch = 0;
@@ -4454,8 +4454,10 @@
     }
   }
 
-  async function refreshSounds(forceRefresh = false) {
+  async function refreshSounds() {
     const requestToken = ++soundListEpoch;
+    const forceRefresh = forceSoundCatalogRefreshPending;
+    forceSoundCatalogRefreshPending = false;
     const loaded = await loadSoundCatalogue(forceRefresh);
     if (requestToken !== soundListEpoch) return sounds;
     sounds = Array.isArray(loaded) ? loaded : [];
@@ -8735,9 +8737,11 @@
           esc(formatModelBytes(managedStorageBytes)) + ' · Drive free: ' + esc(formatModelBytes(free)) + '</p>';
     }
   }
-  async function refreshModels(forceRefresh = false) {
+  async function refreshModels() {
     const requestToken = ++modelListEpoch;
-    const loadedRows = await loadModelInventory(Boolean(forceRefresh));
+    const forceRefresh = forceModelInventoryRefreshPending;
+    forceModelInventoryRefreshPending = false;
+    const loadedRows = await loadModelInventory(forceRefresh);
     if (requestToken !== modelListEpoch) return window.ryuModelInventoryRows || [];
     const rows = Array.isArray(loadedRows) ? loadedRows : [];
     window.ryuModelInventoryRows = rows;
@@ -8767,7 +8771,8 @@
           refreshButton.disabled = true;
           refreshButton.textContent = 'Refreshing…';
           try {
-            await refreshModels(true);
+            forceModelInventoryRefreshPending = true;
+            await refreshModels();
             await refreshVoices();
             message('Model status refreshed from the local installation and saved voice catalogue.');
           } catch (error) {
@@ -9685,7 +9690,7 @@
       }
     });
 
-    if ($('checkModelUpdates')) $('checkModelUpdates').onclick=act(async()=>{await refreshModels(true);message('Local model catalogue refreshed. This checks the local catalogue; it does not contact an online update service.');});
+    if ($('checkModelUpdates')) $('checkModelUpdates').onclick=act(async()=>{forceModelInventoryRefreshPending = true;await refreshModels();message('Local model catalogue refreshed. This checks the local catalogue; it does not contact an online update service.');});
     if ($('startQwenInstall')) $('startQwenInstall').onclick=act(async()=>{
       const choice=document.querySelector('input[name="qwenInstall"]:checked')?.value||'customvoice';
       const data=await call('models.install',{selection:choice});
@@ -10763,7 +10768,8 @@
             });
             soundCatalogScanRequested = false;
             soundCatalogLoadedAt = 0;
-            await refreshSounds(true);
+            forceSoundCatalogRefreshPending = true;
+            await refreshSounds();
             await refreshSoundCues();
             await refreshChapterBgm();
             message('Imported ' + (result.imported || []).length + ' audio asset(s) into the local catalogue.');
