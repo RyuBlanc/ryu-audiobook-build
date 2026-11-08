@@ -162,6 +162,103 @@ class Stage53TerminalJobConsistencyTests(unittest.TestCase):
                     )
 
 
+    def test_complete_chapter_count_without_worker_output_does_not_publish_stale_m4b(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project_folder = root / "project"
+            project_folder.mkdir()
+            job_id = "missing-output-generation-job"
+            output = root / "previously-finished-book.m4b"
+            output.write_bytes(b"previously completed audiobook" * 128)
+            save_state(
+                project_folder,
+                {
+                    "status": "generating",
+                    "generation_job_id": job_id,
+                    "generation_target_path": str(output),
+                    "output_path": None,
+                    "completed_chapters": [],
+                    "generation_mode": "narrator_only",
+                    "narrator_only_generation": True,
+                    "character_voice_profile_count": 0,
+                },
+            )
+            bridge = DurableGenerationCompletionHarness(
+                root, job_id,
+                result={
+                    "generation_mode": "narrator_only",
+                    "narrator_only": True,
+                    "character_voice_profile_count": 0,
+                },
+            )
+            # This worker reports every chapter complete, but returns no output.
+            # An older, non-empty M4B at the target path must not satisfy this job.
+            summary = self._summary(output=None)
+            bridge._generation_finished(
+                job_id, SimpleNamespace(folder=project_folder), summary, output, "Saved Narrator",
+            )
+
+            queue_row = bridge._job_list({"include_hidden": False})[0]
+            history_row = bridge._history_list({})[0]
+            project_state = load_state(project_folder)
+            self.assertEqual(queue_row["state"], "failed")
+            self.assertIsNone(queue_row["output_path"])
+            self.assertIsNone(queue_row["result"]["output_path"])
+            self.assertEqual(queue_row["result"]["generation_mode"], "narrator_only")
+            self.assertTrue(queue_row["result"]["narrator_only"])
+            self.assertEqual(history_row["state"], "failed")
+            self.assertIsNone(history_row["output_path"])
+            self.assertIsNone(history_row["result"]["output_path"])
+            self.assertEqual(project_state["status"], "failed")
+            self.assertIsNone(project_state.get("output_path"))
+            self.assertTrue(output.is_file())
+            self.assertGreater(output.stat().st_size, 0)
+
+    def test_reported_output_must_match_the_requested_generation_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project_folder = root / "project"
+            project_folder.mkdir()
+            job_id = "mismatched-output-generation-job"
+            expected_output = root / "new-book.m4b"
+            prior_output = root / "different-existing-book.m4b"
+            prior_output.write_bytes(b"another book's old output" * 128)
+            unexpected_output = root / "unexpected-worker-output.m4b"
+            unexpected_output.write_bytes(b"unrelated worker output" * 128)
+            save_state(
+                project_folder,
+                {
+                    "status": "generating",
+                    "generation_job_id": job_id,
+                    "generation_target_path": str(expected_output),
+                    "output_path": None,
+                    "completed_chapters": [],
+                    "generation_mode": "character_cast",
+                    "narrator_only_generation": False,
+                    "character_voice_profile_count": 2,
+                },
+            )
+            bridge = DurableGenerationCompletionHarness(
+                root, job_id,
+                result={
+                    "generation_mode": "character_cast",
+                    "narrator_only": False,
+                    "character_voice_profile_count": 2,
+                },
+            )
+            summary = self._summary(output=unexpected_output)
+            bridge._generation_finished(
+                job_id, SimpleNamespace(folder=project_folder), summary, expected_output, "Saved Narrator",
+            )
+
+            queue_row = bridge._job_list({"include_hidden": False})[0]
+            self.assertEqual(queue_row["state"], "failed")
+            self.assertIsNone(queue_row["output_path"])
+            self.assertIsNone(queue_row["result"]["output_path"])
+            self.assertEqual(queue_row["result"]["generation_mode"], "character_cast")
+            self.assertIsNone(load_state(project_folder).get("output_path"))
+            self.assertTrue(unexpected_output.is_file())
+
     def test_incomplete_attempt_does_not_attach_preexisting_m4b_to_failed_job(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
