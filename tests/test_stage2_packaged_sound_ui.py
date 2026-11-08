@@ -187,7 +187,7 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
         self.assertIn("call('sound.cues.get')", cue_refresh)
         self.assertIn("if (requestToken !== cueListEpoch) return cueAssignments;", cue_refresh)
         self.assertIn("sounds = Array.isArray(loadedCatalog) ? loadedCatalog : [];", cue_refresh)
-        self.assertLess(cue_refresh.index("call('sound.catalog')"), cue_refresh.index("const visible = sounds.filter"))
+        self.assertLess(cue_refresh.index("loadSoundCatalogue(false)"), cue_refresh.index("const visible = sounds.filter"))
         self.assertIn("isCueSoundAsset(t)", cue_refresh)
 
     def test_packaged_volume_interaction_focuses_the_real_slider_before_editing(self):
