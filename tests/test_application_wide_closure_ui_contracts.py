@@ -59,6 +59,7 @@ class CharacterStudioUIContracts(unittest.TestCase):
         review = adapter[start:end]
         self.assertIn("chapterPassages", review)
         self.assertIn("wordCount", review)
+        self.assertIn("split(/\\s+/)", review)
         self.assertIn("assignedCount", review)
         self.assertIn("aiSuggestedCount", review)
         self.assertIn("skippedCount", review)
