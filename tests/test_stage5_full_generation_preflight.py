@@ -32,7 +32,13 @@ class ProductionGenerationHarness:
         self._resolve_narrator_for_generation = Mock(
             return_value=(
                 profile,
-                {"source": "project_override", "profile_name": profile.name},
+                {
+                    "source": "project_override",
+                    "profile_name": profile.name,
+                    "generation_mode": "character_cast",
+                    "narrator_only": False,
+                    "character_voice_profile_count": 0,
+                },
             )
         )
         self._project_series_name = Mock(return_value="Saved Series")
@@ -155,6 +161,13 @@ class Stage53ProductionPreflightTests(unittest.TestCase):
 
             self.assertEqual(state["status"], "generating")
             self.assertEqual(state["generation_job_id"], "stage53-production-job")
+            self.assertFalse(state["narrator_only_generation"])
+            self.assertEqual(state["generation_mode"], "character_cast")
+            job_result = bridge._job_update.call_args.kwargs["result"]
+            self.assertFalse(job_result["narrator_only"])
+            self.assertEqual(job_result["generation_mode"], "character_cast")
+            self.assertFalse(result["narrator_only"])
+            self.assertEqual(result["generation_mode"], "character_cast")
             self.assertEqual(state["empty_chapters_skipped"], 1)
             self.assertEqual(state["excluded_chapters_skipped"], 1)
             self.assertEqual(state["chapters_skipped_for_generation"], 2)
