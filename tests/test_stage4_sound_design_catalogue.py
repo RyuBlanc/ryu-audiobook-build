@@ -206,7 +206,8 @@ class SoundDesignCatalogueTests(unittest.TestCase):
         imported_path = Path(result["imported"][0]["path"])
         metadata = json.loads(imported_path.with_name(imported_path.name + ".license.json").read_text(encoding="utf-8"))
         self.assertEqual(metadata["category"], "romance")
-        row = next(item for item in host.PremiumV2Bridge._sound_catalog(self.bridge_a, {}) if item["path"] == str(imported_path.resolve()))
+        rows = host.PremiumV2Bridge._build_sound_catalog(self.bridge_a)
+        row = next(item for item in rows if item["path"] == str(imported_path.resolve()))
         self.assertEqual(row["category"], "romance")
 
     def test_final_output_cannot_overwrite_selected_sound_asset(self):
