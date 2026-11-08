@@ -29,6 +29,7 @@ from ..qwen_character_runtime import (
     unregister_qwen_worker,
 )
 from ..expression import DEFAULT_VOICE_DESIGN_ANCHOR_TEXT, classify_expression
+from ..qwen_model_preference import normalize_qwen_backend_preference
 from app.core.paths import settings_root
 
 
@@ -76,7 +77,10 @@ class QwenCharacterProvider(TTSProvider):
         self.voice_id = voice_id
         self.language = language or "English"
         self.instruct = instruct or ""
-        self.backend = backend
+        # This field is a compute backend, not a provider identifier.
+        # Normalize legacy/malformed values so no path can send "qwen-character"
+        # to the worker's strict backend validator.
+        self.backend = normalize_qwen_backend_preference(backend)
         self.low_memory = bool(low_memory)
         self.last_execution_context: dict = {}
         self.qwen_mode = (qwen_mode or "custom").casefold()
@@ -263,17 +267,22 @@ class QwenCharacterProvider(TTSProvider):
         if self._worker is not None and self._worker.poll() is None:
             return
         self._ensure_model_kind()
-        if str(self.backend or "automatic").casefold() in {"automatic", "auto"} and runtime_ready():
-            ensure_best_runtime_for_gpu(self._status)
+        automatic_backend = self.backend == "automatic"
         if not runtime_ready():
             try:
                 verify_runtime()
             except Exception as exc:
                 raise RuntimeError(f"Qwen3-TTS runtime is not healthy: {exc}") from exc
+        if not runtime_ready():
             raise RuntimeError(
                 "Offline Character Voices are not installed. Open Models and choose "
                 "Install / Repair Qwen Voice Studio first."
             )
+        # Check for a supported GPU after the runtime is ready as well. The old
+        # order skipped this upgrade when a newly verified CPU runtime was not
+        # marked ready at entry, leaving Automatic on CPU until a later session.
+        if automatic_backend:
+            ensure_best_runtime_for_gpu(self._status)
         if not model_installed(self.model_kind):
             phase = {"design": "VoiceDesign", "design-preview": "VoiceDesign", "clone": "Voice Clone (Base)"}.get(
                 self.qwen_mode, "CustomVoice"
