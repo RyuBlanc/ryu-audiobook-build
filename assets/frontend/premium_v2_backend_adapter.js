@@ -799,31 +799,50 @@
 
     const chapterCount = Number(project.chapter_count || 0);
     const preparedChapters = Number(project.prepared_chapter_count || 0);
-    const chaptersReady = chapterCount > 0 && preparedChapters === chapterCount;
-    const hasChapterText = preparedChapters > 0;
+    const eligibleChapters = Math.max(0, Number(
+      project.eligible_chapter_count ?? project.prepared_chapter_count ?? 0
+    ));
+    const emptyChapters = Math.max(0, Number(project.empty_chapter_count || 0));
+    const excludedChapters = Math.max(0, Number(project.excluded_chapter_count || 0));
+    const chaptersReady = eligibleChapters > 0;
+    const metadataComplete = project.metadata_complete === true;
+    const metadataMissing = Array.isArray(project.metadata_missing_fields)
+      ? project.metadata_missing_fields : [];
     const narratorName = String(project.narrator || project.voice_profile || '').trim();
-    const narratorReady = Boolean(String(project.voice_profile || '').trim());
+    const narratorReady = project.narrator_voice_configured === true &&
+      project.narrator_profile_available === true && Boolean(String(project.voice_profile || '').trim());
+    const narratorOnly = project.narrator_only_generation === true;
     const characterCount = Number(project.character_count || 0);
     const characterVoiceCount = Number(project.character_voice_count || 0);
     const characterReviewed = Boolean(project.character_analysis_done);
-    const charactersReady = characterReviewed &&
-      (characterCount === 0 || characterVoiceCount >= characterCount);
-    const outputReady = Boolean(project.output_configured);
-    const canGenerate = chapterCount > 0 && hasChapterText && narratorReady && outputReady;
+    const charactersReady = narratorOnly || (characterReviewed &&
+      (characterCount === 0 || characterVoiceCount >= characterCount));
+    const outputReady = project.output_configured === true &&
+      project.output_folder_ready === true && project.output_format_supported === true;
+    const canGenerate = chaptersReady && metadataComplete && narratorReady && outputReady;
     const pronunciationCount = Number(project.pronunciation_rule_count || 0);
     const soundConfigured = Boolean(project.sound_design_configured);
+    const chapterDetail = chaptersReady
+      ? eligibleChapters + ' eligible chapter(s)' +
+        (emptyChapters || excludedChapters
+          ? ' · skip ' + emptyChapters + ' empty / ' + excludedChapters + ' excluded' : '')
+      : (chapterCount ? 'No eligible chapters' : 'No chapters imported');
+    const metadataDetail = metadataComplete ? 'Book & metadata' :
+      ('Missing: ' + (metadataMissing.slice(0, 3).join(', ') || 'required project details') +
+        (metadataMissing.length > 3 ? ' +' + (metadataMissing.length - 3) + ' more' : ''));
 
     const stageState = [
-      {key:'import', ready:Boolean(project.source_exists), detail:project.source_exists ? 'Book & metadata' : 'Source file missing'},
-      {key:'chapters', ready:chaptersReady, detail:chaptersReady ? 'Structure & text' :
-        (chapterCount ? preparedChapters + '/' + chapterCount + ' chapters ready' : 'No chapters imported')},
-      {key:'voices', ready:narratorReady, detail:narratorReady ? (narratorName || project.voice_profile) : 'Choose a voice profile'},
-      {key:'characters', ready:charactersReady, detail:!characterReviewed ? 'Not analyzed' :
-        (characterCount === 0 ? 'No characters found' :
-          (charactersReady ? 'Voices assigned' : (characterCount-characterVoiceCount) + ' need review'))},
+      {key:'import', ready:metadataComplete, detail:metadataDetail},
+      {key:'chapters', ready:chaptersReady, detail:chapterDetail},
+      {key:'voices', ready:narratorReady, detail:narratorReady ? (narratorName || project.voice_profile) : 'Choose an available saved narrator'},
+      {key:'characters', ready:charactersReady, detail:narratorOnly ? 'Narrator-only · character voices bypassed' :
+        (!characterReviewed ? 'Not analyzed' :
+          (characterCount === 0 ? 'No characters found' :
+            (charactersReady ? 'Voices assigned' : (characterCount-characterVoiceCount) + ' need review')))},
       {key:'pronunciation', ready:true, detail:pronunciationCount ? pronunciationCount + ' saved rules' : 'Names & terms'},
       {key:'sound', ready:true, detail:soundConfigured ? 'Configured' : 'Music & effects'},
-      {key:'generate', ready:canGenerate, detail:project.completed ? 'Audiobook ready' : (canGenerate ? 'Build audiobook' : 'Setup required')}
+      {key:'generate', ready:canGenerate, detail:project.completed && project.output_path ? 'Audiobook ready' :
+        (canGenerate ? 'Build audiobook' : 'Complete the required setup')}
     ];
     const readyCount = stageState.filter(stage => stage.ready).length;
     if (readinessLabel) readinessLabel.textContent = readyCount + ' of ' + stageState.length + ' stages ready';
@@ -5245,7 +5264,37 @@
       (kind === 'warn' ? 'var(--amber)' : (kind === 'error' ? 'var(--danger)' : 'var(--muted)'));
   }
 
-  function renderProductionMetadataGate(active) {
+  function productionGenerationBlockReason(active) {
+    if (!active?.folder) return 'Open a saved project before starting full generation.';
+    const unsaved = metadataDialogDirty && metadataDialogProjectFolder === String(active.folder);
+    if (unsaved) return 'Save or discard Input Project Details changes before generation.';
+    if (active.metadata_complete !== true) {
+      const missing = Array.isArray(active.metadata_missing_fields) ? active.metadata_missing_fields : [];
+      return 'Complete required Input Project Details' +
+        (missing.length ? ': ' + missing.join(', ') : '') + '.';
+    }
+    if (active.narrator_voice_configured !== true || active.narrator_profile_available !== true) {
+      return 'Choose and save an available narrator voice profile before full generation.';
+    }
+    const eligibleChapters = Math.max(0, Number(
+      active.eligible_chapter_count ?? active.prepared_chapter_count ?? 0
+    ));
+    if (eligibleChapters < 1) {
+      return 'Add narration text or re-include at least one chapter for generation.';
+    }
+    if (active.output_format_supported !== true) {
+      return 'Select a supported .m4b output destination before generation.';
+    }
+    if (active.output_folder_ready !== true) {
+      return 'Choose an output folder that exists or whose parent is writable.';
+    }
+    if (active.output_configured !== true) {
+      return 'Configure a writable .m4b output destination before generation.';
+    }
+    return '';
+  }
+
+function renderProductionMetadataGate(active) {
     const status = $('productionMetadataStatus');
     const start = $('startGenerate');
     if (!active?.folder) {
@@ -5262,6 +5311,7 @@
     const unsaved = metadataDialogDirty && metadataDialogProjectFolder === String(active.folder);
     const missing = Array.isArray(active.metadata_missing_fields) ? active.metadata_missing_fields : [];
     const complete = active.metadata_complete === true;
+    const generationBlockReason = productionGenerationBlockReason(active);
     if (status) {
       status.textContent = unsaved
         ? 'Unsaved changes — save Input Project Details before full generation.'
@@ -5273,12 +5323,10 @@
     const audioActive = productionJobIsActive(productionJobSnapshots.full) ||
       productionJobIsActive(productionJobSnapshots.preview);
     if (start) {
-      start.disabled = !complete || unsaved || audioActive;
-      start.title = start.disabled
-        ? (audioActive ? 'Finish or cancel the active Production audio operation first.'
-          : (unsaved ? 'Save or discard Input Project Details changes before generation.'
-            : 'Complete the missing required metadata before full generation.'))
-        : 'Generate the full audiobook using saved project configuration.';
+      start.disabled = Boolean(generationBlockReason) || audioActive;
+      start.title = audioActive
+        ? 'Finish or cancel the active Production audio operation first.'
+        : (generationBlockReason || 'Generate the full audiobook using saved project configuration.');
     }
   }
 
@@ -5528,23 +5576,30 @@
 
     const chapterCount = Math.max(0, Number(active.chapter_count || 0));
     const preparedCount = Math.max(0, Math.min(chapterCount, Number(active.prepared_chapter_count || 0)));
-    const chaptersReady = chapterCount > 0 && preparedCount === chapterCount;
-    setProductionStatus('productionChaptersReady',
-      chapterCount ? preparedCount + ' / ' + chapterCount + ' chapters prepared' : 'No chapters available',
-      chaptersReady ? 'ready' : 'warn');
+    const eligibleCount = Math.max(0, Math.min(chapterCount, Number(active.eligible_chapter_count ?? preparedCount)));
+    const emptyCount = Math.max(0, Number(active.empty_chapter_count || 0));
+    const excludedCount = Math.max(0, Number(active.excluded_chapter_count || 0));
+    const chaptersReady = eligibleCount > 0;
+    const chapterStatus = eligibleCount
+      ? eligibleCount + ' eligible for generation' +
+        (emptyCount || excludedCount ? ' · skip ' + emptyCount + ' empty / ' + excludedCount + ' excluded' : '')
+      : (chapterCount ? 'No eligible chapters · add text or re-include a chapter' : 'No chapters available');
+    setProductionStatus('productionChaptersReady', chapterStatus, chaptersReady ? 'ready' : 'warn');
 
-    const narratorReady = active.narrator_voice_configured === true;
+    const narratorReady = active.narrator_voice_configured === true &&
+      active.narrator_profile_available === true;
     const narratorProfile = String(active.voice_profile || '').trim();
     setProductionStatus('productionNarratorReady',
       narratorReady ? 'Saved voice profile · ' + narratorProfile : 'No saved narrator voice profile',
       narratorReady ? 'ready' : 'warn');
 
-    let characterStatus = 'Character analysis not run';
-    let characterKind = 'warn';
-    if (analysisDone && totalCharacters === 0) {
+    const narratorOnly = active.narrator_only_generation === true;
+    let characterStatus = narratorOnly ? 'Bypassed · saved narrator reads all passages' : 'Character analysis not run';
+    let characterKind = narratorOnly ? 'ready' : 'warn';
+    if (!narratorOnly && analysisDone && totalCharacters === 0) {
       characterStatus = 'No character speakers detected';
       characterKind = 'ready';
-    } else if (totalCharacters > 0) {
+    } else if (!narratorOnly && totalCharacters > 0) {
       const missing = Math.max(0, totalCharacters - assignedCharacters);
       characterStatus = assignedCharacters + ' / ' + totalCharacters + ' assigned' +
         (missing ? ' · ' + missing + ' need voice assignment' : '');
@@ -5558,11 +5613,12 @@
       : 'No custom pronunciation rules saved · optional',
       pronunciationCount ? 'ready' : 'info');
 
-    const outputReady = active.output_folder_ready === true && active.output_format_supported === true;
+    const outputReady = active.output_configured === true &&
+      active.output_folder_ready === true && active.output_format_supported === true;
     const outputStatus = active.output_format_supported === false
       ? 'Unsupported output type · choose M4B'
       : (outputReady ? 'Writable · ' + String(active.output_folder || '')
-        : 'Output folder is missing or not writable');
+        : 'Output destination is missing or its folder is not writable');
     setProductionStatus('productionOutputReady', outputStatus, outputReady ? 'ready' : 'warn');
     renderProductionMetadataGate(active);
     return active;
