@@ -7707,10 +7707,12 @@ class PremiumV2Bridge(QObject):
                              # destination. Do not attach it to a failed/cancelled job
                              # as if this attempt produced a complete audiobook.
                              output_path=str(actual) if valid and status != "cancelled"
-                                 and not summary.packaging_failed and not summary.chapters_failed else None,
+                                 and not summary.packaging_failed and not summary.chapters_failed
+                                 and summary.chapters_completed == summary.chapters_total else None,
                              result={**terminal_identity,
                                      "output_path": str(actual) if valid and status != "cancelled"
-                                         and not summary.packaging_failed and not summary.chapters_failed else None,
+                                         and not summary.packaging_failed and not summary.chapters_failed
+                                         and summary.chapters_completed == summary.chapters_total else None,
                                      "chapters_total": summary.chapters_total,
                                      "chapters_completed": summary.chapters_completed,
                                      "completed_chapters": list(summary.chapters_completed_numbers or []),
