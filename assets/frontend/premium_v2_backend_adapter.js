@@ -505,7 +505,7 @@
         const wordCount = Math.max(
           0,
           Number(chapter.word_count) ||
-            String(chapter.text || '').trim().split(/\\s+/).filter(Boolean).length
+            String(chapter.text || '').trim().split(/\s+/).filter(Boolean).length
         );
         const status = !characterAnalysisStatus.analyzed ? 'Not analysed yet' :
           (pendingRows.length ? 'Needs review' : 'Review complete');
