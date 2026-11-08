@@ -58,3 +58,31 @@ CI builds and static regression tests do not prove the app is flicker-free, cras
 ## Closure rule
 
 Mark a source item closed when the handler and regression test are present and the matching-head CI run passes. Mark a runtime item accepted only after the packaged Windows test is performed and recorded. Keep unsupported capability explicitly unavailable rather than simulating success. Do not claim zero flicker/crashes without repeated target-machine testing.
+
+
+## 8 November 2026 — Character Studio large-book review closure overlay
+
+This dated overlay supersedes the historical branch/build references above for the changes listed here only. It does not close unrelated cross-application requirements or claim installed-Windows acceptance.
+
+**Current repair branch:** `fix/application-wide-closure-2026-11-08`  
+**Source commit under this checkpoint:** `826011075ca45f27e17c788d215c82d0fe0fb5ee`
+
+### Changes recorded
+
+- `5b0d309e9261c3e72977ad076380c496998e19a4` — Character Studio AI review no longer silently limits the current chapter's pending queue to 120 rows. It renders bounded batches of 120 and exposes a real “Show more passages” action until all pending rows are reachable. The full pending/assigned counts remain based on the complete collection. The visible batch resets when the selected chapter or pending passage set changes.
+- `826011075ca45f27e17c788d215c82d0fe0fb5ee` — AI-mode chapter navigation now reports per-chapter word count, detected passages, assigned passages, AI suggestions, pending review and skipped rows. It supports searching chapter number/title and filtering by analysis/review status without rebuilding the navigation on each keystroke.
+
+### Exact-head automated evidence
+
+- Build #2839 — `5b0d309e9261c3e72977ad076380c496998e19a4`: **1,368 tests passed**; Windows build job skipped. [Actions run](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42451900189).
+- Build #2841 — `826011075ca45f27e17c788d215c82d0fe0fb5ee`: **1,369 tests passed**; Windows build job skipped. [Actions run](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42452095607).
+- Test-first evidence: Build #2838 failed on the missing large-queue behaviour before the queue fix; Build #2840 failed on the missing chapter metrics before the navigator fix. Neither was weakened or skipped to obtain a pass.
+- A Windows artifact-checkpoint run is required after this overlay is committed. Until its build job and artifact association are verified, this overlay does not claim a new installer or portable package.
+
+### Remaining acceptance
+
+- Exercise a book with more than 120 pending passages and confirm that repeated “Show more passages” actions expose every row exactly once, with no skipped or duplicated source passages.
+- Search/filter chapters by number, title and each status in the installed app; verify word counts, passage counts and assignment counts against saved source data.
+- Verify navigation, selection, filtering and scrolling in the packaged Windows application at the required display sizes/scales.
+- This work does not close XAPP-01–03, XAPP-05–20, real-book AI analysis, canonical passage persistence, voice-routing, Qwen hardware, catalogue responsiveness, generation/audio or release gates.
+
