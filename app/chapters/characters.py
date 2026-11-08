@@ -554,6 +554,48 @@ _NON_PERSON_DESCRIPTORS = {
 }
 
 
+
+def character_detection_exclusion_keys(
+    exclusions: list[dict] | tuple[dict, ...] | None,
+    series: str,
+    protected_names: set[str] | list[str] | tuple[str, ...] | None = None,
+) -> set[str]:
+    """Return dismissed character names/aliases for one series.
+
+    A dismissal is scoped to the series in which the user made it. Explicit,
+    user-confirmed assignment names are removed from the exclusion set so an
+    intentional later assignment can restore the identity without allowing
+    an unrelated series or ordinary AI guess to bypass the dismissal.
+    """
+    wanted_series = str(series or "").strip().casefold()
+    if not wanted_series or not isinstance(exclusions, (list, tuple)):
+        return set()
+    result: set[str] = set()
+    for row in exclusions:
+        if not isinstance(row, dict):
+            continue
+        row_series = str(row.get("series") or "").strip().casefold()
+        if not row_series or row_series != wanted_series:
+            continue
+        name = str(row.get("name") or row.get("primary_name") or "").strip()
+        if name:
+            result.add(name.casefold())
+        aliases = row.get("aliases") or []
+        if isinstance(aliases, str):
+            aliases = [aliases]
+        if isinstance(aliases, (list, tuple, set)):
+            result.update(
+                str(alias).strip().casefold()
+                for alias in aliases if str(alias or "").strip()
+            )
+    protected = {
+        str(value).strip().casefold()
+        for value in (protected_names or ())
+        if str(value or "").strip()
+    }
+    return result - protected
+
+
 def is_likely_character_name(value: str, *, trusted: bool = False, explicit: bool = False) -> bool:
     """Reject common capitalized prose fragments before they enter the cast.
 
