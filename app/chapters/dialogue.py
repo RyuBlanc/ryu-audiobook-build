@@ -228,24 +228,42 @@ def dialogue_segment_for_selection(
     )
 
 
-def dialogue_segments(chapter: Chapter) -> list[DialogueSegment]:
-    """Return dialogue spans with ranked, evidence-backed speaker suggestions."""
-    analysis = analyze_chapter(chapter)
-    manual_speakers = [
-        str(item.get("speaker", "")).strip()
-        for item in getattr(chapter, "dialogue_assignments", [])
-        if str(item.get("speaker", "")).strip()
-    ]
+def _clean_segment_dialogue(value: str) -> str:
+    raw = str(value or "").strip()
+    pairs = (("“", "”"), ("\u201c", "\u201d"), ("「", "」"), ("『", "』"),
+             ("«", "»"), ("‘", "’"), ("'", "'"), ('"', '"'))
+    for opening, closing in pairs:
+        if raw.startswith(opening) and raw.endswith(closing) and len(raw) > len(opening) + len(closing):
+            raw = raw[len(opening):-len(closing)].strip()
+            break
+    if raw and raw[0] in {"—", "–", "-"}:
+        raw = raw[1:].strip()
+    return _clean_dialogue(raw)
 
-    chapter_text = chapter.text or ""
+
+def dialogue_segments(chapter: Chapter) -> list[DialogueSegment]:
+    """Return Production's exact speaker segments with reviewable suggestions.
+
+    The generation preflight and Character Studio must not independently
+    discover dialogue spans. Reuse the canonical source-position segmentation
+    so quoted, single-quoted, dash-led and saved/overlapping dialogue spans are
+    counted exactly once in both places.
+    """
+    analysis = analyze_chapter(chapter)
+    chapter_text = str(chapter.text or "")
     discovered_names = _discover_candidates(chapter_text)
     discovered_names.update(_discover_explicit_speakers(chapter_text))
     discovered = {
         name for name in discovered_names
         if _is_plausible_name(name)
     }
+    from app.chapters.assignment_utils import assignment_speakers
+    saved_speakers = []
+    for assignment in getattr(chapter, "dialogue_assignments", []) or []:
+        if isinstance(assignment, dict):
+            saved_speakers.extend(assignment_speakers(assignment))
     candidates = list(dict.fromkeys(
-        [c.name for c in analysis.characters] + manual_speakers + sorted(discovered)
+        [c.name for c in analysis.characters] + saved_speakers + sorted(discovered)
     ))
     aliases = {
         alias.casefold(): c.name
@@ -253,39 +271,37 @@ def dialogue_segments(chapter: Chapter) -> list[DialogueSegment]:
         for alias in c.aliases
     }
 
-    text = chapter.text or ""
-    spans = _all_dialogue_spans(text)
+    from app.chapters.speaker_segmentation import segment_chapter_speakers
+    source_segments = [
+        row for row in segment_chapter_speakers(chapter)
+        if row.kind != "narration" and row.end > row.start
+    ]
     result: list[DialogueSegment] = []
     last_speaker: str | None = None
-
-    for number, (start, end, raw) in enumerate(spans, 1):
-        before = text[max(0, start - 700):start]
-        after = text[end:min(len(text), end + 500)]
-        speaker, confidence = _speaker_near_quote(
-            text, start, end, candidates, analysis.narrator.name, last_speaker
-        )
+    for number, row in enumerate(source_segments, 1):
+        start, end = int(row.start), int(row.end)
+        before = chapter_text[max(0, start - 700):start]
+        after = chapter_text[end:min(len(chapter_text), end + 500)]
         suggestions = _rank_suggestions(
             chapter, start, end, before, after, candidates, aliases, last_speaker
         )
+        speaker = row.speaker if row.kind == "character_dialogue" else None
+        confidence = 1.0 if speaker else 0.0
         if suggestions:
-            top_name, top_confidence, _ = suggestions[0]
+            top_name, top_confidence, _evidence = suggestions[0]
             if confidence <= 0 or top_confidence > confidence:
                 speaker, confidence = top_name, top_confidence
-
-        result.append(
-            DialogueSegment(
-                number,
-                _clean_dialogue(raw),
-                start,
-                end,
-                speaker,
-                confidence,
-                tuple(suggestions),
-            )
-        )
+        result.append(DialogueSegment(
+            number,
+            _clean_segment_dialogue(row.text),
+            start,
+            end,
+            speaker,
+            confidence,
+            tuple(suggestions),
+        ))
         if speaker and confidence >= 0.78:
             last_speaker = speaker
-
     return result
 
 
@@ -307,20 +323,31 @@ def _rank_suggestions(
         if current is None or score > current[0]:
             scores[name] = (score, evidence)
 
+    matching_assignments = []
     for item in getattr(chapter, "dialogue_assignments", []):
+        if not isinstance(item, dict):
+            continue
         try:
             a_start = int(item.get("start", -1))
             a_end = int(item.get("end", -1))
         except (TypeError, ValueError):
             continue
         if a_start == start and a_end == end:
-            name = str(item.get("speaker", "")).strip()
-            if name:
-                add(name, 1.0, "Saved manual assignment for this exact dialogue.")
+            matching_assignments.append((item, 1.0, "Saved assignment for this exact source passage."))
         elif a_start <= start < a_end or start <= a_start < end:
-            name = str(item.get("speaker", "")).strip()
-            if name:
-                add(name, 0.94, "Overlapping saved manual assignment.")
+            matching_assignments.append((item, 0.94, "Overlapping saved assignment."))
+    assignment_sets = {
+        tuple(sorted(str(name).casefold() for name in assignment_speakers(item)))
+        for item, _score, _evidence in matching_assignments
+        if assignment_speakers(item)
+    }
+    # If overlapping records disagree, require review instead of silently
+    # selecting whichever legacy/new assignment happened to be iterated first.
+    if len(assignment_sets) == 1:
+        for item, score, evidence in matching_assignments:
+            for name in assignment_speakers(item):
+                add(name, score, evidence)
+
 
     verbs = r"said|asked|replied|answered|shouted|yelled|whispered|muttered|called|cried|exclaimed|added|insisted|wondered|demanded|begged|sighed|snapped|murmured|screamed|explained|remarked|responded|mumbled|stammered|laughed|groaned"
 

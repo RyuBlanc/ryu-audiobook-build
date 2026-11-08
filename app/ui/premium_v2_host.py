@@ -6912,14 +6912,22 @@ class PremiumV2Bridge(QObject):
                 "Let the model operation finish, then retry."
             )
 
-    def _models_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
-        """Return and cache the authoritative model/runtime inventory."""
+    def _models_list(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        """Return the authoritative model inventory with bounded refresh scans."""
+        cached = getattr(self, "_model_inventory_cache", None)
+        scanned_at = float(getattr(self, "_model_inventory_cache_at", 0.0) or 0.0)
+        force_refresh = bool((payload or {}).get("force_refresh"))
+        if (
+            not force_refresh
+            and isinstance(cached, list)
+            and time.monotonic() - scanned_at < 5.0
+        ):
+            return list(cached)
         from app.tts.model_registry import build_inventory
-
         rows = build_inventory()
         self._model_inventory_cache = rows
         self._model_inventory_cache_at = time.monotonic()
-        return rows
+        return list(rows)
 
     def _models_files(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Return paginated actual file metadata for one inventory component."""
@@ -8398,7 +8406,17 @@ class PremiumV2Bridge(QObject):
             raise RuntimeError("Windows did not open the output folder.")
         return {"opened": True, "path": str(folder.resolve())}
 
-    def _sound_catalog(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
+    def _sound_catalog(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        payload = payload if isinstance(payload, dict) else {}
+        cached = getattr(self, "_sound_catalog_cache", None)
+        scanned_at = float(getattr(self, "_sound_catalog_cache_at", 0.0) or 0.0)
+        force_refresh = bool(payload.get("force_refresh"))
+        if (
+            not force_refresh
+            and isinstance(cached, list)
+            and time.monotonic() - scanned_at < 20.0
+        ):
+            return list(cached)
         from app.audio.library import AUDIO_EXTENSIONS, MUSIC_CATEGORY_LABELS, audio_asset_role, metadata_for
         local_root = app_root() / "Audio Library"
         bundled = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2])) / "assets" / "starter_audio"
@@ -8529,7 +8547,10 @@ class PremiumV2Bridge(QObject):
                     }
             except OSError:
                 log.exception("Could not scan sound asset folder %s", root)
-        return sorted(found.values(), key=lambda row: (row["source"], row["title"].casefold()))
+        rows = sorted(found.values(), key=lambda row: (row["source"], row["title"].casefold()))
+        self._sound_catalog_cache = rows
+        self._sound_catalog_cache_at = time.monotonic()
+        return list(rows)
 
     def _sound_import(self, payload: dict[str, Any]) -> dict[str, Any]:
         paths = payload.get("paths")
@@ -8592,7 +8613,7 @@ class PremiumV2Bridge(QObject):
             imported.append({"title": destination.stem, "path": str(destination.resolve()),
                              "source": "Imported locally", "format": destination.suffix.lower(),
                              "size_bytes": destination.stat().st_size})
-        return {"cancelled": False, "imported": imported, "catalog": self._sound_catalog({})}
+        return {"cancelled": False, "imported": imported, "catalog": self._sound_catalog({"force_refresh": True})}
 
     def _sound_assign(self, payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
