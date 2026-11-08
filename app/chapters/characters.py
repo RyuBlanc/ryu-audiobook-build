@@ -684,12 +684,36 @@ def merge_character_analysis_record(candidate: Character, prior: dict | None = N
     prior_aliases = prior.get("aliases") or []
     if isinstance(prior_aliases, str):
         prior_aliases = [prior_aliases]
+    # Previously saved aliases with user-backed cast metadata (manual/user-created
+    # identity or an explicitly selected voice) are confirmed identities, not fresh
+    # AI guesses. Preserve those aliases through re-analysis while still applying
+    # the unconditional hard-word guard (articles, pronouns and interjections).
+    # New aliases produced by the current analysis remain untrusted and must pass
+    # the strict candidate filter.
+    prior_aliases_are_user_confirmed = bool(
+        prior.get("manual")
+        or prior.get("user_created")
+        or prior.get("voice_profile")
+        or prior.get("voice_name")
+        or prior.get("short_description")
+        or prior.get("notes")
+        or prior.get("scope")
+    )
     aliases = list(dict.fromkeys(
         str(alias).strip()
-        for alias in [*prior_aliases, *(candidate.aliases or [])]
+        for alias in prior_aliases
+        if str(alias).strip()
+        and is_likely_character_name(
+            str(alias), trusted=prior_aliases_are_user_confirmed
+        )
+    ))
+    aliases.extend(
+        str(alias).strip()
+        for alias in (candidate.aliases or [])
         if str(alias).strip()
         and is_likely_character_name(str(alias), trusted=False)
-    ))
+    )
+    aliases = list(dict.fromkeys(aliases))
     item = {
         "name": candidate.name,
         "role": str(prior.get("role") or candidate.role),
