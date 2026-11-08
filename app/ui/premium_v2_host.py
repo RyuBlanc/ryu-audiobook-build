@@ -5890,7 +5890,13 @@ class PremiumV2Bridge(QObject):
         return match.group(1).strip() if match else str(default_series or "").strip()
 
     def _resolve_narrator_for_generation(self, project, state: dict[str, Any], chapters):
-        """Resolve the effective saved narrator and fail closed on unresolved dialogue."""
+        """Resolve narrator and choose explicit narrator-only or cast-aware routing.
+
+        GEN-07: with zero configured character voice profiles, the saved
+        narrator intentionally reads all source passages, including dialogue.
+        No artificial character assignments are created. Once any character
+        profile is configured, the normal speaker-review gate applies.
+        """
         series = self._project_series_name(project, state)
         selection = self._narrator_series_default_read(project, state, series)
         profile_name = str(selection.get("effective_profile_name") or "").strip()
@@ -5905,6 +5911,22 @@ class PremiumV2Bridge(QObject):
                 f"Generation is blocked because the effective narrator profile '{profile_name}' "
                 "is unavailable. Restore the saved Voice Studio profile or choose another narrator."
             )
+
+        character_rows = state.get("characters") if isinstance(state, dict) else []
+        character_rows = character_rows if isinstance(character_rows, list) else []
+        configured_profiles = [
+            row for row in character_rows
+            if isinstance(row, dict) and str(row.get("voice_profile") or "").strip()
+        ]
+        effective_selection = dict(selection)
+        if not configured_profiles:
+            effective_selection.update({
+                "generation_mode": "narrator_only",
+                "narrator_only": True,
+                "character_voice_profile_count": 0,
+                "dialogue_routing": "narrator_for_all_passages",
+            })
+            return profile, effective_selection
 
         from app.chapters.speaker_segmentation import segment_chapter_speakers
         unresolved = []
@@ -5922,7 +5944,13 @@ class PremiumV2Bridge(QObject):
                 "Assign a character speaker or correct the narration classification before generating. "
                 + examples
             )
-        return profile, selection
+        effective_selection.update({
+            "generation_mode": "character_cast",
+            "narrator_only": False,
+            "character_voice_profile_count": len(configured_profiles),
+            "dialogue_routing": "saved_character_assignments",
+        })
+        return profile, effective_selection
 
     def _production_generate_book(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._assert_no_active_model_lifecycle("start audiobook generation")
@@ -6104,10 +6132,15 @@ class PremiumV2Bridge(QObject):
             "generation_interruption_reason",
         ):
             state.pop(recovery_key, None)
+        generation_mode = str(narrator_selection.get("generation_mode") or "character_cast")
+        narrator_only = bool(narrator_selection.get("narrator_only"))
         state.update({"voice_profile": profile.name, "voice_id": profile.voice_id,
                       "narrator": profile.name,
                       "narrator_profile_source": str(narrator_selection.get("source") or "none"),
                       "narrator_series_default": str(narrator_selection.get("profile_name") or ""),
+                      "generation_mode": generation_mode,
+                      "narrator_only_generation": narrator_only,
+                      "character_voice_profile_count": int(narrator_selection.get("character_voice_profile_count") or 0),
                       "output_path": None, "generation_target_path": str(output),
                       "status": "generating", "audio_bitrate": bitrate, "generation_job_id": job_id,
                       "generation_started_at": self._now(), "empty_chapters_skipped": empty_skipped,
@@ -6172,13 +6205,19 @@ class PremiumV2Bridge(QObject):
         )
         with self._jobs_lock:
             self._generators[job_id] = manager
+        start_message = f"Starting with {empty_skipped} empty and {excluded_skipped} excluded chapter(s) skipped"
+        if narrator_only:
+            start_message += " • Narrator-only mode: the saved narrator will read narration and all dialogue"
         self._job_update(job_id, state="running", started_at=self._now(), stage="Preparing generation",
-                         progress=1, message=f"Starting with {empty_skipped} empty and {excluded_skipped} excluded chapter(s) skipped",
+                         progress=1, message=start_message,
                          result={"output_path": str(output), "chapter_count": len(chapters),
                                  "empty_chapters_skipped": empty_skipped,
                                  "excluded_chapters_skipped": excluded_skipped,
                                  "chapters_skipped_for_generation": skipped,
-                                 "voice_profile": profile.name})
+                                 "voice_profile": profile.name,
+                                 "generation_mode": generation_mode,
+                                 "narrator_only": narrator_only,
+                                 "character_voice_profile_count": int(narrator_selection.get("character_voice_profile_count") or 0)})
         try:
             manager.start(output, metadata["title"], metadata["author"],
                           Path(state["cover_path"]) if state.get("cover_path") and Path(state["cover_path"]).is_file() else None,
@@ -6194,7 +6233,8 @@ class PremiumV2Bridge(QObject):
         return {"job_id": job_id, "state": "running", "output_path": str(output),
                 "chapter_count": len(chapters), "empty_chapters_skipped": empty_skipped,
                 "excluded_chapters_skipped": excluded_skipped,
-                "chapters_skipped_for_generation": skipped, "voice_profile": profile.name}
+                "chapters_skipped_for_generation": skipped, "voice_profile": profile.name,
+                "generation_mode": generation_mode, "narrator_only": narrator_only}
 
     def _generation_progress(self, job_id: str, chapter: int, total: int, done: int, message: str) -> None:
         msg = str(message or "")
