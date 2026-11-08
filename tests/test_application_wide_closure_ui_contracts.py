@@ -91,16 +91,7 @@ class CharacterStudioUIContracts(unittest.TestCase):
         host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         self.assertIn("id = 'narratorOnlyGeneration'", adapter)
         self.assertIn("input.checked = project?.narrator_only_generation === true", adapter)
-        self.assertIn("production.narrator_only.save", adapter)
-        self.assertIn("narrator_only_generation:narratorOnly", adapter)
-        self.assertIn('state["narrator_only_generation"] = enabled', host)
-        self.assertIn('"route_character_cast": not narrator_only', host)
-
-    def test_narrator_only_generation_control_is_saved_default_off_and_sent_to_both_paths(self):
-        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
-        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
-        self.assertIn("id = 'narratorOnlyGeneration'", adapter)
-        self.assertIn("input.checked = project?.narrator_only_generation === true", adapter)
+        self.assertIn('"narrator_only_generation": state.get("narrator_only_generation", False) is True', host)
         self.assertIn("production.narrator_only.save", adapter)
         self.assertIn("narrator_only_generation:narratorOnly", adapter)
         self.assertIn('state["narrator_only_generation"] = enabled', host)
