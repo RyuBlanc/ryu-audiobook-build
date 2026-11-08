@@ -12,3 +12,6 @@ The Stage 5.3 full-generation preflight also asserts that narrator mode is persi
 
 
 **Automated evidence:** Build #2911 — SUCCESS, 1,399 tests passed on the implementation checkpoint SHA above. The build job was skipped; this is regression evidence, not a package.
+
+
+**Current branch tip:** `c881d9349a48208d5deeac1b6e0f85101d467eb5`. This document update is the exact-head artifact-checkpoint trigger.
