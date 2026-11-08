@@ -18,21 +18,25 @@
 Do not treat Build #2680's 1,258 passing tests as proof for code committed afterwards. Do not mark a requirement complete from a static element/function-name test. Manual Windows/audio acceptance remains distinct from CI.
 
 
-## Current evidence overlay — 8 November 2026, Build #2887
+## Current evidence overlay — 8 November 2026 (supersedes earlier snapshots)
 
-This overlay supersedes the earlier 1,374-test/#2866 snapshot above. It does not bulk-close the requirement matrix.
+This overlay reflects the latest packaged candidate, Build #2887. It supersedes the older #2866/#2847 statements in prior historical notes; those remain history, not current release evidence.
 
-- **Stage 8 PR:** #31, open draft, base `stage-7/responsive-active-project-cache`, head `fix/application-wide-closure-2026-11-08`, 70 commits, 38 files; current PR head `5f811eb60a912353926704b6ba7c8fbfed41e0cc`.
-- **Build #2887:** [Actions](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42477948917), exact SHA `5f811eb60a912353926704b6ba7c8fbfed41e0cc`, **1,387 automated tests passed** and Windows build job succeeded.
-- **Uploaded Windows outputs:** installer artifact `Ryu-Audiobook-Installer-2887` (artifact ID `13616938581`); portable artifact `Ryu-Audiobook-Portable-2887` (artifact ID `13616784388`); SHA-256/size manifest `Ryu-Audiobook-Release-SHA256-2887` (artifact ID `13617037536`); Piper benchmark `Ryu-Audiobook-Stage7-Piper-Benchmark-2887` (artifact ID `13617435436`). These are the matching Build #2887 artifacts and expire 8 December 2026.
-- **Security gate:** Build #2887's Windows Defender log reports no threats for the application executable, HTML installer and core installer. This is CI scan evidence; it does not prove the user's previous endpoint detection is resolved on every machine.
-- **Offline CPU Piper benchmark:** verified CPU execution provider; synthesis 3.5205 seconds for 12.8053 seconds of audio (real-time factor 0.2749) on the Windows CI host. This is not Qwen GPU evidence.
-- **Installer/portable package target:** the 500,000,000-byte target remains unmet and is explicitly deprioritized by the user. Do not remove required offline models or starter audio to pursue it.
-- **Latest matching-head package evidence:** Build #2887's packages do not include commits made after `5f811eb`; rebuild after any subsequent source change before treating packages as current.
+| Requirement area | Current evidence | Acceptance status |
+|---|---|---|
+| Character Studio large review queue / chapter navigator | #2841/#2846: queue pagination, chapter filters/metrics, source-backed counts and correct word counts. #2887 cumulative suite passed. | Automated regressions passed. Actual full-book navigation and source comparison on the user's saved novel remain pending. |
+| False-character cleanup / pronunciation | #2878–#2886 sequence: English prose/interjections rejected, user-confirmed aliases preserved, pronunciation worker isolated from UI bridge, foreign single-token names require source occurrence and non-English evidence; #2882/#2886/#2887 passed cumulative regression. | Automated regression evidence passed. Must verify cleanup of the existing saved cast and pronunciation output against the actual book. |
+| Canonical dialogue passage index (XAPP-03) | Project-local revision-aware atomic index with stable IDs, source slices/offsets, chapter/source/assignment revisions and assignment states; consumed by Character Studio and cast-aware Production. Unit tests cover stale source slices, revision rebuild and stable IDs. | Automated evidence present. Actual 1,175 vs 1,196 book count reconciliation and installed-app review remain runtime acceptance pending. |
+| Models/Sound responsiveness (XAPP-09) | Single-flight background catalogue jobs; last-known-good snapshots; UI awaits scan completion asynchronously. | Automated regression evidence present. Large target-PC filesystem scans concurrent with preview/generation remain runtime acceptance pending. |
+| Sound Design / Music Library | #2887 package pipeline includes packaged Sound Design/Music UI acceptance and matching-head Windows artifact. | Automated/package acceptance passed. Human listening, licensing/source inspection and actual project mix parity remain open. |
+| Windows packaging and Defender | Build #2887 exact head `5f811eb60a912353926704b6ba7c8fbfed41e0cc`; installer, portable, SHA manifest and Piper benchmark uploaded. Windows install/launch/upgrade/uninstall and user-data preservation steps passed. Defender separately reported no threats for app, HTML installer and core installer. | Packaged CI checkpoint passed. User-machine installation and prior endpoint-specific alert disposition remain separate. |
+| Frozen Master requirement set | 128-row inventory below remains authoritative. | Not complete. No bulk closure inferred from CI. |
 
-### Acceptance not implied by Build #2887
+**Exact Build #2887:** [Actions run](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42477948917), **1,387 tests passed**, Windows build succeeded, app version 1.1.1. Installer artifact ID `13616938581`; portable `13616784388`; SHA manifest `13617037536`; Piper benchmark `13617435436`.
 
-The 1,387-test pass and package run do not close long-book runtime acceptance, physical GPU benchmarks, full narrator-only/multi-character audiobook listening, 30-second Qwen preview performance on target devices, actual project-restart recovery, or full manual UI/responsive acceptance. Keep these separate from CI-completed items and follow the OPEN entries in the requirement matrix.
+**500 MB installer target:** explicitly deprioritized by the user and non-blocking for functional closure. Preserve required offline voice models and starter assets.
+
+**Still open:** actual-book quality/count reconciliation; saved voice identity heard through preview and production after restart; Qwen device/task benchmarks and 30-second under-60-second target on agreed hardware; narrator-only and multi-character full M4B playback/recovery; real Task Manager timing/cancellation/restart; complete control/persistence/restart audit; target display/DPI/multi-monitor runtime; pronunciation dictionary/profile/conflict/audio-invalidation; Help & Guide final parity; and any frozen Master items without a matching behavioral test/runtime proof.
 
 ## Frozen requirement IDs
 
