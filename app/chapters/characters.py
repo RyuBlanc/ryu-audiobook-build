@@ -541,6 +541,55 @@ def _is_plausible_name(value: str) -> bool:
     )
 
 
+_PROSE_NAME_STARTERS = {
+    "hearing", "letting", "astonished", "surprised", "amazed", "confused",
+    "suddenly", "finally", "meanwhile", "however", "therefore", "instead",
+    "although", "because", "perhaps", "actually", "apparently", "obviously",
+    "clearly", "honestly", "certainly", "unfortunately", "fortunately",
+}
+_NON_PERSON_DESCRIPTORS = {
+    "haired", "eyed", "looking", "wearing", "holding", "standing", "sitting",
+    "smiling", "frowning", "glowing", "shining", "covered", "filled",
+    "shaped", "sized", "colored", "coloured", "skinned",
+}
+
+
+def is_likely_character_name(value: str, *, trusted: bool = False, explicit: bool = False) -> bool:
+    """Reject common capitalized prose fragments before they enter the cast.
+
+    Trusted user-created/saved names and structurally explicit speaker labels
+    keep their higher evidence level. Untrusted phrases must look like a
+    personal name rather than a sentence opening or physical description.
+    """
+    raw = str(value or "").strip()
+    cleaned = _clean_name(raw)
+    if not cleaned or not _is_plausible_name(cleaned):
+        return False
+    if trusted or explicit:
+        return True
+    words = [
+        re.sub(r"[’']s$", "", part).strip(".,!?;:")
+        for part in cleaned.split()
+    ]
+    words = [part for part in words if part]
+    if not words:
+        return False
+    lowered = [part.casefold() for part in words]
+    if lowered[0] in _PROSE_NAME_STARTERS or lowered[0] in {x.casefold() for x in NAME_STOPWORDS}:
+        return False
+    if len(words) > 1 and (lowered[0].endswith("ing") or lowered[0].endswith("ed")):
+        return False
+    if len(words) > 1 and any(word in _NON_PERSON_DESCRIPTORS for word in lowered):
+        return False
+    if len(words) > 1 and all(part.isupper() for part in words):
+        return False
+    if len(words) == 1 and "-" in lowered[0]:
+        tail = lowered[0].rsplit("-", 1)[-1]
+        if tail in _NON_PERSON_DESCRIPTORS:
+            return False
+    return True
+
+
 def merge_character_analysis_record(candidate: Character, prior: dict | None = None) -> dict:
     """Refresh analysis evidence while preserving explicitly saved cast metadata.
 

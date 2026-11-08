@@ -13,6 +13,7 @@ from app.chapters.characters import (
     _is_plausible_name,
 )
 from app.chapters.detector import Chapter
+from app.chapters.assignment_utils import assignment_speakers
 
 
 @dataclass(frozen=True)
@@ -257,7 +258,6 @@ def dialogue_segments(chapter: Chapter) -> list[DialogueSegment]:
         name for name in discovered_names
         if _is_plausible_name(name)
     }
-    from app.chapters.assignment_utils import assignment_speakers
     saved_speakers = []
     for assignment in getattr(chapter, "dialogue_assignments", []) or []:
         if isinstance(assignment, dict):
