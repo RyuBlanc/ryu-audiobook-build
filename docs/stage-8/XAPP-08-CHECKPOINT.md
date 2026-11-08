@@ -2,7 +2,7 @@
 
 **Implementation branch:** `fix/xapp-08-explicit-narrator-only-2026-11-08`  
 **Base:** `82a39ffa2b54b8ce7cab5468affde0cbaf02db0e` (Build Windows App #2905)  
-**Implementation checkpoint:** `c881d9349a48208d5deeac1b6e0f85101d467eb5`
+**Implementation checkpoint:** `76f4b5edfedbe25d9af09c07a8fa5add2b022b4b`
 
 This checkpoint implements the explicit per-book narrator-only toggle and its backend persistence, preview routing, and generation contract. It does not close real-audio or full-book runtime acceptance.
 
@@ -14,9 +14,11 @@ The Stage 5.3 full-generation preflight also asserts that narrator mode is persi
 **Automated evidence:** Build #2911 — SUCCESS, 1,399 tests passed on the implementation checkpoint SHA above. The build job was skipped; this is regression evidence, not a package.
 
 
-**Current branch tip:** `c881d9349a48208d5deeac1b6e0f85101d467eb5`. This document update is the exact-head artifact-checkpoint trigger.
+**Current branch tip:** `76f4b5edfedbe25d9af09c07a8fa5add2b022b4b`. This document update is the exact-head artifact-checkpoint trigger.
 
 **Exact package marker commit:** this commit must be used as the build/package source; tests were run immediately before the marker commit without code changes.
 
 
 **Critical implementation correction:** narrator-only full generation now skips character-profile resolution and `CastAwareProvider` construction. This ensures the selected saved narrator is the only TTS profile used for the book. The new production-path regression test `test_narrator_only_full_generation_bypasses_all_character_profiles` covers this behavior; a fresh matching-head Windows test and package checkpoint is required.
+
+**New regression:** narrator-only full generation must bypass the cast provider, even when Character Studio has an assigned voice. Test: `test_narrator_only_full_generation_bypasses_all_character_profiles`.
