@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 from threading import RLock
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -9,6 +10,9 @@ from app.tts.voice_profile import VoiceProfile
 import app.tts.profile_provider as profile_provider
 from app.tts.qwen_model_preference import normalize_qwen_backend_preference
 from app.tts.providers.qwen_character import QwenCharacterProvider
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_qwen_backend_normalizer_rejects_provider_identifier():
