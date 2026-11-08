@@ -46,6 +46,15 @@ COMMON_ENGLISH_WORDS = {
     "honestly","right","well","good","great","bad","enough","already","still","now",
 }
 
+COMMON_ENGLISH_WORDS.update({
+    "silver", "silver-haired", "hair", "haired", "knight", "red", "blue",
+    "green", "yellow", "golden", "white", "brown", "gray", "grey", "purple",
+    "pink", "orange", "bright", "dark", "light", "quiet", "loud", "small",
+    "large", "big", "old", "new", "young", "long", "short", "strong", "weak",
+    "beautiful", "pretty", "handsome", "open", "closed", "high", "low",
+    "quick", "slow", "fast", "early", "late", "near", "far",
+})
+
 _KNOWN = {
     "hyoudou issei": "Hee-doh Is-say",
     "issei hyoudou": "Is-say Hee-doh",
@@ -64,6 +73,45 @@ def is_common_english_phrase(text: str) -> bool:
     ]
     words = [word for word in words if word]
     return bool(words) and all(word in COMMON_ENGLISH_WORDS for word in words)
+
+def is_pronunciation_override_candidate(
+    text: str,
+    *,
+    source_language: str | None = None,
+    script: str | None = None,
+    known_names: set[str] | list[str] | tuple[str, ...] = (),
+) -> bool:
+    """Require clear non-English evidence for AI-generated pronunciation drafts.
+
+    Actual native-script text is direct evidence. Latin-script text needs an
+    explicit non-English language label; English, Auto-detect and unknown labels
+    are not enough. A common English word may pass only as an exact known cast
+    identity, and still requires an explicit non-English source language.
+    """
+    value = re.sub(r"\s+", " ", str(text or "").strip())
+    if not value:
+        return False
+    key = value.casefold()
+    known = {
+        re.sub(r"\s+", " ", str(name or "").strip()).casefold()
+        for name in known_names if str(name or "").strip()
+    }
+    if is_common_english_phrase(value) and key not in known:
+        return False
+    has_native_script = bool(re.search(
+        r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff"
+        r"\uac00-\ud7af\u0900-\u097f\u0b80-\u0bff]",
+        value,
+    ))
+    if has_native_script:
+        return True
+    language = re.sub(r"[^a-z]", "", str(source_language or "").casefold())
+    if language in {"en", "eng", "english", "americanenglish", "britishenglish"}:
+        return False
+    if language in {"", "auto", "autodetect", "unknown", "und", "undetermined", "none", "null"}:
+        return False
+    return True
+
 
 def is_likely_character_name_candidate(
     text: str,

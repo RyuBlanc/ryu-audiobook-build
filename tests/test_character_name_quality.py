@@ -20,8 +20,12 @@ class CharacterNameQualityTests(unittest.TestCase):
         self.assertTrue(is_likely_character_name("Ikuse Tobio"))
         self.assertTrue(is_likely_character_name("Tobio"))
         self.assertTrue(is_likely_character_name("Ono Anna"))
-        self.assertTrue(is_likely_character_name("Hearing", explicit=True))
-        self.assertTrue(is_likely_character_name("Silver-Haired", trusted=True))
+        self.assertFalse(is_likely_character_name("Hearing", explicit=True))
+        self.assertFalse(is_likely_character_name("Silver-Haired", explicit=True))
+        self.assertFalse(is_likely_character_name("Astonished Tobio", explicit=True))
+        self.assertFalse(is_likely_character_name("Silver-Haired", trusted=True))
+        self.assertTrue(is_likely_character_name("Will Smith", explicit=True))
+        self.assertTrue(is_likely_character_name("Captain Mira", explicit=True))
 
 
     def test_persisted_detection_exclusions_are_series_scoped_and_assignment_can_restore(self):

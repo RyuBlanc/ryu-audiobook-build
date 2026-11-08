@@ -6337,7 +6337,7 @@ class PremiumV2Bridge(QObject):
                 for candidate in candidates:
                     candidate = str(candidate or "").strip()
                     if len(candidate) > 1 and re.search(
-                        r"(?i)(?<![\w])" + re.escape(candidate) + r"(?![\\w])", source_text
+                        r"(?i)(?<![\w])" + re.escape(candidate) + r"(?![\w])", source_text
                     ):
                         names.add(candidate)
         suggestions = [{
@@ -6362,7 +6362,7 @@ class PremiumV2Bridge(QObject):
         try:
             from app.ai.brain import AudiobookBrain
             from app.ai.learning_context import load_project_learning_context
-            from app.tts.pronunciation_suggester import is_common_english_phrase
+            from app.tts.pronunciation_suggester import is_pronunciation_override_candidate
             from app.chapters.characters import is_likely_character_name
             state = load_state(project.folder)
             confirmed_character_names: set[str] = set()
@@ -6381,7 +6381,7 @@ class PremiumV2Bridge(QObject):
                         confirmed_character_names.update(
                             str(alias).strip().casefold() for alias in aliases
                             if str(alias or "").strip()
-                            and is_likely_character_name(str(alias), trusted=False)
+                            and is_likely_character_name(str(alias), trusted=character_trusted)
                         )
             learning_context = load_project_learning_context(Path(project.folder))
             brain = AudiobookBrain(Path(project.folder))
@@ -6400,6 +6400,24 @@ class PremiumV2Bridge(QObject):
                 brain.close()
 
             source_text = "\n\n".join(str(chapter.text or "") for chapter in project.chapters)
+            # Add AI-discovered identities only when the canonical name/alias
+            # passes the same character filter and appears as a whole source token.
+            known_pronunciation_names = set(confirmed_character_names)
+            for chapter_report in analysis.get("chapters", []) if isinstance(analysis, dict) else []:
+                if not isinstance(chapter_report, dict):
+                    continue
+                for ai_character in chapter_report.get("characters", []) or []:
+                    if not isinstance(ai_character, dict):
+                        continue
+                    for raw_name in [ai_character.get("name"), *(ai_character.get("aliases") or [])]:
+                        ai_name = str(raw_name or "").strip()
+                        if not ai_name or not is_likely_character_name(ai_name, explicit=True):
+                            continue
+                        if re.search(
+                            r"(?i)(?<![\w])" + re.escape(ai_name) + r"(?![\w])",
+                            source_text,
+                        ):
+                            known_pronunciation_names.add(ai_name.casefold())
             seen = set(existing)
             suggestions = []
             for raw in analysis.get("pronunciation", []) if isinstance(analysis, dict) else []:
@@ -6414,23 +6432,15 @@ class PremiumV2Bridge(QObject):
                 present = (
                     written.casefold() in source_text.casefold()
                     if native_script else
-                    bool(re.search(r"(?i)(?<![\w])" + re.escape(written) + r"(?![\\w])", source_text))
+                    bool(re.search(r"(?i)(?<![\w])" + re.escape(written) + r"(?![\w])", source_text))
                 )
                 key = unicodedata.normalize("NFC", written).casefold()
-                source_language = re.sub(
-                    r"[^a-z]", "", str(raw.get("source_language") or "").casefold()
-                )
-                english_source = source_language in {
-                    "english", "en", "eng", "americanenglish", "britishenglish",
-                }
-                if not present or (
-                    is_common_english_phrase(written) and key not in confirmed_character_names
+                if not present or not is_pronunciation_override_candidate(
+                    written,
+                    source_language=raw.get("source_language"),
+                    script=raw.get("script"),
+                    known_names=known_pronunciation_names,
                 ):
-                    continue
-                # Pronunciation AI is for non-English terms and confirmed names
-                # whose reading needs help, not arbitrary English words with a
-                # model-invented phonetic spelling.
-                if english_source and not native_script and key not in confirmed_character_names:
                     continue
                 if key in seen:
                     continue

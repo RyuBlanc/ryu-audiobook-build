@@ -622,16 +622,21 @@ def character_detection_exclusion_keys(
     return result - protected
 
 
-def is_likely_character_name(value: str, *, trusted: bool = False, explicit: bool = False) -> bool:
-    """Reject ordinary English words even when an AI invents speaker evidence.
+_EXPLICIT_SPEAKER_NAME_PREFIXES = {
+    "will", "captain", "commander", "general", "president", "prince",
+    "princess", "emperor", "empress", "king", "queen", "lord", "lady",
+    "doctor", "professor", "miss",
+}
 
-    Trusted/manual identities may use ambiguous English words as names, but
-    articles, pronouns, function words and interjections can never become cast
-    members. Untrusted candidates must also pass the ordinary-English phrase
-    and source-name quality checks.
+
+def is_likely_character_name(value: str, *, trusted: bool = False, explicit: bool = False) -> bool:
+    """Reject English prose and function words even when AI attribution is explicit.
+
+    Explicit attribution can resolve limited title/name ambiguity (for example,
+    "Captain Mira"), but it cannot turn a sentence starter or descriptor into a
+    person. Trusted identities still cannot be articles, pronouns or interjections.
     """
-    raw = str(value or "").strip()
-    cleaned = _clean_name(raw)
+    cleaned = _clean_name(str(value or "").strip())
     if not cleaned or len(cleaned) > 80:
         return False
     words = [
@@ -646,31 +651,36 @@ def is_likely_character_name(value: str, *, trusted: bool = False, explicit: boo
     lowered = [part.casefold() for part in words]
     if any(word in _HARD_NON_CHARACTER_WORDS for word in lowered):
         return False
-
-    # A plain English phrase must never be promoted just because the model
-    # returned it as an alias or attached a high confidence score.
-    from app.tts.pronunciation_suggester import is_common_english_phrase
-    if is_common_english_phrase(cleaned) and not trusted:
+    if any(word in _PROSE_NAME_STARTERS for word in lowered):
         return False
-
-    if trusted or explicit:
-        return True
-    if not _is_plausible_name(cleaned):
-        return False
-    if lowered[0] in _PROSE_NAME_STARTERS or lowered[0] in {x.casefold() for x in NAME_STOPWORDS}:
+    if any(
+        word in _NON_PERSON_DESCRIPTORS
+        or word.rsplit("-", 1)[-1] in _NON_PERSON_DESCRIPTORS
+        for word in lowered
+    ):
         return False
     if len(words) > 1 and (lowered[0].endswith("ing") or lowered[0].endswith("ed")):
         return False
-    if len(words) > 1 and any(word in _NON_PERSON_DESCRIPTORS for word in lowered):
+
+    from app.tts.pronunciation_suggester import is_common_english_phrase
+    if is_common_english_phrase(cleaned) and not trusted:
+        return False
+    if trusted:
+        return True
+
+    title_prefix_override = bool(
+        explicit
+        and len(words) > 1
+        and lowered[0] in _EXPLICIT_SPEAKER_NAME_PREFIXES
+        and _is_plausible_name(" ".join(words[1:]))
+    )
+    if not _is_plausible_name(cleaned) and not title_prefix_override:
+        return False
+    if not title_prefix_override and lowered[0] in {x.casefold() for x in NAME_STOPWORDS}:
         return False
     if len(words) > 1 and all(part.isupper() for part in words):
         return False
-    if len(words) == 1 and "-" in lowered[0]:
-        tail = lowered[0].rsplit("-", 1)[-1]
-        if tail in _NON_PERSON_DESCRIPTORS:
-            return False
     return True
-
 
 def merge_character_analysis_record(candidate: Character, prior: dict | None = None) -> dict:
     """Refresh analysis evidence while preserving explicitly saved cast metadata.
