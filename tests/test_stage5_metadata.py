@@ -718,11 +718,15 @@ class ProductionReadinessUiTests(unittest.TestCase):
         self.assertIn("const generationBlockReason = productionGenerationBlockReason(active);", gate)
         self.assertIn("start.disabled = Boolean(generationBlockReason) || audioActive;", gate)
 
+        generation_start = adapter.index("function renderProductionGeneration(")
+        generation_end = adapter.index("async function refreshChapterBgm(", generation_start)
+        generation = adapter[generation_start:generation_end]
         self.assertIn("const generationBlockReason = productionGenerationBlockReason(project);", generation)
         self.assertIn("fullStart.disabled = anyAudioActive || Boolean(generationBlockReason);", generation)
         self.assertIn("productionGenerationBlockReason(project)", generation)
         self.assertIn("fullStart.title = anyAudioActive", generation)
         self.assertNotIn("fullStart.disabled = anyAudioActive || !metadataComplete;", generation)
+        self.assertIn("previewStart.disabled = anyAudioActive;", generation)
 
         flow_start = adapter.index("function refreshDashboardFlow(project)")
         flow_end = adapter.index("\n  function ", flow_start + 10)
