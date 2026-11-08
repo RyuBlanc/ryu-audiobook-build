@@ -1562,7 +1562,10 @@ class PremiumV2Bridge(QObject):
             chapter_revision = str(payload.get("chapter_revision") or "").strip()
             if passage_id or chapter_revision:
                 from app.chapters.passage_index import load_or_build_passage_index
-                passage_index = load_or_build_passage_index(project.folder, project.chapters)
+                passage_index = load_or_build_passage_index(
+                    project.folder, project.chapters,
+                    suggested_passages=state.get("character_dialogue_suggestions") or [],
+                )
                 canonical = next(
                     (
                         row for row in passage_index["passages"]
@@ -3409,7 +3412,10 @@ class PremiumV2Bridge(QObject):
             raise ValueError("The selected passage changed or its source positions are stale. Save the chapter and select the narration again.")
 
         from app.chapters.passage_index import load_or_build_passage_index
-        passage_index = load_or_build_passage_index(project.folder, project.chapters)
+        passage_index = load_or_build_passage_index(
+            project.folder, project.chapters,
+            suggested_passages=state.get("character_dialogue_suggestions") or [],
+        )
         intersecting = [
             row for row in passage_index["passages"]
             if str(row.get("chapter_id") or "") == str(chapter.chapter_id)
@@ -4227,7 +4233,11 @@ class PremiumV2Bridge(QObject):
         from app.chapters.passage_index import load_or_build_passage_index
 
         project = self._active_project()
-        index = load_or_build_passage_index(project.folder, project.chapters)
+        state = load_state(project.folder)
+        index = load_or_build_passage_index(
+            project.folder, project.chapters,
+            suggested_passages=state.get("character_dialogue_suggestions") or [],
+        )
         raw_number = payload.get("chapter_number")
         requested_number = None
         if raw_number not in (None, ""):
@@ -4281,7 +4291,11 @@ class PremiumV2Bridge(QObject):
         from app.chapters.passage_index import load_or_build_passage_index
 
         project = self._active_project()
-        index = load_or_build_passage_index(project.folder, project.chapters)
+        state = load_state(project.folder)
+        index = load_or_build_passage_index(
+            project.folder, project.chapters,
+            suggested_passages=state.get("character_dialogue_suggestions") or [],
+        )
         raw_number = payload.get("chapter_number")
         requested_number = None
         if raw_number not in (None, ""):
@@ -4333,12 +4347,26 @@ class PremiumV2Bridge(QObject):
         }
 
     def _character_dialogue_suggestions_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
-        """Return source-backed dialogue suggestions created from the active project's chapters."""
+        """Return source-backed AI review suggestions with canonical passage identities."""
+        from app.chapters.passage_index import load_or_build_passage_index
+
         project = self._active_project()
         state = load_state(project.folder)
         stored = state.get("character_dialogue_suggestions") or []
         if not isinstance(stored, list):
             return []
+        index = load_or_build_passage_index(
+            project.folder, project.chapters, suggested_passages=stored
+        )
+        canonical_by_span = {
+            (
+                int(row.get("chapter_number") or 0),
+                int(row.get("start") or 0),
+                int(row.get("end") or 0),
+            ): row
+            for row in index["passages"]
+            if isinstance(row, dict)
+        }
         rows = []
         chapters_by_number = {int(chapter.number): chapter for chapter in project.chapters}
         for raw in stored:
@@ -4352,12 +4380,25 @@ class PremiumV2Bridge(QObject):
             if chapter is None or start < 0 or end <= start or end > len(chapter.text or ""):
                 continue
             source_text = str(chapter.text or "")
-            if source_text[start:end] != str(raw.get("source_text") or ""):
+            expected_text = str(raw.get("source_text") or raw.get("text") or "")
+            if source_text[start:end] != expected_text:
+                continue
+            canonical = canonical_by_span.get((number, start, end))
+            if canonical is None:
                 continue
             row = dict(raw)
             row["chapter_title"] = str(chapter.title or f"Chapter {number}")
             row["text"] = source_text[start:end]
-            row["assigned_speakers"] = []
+            row["source_text"] = source_text[start:end]
+            row["passage_id"] = str(canonical.get("passage_id") or "")
+            row["chapter_revision"] = str(canonical.get("chapter_revision") or "")
+            row["source_revision"] = str(canonical.get("source_revision") or "")
+            row["assignment_state"] = str(canonical.get("assignment_state") or "pending")
+            row["needs_review"] = bool(canonical.get("needs_review"))
+            row["assigned_speakers"] = list(canonical.get("speakers") or [])
+            row["assigned"] = row["assignment_state"] == "assigned"
+            row["conflict"] = row["assignment_state"] == "conflict"
+            row["ai_suggestions"] = list(canonical.get("ai_suggestions") or row.get("suggestions") or [])
             assignment = next((item for item in (chapter.dialogue_assignments or [])
                                if isinstance(item, dict) and item.get("start") == start
                                and item.get("end") == end and source_text[start:end] == str(item.get("text") or "")), None)
@@ -4366,7 +4407,7 @@ class PremiumV2Bridge(QObject):
                     list(assignment.get("speakers") or []) if isinstance(assignment.get("speakers"), list)
                     else ([str(assignment.get("speaker"))] if assignment.get("speaker") else [])
                 )
-            row["assigned"] = bool(row["assigned_speakers"])
+                row["assigned"] = row["assignment_state"] == "assigned"
             skipped = state.get("character_dialogue_skips") or []
             row["skipped"] = str(row.get("id") or "") in {str(value) for value in skipped}
             rows.append(row)
@@ -6424,7 +6465,10 @@ class PremiumV2Bridge(QObject):
             return profile, effective_selection
 
         from app.chapters.passage_index import load_or_build_passage_index
-        passage_index = load_or_build_passage_index(project.folder, project.chapters)
+        passage_index = load_or_build_passage_index(
+            project.folder, project.chapters,
+            suggested_passages=state.get("character_dialogue_suggestions") or [],
+        )
         eligible_chapter_ids = {str(chapter.chapter_id) for chapter in chapters}
         unresolved = [
             (int(row.get("chapter_number") or 0), str(row.get("text") or ""))
@@ -6432,6 +6476,11 @@ class PremiumV2Bridge(QObject):
             if str(row.get("chapter_id") or "") in eligible_chapter_ids
             and bool(row.get("needs_review"))
         ]
+        unresolved.extend(
+            (int(issue.get("chapter_number") or 0), str(issue.get("text") or ""))
+            for issue in passage_index.get("issues", [])
+            if str(issue.get("chapter_id") or "") in eligible_chapter_ids
+        )
         if unresolved:
             examples = "; ".join(
                 f"Chapter {number}: {text[:64].strip()!r}"
