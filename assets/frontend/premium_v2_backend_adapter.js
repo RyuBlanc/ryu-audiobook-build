@@ -3,6 +3,7 @@
   window.__ryuPremiumAdapterReady = false;
   window.__ryuPremiumAdapterFailure = '';
   const $ = id => document.getElementById(id);
+  let narratorOnlySavePromise = Promise.resolve();
 
   // Job polling runs every 1.5 seconds. Avoid writing the same values back to
   // Chromium's DOM/style system when nothing changed; this keeps layout work
@@ -6053,28 +6054,32 @@
         input.id = 'narratorOnlyGeneration';
         input.checked = project?.narrator_only_generation === true;
         input.style.cssText = 'margin-top:3px;flex:0 0 auto';
-        input.addEventListener('change', async () => {
+        input.addEventListener('change', () => {
           const requested = input.checked === true;
           input.disabled = true;
-          try {
-            const saved = await call('production.narrator_only.save', {
-              enabled:requested,
-              expected_project_folder:String(project?.folder || '')
-            });
-            if (saved.project_folder !== String(project?.folder || '')) {
-              throw new Error('The active project changed while saving Narrator-Only Generation. Reopen Production and retry.');
-            }
-            input.checked = saved.enabled === true;
-            project.narrator_only_generation = input.checked;
-            window.ryuPremiumActiveProject = {...project,narrator_only_generation:input.checked};
-            const status = $('narratorOnlyGenerationStatus');
-            if (status) status.textContent = input.checked
-              ? 'Saved for this book. The saved narrator reads all narration and dialogue.'
-              : 'Off. Character assignments and speaker review will be used.';
-          } catch (error) {
-            input.checked = project?.narrator_only_generation === true;
-            message(error?.message || String(error), true);
-          } finally { input.disabled = false; }
+          narratorOnlySavePromise = (async () => {
+            try {
+              const saved = await call('production.narrator_only.save', {
+                enabled:requested,
+                expected_project_folder:String(project?.folder || '')
+              });
+              if (saved.project_folder !== String(project?.folder || '')) {
+                throw new Error('The active project changed while saving Narrator-Only Generation. Reopen Production and retry.');
+              }
+              input.checked = saved.enabled === true;
+              project.narrator_only_generation = input.checked;
+              window.ryuPremiumActiveProject = {...project,narrator_only_generation:input.checked};
+              const status = $('narratorOnlyGenerationStatus');
+              if (status) status.textContent = input.checked
+                ? 'Saved for this book. The saved narrator reads all narration and dialogue.'
+                : 'Off. Character assignments and speaker review will be used.';
+            } catch (error) {
+              input.checked = project?.narrator_only_generation === true;
+              message(error?.message || String(error), true);
+              throw error;
+            } finally { input.disabled = false; }
+          })();
+          narratorOnlySavePromise.catch(() => {});
         });
         const copy = document.createElement('span');
         copy.style.cssText = 'display:grid;gap:3px;min-width:0';
@@ -10339,6 +10344,7 @@
     if ($('generatePreview')) $('generatePreview').onclick=act(previewVoice);
     ensureProductionPreviewMonitorUi();
     if ($('previewGenerate')) $('previewGenerate').onclick=act(async()=>{
+      await narratorOnlySavePromise;
       const chapterNumber=Number(productionPreviewSelectedChapter||$('productionPreviewChapterSelect')?.value||0);
       if(!chapterNumber)throw new Error('Select a saved chapter in the Production preview chapter selector.');
       if(productionJobIsActive(productionJobSnapshots.full))throw new Error('Finish or cancel the full audiobook generation before starting a preview.');
@@ -10484,6 +10490,7 @@
       await refreshJobs();
     });
     if ($('startGenerate')) $('startGenerate').onclick=act(async()=>{
+      await narratorOnlySavePromise;
       if(productionJobIsActive(productionJobSnapshots.full)||productionJobIsActive(productionJobSnapshots.preview))throw new Error('Another Production audio operation is already running. Finish or cancel it before starting full generation.');
       await flushSoundDesignState();
       const [activeProject, savedSettings] = await Promise.all([
