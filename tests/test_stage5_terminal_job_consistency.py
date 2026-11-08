@@ -162,5 +162,60 @@ class Stage53TerminalJobConsistencyTests(unittest.TestCase):
                     )
 
 
+    def test_incomplete_attempt_does_not_attach_preexisting_m4b_to_failed_job(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project_folder = root / "project"
+            project_folder.mkdir()
+            job_id = "incomplete-generation-job"
+            output = root / "previously-finished-book.m4b"
+            output.write_bytes(b"existing complete audiobook" * 128)
+            save_state(
+                project_folder,
+                {
+                    "status": "generating",
+                    "generation_job_id": job_id,
+                    "generation_target_path": str(output),
+                    "output_path": None,
+                    "completed_chapters": [],
+                    "generation_mode": "character_cast",
+                    "narrator_only_generation": False,
+                    "character_voice_profile_count": 2,
+                },
+            )
+            bridge = DurableGenerationCompletionHarness(
+                root, job_id,
+                result={
+                    "generation_mode": "character_cast",
+                    "narrator_only": False,
+                    "character_voice_profile_count": 2,
+                },
+            )
+            summary = self._summary(output=output)
+            # The old file exists and is non-empty, but this attempt completed
+            # fewer chapters than the book requires. It must not be published
+            # as the failed attempt's output in Queue or durable History.
+            summary.chapters_completed = 0
+            summary.chapters_completed_numbers = []
+            summary.chapters_failed = []
+
+            bridge._generation_finished(
+                job_id, SimpleNamespace(folder=project_folder), summary, output, "Saved Narrator",
+            )
+
+            queue_row = bridge._job_list({"include_hidden": False})[0]
+            history_row = bridge._history_list({})[0]
+            project_state = load_state(project_folder)
+            self.assertEqual(queue_row["state"], "failed")
+            self.assertIsNone(queue_row["output_path"])
+            self.assertIsNone(queue_row["result"]["output_path"])
+            self.assertEqual(history_row["state"], "failed")
+            self.assertIsNone(history_row["output_path"])
+            self.assertIsNone(history_row["result"]["output_path"])
+            self.assertIsNone(project_state.get("output_path"))
+            self.assertTrue(output.is_file())
+            self.assertGreater(output.stat().st_size, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
