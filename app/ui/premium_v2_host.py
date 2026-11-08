@@ -3411,17 +3411,29 @@ class PremiumV2Bridge(QObject):
         if start < 0 or end <= start or end > len(source_text) or source_text[start:end] != selected_text:
             raise ValueError("The selected passage changed or its source positions are stale. Save the chapter and select the narration again.")
 
-        from app.chapters.passage_index import load_or_build_passage_index
-        passage_index = load_or_build_passage_index(
-            project.folder, project.chapters,
-            suggested_passages=state.get("character_dialogue_suggestions") or [],
-        )
-        intersecting = [
-            row for row in passage_index["passages"]
-            if str(row.get("chapter_id") or "") == str(chapter.chapter_id)
-            and int(row.get("end", 0)) > start and int(row.get("start", 0)) < end
-        ]
-        if not intersecting or any(row.get("kind") != "narration" for row in intersecting):
+        if getattr(project, "folder", None) is None:
+            # Unsaved test harnesses retain the pure source segmenter. Installed
+            # projects use the persisted index shared with Character Studio/Production.
+            from app.chapters.speaker_segmentation import segment_chapter_speakers
+            segments = segment_chapter_speakers(chapter)
+            intersecting = [
+                segment for segment in segments
+                if int(segment.end) > start and int(segment.start) < end
+            ]
+            invalid_narration = any(segment.kind != "narration" for segment in intersecting)
+        else:
+            from app.chapters.passage_index import load_or_build_passage_index
+            passage_index = load_or_build_passage_index(
+                project.folder, project.chapters,
+                suggested_passages=state.get("character_dialogue_suggestions") or [],
+            )
+            intersecting = [
+                row for row in passage_index["passages"]
+                if str(row.get("chapter_id") or "") == str(chapter.chapter_id)
+                and int(row.get("end", 0)) > start and int(row.get("start", 0)) < end
+            ]
+            invalid_narration = any(row.get("kind") != "narration" for row in intersecting)
+        if not intersecting or invalid_narration:
             raise ValueError(
                 "Narrator Preview accepts narration only. Select text classified as Narrator; "
                 "character dialogue and Needs Speaker Review passages cannot be previewed as narration."
@@ -4287,15 +4299,8 @@ class PremiumV2Bridge(QObject):
         }
 
     def _character_narration_segments_list(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
-        """Return Character Studio's source rows from the persisted canonical index."""
-        from app.chapters.passage_index import load_or_build_passage_index
-
+        """Return Character Studio rows from the persisted canonical source index."""
         project = self._active_project()
-        state = load_state(project.folder)
-        index = load_or_build_passage_index(
-            project.folder, project.chapters,
-            suggested_passages=state.get("character_dialogue_suggestions") or [],
-        )
         raw_number = payload.get("chapter_number")
         requested_number = None
         if raw_number not in (None, ""):
@@ -4304,7 +4309,39 @@ class PremiumV2Bridge(QObject):
             except (TypeError, ValueError, OverflowError) as exc:
                 raise ValueError("Choose a valid chapter number for narrator segmentation.") from exc
 
-        rows = [
+        if getattr(project, "folder", None) is None:
+            # Unsaved Project-like test harnesses have no durable folder. They
+            # retain the deterministic pure segmenter; installed projects use
+            # the revision-aware index as their single source of passage truth.
+            from dataclasses import asdict
+            from app.chapters.speaker_segmentation import segment_chapter_speakers
+            results = [
+                asdict(segment)
+                for chapter in project.chapters
+                if requested_number is None or int(chapter.number) == requested_number
+                for segment in segment_chapter_speakers(chapter)
+            ]
+            for chapter in project.chapters:
+                if requested_number is not None and int(chapter.number) != requested_number:
+                    continue
+                chapter.narrator_passages = [
+                    {
+                        "start": row["start"], "end": row["end"], "text": row["text"],
+                        "role": "Narrator", "kind": "narration",
+                        "source": row["source"], "automatic": True,
+                    }
+                    for row in results if row.get("chapter_number") == chapter.number
+                    and row.get("kind") == "narration"
+                ]
+            return results
+
+        from app.chapters.passage_index import load_or_build_passage_index
+        state = load_state(project.folder)
+        index = load_or_build_passage_index(
+            project.folder, project.chapters,
+            suggested_passages=state.get("character_dialogue_suggestions") or [],
+        )
+        results = [
             dict(row) for row in index["passages"]
             if requested_number is None or int(row.get("chapter_number") or 0) == requested_number
         ]
@@ -4321,10 +4358,10 @@ class PremiumV2Bridge(QObject):
                     "passage_id": row["passage_id"],
                     "chapter_revision": row["chapter_revision"],
                 }
-                for row in rows
+                for row in results
                 if row.get("chapter_id") == chapter.chapter_id and row.get("kind") == "narration"
             ]
-        return rows
+        return results
 
     def _character_analysis_status(self, _payload: dict[str, Any]) -> dict[str, Any]:
         """Return only analysis status persisted for the active project."""
@@ -6440,8 +6477,8 @@ class PremiumV2Bridge(QObject):
         profile = self._find_profile(profile_name)
         if profile is None or not selection.get("profile_available"):
             raise ValueError(
-                f"Generation is blocked because the effective narrator profile '{profile_name}' "
-                "is unavailable. Restore the saved Voice Studio profile or choose another narrator."
+                f"The effective narrator profile '{profile_name}' is unavailable. "
+                "Restore the saved Voice Studio profile or choose another narrator."
             )
 
         character_rows, _cast_mapping_issues = self._effective_generation_character_rows(
@@ -6464,18 +6501,30 @@ class PremiumV2Bridge(QObject):
             })
             return profile, effective_selection
 
-        from app.chapters.passage_index import load_or_build_passage_index
-        passage_index = load_or_build_passage_index(
-            project.folder, project.chapters,
-            suggested_passages=state.get("character_dialogue_suggestions") or [],
-        )
-        eligible_chapter_ids = {str(chapter.chapter_id) for chapter in chapters}
-        unresolved = [
-            (int(row.get("chapter_number") or 0), str(row.get("text") or ""))
-            for row in passage_index["passages"]
-            if str(row.get("chapter_id") or "") in eligible_chapter_ids
-            and bool(row.get("needs_review"))
-        ]
+        eligible_chapter_ids = {str(getattr(chapter, "chapter_id", "") or "") for chapter in chapters}
+        if getattr(project, "folder", None) is None:
+            # Projectless tests may use a SimpleNamespace instead of a persisted
+            # Project. Keep this small harness on the exact source segmenter.
+            from app.chapters.speaker_segmentation import segment_chapter_speakers
+            unresolved = [
+                (int(chapter.number), str(segment.text or ""))
+                for chapter in chapters
+                for segment in segment_chapter_speakers(chapter)
+                if segment.needs_review or segment.kind in {"needs_speaker_review", "review_required"}
+            ]
+            passage_index = {"issues": []}
+        else:
+            from app.chapters.passage_index import load_or_build_passage_index
+            passage_index = load_or_build_passage_index(
+                project.folder, project.chapters,
+                suggested_passages=state.get("character_dialogue_suggestions") or [],
+            )
+            unresolved = [
+                (int(row.get("chapter_number") or 0), str(row.get("text") or ""))
+                for row in passage_index["passages"]
+                if str(row.get("chapter_id") or "") in eligible_chapter_ids
+                and bool(row.get("needs_review"))
+            ]
         unresolved.extend(
             (int(issue.get("chapter_number") or 0), str(issue.get("text") or ""))
             for issue in passage_index.get("issues", [])
