@@ -6121,6 +6121,168 @@ class PremiumV2Bridge(QObject):
         match = re.match(r"(?i)^series\s*[·:-]\s*(.+)$", scope)
         return match.group(1).strip() if match else str(default_series or "").strip()
 
+    def _effective_generation_character_rows(
+        self,
+        state: dict[str, Any],
+        default_series: str,
+        *,
+        available_profiles=None,
+        strict: bool = True,
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """Resolve Character Studio and legacy Voice Cast into one production cast.
+
+        Character Studio records remain primary. Legacy Voice Cast entries are
+        merged only when their character identity is unambiguous; a name shared
+        by multiple series is never routed to the first matching character.
+        Every non-empty profile reference must resolve to a currently saved
+        Voice Studio profile before it can be treated as configured.
+        """
+        profiles = list(available_profiles if available_profiles is not None else load_profiles())
+        by_name = {
+            str(profile.name or "").strip().casefold(): profile
+            for profile in profiles if str(getattr(profile, "name", "") or "").strip()
+        }
+        by_voice_id: dict[str, list[Any]] = {}
+        for profile in profiles:
+            voice_id = str(getattr(profile, "voice_id", "") or "").strip().casefold()
+            if voice_id:
+                by_voice_id.setdefault(voice_id, []).append(profile)
+
+        issues: list[str] = []
+
+        def resolve_profile(value: Any, *, allow_voice_id: bool = False):
+            key = str(value or "").strip().casefold()
+            if not key:
+                return None
+            match = by_name.get(key)
+            if match is not None:
+                return match
+            if allow_voice_id:
+                candidates = by_voice_id.get(key, [])
+                if len(candidates) == 1:
+                    return candidates[0]
+                if len(candidates) > 1:
+                    issues.append(
+                        f"Voice ID '{str(value).strip()}' matches more than one saved Voice Studio profile."
+                    )
+            return None
+
+        rows = [
+            dict(row) for row in (state.get("characters") or [])
+            if isinstance(row, dict)
+        ]
+
+        # Normalize older alternate assignment fields on Character Studio rows.
+        for row in rows:
+            existing = str(row.get("voice_profile") or "").strip()
+            if not existing:
+                existing = next((
+                    str(row.get(key) or "").strip()
+                    for key in ("voice_profile_name", "assigned_voice_profile", "profile_name", "voice_name")
+                    if str(row.get(key) or "").strip()
+                ), "")
+            profile = resolve_profile(existing) if existing else None
+            if existing and profile is None:
+                issues.append(
+                    f"Character '{row.get('name') or 'Unknown'}' references unavailable saved voice profile '{existing}'."
+                )
+            elif profile is not None:
+                row["voice_profile"] = str(profile.name)
+            elif not str(row.get("voice_profile") or "").strip():
+                legacy_voice_id = str(row.get("voice_id") or "").strip()
+                if legacy_voice_id:
+                    profile = resolve_profile(legacy_voice_id, allow_voice_id=True)
+                    if profile is None:
+                        issues.append(
+                            f"Character '{row.get('name') or 'Unknown'}' has an unresolvable legacy voice ID '{legacy_voice_id}'."
+                        )
+                    else:
+                        row["voice_profile"] = str(profile.name)
+
+        legacy_cast = state.get("voice_cast")
+        legacy_cast = legacy_cast if isinstance(legacy_cast, dict) else {}
+        for raw_name, raw_assignment in legacy_cast.items():
+            name = str(raw_name or "").strip()
+            if not name or name.casefold() == "narrator":
+                continue
+
+            requested_series = ""
+            raw_profile = ""
+            allow_voice_id = False
+            if isinstance(raw_assignment, dict):
+                requested_series = str(raw_assignment.get("series") or "").strip()
+                raw_profile = next((
+                    str(raw_assignment.get(key) or "").strip()
+                    for key in ("voice_profile", "voice_profile_name", "assigned_voice_profile", "profile_name", "voice_name")
+                    if str(raw_assignment.get(key) or "").strip()
+                ), "")
+                if not raw_profile:
+                    raw_profile = str(raw_assignment.get("voice_id") or "").strip()
+                    allow_voice_id = bool(raw_profile)
+            else:
+                raw_profile = str(raw_assignment or "").strip()
+
+            if not raw_profile:
+                continue
+            profile = resolve_profile(raw_profile, allow_voice_id=allow_voice_id)
+            if profile is None:
+                issues.append(
+                    f"Legacy Voice Cast entry '{name}' references unavailable voice profile '{raw_profile}'."
+                )
+                continue
+
+            name_key = name.casefold()
+            matching_rows = []
+            for row in rows:
+                canonical = str(row.get("name") or row.get("primary_name") or "").strip()
+                aliases = row.get("aliases") or []
+                aliases = aliases if isinstance(aliases, (list, tuple)) else ([aliases] if aliases else [])
+                identity_names = {canonical.casefold()}
+                identity_names.update(str(alias or "").strip().casefold() for alias in aliases)
+                if name_key not in identity_names:
+                    continue
+                row_series = self._character_series_for_voice_assignment(row, default_series)
+                if requested_series and row_series.casefold() != requested_series.casefold():
+                    continue
+                matching_rows.append(row)
+
+            if len(matching_rows) > 1:
+                issues.append(
+                    f"Legacy Voice Cast entry '{name}' matches multiple characters; specify its series in Character Studio."
+                )
+                continue
+            if matching_rows:
+                row = matching_rows[0]
+                current = str(row.get("voice_profile") or "").strip()
+                if current and current.casefold() != str(profile.name).casefold():
+                    issues.append(
+                        f"Character '{name}' has conflicting Character Studio and legacy Voice Cast profiles."
+                    )
+                    continue
+                row["voice_profile"] = str(profile.name)
+                if not str(row.get("series") or row.get("series_name") or "").strip():
+                    row["series"] = requested_series or default_series
+                continue
+
+            # Older Voice Cast data may not have a Character Studio row at all.
+            # Preserve its real profile route in an explicit virtual cast record.
+            series = requested_series or default_series
+            rows.append({
+                "name": name,
+                "aliases": [],
+                "series": series,
+                "scope": ("Series · " + series) if series else "Current book only",
+                "voice_profile": str(profile.name),
+                "legacy_voice_cast": True,
+            })
+
+        if strict and issues:
+            raise ValueError(
+                "Saved character voice assignments need attention before generation: "
+                + " ".join(issues[:3])
+            )
+        return rows, issues
+
     def _resolve_narrator_for_generation(self, project, state: dict[str, Any], chapters):
         """Resolve narrator and choose explicit narrator-only or cast-aware routing.
 
@@ -6144,11 +6306,14 @@ class PremiumV2Bridge(QObject):
                 "is unavailable. Restore the saved Voice Studio profile or choose another narrator."
             )
 
-        character_rows = state.get("characters") if isinstance(state, dict) else []
-        character_rows = character_rows if isinstance(character_rows, list) else []
+        character_rows, _cast_mapping_issues = self._effective_generation_character_rows(
+            state if isinstance(state, dict) else {},
+            series,
+            strict=True,
+        )
         configured_profiles = [
             row for row in character_rows
-            if isinstance(row, dict) and str(row.get("voice_profile") or "").strip()
+            if str(row.get("voice_profile") or "").strip()
         ]
         effective_selection = dict(selection)
         if not configured_profiles:
@@ -6157,6 +6322,7 @@ class PremiumV2Bridge(QObject):
                 "narrator_only": True,
                 "character_voice_profile_count": 0,
                 "dialogue_routing": "narrator_for_all_passages",
+                "effective_character_rows": character_rows,
             })
             return profile, effective_selection
 
@@ -6181,6 +6347,7 @@ class PremiumV2Bridge(QObject):
             "narrator_only": False,
             "character_voice_profile_count": len(configured_profiles),
             "dialogue_routing": "saved_character_assignments",
+            "effective_character_rows": character_rows,
         })
         return profile, effective_selection
 
@@ -6262,9 +6429,15 @@ class PremiumV2Bridge(QObject):
         cast_assignments: dict[str, str] = {}
         cast_identity_assignments: dict[str, str] = {}
         cast_profiles: dict[str, Any] = {}
-        available_profiles = {p.name.casefold(): p for p in load_profiles()}
+        saved_profiles = load_profiles()
+        available_profiles = {p.name.casefold(): p for p in saved_profiles}
         project_series = self._project_series_name(project, state)
-        for character in state.get("characters") or []:
+        generation_characters = narrator_selection.get("effective_character_rows")
+        if not isinstance(generation_characters, list):
+            generation_characters, _cast_mapping_issues = self._effective_generation_character_rows(
+                state, project_series, available_profiles=saved_profiles, strict=True
+            )
+        for character in generation_characters:
             if not isinstance(character, dict):
                 continue
             assigned_name = str(character.get("voice_profile") or "").strip()
