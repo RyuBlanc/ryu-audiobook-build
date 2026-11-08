@@ -6,6 +6,7 @@ on:
   push:
     branches:
       - 'stage-7/**'
+      - 'stage-5/**'
     paths:
       - app/tts/preview.py
       - app/tts/providers/qwen_character.py
