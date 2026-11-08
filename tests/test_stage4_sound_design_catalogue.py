@@ -190,7 +190,7 @@ class SoundDesignCatalogueTests(unittest.TestCase):
         track.with_name(track.name + ".license.json").write_text(json.dumps({
             "title": "A Custom Cue", "license_note": "CC0", "duration_seconds": 1.0,
             "category": "fantasy"}), encoding="utf-8")
-        rows = host.PremiumV2Bridge._sound_catalog(self.bridge_a, {})
+        rows = host.PremiumV2Bridge._build_sound_catalog(self.bridge_a)
         row = next(item for item in rows if item["path"] == str(track.resolve()))
         self.assertEqual(row["title"], "A Custom Cue"); self.assertEqual(row["licensing"], "CC0")
         self.assertEqual(row["duration_seconds"], 1.0)
@@ -353,7 +353,7 @@ class SoundDesignCatalogueTests(unittest.TestCase):
         }), encoding="utf-8")
 
         with patch.object(host.sys, "_MEIPASS", str(frozen_root), create=True):
-            rows = host.PremiumV2Bridge._sound_catalog(self.bridge_a, {})
+            rows = host.PremiumV2Bridge._build_sound_catalog(self.bridge_a)
 
         starter_rows = [row for row in rows if row["title"] == "Starter Theme"]
         self.assertEqual(len(starter_rows), 1)
@@ -367,7 +367,7 @@ class SoundDesignCatalogueTests(unittest.TestCase):
 
     def test_roleless_assets_in_canonical_cue_folders_remain_cues(self):
         cue = _valid_wav(self.app_root / "Audio Library" / "cues" / "opening" / "legacy-opening.wav")
-        rows = host.PremiumV2Bridge._sound_catalog(self.bridge_a, {})
+        rows = host.PremiumV2Bridge._build_sound_catalog(self.bridge_a)
         row = next(item for item in rows if item["path"] == str(cue.resolve()))
         self.assertEqual(row["role"], "cue")
 
@@ -375,7 +375,7 @@ class SoundDesignCatalogueTests(unittest.TestCase):
         corrupt = _valid_wav(self.app_root / "Audio Library" / "music" / "calm" / "bad-sidecar.wav")
         corrupt.with_name(corrupt.name + ".license.json").write_text("{not-json", encoding="utf-8")
         valid = _valid_wav(self.app_root / "Audio Library" / "music" / "romance" / "valid-track.wav")
-        rows = host.PremiumV2Bridge._sound_catalog(self.bridge_a, {})
+        rows = host.PremiumV2Bridge._build_sound_catalog(self.bridge_a)
         paths = {row["path"] for row in rows}
         self.assertNotIn(str(corrupt.resolve()), paths)
         self.assertIn(str(valid.resolve()), paths)
