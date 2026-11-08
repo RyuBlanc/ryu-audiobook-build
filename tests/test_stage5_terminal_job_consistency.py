@@ -26,7 +26,7 @@ class DurableGenerationCompletionHarness:
     _terminal_job_state = staticmethod(host.PremiumV2Bridge._terminal_job_state)
     _now = staticmethod(host.PremiumV2Bridge._now)
 
-    def __init__(self, root: Path, job_id: str) -> None:
+    def __init__(self, root: Path, job_id: str, result: dict | None = None) -> None:
         self._jobs_lock = threading.RLock()
         self._jobs = {
             job_id: {
@@ -38,6 +38,7 @@ class DurableGenerationCompletionHarness:
                 "state": "running",
                 "progress": 64,
                 "output_path": None,
+                "result": dict(result or {}),
             }
         }
         self._history: dict[str, dict] = {}
@@ -62,14 +63,15 @@ class Stage53TerminalJobConsistencyTests(unittest.TestCase):
 
     def test_completed_failed_and_cancelled_results_share_one_terminal_job_identity(self) -> None:
         scenarios = (
-            ("completed", False, False, True, "Saved Narrator", True),
-            ("failed", False, True, True, "Saved Narrator", False),
-            ("cancelled", True, False, True, "Saved Narrator", False),
+            ("completed", False, False, True, "Saved Narrator", True, "narrator_only", True, 1),
+            ("failed", False, True, True, "Saved Narrator", False, "character_cast", False, 3),
+            ("cancelled", True, False, True, "Saved Narrator", False, "narrator_only", True, 1),
         )
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            for expected_status, cancelled, failed, old_output_exists, narrator, attach_output in scenarios:
+            for (expected_status, cancelled, failed, old_output_exists, narrator, attach_output,
+                 generation_mode, narrator_only, character_profile_count) in scenarios:
                 with self.subTest(status=expected_status):
                     case_root = root / expected_status
                     case_root.mkdir()
@@ -88,10 +90,20 @@ class Stage53TerminalJobConsistencyTests(unittest.TestCase):
                             "generation_target_path": str(output),
                             "output_path": None,
                             "completed_chapters": [],
+                            "generation_mode": generation_mode,
+                            "narrator_only_generation": narrator_only,
+                            "character_voice_profile_count": character_profile_count,
                         },
                     )
                     project = SimpleNamespace(folder=project_folder)
-                    bridge = DurableGenerationCompletionHarness(case_root, job_id)
+                    bridge = DurableGenerationCompletionHarness(
+                        case_root, job_id,
+                        result={
+                            "generation_mode": generation_mode,
+                            "narrator_only": narrator_only,
+                            "character_voice_profile_count": character_profile_count,
+                        },
+                    )
                     summary = self._summary(
                         cancelled=cancelled,
                         failed=failed,
@@ -118,6 +130,13 @@ class Stage53TerminalJobConsistencyTests(unittest.TestCase):
                     self.assertEqual(queue_row["job_id"], history_row["job_id"])
                     self.assertEqual(queue_row["output_path"], expected_output)
                     self.assertEqual(history_row["output_path"], expected_output)
+                    for terminal_row in (queue_row, history_row):
+                        self.assertEqual(terminal_row["result"]["generation_mode"], generation_mode)
+                        self.assertIs(terminal_row["result"]["narrator_only"], narrator_only)
+                        self.assertEqual(
+                            terminal_row["result"]["character_voice_profile_count"],
+                            character_profile_count,
+                        )
                     self.assertEqual(queue_row["output_path"], expected_output)
                     self.assertNotIn(job_id, bridge._generators)
 
@@ -134,6 +153,13 @@ class Stage53TerminalJobConsistencyTests(unittest.TestCase):
                     self.assertEqual(saved_job["job_id"], saved_record["job_id"])
                     self.assertEqual(saved_job["output_path"], expected_output)
                     self.assertEqual(saved_record["output_path"], expected_output)
+                    self.assertEqual(saved_job["result"]["generation_mode"], generation_mode)
+                    self.assertEqual(saved_record["result"]["generation_mode"], generation_mode)
+                    self.assertIs(saved_record["result"]["narrator_only"], narrator_only)
+                    self.assertEqual(
+                        saved_record["result"]["character_voice_profile_count"],
+                        character_profile_count,
+                    )
 
 
 if __name__ == "__main__":
