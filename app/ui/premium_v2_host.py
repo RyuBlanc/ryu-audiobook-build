@@ -4668,7 +4668,13 @@ class PremiumV2Bridge(QObject):
                     or row.get("voice_name") or row.get("short_description") or row.get("notes")
                     or (row.get("series") and row.get("primary_name"))
                 )
-                if trusted and name:
+                # Re-check rows already saved by earlier analysis. A voice profile
+                # must not preserve an English false-positive such as "Oh" or "Any".
+                if not name or not is_likely_character_name(
+                    name, trusted=trusted, explicit=name.casefold() in explicit_names
+                ):
+                    continue
+                if trusted:
                     trusted_rows.append(row)
                     trusted_keys.add(name.casefold())
                     trusted_keys.update(str(alias).strip().casefold() for alias in aliases if str(alias or "").strip())
@@ -4679,12 +4685,15 @@ class PremiumV2Bridge(QObject):
                     raw_speakers = assignment.get("speakers")
                     if not isinstance(raw_speakers, (list, tuple)):
                         raw_speakers = [assignment.get("speaker")] if assignment.get("speaker") else []
+                    assignment_series = str(assignment.get("series") or series_name).strip()
+                    if not assignment_series or assignment_series.casefold() != series_name.casefold():
+                        continue
                     for speaker in raw_speakers:
                         clean_speaker = str(speaker or "").strip()
-                        if clean_speaker:
+                        if clean_speaker and is_likely_character_name(clean_speaker, trusted=True):
                             trusted_keys.add(clean_speaker.casefold())
                             trusted_rows.append({"name": clean_speaker, "aliases": [],
-                                                 "series": str(assignment.get("series") or series_name)})
+                                                 "series": assignment_series})
 
             analysis = analyze_book(project.chapters)
             ai_report: dict[str, Any] = {}
@@ -4781,7 +4790,10 @@ class PremiumV2Bridge(QObject):
                         clean_aliases = [
                             str(alias).strip() for alias in aliases
                             if str(alias).strip()
-                            and is_likely_character_name(str(alias), trusted=True)
+                            and is_likely_character_name(
+                                str(alias),
+                                explicit=str(alias).strip().casefold() in explicit_names,
+                            )
                             and str(alias).strip().casefold() in raw_text.casefold()
                         ]
                         ai_character_aliases[key] = list(dict.fromkeys([
@@ -4854,6 +4866,15 @@ class PremiumV2Bridge(QObject):
             # Analysis refreshes must not silently discard characters the user
             # manually created or imported from the reusable Character Library.
             for old_name, prior in old.items():
+                prior_name = str(prior.get("name") or old_name).strip()
+                prior_trusted = bool(
+                    prior.get("user_created") or prior.get("manual") or prior.get("voice_profile")
+                    or prior.get("voice_name") or prior.get("short_description") or prior.get("notes")
+                )
+                if not is_likely_character_name(
+                    prior_name, trusted=prior_trusted, explicit=prior_name.casefold() in explicit_names
+                ):
+                    continue
                 if old_name and old_name not in item_names and (
                     old_name in trusted_keys or bool(prior.get("user_created")) or bool(prior.get("voice_profile"))
                 ):
@@ -5444,7 +5465,7 @@ class PremiumV2Bridge(QObject):
                     speakers = {str(value or "").strip().casefold() for value in raw_speakers if str(value or "").strip()}
                     if speakers.intersection(identity_names):
                         raise ValueError(
-                            f"Cannot dismiss '{name}' while saved dialogue assignments still refer to this character. "
+                            f"Cannot delete/dismiss '{name}' while saved dialogue assignments still refer to this character. "
                             "Unassign or reassign those passages first."
                         )
             exclusions = [
@@ -6333,6 +6354,26 @@ class PremiumV2Bridge(QObject):
             from app.ai.brain import AudiobookBrain
             from app.ai.learning_context import load_project_learning_context
             from app.tts.pronunciation_suggester import is_common_english_phrase
+            from app.chapters.characters import is_likely_character_name
+            state = load_state(project.folder)
+            confirmed_character_names: set[str] = set()
+            for character in state.get("characters") or []:
+                if not isinstance(character, dict):
+                    continue
+                character_name = str(character.get("name") or "").strip()
+                character_trusted = bool(
+                    character.get("user_created") or character.get("manual")
+                    or character.get("voice_profile") or character.get("voice_name")
+                )
+                if character_name and is_likely_character_name(character_name, trusted=character_trusted):
+                    confirmed_character_names.add(character_name.casefold())
+                    aliases = character.get("aliases") or []
+                    if isinstance(aliases, (list, tuple)):
+                        confirmed_character_names.update(
+                            str(alias).strip().casefold() for alias in aliases
+                            if str(alias or "").strip()
+                            and is_likely_character_name(str(alias), trusted=character_trusted)
+                        )
             learning_context = load_project_learning_context(Path(project.folder))
             brain = AudiobookBrain(Path(project.folder))
             try:
@@ -6366,9 +6407,22 @@ class PremiumV2Bridge(QObject):
                     if native_script else
                     bool(re.search(r"(?i)(?<![\w])" + re.escape(written) + r"(?![\\w])", source_text))
                 )
-                if not present or is_common_english_phrase(written):
-                    continue
                 key = unicodedata.normalize("NFC", written).casefold()
+                source_language = re.sub(
+                    r"[^a-z]", "", str(raw.get("source_language") or "").casefold()
+                )
+                english_source = source_language in {
+                    "english", "en", "eng", "americanenglish", "britishenglish",
+                }
+                if not present or (
+                    is_common_english_phrase(written) and key not in confirmed_character_names
+                ):
+                    continue
+                # Pronunciation AI is for non-English terms and confirmed names
+                # whose reading needs help, not arbitrary English words with a
+                # model-invented phonetic spelling.
+                if english_source and not native_script and key not in confirmed_character_names:
+                    continue
                 if key in seen:
                     continue
                 try:

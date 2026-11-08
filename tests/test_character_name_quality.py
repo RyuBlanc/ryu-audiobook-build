@@ -1,6 +1,10 @@
 import unittest
+from pathlib import Path
 
 from app.chapters.characters import is_likely_character_name, character_detection_exclusion_keys
+from app.tts.pronunciation_suggester import (
+    is_common_english_phrase, is_likely_character_name_candidate,
+)
 
 
 class CharacterNameQualityTests(unittest.TestCase):
@@ -47,6 +51,26 @@ class CharacterNameQualityTests(unittest.TestCase):
             {"name": "Mira", "series": ""},
         ]
         self.assertEqual(character_detection_exclusion_keys(exclusions, "Series A"), {"tobio"})
+    def test_ordinary_english_words_never_become_ai_characters_or_pronunciation_names(self):
+        for value in ("Oh", "The", "Any", "Ah", "Uh", "Hmm", "Wait", "Okay", "Fine", "Please", "Actually"):
+            with self.subTest(value=value):
+                self.assertFalse(is_likely_character_name(value, explicit=True))
+                self.assertFalse(is_likely_character_name(value, trusted=True))
+                self.assertTrue(is_common_english_phrase(value))
+                self.assertFalse(is_likely_character_name_candidate(value))
+        self.assertFalse(is_likely_character_name("Any Other", explicit=True))
+        self.assertFalse(is_likely_character_name_candidate("Oh 美咲"))
+        self.assertFalse(is_likely_character_name_candidate("The 学生"))
+        self.assertTrue(is_likely_character_name_candidate("美咲"))
+        self.assertTrue(is_likely_character_name("Will Smith", explicit=True))
+        self.assertTrue(is_likely_character_name("Hope", trusted=True))
+        self.assertTrue(is_likely_character_name_candidate("Hyoudou Issei"))
+
+    def test_ai_aliases_are_not_promoted_to_trusted_and_assignment_restores_are_series_scoped(self):
+        host_source = (Path(__file__).resolve().parents[1] / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn("explicit=str(alias).strip().casefold() in explicit_names", host_source)
+        self.assertIn("assignment_series.casefold() != series_name.casefold()", host_source)
+        self.assertIn("Cannot delete/dismiss", host_source)
 
 
 if __name__ == "__main__":

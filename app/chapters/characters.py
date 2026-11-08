@@ -76,6 +76,22 @@ NAME_STOPWORDS = {
     "School","Academy","Student","Teacher","President","Captain","Commander","General",
 }
 
+# These are never valid cast identities, even when an LLM marks them as an
+# explicit speaker or a previous false detection has acquired a voice profile.
+# Ambiguous content words are intentionally not all hard-blocked: an explicitly
+# confirmed name such as Will Smith remains valid.
+_HARD_NON_CHARACTER_WORDS = {
+    "a", "an", "the", "any", "some", "each", "every", "either", "neither", "both",
+    "oh", "ah", "uh", "hmm", "huh", "um", "erm", "eh",
+    "i", "me", "my", "mine", "we", "us", "our", "ours", "you", "your", "yours",
+    "he", "him", "his", "she", "her", "hers", "it", "its", "they", "them", "their", "theirs",
+    "this", "that", "these", "those", "who", "whom", "whose", "which", "what", "where", "when", "why", "how",
+    "and", "but", "or", "so", "if", "as", "than", "then", "there", "here",
+    "to", "of", "in", "on", "at", "by", "for", "from", "with", "about", "into", "over", "under",
+    "not", "no", "yes", "anyway", "wait", "okay", "fine", "good", "right", "well", "please", "sorry",
+    "actually", "perhaps", "suddenly", "finally", "clearly", "certainly", "obviously", "honestly",
+}
+
 
 def analyze_chapter(chapter: Chapter) -> CharacterAnalysis:
     return analyze_book([chapter])
@@ -607,26 +623,40 @@ def character_detection_exclusion_keys(
 
 
 def is_likely_character_name(value: str, *, trusted: bool = False, explicit: bool = False) -> bool:
-    """Reject common capitalized prose fragments before they enter the cast.
+    """Reject ordinary English words even when an AI invents speaker evidence.
 
-    Trusted user-created/saved names and structurally explicit speaker labels
-    keep their higher evidence level. Untrusted phrases must look like a
-    personal name rather than a sentence opening or physical description.
+    Trusted/manual identities may use ambiguous English words as names, but
+    articles, pronouns, function words and interjections can never become cast
+    members. Untrusted candidates must also pass the ordinary-English phrase
+    and source-name quality checks.
     """
     raw = str(value or "").strip()
     cleaned = _clean_name(raw)
-    if not cleaned or not _is_plausible_name(cleaned):
+    if not cleaned or len(cleaned) > 80:
         return False
-    if trusted or explicit:
-        return True
     words = [
         re.sub(r"[’']s$", "", part).strip(".,!?;:")
         for part in cleaned.split()
     ]
     words = [part for part in words if part]
-    if not words:
+    if not 1 <= len(words) <= 3:
+        return False
+    if not all(word and (word[0].isupper() or not word[0].isascii()) for word in words):
         return False
     lowered = [part.casefold() for part in words]
+    if any(word in _HARD_NON_CHARACTER_WORDS for word in lowered):
+        return False
+
+    # A plain English phrase must never be promoted just because the model
+    # returned it as an alias or attached a high confidence score.
+    from app.tts.pronunciation_suggester import is_common_english_phrase
+    if is_common_english_phrase(cleaned) and not trusted:
+        return False
+
+    if trusted or explicit:
+        return True
+    if not _is_plausible_name(cleaned):
+        return False
     if lowered[0] in _PROSE_NAME_STARTERS or lowered[0] in {x.casefold() for x in NAME_STOPWORDS}:
         return False
     if len(words) > 1 and (lowered[0].endswith("ing") or lowered[0].endswith("ed")):

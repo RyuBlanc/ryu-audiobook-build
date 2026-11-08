@@ -39,6 +39,11 @@ COMMON_ENGLISH_WORDS = {
     "god","gods","town","city","cities","king","queen","lord","lady","madam","mrs",
     "miss","doctor","professor","captain","prince","princess","emperor","empress",
     "father","mother","brother","sister","son","daughter","uncle","aunt",
+    # Interjections and everyday function words are not foreign names even if
+    # an LLM proposes a phonetic rewrite for them.
+    "oh","ah","uh","hmm","huh","um","erm","eh","okay","fine","wait","please","sorry",
+    "actually","perhaps","anyway","suddenly","finally","clearly","certainly","obviously",
+    "honestly","right","well","good","great","bad","enough","already","still","now",
 }
 
 _KNOWN = {
@@ -85,7 +90,10 @@ def is_likely_character_name_candidate(
     if key in known:
         return True
 
-    # Keep proper nouns in scripts that cannot be judged by English capitalization.
+    # Keep proper nouns in scripts that cannot be judged by English capitalization,
+    # but do not let a mixed-script phrase smuggle ordinary English words through.
+    if is_common_english_phrase(value):
+        return False
     has_native_script = bool(re.search(r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uac00-\ud7af]", value))
     if has_native_script:
         return len(value) >= 2 and not re.search(r"[。！？!?;:，,。…]", value) and len(value.split()) <= 3
