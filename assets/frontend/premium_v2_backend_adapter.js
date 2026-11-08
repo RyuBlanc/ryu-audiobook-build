@@ -491,27 +491,93 @@
     }
     if (chapterNav) {
       const priorScroll = chapterNav.scrollTop;
+      const chapterFilter = String(window.ryuPremiumAiChapterFilter || '').trim().toLocaleLowerCase();
+      const statusFilter = String(window.ryuPremiumAiChapterStatusFilter || 'all');
       const chapterButtons = chapters.map(chapter => {
         const number = Number(chapter.number);
-        const chapterRows = analyzedItems.filter(item => Number(item.chapter_number) === number && !item.skipped);
-        const pendingRows = chapterRows.filter(item => !item.assigned);
-        const active = number === Number(selectedChapter?.number);
+        const chapterPassages = items.filter(item => Number(item.chapter_number) === number);
+        const chapterRows = analyzedItems.filter(item => Number(item.chapter_number) === number);
+        const assignedCount = chapterRows.filter(item => item.assigned && !item.skipped).length;
+        const aiSuggestedCount = chapterRows.filter(item =>
+          !item.skipped && Array.isArray(item.suggestions) && item.suggestions.length > 0
+        ).length;
+        const skippedCount = chapterRows.filter(item => item.skipped).length;
+        const pendingRows = chapterRows.filter(item => !item.assigned && !item.skipped);
+        const wordCount = Math.max(
+          0,
+          Number(chapter.word_count) ||
+            String(chapter.text || '').trim().split(/\\s+/).filter(Boolean).length
+        );
         const status = !characterAnalysisStatus.analyzed ? 'Not analysed yet' :
-          (pendingRows.length ? pendingRows.length + ' need review' : 'Review complete');
+          (pendingRows.length ? 'Needs review' : 'Review complete');
+        const statusKey = !characterAnalysisStatus.analyzed ? 'not-analysed' :
+          (pendingRows.length ? 'needs-review' : 'complete');
+        const searchText = (number + ' ' + String(chapter.title || '')).toLocaleLowerCase();
+        const matchesSearch = !chapterFilter || searchText.includes(chapterFilter);
+        const matchesStatus = statusFilter === 'all' || statusFilter === statusKey;
+        const hidden = matchesSearch && matchesStatus ? '' : ' hidden';
+        const active = number === Number(selectedChapter?.number);
         return '<button type="button" class="chapter-pick ' + (active ? 'active' : '') +
-          '" data-ai-chapter-number="' + number + '" aria-current="' + (active ? 'page' : 'false') +
-          '" style="display:flex;flex-direction:column;align-items:flex-start;gap:3px;width:100%;text-align:left;padding:9px 11px;border-radius:9px;border:1px solid ' +
+          '" data-ai-chapter-number="' + number + '" data-ai-chapter-status="' + statusKey +
+          '" data-ai-chapter-search="' + esc(searchText) + '" aria-current="' + (active ? 'page' : 'false') + '"' + hidden +
+          ' style="display:flex;flex-direction:column;align-items:flex-start;gap:3px;width:100%;text-align:left;padding:9px 11px;border-radius:9px;border:1px solid ' +
           (active ? 'var(--accent,#c92c57)' : 'var(--border,#303744)') +
           ';background:' + (active ? 'rgba(197,39,82,.16)' : 'rgba(255,255,255,.02)') +
           ';color:inherit;cursor:pointer"><b>Chapter ' + number + ' · ' +
           esc(String(chapter.title || 'Untitled chapter')) + '</b><small>' +
-          esc(status + ' · ' + pendingRows.length + ' pending') + '</small></button>';
+          esc(status + ' · ' + pendingRows.length + ' pending') +
+          '</small><small style="white-space:normal;line-height:1.45">' +
+          esc(wordCount.toLocaleString() + ' words · ' + chapterPassages.length + ' detected · ' +
+            assignedCount + ' assigned · ' + aiSuggestedCount + ' AI suggestions · ' +
+            pendingRows.length + ' needs review · ' + skippedCount + ' skipped') +
+          '</small></button>';
       }).join('');
-      chapterNav.innerHTML = '<div class="ryu-character-subsection">Chapters · select to review</div>' +
-        (chapterButtons || '<div class="ryu-character-empty">No chapters are loaded.</div>');
+      const statusOptions = [
+        ['all', 'All statuses'],
+        ['not-analysed', 'Not analysed'],
+        ['needs-review', 'Needs review'],
+        ['complete', 'Review complete']
+      ].map(([value, label]) =>
+        '<option value="' + value + '"' + (statusFilter === value ? ' selected' : '') + '>' + label + '</option>'
+      ).join('');
+      chapterNav.innerHTML =
+        '<div class="ryu-character-subsection">Chapters · select to review</div>' +
+        '<label style="display:grid;gap:4px"><span class="muted">Search chapter number or title</span>' +
+        '<input type="search" data-ai-chapter-filter aria-label="Search chapters by number or title" placeholder="Search chapters…" value="' +
+        esc(String(window.ryuPremiumAiChapterFilter || '')) + '" style="width:100%;min-width:0"></label>' +
+        '<label style="display:grid;gap:4px"><span class="muted">Filter by review status</span>' +
+        '<select data-ai-chapter-status-filter aria-label="Filter chapters by review status" style="width:100%;min-width:0">' +
+        statusOptions + '</select></label>' +
+        (chapterButtons || '<div class="ryu-character-empty">No chapters are loaded.</div>') +
+        '<div data-ai-chapter-filter-empty hidden class="ryu-character-empty">No chapters match these filters.</div>';
       chapterNav.scrollTop = priorScroll;
       if (!chapterNav.dataset.liveBound) {
         chapterNav.dataset.liveBound = '1';
+        const applyChapterFilters = () => {
+          const term = String(window.ryuPremiumAiChapterFilter || '').trim().toLocaleLowerCase();
+          const selectedStatus = String(window.ryuPremiumAiChapterStatusFilter || 'all');
+          let visible = 0;
+          chapterNav.querySelectorAll('[data-ai-chapter-number]').forEach(button => {
+            const matchesSearch = !term || String(button.dataset.aiChapterSearch || '').includes(term);
+            const matchesStatus = selectedStatus === 'all' || button.dataset.aiChapterStatus === selectedStatus;
+            button.hidden = !(matchesSearch && matchesStatus);
+            if (!button.hidden) visible++;
+          });
+          const empty = chapterNav.querySelector('[data-ai-chapter-filter-empty]');
+          if (empty) empty.hidden = visible > 0;
+        };
+        chapterNav.addEventListener('input', event => {
+          const input = event.target.closest('[data-ai-chapter-filter]');
+          if (!input) return;
+          window.ryuPremiumAiChapterFilter = String(input.value || '');
+          applyChapterFilters();
+        });
+        chapterNav.addEventListener('change', event => {
+          const select = event.target.closest('[data-ai-chapter-status-filter]');
+          if (!select) return;
+          window.ryuPremiumAiChapterStatusFilter = String(select.value || 'all');
+          applyChapterFilters();
+        });
         chapterNav.addEventListener('click', event => {
           const button = event.target.closest('[data-ai-chapter-number]');
           if (!button) return;
