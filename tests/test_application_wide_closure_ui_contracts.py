@@ -75,5 +75,15 @@ class CharacterStudioUIContracts(unittest.TestCase):
         self.assertIn("chapterNav.addEventListener('change'", review)
 
 
+    def test_ai_chapter_metrics_include_manual_source_assignments_and_all_pending_passages(self):
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        start = adapter.index("function renderDialogueReview()")
+        end = adapter.index("function renderAiChapterDocument()", start)
+        review = adapter[start:end]
+        self.assertIn("chapterPassages.filter(item => item.assigned && !item.skipped)", review)
+        self.assertIn("chapterPassages.filter(item => item.skipped)", review)
+        self.assertIn("chapterPassages.filter(item => !item.assigned && !item.skipped)", review)
+
+
 if __name__ == "__main__":
     unittest.main()
