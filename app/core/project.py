@@ -6,6 +6,8 @@ import json
 import shutil
 import os
 import tempfile
+import threading
+from typing import Any
 
 from app.chapters.detector import Chapter
 from app.core.paths import library_root, project_library_roots
@@ -75,6 +77,7 @@ class Project:
         persisted = json.loads(self.text_file.read_text(encoding="utf-8"))
         if persisted != json.loads(chapters_payload):
             raise IOError("Saved chapter data could not be verified.")
+        invalidate_project_list_cache(self.folder)
 
     @classmethod
     def load(cls, folder: Path, *, migrate_legacy: bool = True) -> "Project":
@@ -249,40 +252,117 @@ def create_project(title: str, source_path: Path, chapters: list[Chapter]) -> Pr
         shutil.rmtree(staging_folder, ignore_errors=True)
         raise
 
+# list_projects() is called by Dashboard, Library, Trash and generation lookups.
+# Reuse parsed Project objects while the durable project metadata and chapter file
+# fingerprints are unchanged. This avoids reparsing multi-megabyte chapters.json
+# (and, importantly, rerunning legacy narration/BGM migration) on every UI refresh.
+_PROJECT_LIST_CACHE_LOCK = threading.RLock()
+_PROJECT_LIST_CACHE: dict[str, tuple[tuple[Any, ...], "Project"]] = {}
+
+
+def _project_list_fingerprint(folder: Path) -> tuple[Any, ...] | None:
+    """Fingerprint only the two files that determine the loaded Project object."""
+    result: list[Any] = []
+    for name in ("project.json", "chapters.json"):
+        try:
+            stat = (folder / name).stat()
+        except OSError:
+            return None
+        result.extend((stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size, getattr(stat, "st_ino", 0)))
+    return tuple(result)
+
+
+def invalidate_project_list_cache(folder: Path | str | None = None) -> None:
+    """Invalidate one saved project after a durable edit, or clear the full list."""
+    with _PROJECT_LIST_CACHE_LOCK:
+        if folder is None:
+            _PROJECT_LIST_CACHE.clear()
+            return
+        try:
+            key = str(Path(folder).expanduser().resolve()).casefold()
+        except (OSError, RuntimeError, ValueError):
+            key = str(Path(folder).expanduser().absolute()).casefold()
+        _PROJECT_LIST_CACHE.pop(key, None)
+
+
 def list_projects() -> list[Project]:
     projects: list[Project] = []
     seen_folders: set[str] = set()
-    # Scan the chosen root first, then the original root. Existing projects are
-    # not moved or hidden just because the user changes the destination for new imports.
-    for root in project_library_roots():
-        if not root.is_dir():
-            continue
+    scanned_roots: list[str] = []
+
+    # Scan the selected root first, then the original root. Existing projects
+    # remain visible when the user changes the destination for new imports.
+    for root_value in project_library_roots():
+        root = Path(root_value).expanduser()
         try:
+            if not root.is_dir():
+                # A disconnected external drive must not erase its cached rows.
+                continue
+            root_key = str(root.resolve()).casefold()
+            scanned_roots.append(root_key)
             folders = sorted(root.iterdir())
         except OSError:
-            # An external library drive can be disconnected while the app is open.
             continue
+
         for folder in folders:
-            # Import staging folders may briefly contain verified JSON while the
-            # import worker is preparing its atomic publish. Never expose these.
-            if folder.name.startswith(".import-staging-"):
-                continue
-            if not folder.is_dir() or not (folder / "project.json").exists():
+            if folder.name.startswith(".import-staging-") or not folder.is_dir():
                 continue
             try:
-                key = str(folder.resolve()).casefold()
-            except OSError:
-                key = str(folder.absolute()).casefold()
+                resolved_folder = folder.resolve()
+                key = str(resolved_folder).casefold()
+            except (OSError, RuntimeError, ValueError):
+                resolved_folder = folder.absolute()
+                key = str(resolved_folder).casefold()
             if key in seen_folders:
                 continue
-            try:
-                project = Project.load(folder)
-            except (OSError, ValueError, KeyError, json.JSONDecodeError):
+
+            fingerprint = _project_list_fingerprint(resolved_folder)
+            if fingerprint is None:
                 continue
+            with _PROJECT_LIST_CACHE_LOCK:
+                cached = _PROJECT_LIST_CACHE.get(key)
+            if cached is not None and cached[0] == fingerprint:
+                project = cached[1]
+            else:
+                try:
+                    # Listing is observational only. Legacy chapter IDs, narration
+                    # manifests and BGM keys are migrated on authoritative open,
+                    # never during every Dashboard/Library search refresh.
+                    project = Project.load(resolved_folder, migrate_legacy=False)
+                except (OSError, ValueError, KeyError, json.JSONDecodeError):
+                    continue
+
+                after_load = _project_list_fingerprint(resolved_folder)
+                if after_load is None:
+                    continue
+                if after_load != fingerprint:
+                    # A concurrent Save replaced files while the snapshot was read.
+                    # Re-read once so we do not expose mixed project/chapter data.
+                    try:
+                        project = Project.load(resolved_folder, migrate_legacy=False)
+                    except (OSError, ValueError, KeyError, json.JSONDecodeError):
+                        continue
+                    after_load = _project_list_fingerprint(resolved_folder)
+                    if after_load is None:
+                        continue
+                with _PROJECT_LIST_CACHE_LOCK:
+                    _PROJECT_LIST_CACHE[key] = (after_load, project)
+
             projects.append(project)
             seen_folders.add(key)
-    return projects
 
+    # Remove deleted/renamed entries from roots that were successfully scanned.
+    # Keep entries under unavailable external roots for reconnect/recovery.
+    with _PROJECT_LIST_CACHE_LOCK:
+        for key in list(_PROJECT_LIST_CACHE):
+            try:
+                parent = str(Path(key).parent).casefold()
+            except (OSError, ValueError):
+                continue
+            if parent in scanned_roots and key not in seen_folders:
+                _PROJECT_LIST_CACHE.pop(key, None)
+
+    return projects
 
 
 def _preserve_project_pronunciations(state: dict) -> None:
