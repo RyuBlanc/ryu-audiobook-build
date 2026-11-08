@@ -4161,9 +4161,89 @@
   function pronunciationSelectionKey(term) {
     return pronunciationScopeKey(term) + '|' + String(term.written_form || term.word || '').normalize('NFC').toLocaleLowerCase();
   }
+  function ensurePronunciationDictionaryTools(body) {
+    if (!body || body.closest('.page')?.querySelector('[data-pron-dictionary-tools]')) return;
+    const table = body.closest('table');
+    if (!table?.parentNode) return;
+    const tools = document.createElement('div');
+    tools.dataset.pronDictionaryTools = '1';
+    tools.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0 12px';
+    tools.innerHTML =
+      '<button type="button" class="btn small secondary" data-pron-import>Import dictionary JSON</button>' +
+      '<button type="button" class="btn small ghost" data-pron-export>Export dictionary JSON</button>' +
+      '<span class="muted" style="font-size:12px">Imports preserve book/series/global scope; conflicts require confirmation.</span>';
+    table.parentNode.insertBefore(tools, table);
+  }
+
+  async function exportPronunciationDictionary() {
+    const exported = await call('pronunciation.export');
+    const blob = new Blob([JSON.stringify(exported, null, 2)], {type:'application/json;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    anchor.href = url;
+    anchor.download = 'ryu-pronunciation-dictionary-' + stamp + '.json';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    message('Exported ' + (Array.isArray(exported.entries) ? exported.entries.length : 0) +
+      ' pronunciation entry/entries with their original scopes.');
+  }
+
+  async function importPronunciationDictionary() {
+    const picker = document.createElement('input');
+    picker.type = 'file';
+    picker.accept = '.json,application/json';
+    picker.onchange = async () => {
+      const file = picker.files?.[0];
+      if (!file) return;
+      if (file.size > 5 * 1024 * 1024) {
+        message('Pronunciation dictionary imports are limited to 5 MB.', true);
+        return;
+      }
+      try {
+        const importedDocument = JSON.parse(await file.text());
+        const preview = await call('pronunciation.import', {document:importedDocument, apply:false});
+        const conflicts = Array.isArray(preview.conflicts) ? preview.conflicts : [];
+        if (Number(preview.protected_manual_count || 0) > 0) {
+          throw new Error('The file contains ' + preview.protected_manual_count +
+            ' AI reading(s) that would overwrite a saved manual rule. Resolve those manually before importing.');
+        }
+        let replaceConflicts = false;
+        if (conflicts.length) {
+          const details = conflicts.slice(0, 8).map(row =>
+            row.written_form + ' · ' + row.scope + ': ' + row.existing_spoken_form +
+            ' → ' + row.imported_spoken_form
+          ).join('\n');
+          replaceConflicts = window.confirm(
+            'The import contains ' + conflicts.length + ' conflicting pronunciation rule(s).\n\n' +
+            details + (conflicts.length > 8 ? '\n… and ' + (conflicts.length - 8) + ' more.' : '') +
+            '\n\nReplace these existing readings? Cancel keeps every saved rule unchanged.'
+          );
+          if (!replaceConflicts) {
+            message('Import cancelled. Existing pronunciation rules were not changed.');
+            return;
+          }
+        }
+        const result = await call('pronunciation.import', {
+          document:importedDocument, apply:true, replace_conflicts:replaceConflicts
+        });
+        await refreshTerms();
+        message('Imported ' + Number(result.imported || 0) + ' new pronunciation rule(s), updated ' +
+          Number(result.updated || 0) + ', skipped ' + Number(result.duplicate_count || 0) +
+          ' duplicate(s).');
+      } catch (error) {
+        message(error?.message || String(error), true);
+      }
+    };
+    picker.click();
+  }
+
   function renderPronunciationRows() {
     const body = $('pronDictionaryBody');
     if (!body) return;
+    ensurePronunciationDictionaryTools(body);
     const query = String($('pronSearchAdvanced')?.value || '').trim().toLocaleLowerCase();
     const scopeFilter = $('pronScopeFilter')?.value || 'all';
     const originFilter = $('pronOriginFilter')?.value || 'all';
@@ -11437,6 +11517,14 @@
       if (!button) return;
       const stop = () => { event.preventDefault(); event.stopImmediatePropagation(); };
       const run = fn => { stop(); void Promise.resolve().then(fn).catch(error => message(error?.message || String(error),true)); };
+      if (button.matches('[data-pron-import]')) {
+        run(importPronunciationDictionary);
+        return;
+      }
+      if (button.matches('[data-pron-export]')) {
+        run(exportPronunciationDictionary);
+        return;
+      }
       if (button.id === 'addPronunciationAdvanced') {
         run(() => {
           window.ryuPronunciationEditing = null;
