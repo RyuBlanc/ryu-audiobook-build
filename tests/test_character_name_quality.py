@@ -33,6 +33,10 @@ class CharacterNameQualityTests(unittest.TestCase):
         # dismissal and deliberately makes that identity eligible again.
         restored = character_detection_exclusion_keys(exclusions, "Series A", protected_names={"Miri"})
         self.assertEqual(restored, {"silver-haired", "the silver knight", "mira"})
+        other_series_assignment = character_detection_exclusion_keys(
+            exclusions, "Series A", protected_names=[{"name": "Mira", "series": "Series B"}]
+        )
+        self.assertEqual(other_series_assignment, excluded)
 
     def test_detection_exclusions_reject_malformed_entries_and_do_not_cross_series(self):
         exclusions = [
