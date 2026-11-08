@@ -18,7 +18,49 @@
 Do not treat Build #2680's 1,258 passing tests as proof for code committed afterwards. Do not mark a requirement complete from a static element/function-name test. Manual Windows/audio acceptance remains distinct from CI.
 
 
-## Current evidence overlay — 8 November 2026 (supersedes earlier snapshots)
+## Current evidence overlay — 8 November 2026 (Build #2950 source-head reconciliation)
+
+**Active branch:** `stage-5/xapp08-recovery-reentry-2026-11-08`  
+**Application source candidate:** `976f8dbc132359f8c4b470688d61a1f3bd9ec209`  
+**Windows CI:** [Build #2950](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42502827868) — `tests` passed, **1,428 tests passed**; focused Stage 6 preflight passed 45 tests. The `build` job was skipped because this branch's workflow only packages on an `[artifact-checkpoint]` commit or manual dispatch. The next commit is an evidence/package checkpoint and does not change application code.
+
+This is the latest verified source-head regression result. It supersedes #2943–#2949 as the current CI verdict. #2944–#2949 were unsuccessful test attempts caused by stale or incorrectly-scoped test assertions after the readiness gate was strengthened; the assertions were corrected and #2950 passed. Those failed attempts are retained in Actions history, not described as product regressions.
+
+### Matching-branch functional evidence
+
+| Build | Tests | Verified area | Remaining acceptance |
+|---|---:|---|---|
+| #2930 | 1,407 | Actual retry/recovery route creates a new job linked to the interrupted narrator-only job, preserves saved narrator identity and bypasses character providers. | Real interruption/recovery on installed Windows using a real audiobook remains open. |
+| #2932 | 1,411 | Audiobook loading, playback preference persistence, cache rebuild without changing M4B, chapter/listening position validation. | Listen to real output in the installed Windows app remains open. |
+| #2935 | 1,415 | Real GenerationManager worker pause/resume at a saved chunk boundary and cancel while paused. | Real long-running generation cancellation/recovery on target hardware remains open. |
+| #2936 | 1,416 | Two-chapter GenerationManager-to-M4B integration, embedded chapter metadata/cover and container validation. | Listen through the full audiobook and validate target-device playback remains open. |
+| #2938–#2939 | cumulative suite | Production preview Save-path correction, saved narrator/chapter identity, preview/final-generation parity. | Real provider audio and listening checks remain open. |
+| #2940–#2942 | 1,424 at #2942 | Durable progress-stage mapping, independent Production Preview job lifecycle, and typed durable full-generation job identity. | Packaged-app interaction remains open. |
+| #2950 | 1,428 | Metadata/output readiness summary, eligible/empty/excluded chapter counts, shared full-generation gate, gate persistence during job polling, narrator-only readiness handling. | Exact-head Windows package and installed-app acceptance are pending. |
+
+### Readiness correction included in #2950
+
+- The project summary now reports eligible, empty and excluded chapters separately.
+- A new project's default M4B destination can be ready before an output file exists. Custom output folders that do not yet exist are considered ready only when their nearest existing ancestor is writable; the generation handler creates the folder.
+- The Production Generate button and Dashboard readiness flow both require saved metadata, an available saved narrator, at least one eligible chapter, supported M4B output and a writable/creatable destination.
+- Narrator-only mode explicitly bypasses the character-voice readiness stage.
+- The job-poll refresh applies the same prerequisite function as the initial render; it cannot re-enable generation using an older metadata-only rule.
+
+### Current package status
+
+Build #2922 remains a successful Windows package checkpoint on the earlier XAPP-08 branch, not a package of this Stage 5 recovery-reentry source head. #2950 passed tests but skipped packaging. The next `[artifact-checkpoint]` workflow run is required to prove that the exact reconciled Stage 5 candidate can be frozen, run through packaged acceptance, installed/upgraded/uninstalled, scanned, and uploaded as installer/portable artifacts. Do not call #2922 the latest package for the Stage 5 candidate.
+
+### Still open and deliberately not inferred from CI
+
+- Real installed-Windows playback and listening, including the new M4B chapter navigation.
+- Real interrupted audiobook recovery and pause/resume/cancel using an actual saved project on the installed app.
+- Qwen 30-second preview under 60 seconds. Earlier 1.7B measurements around 298–305 seconds remain evidence that this target was not met; no newer passing <60-second measurement has been supplied.
+- Multilingual pronunciation correctness by listening to representative names and passages.
+- Full visual review of every screen at the user's actual display scaling, multi-monitor arrangement and window sizes.
+- Any requirement whose control, persistence, recovery or output behavior has not been exercised end-to-end on the packaged Windows application.
+
+
+## Historical evidence overlay — XAPP-08 / Build #2929 snapshot
 
 This overlay separates the latest packaged candidate from the latest regression-only source head. Build #2922 is the latest verified Windows package checkpoint currently evidenced here; Build #2929 is a newer regression-only checkpoint and must not be represented as a package build. The older #2866/#2847/#2887 snapshots remain historical evidence, not current release evidence.
 
@@ -48,21 +90,21 @@ This inventory extracts all stable requirement IDs from the Master Bug & Change 
 
 | ID | Priority | Requirement | Current status | Evidence / next gate |
 |---|---:|---|---|---|
-| UI-01 | P0 | Premium V2 is the required default UI. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
+| UI-01 | P0 | Premium V2 is the required default UI. | AUTOMATED REGRESSION VERIFIED — installed-app visual acceptance open | Premium V2 default/native fallback contract passed in the #2950 cumulative Windows suite. |
 | UI-02 | P0 | Fix overlapping and unreadable elements. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | UI-03 | P0 | Resolve flickering without requiring Reduce Motion to be off. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | UI-04 | P0 | Desktop application behaviour. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | UI-05 | P0 | Notifications, errors and empty states. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | UI-06 | P0 | Responsive layout acceptance. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| UI-07 | P0 | Preserve existing stability improvements. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
+| UI-07 | P0 | Preserve existing stability improvements. | AUTOMATED REGRESSION VERIFIED — user-workflow acceptance open | UI stability, refresh/selection/scroll, navigation, autosave and lifecycle regressions passed in the #2950 cumulative suite. |
 | VS-01 | P0 | 30-second preview under 60 seconds. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| VS-02 | P0 | Preserve character voice identity. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
+| VS-02 | P0 | Preserve character voice identity. | AUTOMATED REGRESSION VERIFIED — audible identity acceptance open | Saved narrator/character routing and Production preview parity/recovery tests passed #2930, #2939 and #2950. |
 | VS-03 | P1 | Emotion-aware narration. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | VS-04 | P1 | Story-aware background effects and voices. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | VS-05 | P1 | Make emotion/effects global. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | VS-06 | P0 | Accurate multilingual pronunciation. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | VS-07 | P1 | Emotion and pronunciation must cooperate. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| VS-08 | P0 | Preserve all previous Voice Studio fixes. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
+| VS-08 | P0 | Preserve all previous Voice Studio fixes. | AUTOMATED REGRESSION VERIFIED — installed-app voice acceptance open | Voice Studio refresh, profile identity and preview state regression coverage passed in the #2950 cumulative suite. |
 | CS-01 | P1 | Real Assigned Cast list. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | CS-02 | P1 | Project isolation and live assignment data. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | CS-03 | P1 | Audio Profile dropdown. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
@@ -106,13 +148,13 @@ This inventory extracts all stable requirement IDs from the Master Bug & Change 
 | MUS-07 | P1 | Master BGM volume. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | MUS-08 | P1 | Chapter volume. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | MUS-09 | P1 | BGM/voice-only configuration. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| PROD-01 | P0 | Add Input Project Details. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| PROD-02 | P0 | Metadata fields. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| PROD-03 | P0 | Metadata completion gate. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| PROD-04 | P0 | Metadata persistence and output. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| PROD-05 | P0 | Real progress animation. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| PROD-06 | P0 | Separate preview and full generation states. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| PROD-07 | P0 | Preview generation controls. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
+| PROD-01 | P0 | Add Input Project Details. | AUTOMATED REGRESSION VERIFIED — installed-app acceptance open | Metadata dialog, save, history, cover and rollback tests passed in the #2950 cumulative suite (1,428). |
+| PROD-02 | P0 | Metadata fields. | AUTOMATED REGRESSION VERIFIED — installed-app acceptance open | Ten required fields, validation and persisted read-back/rollback tests passed in #2950. |
+| PROD-03 | P0 | Metadata completion gate. | AUTOMATED REGRESSION VERIFIED — packaged acceptance open | #2950 verifies missing metadata, narrator availability, eligible chapters, M4B type and output folder gates; job refresh cannot bypass the gate. |
+| PROD-04 | P0 | Metadata persistence and output. | AUTOMATED REGRESSION VERIFIED — real-book output acceptance open | Atomic metadata save/read-back, usable default/custom M4B destination and two-chapter M4B assembly tests (#2936, #2950). |
+| PROD-05 | P0 | Real progress animation. | AUTOMATED REGRESSION VERIFIED — installed-app observation open | Durable generation stage/progress mapping passed #2940 and cumulative #2950 (1,428 tests). |
+| PROD-06 | P0 | Separate preview and full generation states. | AUTOMATED REGRESSION VERIFIED — installed-app acceptance open | Independent typed Production Preview and full-generation job identity/monitor coverage passed #2941–#2942 and cumulative #2950. |
+| PROD-07 | P0 | Preview generation controls. | AUTOMATED REGRESSION VERIFIED — real listening open | Preview identity/parity, saved chapter ownership, duration and Save-path tests passed #2938–#2939 and cumulative #2950. |
 | PROD-08 | P1 | Live pronunciation toggle. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | PROD-09 | P1 | Live BGM/cue toggle. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | PROD-10 | P1 | Live project summary. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
@@ -122,20 +164,20 @@ This inventory extracts all stable requirement IDs from the Master Bug & Change 
 | PROD-14 | P0 | Consistent job state. | AUTOMATED TESTS PASSED — RUNTIME ACCEPTANCE PENDING | #2929 (commit 712d844): 1,406-test Windows regression run passed; History/Task Manager generation-mode visibility contract and backend terminal identity are covered. Installed Windows UI verification and exact-head package remain pending. |
 | PROD-15 | P1 | Chapter-specific preview audio and download. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | AB-01 | P2 | Compact audiobook cards. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| AB-02 | P0 | Fix audio file loading. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| AB-03 | P0 | Full player controls. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| AB-04 | P0 | Chapter playback. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
+| AB-02 | P0 | Fix audio file loading. | AUTOMATED REGRESSION VERIFIED — installed-app playback open | #2932 real backend loading/cache restoration regressions; full suite remains green at #2950. |
+| AB-03 | P0 | Full player controls. | AUTOMATED REGRESSION VERIFIED — real audio operation open | #2932 preference/transport contracts and #2950 cumulative suite; manual player control/listening remains open. |
+| AB-04 | P0 | Chapter playback. | AUTOMATED REGRESSION VERIFIED — real chapter listening open | #2932 player chapter/listening-position coverage and #2936 embedded M4B chapter metadata; installed-app playback remains open. |
 | AB-05 | P1 | Persistent mini-player. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | AB-06 | P1 | Playback position persistence. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| AB-07 | P0 | Preserve completed output integrity. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| HIS-01 | P2 | Accurate history records. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| HIS-02 | P2 | Date filtering. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| HIS-03 | P1 | Durable history. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| JOB-01 | P2 | Fix readability and layout. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| JOB-02 | P2 | Job details. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| JOB-03 | P2 | Accurate totals and filters. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| JOB-04 | P1 | Safe operations. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| JOB-05 | P1 | Consistency with History. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
+| AB-07 | P0 | Preserve completed output integrity. | AUTOMATED REGRESSION VERIFIED — real output playback open | #2932 cache rebuild preserves authoritative M4B; #2936 validates assembled chaptered M4B; #2950 cumulative suite. |
+| HIS-01 | P2 | Accurate history records. | AUTOMATED REGRESSION VERIFIED — installed-app history acceptance open | Terminal job ownership/results and History details are covered by #2928–#2929 and the cumulative #2950 suite. |
+| HIS-02 | P2 | Date filtering. | AUTOMATED REGRESSION VERIFIED — installed-app history acceptance open | Search/date filtering source and backend record tests passed in the #2950 cumulative suite. |
+| HIS-03 | P1 | Durable history. | AUTOMATED REGRESSION VERIFIED — restart acceptance open | Independent durable job/history persistence and generation identity coverage passed #2928–#2929 and #2950. |
+| JOB-01 | P2 | Fix readability and layout. | AUTOMATED REGRESSION VERIFIED — target-window visual acceptance open | Task Manager bounded dialog and responsive layout contract tests passed in the #2950 cumulative suite. |
+| JOB-02 | P2 | Job details. | AUTOMATED REGRESSION VERIFIED — installed-app detail acceptance open | History/Task Manager open-details and narrator generation identity display tests passed #2929 and #2950. |
+| JOB-03 | P2 | Accurate totals and filters. | AUTOMATED REGRESSION VERIFIED — installed-app data acceptance open | Backend History and Task Manager filter/record contracts passed in the #2950 cumulative suite. |
+| JOB-04 | P1 | Safe operations. | AUTOMATED REGRESSION VERIFIED — real lifecycle acceptance open | Pause/resume/cancel/retry/recover ownership and safe state tests passed #2930, #2935 and #2950. |
+| JOB-05 | P1 | Consistency with History. | AUTOMATED REGRESSION VERIFIED — installed-app acceptance open | Durable History/Task Manager generation identity and details tests passed #2929 and #2950. |
 | MOD-01 | P1 | Audit actual model installation inventory. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | MOD-02 | P1 | Synchronize voice/model selectors. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | MOD-03 | P1 | Model lifecycle. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
@@ -156,11 +198,11 @@ This inventory extracts all stable requirement IDs from the Master Bug & Change 
 | LIB-03 | P1 | Recoverable projects. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | LIB-04 | P1 | Project identity and save state. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | LIB-05 | P2 | Known project-lifecycle limitations. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| GEN-01 | P0 | Real generation workflow. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| GEN-02 | P1 | Resumable and recoverable generation. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| GEN-03 | P1 | Pause/cancel/retry. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
+| GEN-01 | P0 | Real generation workflow. | AUTOMATED REGRESSION VERIFIED — full-book listening open | #2936 exercised GenerationManager through two chapters and actual M4B assembly; cumulative suite passed #2950. |
+| GEN-02 | P1 | Resumable and recoverable generation. | AUTOMATED REGRESSION VERIFIED — real interrupted-book acceptance open | #2930 recovery re-entry retains narrator-only identity and job lineage; pause checkpoint coverage #2935; cumulative #2950. |
+| GEN-03 | P1 | Pause/cancel/retry. | AUTOMATED REGRESSION VERIFIED — installed-app lifecycle acceptance open | #2935 real worker pause/resume/cancel at chunk boundary; retry/recovery lineage tests are included in the cumulative #2950 suite. |
 | GEN-04 | P1 | Empty/ineligible chapters. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
-| GEN-05 | P0 | M4B validation and metadata. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
+| GEN-05 | P0 | M4B validation and metadata. | AUTOMATED REGRESSION VERIFIED — target-player listening open | #2927 strict metadata/cover validation and #2936 two-chapter M4B metadata/cover/container integration; cumulative #2950. |
 | GEN-06 | P0 | Preview/final parity. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | PKG-01 | P1 | Installer below 500 MB target. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | PKG-02 | P2 | Investigate slow downloads. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
