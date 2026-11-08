@@ -6095,7 +6095,7 @@ function renderProductionMetadataGate(active) {
     const fullStart = $('startGenerate');
     const previewStart = $('previewGenerate');
     const anyAudioActive = fullActive || previewActive;
-    const metadataComplete = project?.metadata_complete === true && !metadataDialogDirty;
+    const generationBlockReason = productionGenerationBlockReason(project);
     syncProductionPreviewChapterSelector();
     let narratorOnlyControl = $('narratorOnlyGeneration');
     if (!narratorOnlyControl) {
@@ -6161,8 +6161,14 @@ function renderProductionMetadataGate(active) {
         narratorOnlyControl.checked = savedValue;
       }
     }
-    // Job-state refreshes must never overwrite the required metadata gate.
-    if (fullStart) fullStart.disabled = anyAudioActive || !metadataComplete;
+    // Job-state refreshes must reuse the exact Production prerequisite
+    // gate; polling must never re-enable generation after a blocker is found.
+    if (fullStart) {
+      fullStart.disabled = anyAudioActive || Boolean(generationBlockReason);
+      fullStart.title = anyAudioActive
+        ? 'Finish or cancel the active Production audio operation first.'
+        : (generationBlockReason || 'Generate the full audiobook using saved project configuration.');
+    }
     // Preview remains available when metadata is incomplete; only active audio
     // work prevents a second full/preview operation.
     if (previewStart) previewStart.disabled = anyAudioActive;
