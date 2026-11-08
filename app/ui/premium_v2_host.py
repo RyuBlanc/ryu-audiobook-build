@@ -4629,7 +4629,7 @@ class PremiumV2Bridge(QObject):
                 source_grounded_speaker_for_continuity,
             )
             explicit_names = {str(name).casefold() for name in _discover_explicit_speakers(raw_text)}
-            protected_assignment_names = set()
+            protected_assignment_names = []
             for chapter in project.chapters:
                 for assignment in (getattr(chapter, "dialogue_assignments", []) or []):
                     if not isinstance(assignment, dict):
@@ -4637,9 +4637,10 @@ class PremiumV2Bridge(QObject):
                     raw_speakers = assignment.get("speakers")
                     if not isinstance(raw_speakers, (list, tuple)):
                         raw_speakers = [assignment.get("speaker")] if assignment.get("speaker") else []
-                    protected_assignment_names.update(
-                        str(speaker or "").strip() for speaker in raw_speakers
-                        if str(speaker or "").strip()
+                    assignment_series = str(assignment.get("series") or series_name).strip()
+                    protected_assignment_names.extend(
+                        {"name": str(speaker or "").strip(), "series": assignment_series}
+                        for speaker in raw_speakers if str(speaker or "").strip()
                     )
             excluded_detection_keys = character_detection_exclusion_keys(
                 state.get("character_detection_exclusions") or [],
@@ -5055,14 +5056,14 @@ class PremiumV2Bridge(QObject):
                     dict(row) for row in (latest_state.get("characters") or [])
                     if isinstance(row, dict)
                 ]
-                latest_protected_names = set(protected_assignment_names)
+                latest_protected_names = list(protected_assignment_names)
                 for row in latest_saved_characters:
                     if row.get("user_created") or row.get("manual") or row.get("voice_profile"):
-                        latest_protected_names.add(str(row.get("name") or "").strip())
-                        latest_protected_names.update(
-                            str(alias).strip() for alias in (row.get("aliases") or [])
-                            if str(alias or "").strip()
-                        )
+                        latest_protected_names.append({
+                            "name": str(row.get("name") or "").strip(),
+                            "aliases": list(row.get("aliases") or []),
+                            "series": str(row.get("series") or series_name).strip(),
+                        })
                 latest_excluded_keys = character_detection_exclusion_keys(
                     latest_state.get("character_detection_exclusions") or [],
                     series_name,
