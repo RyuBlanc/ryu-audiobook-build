@@ -811,9 +811,9 @@
     const narratorName = String(project.narrator || project.voice_profile || '').trim();
     const narratorReady = project.narrator_voice_configured === true &&
       project.narrator_profile_available === true && Boolean(String(project.voice_profile || '').trim());
-    const narratorOnly = project.narrator_only_generation === true;
     const characterCount = Number(project.character_count || 0);
-    const characterVoiceCount = Number(project.character_voice_count || 0);
+    const characterVoiceCount = Math.max(0, Number(project.character_voice_count || 0));
+    const narratorOnly = project.narrator_only_generation === true && characterVoiceCount === 0;
     const characterReviewed = Boolean(project.character_analysis_done);
     const charactersReady = narratorOnly || (characterReviewed &&
       (characterCount === 0 || characterVoiceCount >= characterCount));
@@ -5266,6 +5266,12 @@
 
   function productionGenerationBlockReason(active) {
     if (!active?.folder) return 'Open a saved project before starting full generation.';
+    const configuredCharacterVoiceCount = Math.max(0, Number(active.character_voice_count || 0));
+    if (active.narrator_only_generation === true && configuredCharacterVoiceCount > 0) {
+      return 'Narrator-Only Generation is no longer available because '
+        + configuredCharacterVoiceCount
+        + ' character voice profile(s) are configured. Turn it off to use multi-character speaker review.';
+    }
     const unsaved = metadataDialogDirty && metadataDialogProjectFolder === String(active.folder);
     if (unsaved) return 'Save or discard Input Project Details changes before generation.';
     if (active.metadata_complete !== true) {
@@ -5593,10 +5599,18 @@ function renderProductionMetadataGate(active) {
       narratorReady ? 'Saved voice profile · ' + narratorProfile : 'No saved narrator voice profile',
       narratorReady ? 'ready' : 'warn');
 
-    const narratorOnly = active.narrator_only_generation === true;
-    let characterStatus = narratorOnly ? '0 configured character voice profiles · character voice assignment not required; saved narrator reads all passages' : 'Character analysis not run';
+    const configuredCharacterVoiceCount = Math.max(0, Number(active.character_voice_count || 0));
+    const narratorOnlyRequested = active.narrator_only_generation === true;
+    const narratorOnly = narratorOnlyRequested && configuredCharacterVoiceCount === 0;
+    let characterStatus = narratorOnly
+      ? '0 configured character voice profiles · character voice assignment not required; saved narrator reads all passages'
+      : 'Character analysis not run';
     let characterKind = narratorOnly ? 'ready' : 'warn';
-    if (!narratorOnly && analysisDone && totalCharacters === 0) {
+    if (narratorOnlyRequested && configuredCharacterVoiceCount > 0) {
+      characterStatus = configuredCharacterVoiceCount
+        + ' configured character voice profile(s) · narrator-only is no longer eligible; switch to multi-character speaker review';
+      characterKind = 'warn';
+    } else if (!narratorOnly && analysisDone && totalCharacters === 0) {
       characterStatus = 'No character speakers detected';
       characterKind = 'ready';
     } else if (!narratorOnly && totalCharacters > 0) {
