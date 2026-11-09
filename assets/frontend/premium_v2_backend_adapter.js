@@ -9121,6 +9121,7 @@ function renderProductionMetadataGate(active) {
     grid.style.gap = '12px';
     grid.style.alignItems = 'stretch';
     grid.style.minWidth = '0';
+    grid.style.paddingBottom = '48px';
     const signature = JSON.stringify(rows);
     if (grid.dataset.modelSignature !== signature || grid.dataset.modelFilter !== query + '|' + filter) {
       grid.dataset.modelSignature = signature;

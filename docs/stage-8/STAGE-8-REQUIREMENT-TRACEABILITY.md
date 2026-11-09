@@ -771,3 +771,8 @@ Build #3011 passed all 1,442 regression tests and frozen executable checks. Pack
 ## 9 November 2026 — Build #3012 residual overlap geometry
 
 Build #3012 attempt 1 stopped during dependency setup because the Kokoro voice-pack endpoint returned HTTP 504; no product checks ran. Attempt 2 passed regression and frozen-app checks, then passed Production chapter-selection and full-book/retry generation. Packaged responsive acceptance measured the remaining Models Center overlap precisely at 1920×1080: the `base-1.7b` card's Copy path control and installation queue's Clear completed control intersected 16×9 pixels at the inventory/queue boundary. The UI now adds explicit 40px separation between inventory and queue. Build #3013 must verify this layout and complete packaging; no release artifacts yet.
+
+
+## 9 November 2026 — Build #3013 inventory boundary follow-up
+
+Build #3013 passed tests and froze successfully; packaged acceptance confirmed Production selection/recovery flows but still measured overlap between the final model card's Copy path and installation queue's Clear completed control (16×33 px) at 1920×1080. The 40px margin change did not move the controls, proving margin alone did not reserve the needed grid space. The model inventory now reserves 48px of bottom padding in its rendered grid box. Build #3014 must verify this and complete the remaining gates.
