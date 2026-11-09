@@ -125,7 +125,7 @@ jobs:
   # storage cleanup. Only explicit artifact checkpoints (and main/manual runs)
   # may create release artifacts.
   build:
-    if: ${{ github.ref == 'refs/heads/main' || contains(github.event.head_commit.message || '', '[artifact-checkpoint]') || github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.ref == 'refs/heads/main' || contains(github.event.head_commit.message || '', '[artifact-checkpoint]') || contains(github.event.head_commit.message || '', 'Dragon Studio Edition version: 1.2.0') || github.event_name == 'workflow_dispatch' }}
     needs: tests
     runs-on: windows-latest
     timeout-minutes: 120
@@ -1063,3 +1063,4 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($semanticVersion)) { throw "Application version was not exported by the validated build step for release tagging." }
           $tag = "v$semanticVersion-build-${{ github.run_number }}"
           gh release create $tag "installer/installer-output/Ryu's Audiobook Setup.exe" --title "Ryu's Audiobook $tag" --notes "Verified Windows build. Includes offline Piper + Kokoro voices, the Obsidian/Ember dragon-tech interface, global Reduce Motion preference, a local-first audio catalogue with 26 real starter BGM tracks across calm, fantasy, adventure, comedy, action, sci-fi, emotional, mystery, horror and slice-of-life moods, plus six real book opening/page-turn/closing sound cues. Add licensed tracks through Generate > Real BGM catalogue / Real audiobook cue files. Includes Qwen VoiceDesign preset isolation, audiobook AI smoke validation, Chatterbox runtime validation, frozen EXE checks and installer verification. Starter-track source and license notes are included beside the local audio library." --target $env:GITHUB_SHA
+

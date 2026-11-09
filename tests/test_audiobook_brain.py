@@ -84,9 +84,9 @@ class AudiobookBrainTests(unittest.TestCase):
         with patch.object(model_runtime, "detect_nvidia_vram_gb", return_value=0.0):
             self.assertIn("cpu-x64", model_runtime.LLAMA_CPU_URL)
 
-    def test_release_version_is_current_bugfix_line(self):
+    def test_release_version_is_120_candidate(self):
         from app.version import APP_VERSION
-        self.assertEqual(APP_VERSION, "1.1.1")
+        self.assertEqual(APP_VERSION, "1.2.0")
 
     def test_chatterbox_runtime_is_resume_safe_and_pinned(self):
         from pathlib import Path
@@ -155,3 +155,4 @@ class AudiobookBrainTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
