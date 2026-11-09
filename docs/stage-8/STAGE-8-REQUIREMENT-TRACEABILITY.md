@@ -681,3 +681,33 @@ Build #2996 passed 1,438 regression tests, frozen application startup and bundle
 The added regression requires the active-project summary to return the persisted `generation_mode`, `narrator_only_generation`, and `character_voice_profile_count`. The fix exposes the saved count with non-negative integer normalization and falls back to the currently configured count for older projects without a generation snapshot. It preserves the existing derived configured-cast field and does not weaken job ownership, output validation, or readiness guards.
 
 **Status:** code and regression committed; matching-head full tests and packaged Windows acceptance are pending. Build #2996 produced no installer or release artifacts because the package gate correctly stopped at the failed acceptance. Actual saved-book listening, user-PC performance, physical Qwen device tests, and display/DPI acceptance remain pending.
+
+
+## Cross-App Addendum — XAPP-01 through XAPP-20
+
+The Cross-Application Defect Closure & Integration Addendum supplied with this continuation remains authoritative for full requirement text, acceptance criteria, viewport coverage, and workflow order. This status ledger supplements that text; it does not replace it. A code/test result does not satisfy installed-app, saved-book, real-audio, physical-device, or user-PC acceptance.
+
+| ID | Priority | Current evidence and remaining closure |
+|---|---:|---|
+| XAPP-01 | P0 | Character-analysis pipeline and regression coverage exist; actual-book, cross-chapter identity/alias quality and user correction acceptance remain pending. |
+| XAPP-02 | P0 | False-positive rejection and exclusions have code/test evidence; audit the user's existing cast against the actual book and verify dismiss/correction persistence. |
+| XAPP-03 | P0 | Revision-aware persisted passage index and automated tests exist; reconcile actual dialogue counts and assignments in the saved book. |
+| XAPP-04 | P0 | Full-text chapter navigator/passage review code has regression coverage; verify large-book navigation and review in both modes in the packaged UI. |
+| XAPP-05 | P0 | Profile assignment and routing code/tests exist; verify each saved character voice through preview and final output after project restart. |
+| XAPP-06 | P0 | #2970 recorded 1,433 passing tests for persisted legacy Qwen backend migration; verify migration against an existing user catalogue and restart. |
+| XAPP-07 | P0 | Backend selection and benchmark paths exist; real CustomVoice, VoiceDesign and Clone inference/device evidence, per-device timings and preview target remain pending. |
+| XAPP-08 | P0 | #2996 failed packaged acceptance at the owning-project summary assertion. Fix `e8885c0` and regression `d3a89ea` are on this branch; matching-head full tests and packaged acceptance remain pending, followed by actual-book listening. |
+| XAPP-09 | P0 | Async catalogue and responsiveness regressions are present; verify target-PC responsiveness under concurrent scan, preview and generation workloads. |
+| XAPP-10 | P1 | Durable job state/control paths have automated coverage; verify truthful progress, cancellation and restart recovery in the installed app. |
+| XAPP-11 | P0 | Saved narrator/profile identity paths have automated coverage; verify profile assignment, reopen, audition and final narrator consistency on a real saved project. |
+| XAPP-12 | P0 | Shared readiness/index calculations have automated coverage; reconcile every readiness indicator against actual dialogue records and book counts. |
+| XAPP-13 | P0 | Recovery, retry, pause/resume and cancellation code/tests exist; run actual interrupted generation and recovery on packaged Windows and validate output. |
+| XAPP-14 | P1 | Assignment/statistics/source-display code has tests; verify exact Assigned Cast metrics, highlighting and persistence against the actual book. |
+| XAPP-15 | P0 | UI/backend contracts exist; complete the Addendum's full visible-control audit across all screens, including persistence and restart behavior. |
+| XAPP-16 | P1 | Dashboard/workflow active-project paths have tests; verify project identity and saved state across every cross-screen route in the packaged UI. |
+| XAPP-17 | P1 | Help & Guide source exists; verify search, navigation and functional parity against the final integrated package. |
+| XAPP-18 | P0 | PR #31 remains open/draft with no inline review threads. The recovery head `11d37c0` compares as 110 commits ahead and zero behind PR #31 head `82a39ff`; preserve this lineage and reconcile candidate dependencies before release. |
+| XAPP-19 | P1 | No current-head installer/portable pair exists after #2996 failed; verify same-SHA package parity, manifest and install/data-preservation gates. |
+| XAPP-20 | P0 | Full integrated user-journey set remains open until matching-head tests, packaged Windows gates and all required runtime evidence are recorded together. |
+
+**Global acceptance still pending:** user-PC saved-book analysis/generation, real listening, actual interruption/recovery, physical Qwen hardware and task-specific performance, target-PC responsiveness, supported display/DPI/multi-monitor behavior, complete accessibility/layout review, current-head installer/portable parity, and release gates. Do not mark Version 1.2.0 complete without the original Master Register's evidence requirements.
