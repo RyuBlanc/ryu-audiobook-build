@@ -34,7 +34,7 @@ class Stage8PackagedAcceptanceContractTests(unittest.TestCase):
         self.assertIn('const narratorOnlyAudio = await waitForRealPlayback(', playback_flow)
         self.assertIn('must(narratorOnlyAudio === narratorOnlyLoadedAudio', playback_flow)
 
-    def test_production_preview_selector_resolves_live_option_during_polling(self):
+    def test_production_preview_selector_reacquires_live_selector_and_option_during_polling(self):
         source = (ROOT / "tests" / "stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
         start = source.index("async function selectProductionPreviewChapter")
         end = source.index("await selectProductionPreviewChapter(2", start)
@@ -44,10 +44,12 @@ class Stage8PackagedAcceptanceContractTests(unittest.TestCase):
         predicate_end = helper.index("}, 10000);", predicate)
         predicate_source = helper[predicate:predicate_end]
         setup_source = helper[:predicate]
+        self.assertIn('const pickerFor = () => document.querySelector("#productionPreviewChapterSelect");', helper)
+        self.assertIn("const picker = pickerFor();", predicate_source)
         self.assertIn("const expectedOption = optionFor(chapterNumber);", predicate_source)
         self.assertNotIn("const expectedOption = optionFor(chapterNumber);", setup_source)
         self.assertIn("Production chapter selector diagnostic=", helper)
-        self.assertIn("productionChapterPicker.selectedOptions?.[0]?.textContent", predicate_source)
+        self.assertIn("picker.selectedOptions?.[0]?.textContent", predicate_source)
 
     def test_packaged_acceptance_rejects_overlapping_independent_controls_on_all_pages(self):
         source = (ROOT / "tests" / "stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
