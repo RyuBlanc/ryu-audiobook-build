@@ -3118,8 +3118,7 @@
       "GEN-07 narrator-only project could not persist the saved narrator profile.");
     const narratorOnlyInitialProject = await invoke("project.get_active", {});
     must(Number(narratorOnlyInitialProject.configured_character_voice_profile_count || 0) === 0 &&
-      Array.isArray(narratorOnlyInitialProject.characters) &&
-      narratorOnlyInitialProject.characters.length === 0,
+      Number(narratorOnlyInitialProject.character_count || 0) === 0,
       "GEN-07 fixture must have zero configured character voice profiles.");
 
     window.go("generate");
