@@ -3099,6 +3099,142 @@
     record("stage55_audiobooks_real_playback_chapter_seek_and_position", true,
       "The real finished M4B played in Premium V2, chapter navigation sought to its embedded second marker, and the owning project's playback position was persisted.");
 
+    // GEN-07 / XAPP-08 frozen Windows acceptance: the narrator-only flag must
+    // be explicitly saved for a book with zero configured character voice
+    // profiles, then drive a real full-book GenerationManager job and M4B.
+    await openProjectFromDashboard(
+      config.narrator_only_project_folder,
+      "GEN-07 narrator-only full-book acceptance"
+    );
+    await waitFor("GEN-07 narrator-only project activation", async function () {
+      const active = await invoke("project.get_active", {});
+      return String(active.folder || "") === String(config.narrator_only_project_folder || "");
+    }, 20000);
+    const narratorOnlySavedVoice = await invoke("voice.select", {
+      profile_name:narratorProfileName, backend:"automatic"
+    });
+    must(narratorOnlySavedVoice && narratorOnlySavedVoice.saved === true &&
+      String(narratorOnlySavedVoice.name || "") === narratorProfileName,
+      "GEN-07 narrator-only project could not persist the saved narrator profile.");
+    const narratorOnlyInitialProject = await invoke("project.get_active", {});
+    must(Number(narratorOnlyInitialProject.configured_character_voice_profile_count || 0) === 0 &&
+      Array.isArray(narratorOnlyInitialProject.characters) &&
+      narratorOnlyInitialProject.characters.length === 0,
+      "GEN-07 fixture must have zero configured character voice profiles.");
+
+    window.go("generate");
+    await waitFor("GEN-07 narrator-only Production controls", function () {
+      return document.querySelector("#generate")?.classList.contains("active") === true &&
+        Boolean(document.querySelector("#narratorOnlyGeneration")) &&
+        Boolean(document.querySelector("#startGenerate"));
+    }, 20000);
+    const narratorOnlyControl = document.querySelector("#narratorOnlyGeneration");
+    must(narratorOnlyControl.checked === false,
+      "GEN-07 narrator-only must be an explicit opt-in and start disabled for a new book.");
+    narratorOnlyControl.click();
+    await waitFor("GEN-07 per-book narrator-only opt-in persisted", async function () {
+      const active = await invoke("project.get_active", {});
+      return active.narrator_only_generation === true &&
+        Number(active.configured_character_voice_profile_count || 0) === 0;
+    }, 20000);
+    must(document.querySelector("#narratorOnlyGenerationStatus")?.textContent.includes("Saved for this book"),
+      "The Production narrator-only control did not report a successful per-book save.");
+
+    // Re-enter Production so all live readiness indicators are rebuilt from
+    // the saved project state, not the checkbox's transient DOM value.
+    window.go("dashboard");
+    await waitFor("GEN-07 Dashboard project identity", async function () {
+      const active = await invoke("project.get_active", {});
+      return String(active.folder || "") === String(config.narrator_only_project_folder || "");
+    }, 15000);
+    window.go("generate");
+    await waitFor("GEN-07 narrator-only start gate", function () {
+      const button = document.querySelector("#startGenerate");
+      const characterStatus = document.querySelector("#productionCharacterVoices")?.textContent || "";
+      return Boolean(button && !button.disabled &&
+        characterStatus.includes("0 configured character voice profiles"));
+    }, 20000);
+
+    const narratorOnlyJobsBefore = await invoke("job.list", {include_hidden:true});
+    const priorNarratorOnlyIds = new Set(
+      (Array.isArray(narratorOnlyJobsBefore) ? narratorOnlyJobsBefore : [])
+        .filter(job => job.type === "audiobook-generation" &&
+          String(job.project_folder || "") === String(config.narrator_only_project_folder || ""))
+        .map(job => String(job.job_id || ""))
+    );
+    document.querySelector("#startGenerate").click();
+    let narratorOnlyJobId = "";
+    await waitFor("real GEN-07 narrator-only full-generation job start", async function () {
+      const jobs = await invoke("job.list", {include_hidden:true});
+      const job = Array.isArray(jobs) ? jobs.find(item =>
+        item.type === "audiobook-generation" &&
+        String(item.project_folder || "") === String(config.narrator_only_project_folder || "") &&
+        !priorNarratorOnlyIds.has(String(item.job_id || "")) &&
+        Boolean(item.job_id)) : null;
+      if (!job) return false;
+      narratorOnlyJobId = String(job.job_id);
+      return true;
+    }, 30000);
+    let narratorOnlyJob = null;
+    await waitFor("real GEN-07 narrator-only full-book completion", async function () {
+      const jobs = await invoke("job.list", {include_hidden:true});
+      narratorOnlyJob = Array.isArray(jobs)
+        ? jobs.find(item => String(item.job_id || "") === narratorOnlyJobId) : null;
+      if (!narratorOnlyJob) return false;
+      const state = String(narratorOnlyJob.state || "").toLowerCase();
+      if (state === "failed" || state === "cancelled") {
+        throw new Error("GEN-07 narrator-only generation ended " + state + ": " +
+          String(narratorOnlyJob.error?.message || narratorOnlyJob.message || ""));
+      }
+      return state === "completed";
+    }, 360000);
+
+    const narratorOnlyHistory = await invoke("history.list", {});
+    const narratorOnlyHistoryRow = Array.isArray(narratorOnlyHistory)
+      ? narratorOnlyHistory.find(item => String(item.job_id || "") === narratorOnlyJobId) : null;
+    const narratorOnlyCompletedProject = await invoke("project.get_active", {});
+    const narratorOnlyExpectedOutput = normalizeOutputPath(config.narrator_only_output_path);
+    must(narratorOnlyJob &&
+      narratorOnlyJob.state === "completed" &&
+      normalizeOutputPath(narratorOnlyJob.output_path) === narratorOnlyExpectedOutput &&
+      narratorOnlyJob.result?.generation_mode === "narrator_only" &&
+      narratorOnlyJob.result?.narrator_only === true &&
+      Number(narratorOnlyJob.result?.character_voice_profile_count) === 0 &&
+      String(narratorOnlyJob.result?.voice_profile || narratorOnlyJob.result?.narrator || "") === narratorProfileName,
+      "GEN-07 narrator-only job did not preserve the saved narrator-only mode/identity in its durable result: " +
+        JSON.stringify(narratorOnlyJob));
+    must(narratorOnlyHistoryRow &&
+      narratorOnlyHistoryRow.state === "completed" &&
+      String(narratorOnlyHistoryRow.project_folder || "") === String(config.narrator_only_project_folder || "") &&
+      normalizeOutputPath(narratorOnlyHistoryRow.output_path) === narratorOnlyExpectedOutput,
+      "GEN-07 narrator-only generation did not retain the same project/job/output identity in History.");
+    must(narratorOnlyCompletedProject.completed === true &&
+      narratorOnlyCompletedProject.narrator_only_generation === true &&
+      narratorOnlyCompletedProject.generation_mode === "narrator_only" &&
+      Number(narratorOnlyCompletedProject.character_voice_profile_count) === 0 &&
+      normalizeOutputPath(narratorOnlyCompletedProject.output_path) === narratorOnlyExpectedOutput,
+      "GEN-07 narrator-only mode or completed output was not persisted to the owning project.");
+
+    const narratorOnlyPlayer = await invoke("player.get_active", {
+      folder:String(config.narrator_only_project_folder || "")
+    });
+    must(normalizeOutputPath(narratorOnlyPlayer.output_path) === narratorOnlyExpectedOutput &&
+      String(narratorOnlyPlayer.format || "").toLowerCase() === ".m4b" &&
+      Array.isArray(narratorOnlyPlayer.chapters) && narratorOnlyPlayer.chapters.length === 1 &&
+      String(narratorOnlyPlayer.narrator || "") === narratorProfileName,
+      "GEN-07 narrator-only M4B output, embedded chapter or saved narrator identity failed validation: " +
+        JSON.stringify(narratorOnlyPlayer));
+    window.go("player");
+    await waitFor("GEN-07 Audiobooks page activation", () =>
+      Boolean(document.querySelector("#player")?.classList.contains("active")), 15000);
+    const narratorOnlyAudio = await waitForRealPlayback(
+      "real narrator-only M4B audio in the Premium V2 Audiobooks player",
+      narratorOnlyPlayer.playback_output_path
+    );
+    narratorOnlyAudio.pause();
+    record("xapp08_packaged_narrator_only_full_book_generation", true,
+      "The frozen app explicitly saved narrator-only for a zero-character-profile book, generated an actual dialogue-containing M4B using the saved narrator, persisted narrator-only mode/profile count in project/job/History, and opened the real output in Audiobooks playback.");
+
     // Stage 6 AB-01: verify multiple compact cards against real completed M4B outputs,
     // then exercise Open (load paused), Play (actual audio), and switching book identity.
     const libraryFixtures = Array.isArray(config.audiobook_library_fixtures) ? config.audiobook_library_fixtures : [];
