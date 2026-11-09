@@ -10,7 +10,6 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from app.core.paths import ensure_roots, configure_temporary_root
 from app.version import APP_NAME, full_version
-from app.ui.workflow import ProjectWorkflow
 
 
 def asset_path(name: str) -> Path:
@@ -776,6 +775,10 @@ def main() -> int:
     # explicitly opts into compatibility mode with RYU_UI_MODE=native.
     ui_mode = os.environ.get("RYU_UI_MODE", "premium-v2").strip().casefold()
     if ui_mode == "native":
+        # Premium V2 is the default. Import the compatibility Qt workflow only
+        # when the user explicitly requests it; importing it during normal
+        # startup eagerly loads the legacy page tree and its model/UI modules.
+        from app.ui.workflow import ProjectWorkflow
         window = ProjectWorkflow()
         window.setWindowTitle(f"{APP_NAME} • {full_version()}")
     else:
