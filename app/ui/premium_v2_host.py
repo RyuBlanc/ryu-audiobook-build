@@ -2679,6 +2679,7 @@ class PremiumV2Bridge(QObject):
         """Persist a custom voice profile atomically in the local voice catalogue."""
         from app.tts.voice_profile import (
             VoiceProfile, import_reference_audio, load_saved_profiles, save_profiles,
+            stable_qwen_profile_id,
         )
 
         name = str(payload.get("name") or payload.get("profile_name") or "").strip()
@@ -2728,6 +2729,27 @@ class PremiumV2Bridge(QObject):
             sample_path = str(sample)
 
         qwen_mode = str(payload.get("qwen_mode") or getattr(target_existing, "qwen_mode", "") or ("clone" if provider_name == "chatterbox" else "custom")).strip().lower()
+        qwen_language = str(payload.get("language") or getattr(target_existing, "language", None) or "English")
+        qwen_prompt = str(payload.get("qwen_prompt") or payload.get("prompt") or getattr(target_existing, "qwen_prompt", "") or "")[:4000]
+        qwen_seed = (
+            int(payload["qwen_seed"])
+            if payload.get("qwen_seed") not in (None, "") and qwen_mode == "design"
+            else getattr(target_existing, "qwen_seed", None)
+        )
+        qwen_reference_text = str(payload.get("reference_text") or getattr(target_existing, "reference_text", "") or "")[:10000]
+        qwen_anchor_text = str(payload.get("qwen_anchor_text") or getattr(target_existing, "qwen_anchor_text", "") or "")[:10000]
+        qwen_profile_id = str(payload.get("qwen_profile_id") or getattr(target_existing, "qwen_profile_id", "") or "")
+        if provider_name == "qwen-character" and not qwen_profile_id:
+            qwen_profile_id = stable_qwen_profile_id(
+                mode=qwen_mode,
+                voice_id=voice_id,
+                language=qwen_language,
+                prompt=qwen_prompt,
+                seed=qwen_seed,
+                sample_path=sample_path,
+                reference_text=qwen_reference_text,
+                anchor_text=qwen_anchor_text,
+            )
         authorized = bool(payload.get("authorized", False)) or bool(getattr(target_existing, "authorized", False))
         if provider_name == "chatterbox" and not authorized:
             raise ValueError("Confirm that you have permission to use this voice before saving a cloned voice.")
@@ -2744,19 +2766,19 @@ class PremiumV2Bridge(QObject):
             sample_path=sample_path,
             model_id=str(payload.get("model_id") or getattr(target_existing, "model_id", None) or ("chatterbox" if provider_name == "chatterbox" else "auto")),
             backend=str(payload.get("backend") or getattr(target_existing, "backend", None) or "automatic"),
-            language=str(payload.get("language") or getattr(target_existing, "language", None) or "English"),
+            language=qwen_language,
             notes=str(payload.get("notes") or payload.get("description") or getattr(target_existing, "notes", "") or "")[:4000],
             authorized=authorized,
             exaggeration=max(0.0, min(1.0, float(payload.get("exaggeration", getattr(target_existing, "exaggeration", 0.5))))),
             cfg_weight=max(0.0, min(1.0, float(payload.get("cfg_weight", getattr(target_existing, "cfg_weight", 0.35))))),
             style_preset=str(payload.get("style_preset") or getattr(target_existing, "style_preset", None) or "Natural"),
             qwen_mode=qwen_mode,
-            qwen_prompt=str(payload.get("qwen_prompt") or payload.get("prompt") or getattr(target_existing, "qwen_prompt", "") or "")[:4000],
-            qwen_seed=(int(payload["qwen_seed"]) if payload.get("qwen_seed") not in (None, "") else None) if qwen_mode == "design" else getattr(target_existing, "qwen_seed", None),
-            reference_text=str(payload.get("reference_text") or getattr(target_existing, "reference_text", "") or "")[:10000],
+            qwen_prompt=qwen_prompt,
+            qwen_seed=qwen_seed,
+            reference_text=qwen_reference_text,
             qwen_anchor_path=str(payload.get("qwen_anchor_path") or getattr(target_existing, "qwen_anchor_path", "") or "") or None,
-            qwen_anchor_text=str(payload.get("qwen_anchor_text") or getattr(target_existing, "qwen_anchor_text", "") or "")[:10000],
-            qwen_profile_id=str(payload.get("qwen_profile_id") or getattr(target_existing, "qwen_profile_id", "") or ""),
+            qwen_anchor_text=qwen_anchor_text,
+            qwen_profile_id=qwen_profile_id,
         )
         previous_saved = list(saved)
         if target_existing is not None:
@@ -3386,8 +3408,7 @@ class PremiumV2Bridge(QObject):
         first. These temporary profiles are passed only to the preview worker and are
         never written to the persistent voice catalogue.
         """
-        from uuid import uuid4
-        from app.tts.voice_profile import VoiceProfile
+        from app.tts.voice_profile import VoiceProfile, stable_qwen_profile_id
 
         profile_name = str(payload.get("profile_name") or "").strip()
         provider = str(payload.get("provider") or "").strip().casefold()
@@ -3413,7 +3434,20 @@ class PremiumV2Bridge(QObject):
 
         qwen_profile_id = str(payload.get("qwen_profile_id") or "")
         if provider == "qwen-character" and not qwen_profile_id:
-            qwen_profile_id = uuid4().hex
+            qwen_profile_id = stable_qwen_profile_id(
+                mode=qwen_mode,
+                voice_id=voice_id,
+                language=str(payload.get("language") or "English"),
+                prompt=str(payload.get("qwen_prompt") or payload.get("notes") or ""),
+                seed=(
+                    int(payload["qwen_seed"])
+                    if payload.get("qwen_seed") not in (None, "")
+                    else None
+                ),
+                sample_path=sample_path,
+                reference_text=str(payload.get("reference_text") or ""),
+                anchor_text=str(payload.get("qwen_anchor_text") or ""),
+            )
         name = profile_name or ("Preview · " + voice_id)
         return VoiceProfile(
             name=name,
