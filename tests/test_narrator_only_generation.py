@@ -257,11 +257,11 @@ class NarratorOnlyGenerationTests(unittest.TestCase):
             adapter,
         )
         self.assertIn(
-            "project.narrator_only_generation === true && characterVoiceCount === 0",
+            "const narratorOnly = narratorOnlyRequested && configuredCharacterVoiceCount === 0",
             adapter,
         )
         self.assertIn(
-            "active.narrator_only_generation === true && configuredCharacterVoiceCount > 0",
+            "if (narratorOnly && configuredCharacterVoiceCount > 0)",
             adapter,
         )
         self.assertIn(
