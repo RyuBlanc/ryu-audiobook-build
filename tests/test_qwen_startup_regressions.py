@@ -117,5 +117,17 @@ class StartupAndNavigationRegressionTests(unittest.TestCase):
         self.assertNotIn('job_id, stage="synthesizing",', worker)
 
 
+    def test_startup_batches_durable_history_writes_instead_of_flushing_each_job(self):
+        source = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        start = source.index("    def _load_durable_jobs(")
+        end = source.index("\n    def _new_job(", start)
+        loader = source[start:end]
+        self.assertNotIn("self._record_history_job(row)", loader)
+        self.assertIn("history_changed = False", loader)
+        self.assertIn("if history_changed:", loader)
+        self.assertEqual(1, loader.count("self._persist_history()"))
+        self.assertEqual(1, loader.count("self._persist_jobs()"))
+
+
 if __name__ == "__main__":
     unittest.main()
