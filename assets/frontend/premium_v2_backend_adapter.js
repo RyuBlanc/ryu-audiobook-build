@@ -815,6 +815,7 @@
     const configuredCharacterVoiceCount = Math.max(0, Number(
       project.configured_character_voice_profile_count ?? project.character_voice_count ?? 0
     ));
+    const narratorOnlyEligibilityInvalid = narratorOnlyRequested && configuredCharacterVoiceCount > 0;
     const narratorOnly = narratorOnlyRequested && configuredCharacterVoiceCount === 0;
     const characterCount = Number(project.character_count || 0);
     const characterVoiceCount = Math.max(0, Number(project.character_voice_count || 0));
@@ -824,8 +825,10 @@
     const pendingDialogue = Math.max(0, Number(project.pending_dialogue_count || 0));
     const conflictingDialogue = Math.max(0, Number(project.conflicting_dialogue_count || 0));
     const dialogueIndexIssues = Math.max(0, Number(project.dialogue_index_issue_count || 0));
-    const charactersReady = narratorOnly || (
-      dialogueIndexReady && dialogueReviewComplete && characterAssignmentIssues === 0
+    const charactersReady = !narratorOnlyEligibilityInvalid && (
+      narratorOnly || (
+        dialogueIndexReady && dialogueReviewComplete && characterAssignmentIssues === 0
+      )
     );
     const charactersDetail = narratorOnly
       ? '0 configured character voice profiles · saved narrator reads all passages'
