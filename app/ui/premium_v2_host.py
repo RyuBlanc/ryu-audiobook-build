@@ -4167,17 +4167,36 @@ class PremiumV2Bridge(QObject):
                         narrating_character=str(state.get("narrating_character") or ""),
                         backend_override=str(state.get("backend") or "automatic"),
                     )
+            preview_status_lock = threading.Lock()
+            preview_status = {
+                "stage": "Preparing preview",
+                "message": "Preparing preview",
+            }
+
+            def remember_preview_status(stage: str, detail: str) -> None:
+                with preview_status_lock:
+                    preview_status["stage"] = str(stage or "Synthesizing")
+                    preview_status["message"] = str(detail or "")
+
             def provider_status(detail: str) -> None:
                 detail_text = str(detail or "").strip()
                 if not detail_text or (cancel_event is not None and cancel_event.is_set()):
                     return
                 lower_detail = detail_text.casefold()
-                if "loading qwen model" in lower_detail or "loading model" in lower_detail:
+                if any(token in lower_detail for token in (
+                    "loading qwen model", "loading qwen3-tts", "loading model",
+                    "starting qwen", "voice engine",
+                )):
                     stage = "Loading model"
                 elif "switching to cpu" in lower_detail or "compatibility mode" in lower_detail:
                     stage = "Selecting compatible backend"
+                elif "qwen engine ready" in lower_detail or "voice engine ready" in lower_detail:
+                    stage = "Preparing segments"
+                elif "generating" in lower_detail or "synthesizing" in lower_detail:
+                    stage = "Synthesizing"
                 else:
-                    stage = "synthesizing"
+                    stage = "Preparing preview"
+                remember_preview_status(stage, detail_text)
                 lock = getattr(self, "_jobs_lock", None)
                 jobs = getattr(self, "_jobs", None)
                 if lock is None or not isinstance(jobs, dict):
@@ -4215,7 +4234,13 @@ class PremiumV2Bridge(QObject):
                     detail = f"Finalizing preview • elapsed {clock}"
                 else:
                     detail = f"Preparing preview • elapsed {clock}"
-                self._job_update(job_id, stage=str(stage), message=detail,
+                normalized_stage = (
+                    "Synthesizing" if stage == "synthesizing"
+                    else "Finalizing preview" if stage == "finalizing"
+                    else "Preparing segments"
+                )
+                remember_preview_status(normalized_stage, detail)
+                self._job_update(job_id, stage=normalized_stage, message=detail,
                                  progress=min(95, max(2, 5 + int(90 * current / max(1, total)))))
 
             def report_elapsed_time() -> None:
@@ -4233,9 +4258,16 @@ class PremiumV2Bridge(QObject):
                             row = jobs.get(str(job_id))
                             if not row or str(row.get("state") or "").casefold() != "running":
                                 return
+                        with preview_status_lock:
+                            current_stage = str(preview_status.get("stage") or "Preparing preview")
+                            current_detail = str(preview_status.get("message") or "")
+                        if "elapsed " not in current_detail.casefold():
+                            current_detail = (
+                                current_detail + " • " if current_detail else ""
+                            ) + f"elapsed {clock}"
                         self._job_update(
-                            job_id, stage="synthesizing",
-                            message=f"Synthesis is still running • elapsed {clock}",
+                            job_id, stage=current_stage,
+                            message=current_detail,
                         )
                     except Exception:
                         return
