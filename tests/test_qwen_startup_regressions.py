@@ -114,6 +114,7 @@ class StartupAndNavigationRegressionTests(unittest.TestCase):
         self.assertIn("preview_status_lock", worker)
         self.assertIn('current_stage = str(preview_status.get("stage")', worker)
         self.assertIn("stage=current_stage", worker)
+        self.assertIn('current_detail = "Synthesis is still running"', worker)
         self.assertNotIn('job_id, stage="synthesizing",', worker)
 
 
