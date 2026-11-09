@@ -9411,8 +9411,8 @@ class PremiumV2Bridge(QObject):
                 qwen_mode="custom",
                 backend=backend,
                 low_memory=low_memory,
-                status_callback=report_progress,
             )
+            provider.set_status_callback(report_progress)
             with tempfile.TemporaryDirectory(prefix="ryu-qwen-bench-warmup-") as temporary:
                 warmup_path = Path(temporary) / "warmup.wav"
                 warmup_started = time.perf_counter()
