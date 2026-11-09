@@ -781,3 +781,8 @@ Build #3013 passed tests and froze successfully; packaged acceptance confirmed P
 ## 9 November 2026 — Build #3014 regression-test correction
 
 Build #3014 stopped in the test job before packaging because the new Models Center padding contract referenced `adapter` without reading the adapter source in that test method (`NameError`). This is a test setup defect, not product evidence. The test now loads the adapter explicitly; the 1,443-test suite and packaged geometry check must rerun on the corrected head.
+
+
+## 9 November 2026 — Build #3015 adjacent-card overlap
+
+Build #3015 passed 1,443 tests, frozen executable checks, bundled assets, project restart, recovery, and real generation fixtures. Packaged responsive acceptance still failed at 1366×768: controls from `custom-0.6b` and `windows-sapi` cards overlapped 82×29 and 80×29 px. The overlap guard remains intact; its diagnostics now include enclosing model-card and grid bounds so the next fix can distinguish card overlap from child overflow. The 1.2.0 package is not yet accepted.

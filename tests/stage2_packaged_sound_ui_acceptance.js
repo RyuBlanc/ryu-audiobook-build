@@ -1033,6 +1033,9 @@
                   rightRect:{left:Math.round(right.rect.left),top:Math.round(right.rect.top),right:Math.round(right.rect.right),bottom:Math.round(right.rect.bottom)},
                   leftModelCard:left.element.closest(".model-card")?.getAttribute("data-model-id") || null,
                   rightModelCard:right.element.closest(".model-card")?.getAttribute("data-model-id") || null,
+                  leftCardRect:(() => {const r=left.element.closest(".model-card")?.getBoundingClientRect();return r?{left:Math.round(r.left),top:Math.round(r.top),right:Math.round(r.right),bottom:Math.round(r.bottom)}:null})(),
+                  rightCardRect:(() => {const r=right.element.closest(".model-card")?.getBoundingClientRect();return r?{left:Math.round(r.left),top:Math.round(r.top),right:Math.round(r.right),bottom:Math.round(r.bottom)}:null})(),
+                  modelGridRect:(() => {const r=d.querySelector("#modelGrid")?.getBoundingClientRect();return r?{left:Math.round(r.left),top:Math.round(r.top),right:Math.round(r.right),bottom:Math.round(r.bottom)}:null})(),
                   overlapWidth:Math.round(overlapWidth),overlapHeight:Math.round(overlapHeight)
                 });
                 if (overlappingControls.length >= 8) break;

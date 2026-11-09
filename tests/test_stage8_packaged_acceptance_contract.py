@@ -80,6 +80,8 @@ class Stage8PackagedAcceptanceContractTests(unittest.TestCase):
         source = (ROOT / "tests" / "stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
         self.assertIn('leftRect:{left:Math.round(left.rect.left)', source)
         self.assertIn('leftModelCard:left.element.closest(".model-card")', source)
+        self.assertIn('leftCardRect:(() => {const r=left.element.closest(".model-card")', source)
+        self.assertIn('modelGridRect:(() => {const r=d.querySelector("#modelGrid")', source)
 
     def test_live_qwen_smoke_download_has_official_fallback_and_pinned_digest(self):
         workflow = (ROOT / ".github" / "workflows" / "build-windows.yml").read_text(encoding="utf-8")
