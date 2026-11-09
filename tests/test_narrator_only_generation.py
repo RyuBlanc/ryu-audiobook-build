@@ -255,7 +255,7 @@ class NarratorOnlyGenerationTests(unittest.TestCase):
             adapter,
         )
         self.assertIn(
-            "adding a configured character voice profile returns production to multi-character routing.",
+            "adding a character voice profile returns production to multi-character routing.",
             adapter,
         )
         self.assertIn(

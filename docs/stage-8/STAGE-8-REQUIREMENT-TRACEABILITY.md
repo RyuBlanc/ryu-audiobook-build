@@ -1,6 +1,6 @@
 # Stage 8 — Frozen Requirement Traceability Matrix
 
-**Source of truth:** Master Bug & Change Register (Sections 0–24), Stage 8 Detailed Requirements, and the six-package Stage 8 execution plan supplied on 7 November 2026.
+**Source of truth:** the exact user-pasted Master Bug & Change Register and Additional UI Continuation preserved in `docs/stage-8/source-registers/`, Stage 8 Detailed Requirements, the Cross-App Addendum, and the existing staged execution plan. The two pasted files are byte-exact and their SHA-256 hashes are recorded in the source-register README.
 **Repository:** `RyuBlanc/ryu-audiobook-build`
 **Current repair branch:** `fix/application-wide-closure-2026-11-08`
 **Implementation commits:** regression test `ef8044248daf2f109025861d231831f54cd19ca4`; assembler fix `cb25247c4dc95ff9f8ae518fe40dd7a52e17d583`; defect record `025a467112e60244bec541b5943283b838119ed5`.
@@ -76,7 +76,7 @@ This overlay separates the latest packaged candidate from the latest regression-
 | Models/Sound responsiveness (XAPP-09) | Single-flight background catalogue jobs; last-known-good snapshots; UI awaits scan completion asynchronously. | Automated regression evidence present. Large target-PC filesystem scans concurrent with preview/generation remain runtime acceptance pending. |
 | Sound Design / Music Library | #2887 package pipeline includes packaged Sound Design/Music UI acceptance and matching-head Windows artifact. | Automated/package acceptance passed. Human listening, licensing/source inspection and actual project mix parity remain open. |
 | Windows packaging and Defender | Build #2887 exact head `5f811eb60a912353926704b6ba7c8fbfed41e0cc`; installer, portable, SHA manifest and Piper benchmark uploaded. Windows install/launch/upgrade/uninstall and user-data preservation steps passed. Defender separately reported no threats for app, HTML installer and core installer. | Packaged CI checkpoint passed. User-machine installation and prior endpoint-specific alert disposition remain separate. |
-| Frozen Master requirement set | 128-row inventory below remains authoritative. | Not complete. No bulk closure inferred from CI. |
+| Frozen Master requirement set | 133 stable IDs from the pasted Master Register plus continuation; 20 Cross-App Addendum IDs remain separately tracked below. | Not complete. No bulk closure inferred from CI. |
 
 **Exact Build #2887:** [Actions run](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42477948917), **1,387 tests passed**, Windows build succeeded, app version 1.1.1. Installer artifact ID `13616938581`; portable `13616784388`; SHA manifest `13617037536`; Piper benchmark `13617435436`.
 
@@ -113,6 +113,10 @@ This inventory extracts all stable requirement IDs from the Master Bug & Change 
 | CS-06 | P1 | Display selected-character dialogue. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | CS-07 | P1 | Source highlighting. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | CS-08 | P1 | Persist assignments. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
+| CS-09 | P1 | Clear character assignments. | OPEN — implementation/evidence reconciliation required | Continuation requirement; verify assignment removal and saved state in the user's book. |
+| CS-10 | P1 | Test Character Studio dialogue. | OPEN — implementation/evidence reconciliation required | Continuation requirement; verify selected profile routing and audible output. |
+| CS-11 | P1 | Preserve chapter and source context. | OPEN — implementation/evidence reconciliation required | Continuation requirement; verify source passage and chapter context through review and restart. |
+| CS-12 | P1 | Reconcile character statistics with dialogue records. | OPEN — implementation/evidence reconciliation required | Continuation requirement; reconcile actual-book counts and readiness indicators. |
 | PS-01 | P1 | Simplify the interface. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | PS-02 | P1 | Required dictionary table. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | PS-03 | P1 | Search all relevant entries. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
@@ -204,6 +208,7 @@ This inventory extracts all stable requirement IDs from the Master Bug & Change 
 | GEN-04 | P1 | Empty/ineligible chapters. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | GEN-05 | P0 | M4B validation and metadata. | AUTOMATED REGRESSION VERIFIED — target-player listening open | #2927 strict metadata/cover validation and #2936 two-chapter M4B metadata/cover/container integration; cumulative #2950. |
 | GEN-06 | P0 | Preview/final parity. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
+| GEN-07 | P0 | Narrator-only generation for books without configured character profiles. | CODE CHANGED — MATCHING-HEAD PACKAGE PENDING | User-confirmed 1.2.0 behavior: automatically use the available saved narrator at zero valid configured character profiles; persist the effective mode across preview, generation, recovery and restart; use no dummy character profiles; retain normal cast routing once profiles are configured; missing narrator remains a blocking error. Current source implementation is at `71cb5cd`; matching-head packaged proof is pending. |
 | PKG-01 | P1 | Installer below 500 MB target. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | PKG-02 | P2 | Investigate slow downloads. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
 | PKG-03 | P1 | Preserve installer quality and branding. | OPEN — implementation/evidence reconciliation required | No matching-head evidence recorded yet. |
@@ -696,7 +701,7 @@ The Cross-Application Defect Closure & Integration Addendum supplied with this c
 | XAPP-05 | P0 | Profile assignment and routing code/tests exist; verify each saved character voice through preview and final output after project restart. |
 | XAPP-06 | P0 | #2970 recorded 1,433 passing tests for persisted legacy Qwen backend migration; verify migration against an existing user catalogue and restart. |
 | XAPP-07 | P0 | Backend selection and benchmark paths exist; real CustomVoice, VoiceDesign and Clone inference/device evidence, per-device timings and preview target remain pending. |
-| XAPP-08 | P0 | #3000 confirmed the persisted project/job/History result, narrator identity, M4B metadata and output ownership after the #2996 summary fix; it then failed because the acceptance harness navigated to Audiobooks without invoking the card's Open and Play controls. Test-first guard commit `2e5c370`; corrected packaged Open/Play path and guard `3c8eb62`; 1,438 tests passed in #3002. Exact-head packaged rerun and actual-book listening remain pending. |
+| XAPP-08 | P0 | Build #3003 passed the previous packaged narrator-only acceptance, Sound Design/Music Library, installer and portable pipeline at `c909d45`. User then confirmed auto-enable at zero profiles for 1.2.0. The automatic-default implementation and packaged fixture are in `71cb5cd`; Build #3005 exercised it but failed only two stale static assertions. Corrected assertions and the matching-head rerun remain pending. Actual-book listening remains open. |
 | XAPP-09 | P0 | Async catalogue and responsiveness regressions are present; verify target-PC responsiveness under concurrent scan, preview and generation workloads. |
 | XAPP-10 | P1 | Durable job state/control paths have automated coverage; verify truthful progress, cancellation and restart recovery in the installed app. |
 | XAPP-11 | P0 | Saved narrator/profile identity paths have automated coverage; verify profile assignment, reopen, audition and final narrator consistency on a real saved project. |
@@ -706,8 +711,8 @@ The Cross-Application Defect Closure & Integration Addendum supplied with this c
 | XAPP-15 | P0 | UI/backend contracts exist; complete the Addendum's full visible-control audit across all screens, including persistence and restart behavior. |
 | XAPP-16 | P1 | Dashboard/workflow active-project paths have tests; verify project identity and saved state across every cross-screen route in the packaged UI. |
 | XAPP-17 | P1 | Help & Guide source exists; verify search, navigation and functional parity against the final integrated package. |
-| XAPP-18 | P0 | PR #31 remains open/draft with no inline review threads. Recovery head `3c8eb62` compares as 113 commits ahead and zero behind PR #31 head `82a39ff`; preserve this lineage and reconcile candidate dependencies before release. |
-| XAPP-19 | P1 | No installer/portable pair exists for current head `3c8eb62`; #3000 stopped before packaging after acceptance failure. Verify same-SHA package parity, manifest and install/data-preservation gates on the next passing artifact checkpoint. |
+| XAPP-18 | P0 | PR #31 remains open/draft with no inline review threads. Recovery head `71cb5cd` compares as 116 commits ahead and zero behind PR #31 head `82a39ff`; preserve this lineage and reconcile candidate dependencies before release. |
+| XAPP-19 | P1 | #3003 produced installer/portable/SHA artifacts at `c909d45`, but they predate the auto-enable change at `71cb5cd`. Verify same-SHA package parity, manifest and install/data-preservation gates on the corrected auto-enable artifact checkpoint. |
 | XAPP-20 | P0 | Full integrated user-journey set remains open until matching-head tests, packaged Windows gates and all required runtime evidence are recorded together. |
 
 **Global acceptance still pending:** user-PC saved-book analysis/generation, real listening, actual interruption/recovery, physical Qwen hardware and task-specific performance, target-PC responsiveness, supported display/DPI/multi-monitor behavior, complete accessibility/layout review, current-head installer/portable parity, and release gates. Do not mark Version 1.2.0 complete without the original Master Register's evidence requirements.
@@ -724,3 +729,11 @@ Build #3000 passed the full 1,438-test regression job, frozen application verifi
 - Build #3002 passed **1,438 tests** on the corrected source head; packaging was skipped because this was a normal fix commit.
 
 **Status:** the playback-flow correction is automated-test verified. A new `[artifact-checkpoint]` run must pass the entire packaged acceptance and Windows installer/portable pipeline before GEN-07 can advance. #3000 produced no installer or release artifacts. Actual saved-book listening, target-PC performance, physical Qwen device tests, and display/DPI acceptance remain pending.
+
+## 9 November 2026 — User-confirmed zero-profile narrator default
+
+The user explicitly selected automatic Narrator-Only Mode whenever a project has zero valid configured character voice profiles and a valid saved narrator. This governs 1.2.0 and supersedes the historical “explicit per-book setting” wording above. The UI starts enabled in this state and persists a user's explicit opt-out; adding configured profiles returns to cast-aware routing. A missing narrator still blocks generation. The test-first behavior commit `acd020ee7d3b60b685a62d53d7fde54a33836f70` produced the expected failures against prior explicit-only behavior in Build #3004. Source fix `71cb5cd1bdf33ffce495fe0185584e2fcfcd0042` passed behavioral tests in Build #3005 but exposed two stale static assertions; those assertions are corrected locally. Exact-head full suite and packaged acceptance are pending.
+
+## 9 November 2026 — authoritative pasted registers added
+
+Byte-exact copies of the user's 9 November pasted Master Bug & Change Register and Additional UI Continuation are preserved under `docs/stage-8/source-registers/`. The continuation contributes five stable IDs absent from the prior matrix: CS-09–CS-12 and GEN-07. The inventory now records 133 Master/continuation IDs plus all 20 Cross-App Addendum IDs. Existing requirements and completed stages are retained; the source texts remain unchanged.

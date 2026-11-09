@@ -1,0 +1,2311 @@
+RYU'S AUDIOBOOK — MASTER BUG & CHANGE REGISTER
+============================================================
+
+PROJECT: Ryu's Audiobook — Dragon Studio Edition
+GITHUB REPOSITORY: https://github.com/RyuBlanc/ryu-audiobook-build
+WORKING BRANCH LAST VERIFIED: fix/native-ui-font-scale-learning-ai
+LATEST VERIFIED BUILD AT TIME OF THIS HANDOFF: Build Windows App #1441
+LATEST VERIFIED BUILD RUN:
+https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/40304124692
+
+LATEST VERIFIED COMMIT:
+9d62701877ed4a99280607f1932c1c7accaf3d05
+
+AUDIT DATE: 27 October 2026
+
+PURPOSE:
+This is the permanent master list of outstanding bugs, functional
+defects, enhancements, UI changes, performance requirements, integration
+requirements and release acceptance criteria for Ryu's Audiobook.
+
+Use this list across every conversation until the project is genuinely
+complete. Do not discard previous requirements when new ones are added.
+
+
+VERSION 1.2.0 — RELEASE SCOPE FREEZE
+------------------------------------
+Planned release version: 1.2.0.
+
+The complete set of requirements in this register is the frozen scope for
+preparing the Version 1.2.0 release. This is a requirements/scope freeze,
+not a freeze on bug-fixing: implementation, regression fixes, integration,
+verification and release testing must continue until the listed requirements
+are completed or explicitly documented as unsupported/blocked with the user's
+agreement.
+
+Do not bump the application version, create/tag the Version 1.2.0 release, or
+represent a package as Version 1.2.0 before the requested fixes and changes
+have been implemented, integrated, verified and accepted under Section 21.
+Only after release acceptance should the version be updated to 1.2.0 and the
+final installer/portable packages be produced from the exact verified commit.
+
+Do not add unrelated features or silently expand the frozen scope. A newly
+reported bug, correction or requirement from the user is in scope when the
+user explicitly requests it; add it to this register without removing or
+weakening existing requirements. Do not treat a passing CI build alone as
+permission to declare Version 1.2.0 complete.
+
+============================================================
+SECTION 0 — CONTINUATION AND BUILD-TRACKING RULES
+============================================================
+
+0.1 CHECK THE LIVE REPOSITORY FIRST
+
+Before modifying code or deciding what remains to be fixed, inspect:
+
+Repository:
+https://github.com/RyuBlanc/ryu-audiobook-build
+
+Check:
+- Latest successful Windows App build.
+- Latest build on the intended working branch.
+- Current branch HEAD SHA.
+- Regression test results.
+- Windows packaging job results.
+- Generated installer and portable artifacts.
+- Failed or skipped jobs and steps.
+- Current open pull requests.
+- Branch dependencies and whether changes have been merged.
+- Changes committed since the previous checkpoint.
+- Whether the latest successful build corresponds to the current source.
+- Whether artifacts are available and have not expired.
+
+Do not assume that Build #1441 remains the latest build when opening a
+new chat. Verify GitHub again.
+
+Do not confuse the latest successful build with the latest attempted
+build. A failed newer build does not invalidate all work from an earlier
+successful build, but its failures must be investigated.
+
+0.2 LAST VERIFIED CHECKPOINT
+
+At the time of this handoff, Build Windows App #1441 completed successfully
+on the branch fix/native-ui-font-scale-learning-ai.
+
+Run:
+https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/40304124692
+
+Commit:
+9d62701877ed4a99280607f1932c1c7accaf3d05
+
+The regression-test job, Windows build job and storage-cleanup job passed.
+
+Uploaded artifacts:
+- Ryu-Audiobook-Installer-1441
+- Ryu-Audiobook-Portable-1441
+- Ryu-Audiobook-Release-SHA256-1441
+
+The GitHub artifact sizes at that checkpoint were approximately:
+- Installer artifact: 878,097,646 bytes.
+- Portable artifact: 1,349,398,118 bytes.
+
+These are uploaded GitHub artifact sizes, not proof of the size of the
+installer executable alone or of the final installed application.
+
+The workflow step "Publish verified installer release" was skipped.
+Do not claim that a new GitHub Release was published.
+
+IMPORTANT:
+Build #1441 passing does NOT mean all application bugs are fixed.
+The installed application screenshots from Build 1441 still show
+overlapping text, layout defects, playback errors and incomplete workflows.
+
+0.3 OPEN CHANGE BATCHES LAST VERIFIED
+
+The following pull requests were open at the last repository check:
+
+PR #15:
+https://github.com/RyuBlanc/ryu-audiobook-build/pull/15
+Import, UI, hardware verification, speaker overlays and model management.
+
+PR #18:
+https://github.com/RyuBlanc/ryu-audiobook-build/pull/18
+Voice Studio and Character Studio assignment.
+
+PR #19:
+https://github.com/RyuBlanc/ryu-audiobook-build/pull/19
+Pronunciation, sound design and assembly acceptance.
+
+PR #20:
+https://github.com/RyuBlanc/ryu-audiobook-build/pull/20
+Installer branding and accessibility.
+
+PR #26:
+https://github.com/RyuBlanc/ryu-audiobook-build/pull/26
+Recoverable Library deletion and live Character Library data.
+
+PR #4:
+https://github.com/RyuBlanc/ryu-audiobook-build/pull/4
+Qwen preset handling and creation of a new voice draft.
+
+Re-check each PR's state, head SHA, base branch, dependencies, changes and
+checks before deciding what has to be integrated. These PRs were open at
+the last check; do not assume their status is unchanged.
+
+0.4 DO NOT LOSE EXISTING WORK
+
+The user has already spent more than two weeks on this project.
+
+Do not restart or rewrite the application from scratch just because
+integration, packaging or regression tests have failed.
+
+Preserve and build on all valid existing implementation work.
+
+Do not:
+- Reintroduce the older UI as the default.
+- Remove working features to simplify a fix.
+- Replace the intended design without explicit approval.
+- Create new overlapping implementations of an existing feature.
+- Treat a new commit or higher build number as proof of completion.
+- Mark source-level code as runtime-verified without evidence.
+- Hide unsupported functionality behind a simulated success message.
+
+If a defect is found, identify the root cause, correct the relevant
+implementation, add appropriate regression coverage and verify it
+against the integrated candidate.
+
+0.5 REQUIREMENT STATUS VALUES
+
+Track each requirement using one of these statuses:
+
+OPEN:
+Not implemented, incomplete, broken or not integrated.
+
+IN PROGRESS:
+Currently being implemented or investigated.
+
+CODE CHANGED — NOT VERIFIED:
+A source change exists, but matching-head tests have not passed.
+
+AUTOMATED TESTS PASSED:
+Relevant tests passed on the identified commit. Runtime acceptance
+may still be pending.
+
+RUNTIME ACCEPTANCE PENDING:
+Code/tests may pass, but actual installed Windows behaviour has not
+been verified.
+
+VERIFIED COMPLETE:
+Required implementation and tests are present, matching-head CI passes,
+and any required Windows/audio acceptance evidence is recorded.
+
+BLOCKED:
+A specific dependency, missing asset, hardware limitation or other
+identified issue prevents completion.
+
+UNSUPPORTED — EXPLICITLY DOCUMENTED:
+A capability is intentionally unavailable and has not been represented
+as working. This is not the same as completing a requested feature.
+
+Do not mark a feature VERIFIED COMPLETE merely because a test checks
+that an HTML element or function name exists.
+
+0.6 COMPLETION REQUIREMENTS
+
+Each requirement must have:
+- A stable requirement ID.
+- Description of the issue/change.
+- Implementation status.
+- Relevant file, function, PR or commit, when known.
+- Regression test evidence.
+- Matching build/run evidence.
+- Manual Windows acceptance evidence, where needed.
+- Remaining limitations or dependencies.
+
+After each work session, provide a continuation checkpoint containing:
+1. Latest build number, run URL, branch and commit SHA.
+2. Tests passed/failed and the cause of any failure.
+3. Files/areas changed.
+4. Requirements newly verified complete.
+5. Requirements still open or unverified.
+6. Outstanding integration and pull requests.
+7. Next highest-priority action.
+8. Any newly reported user requirements.
+
+Do not make the user repeat requirements from earlier conversations.
+
+0.7 IMPLEMENTATION PERMISSION
+
+The user has asked for a comprehensive register before proceeding
+with implementation. Do not make code changes, push commits, trigger
+builds or rerun workflows merely because this register was pasted.
+
+Wait for the user's explicit instruction to start implementation.
+
+Once authorized, continue from the current live GitHub state and the
+existing code. Do not start again from Build #1430 or another outdated
+checkpoint.
+
+============================================================
+SECTION 1 — PRIORITY DEFINITIONS
+============================================================
+
+P0 — RELEASE BLOCKER:
+Wrong UI/default, unstable rendering, critical voice/audio defects,
+failed playback, data integrity issues, generation errors or important
+controls that do not affect real output.
+
+P1 — CORE WORKFLOW:
+Voice Studio, Character Studio, Pronunciation Studio, Sound Design,
+chapter BGM, metadata, generation and playback functionality required
+to complete an audiobook workflow.
+
+P2 — OPERATIONAL AND RELEASE IMPROVEMENTS:
+History filtering, task manager presentation, model inventory checks,
+real performance benchmarking, smaller packages, download reliability
+and Help & Guide updates.
+
+These priorities organise implementation. They do not authorise dropping
+lower-priority requirements. Every item remains in scope unless the user
+explicitly removes it.
+
+============================================================
+SECTION 2 — GLOBAL UI, DESIGN AND STABILITY
+============================================================
+
+UI-01 — Premium V2 is the required default UI. [P0]
+
+The application must launch the intended Premium V2 Dragon Studio
+interface by default.
+
+Do not revert to the older native dashboard.
+
+Preserve the current approved design and its connected functionality.
+
+The older native interface may remain available only as an intentional
+compatibility option. It must never silently become the default.
+
+Verify:
+- Startup mode.
+- Packaged frontend assets.
+- Installed executable behaviour.
+- Settings persistence.
+- Actual installed-app interface.
+
+UI-02 — Fix overlapping and unreadable elements. [P0]
+
+Screenshots from Build 1441 show problems including:
+- Project Production Flow overlapping page content.
+- Headings and content behind panels.
+- Colliding music-track titles and metadata.
+- Ghosted or doubled text.
+- Toasts/errors over important controls.
+- Clipped content and poorly sized panels.
+- Inconsistent input and dropdown styling.
+- Low-contrast text.
+- Incorrect scroll-area/layout boundaries.
+
+Correct the actual layout and event/rendering behaviour, not merely
+the visual appearance of one screenshot.
+
+UI-03 — Resolve flickering without requiring Reduce Motion to be off. [P0]
+
+The earlier test found that disabling Reduce Motion and heavy visual
+effects stopped the flickering. That is a diagnostic clue, not a final fix.
+
+Investigate:
+- Excessive DOM/UI rebuilding.
+- Repeated state updates.
+- Unnecessary polling and refreshes.
+- Stale asynchronous responses.
+- Expensive transitions and blur/backdrop effects.
+- Repeated widget construction.
+- Navigation and resizing refresh loops.
+- Background work updating hidden pages.
+- Preview-worker changes that interrupt the visible UI.
+
+The application must remain smooth with visual effects enabled.
+
+Reduced Motion remains an accessibility option, not a requirement
+for basic stability.
+
+Preserve unchanged cards/lists where possible and update only the
+content that has actually changed.
+
+UI-04 — Desktop application behaviour. [P0]
+
+Preserve:
+- Proper minimize/maximize/restore behaviour.
+- Stable window movement and resizing.
+- Saved text scale and window-size preferences.
+- Functional sidebar collapse and scrolling.
+- Smooth page transitions.
+- No blank/frozen WebEngine startup screen.
+- Correct error/recovery presentation.
+- No unnecessary interface reloads during synthesis.
+- Correct brand/logo with transparency preserved.
+- Proper installed desktop behaviour rather than an unstable
+  webpage-like interface.
+
+Do not undertake a full UI rewrite without establishing that it is
+necessary and without preserving the approved user-facing design.
+
+UI-05 — Notifications, errors and empty states. [P0]
+
+Make messages readable and non-blocking.
+
+Do not allow status messages to collide with the bottom player, page
+content, buttons or other controls.
+
+Show actual saved data and accurate empty/loading/error states.
+
+Never show a success message until the corresponding operation succeeds.
+
+UI-06 — Responsive layout acceptance. [P0]
+
+Test all menus and key workflows at:
+- 1920 × 1080.
+- 1366 × 768.
+- 1280 × 720.
+
+Also test reduced window size, window resizing, sidebar collapse,
+scrolling, menus, dialogs, selections and navigation.
+
+UI-07 — Preserve existing stability improvements. [P0]
+
+Retain and validate:
+- Stale-response guards.
+- Serialized job polling.
+- Stable rendering of unchanged sections.
+- Reduced unnecessary DOM rebuilds.
+- Protected preview state during synthesis.
+- Chapter Studio scroll/draft safeguards.
+- Safe autosave and state restoration.
+- Responsive cancellation and error handling.
+
+============================================================
+SECTION 3 — VOICE STUDIO: PREVIEW SPEED AND QUALITY
+============================================================
+
+VS-01 — 30-second preview under 60 seconds. [P0]
+
+Current reference from the user's screenshot:
+- Requested preview: 30 seconds.
+- Actual preview: approximately 34.6 seconds.
+- Synthesis time: approximately 266.5 seconds.
+- Reported real-time factor: approximately 7.69×.
+- Target: below 60 seconds, ideally lower.
+
+This is an actual performance defect.
+
+Investigate model loading, inference, worker reuse, repeated computation,
+audio processing, CPU/GPU fallback, polling, memory pressure, contention
+and unnecessary work.
+
+Requirements:
+- Make the 30-second preview complete in under 60 seconds when the
+  supported hardware/runtime permits it.
+- Aim for lower latency where practical.
+- Do not deliberately sacrifice voice quality to achieve the target.
+- Record actual elapsed time and measured audio duration.
+- Benchmark the same model/configuration consistently.
+- Ensure previews do not compete unnecessarily for model resources.
+- Keep the UI responsive.
+- Make Stop/Cancel effective.
+- Do not show a false target-met state.
+
+Acceptance requires real measurements, not merely a passing static test.
+
+VS-02 — Preserve character voice identity. [P0]
+
+The supplied preview audio is reported to have changing vocal tone
+and identity, rather than consistent character voice with emotional
+variation.
+
+Fix:
+- Unintended pitch/timbre/voice identity changes.
+- Wrong profile/provider/model selection.
+- Stale Voice State values.
+- Switching to another profile while previewing.
+- Incorrect voice propagation into character assignment and generation.
+
+The same character must remain recognisable across sentences, paragraphs,
+chapters, previews and full audiobook generation.
+
+Emotion should change delivery, not replace the underlying voice.
+
+VS-03 — Emotion-aware narration. [P1]
+
+Support contextual delivery including:
+- Happy/cheerful.
+- Laughing.
+- Sad/subdued.
+- Crying/sobbing.
+- Angry.
+- Fearful/tense.
+- Surprised.
+- Bored.
+- Calm.
+- Serious.
+
+Use story and dialogue context. Do not apply random emotions.
+
+Keep speech natural, intelligible and consistent with the character.
+
+VS-04 — Story-aware background effects and voices. [P1]
+
+Support appropriate story-relevant effects such as:
+- Character laughter.
+- Crying/sobbing.
+- Sad or emotionally subdued delivery.
+- Background voices and crowd ambience.
+- Door creaks.
+- Glass cracking/breaking.
+- Other environment or scene-specific effects.
+
+Use story analysis to identify appropriate placement and effect type.
+
+Effects should not be inserted randomly, overpower dialogue or occur
+without narrative justification.
+
+Contextual sound effects in narration are distinct from the fixed
+Opening/Next Chapter/Closing cue-assignment UI. The latter must not
+reintroduce the removed Scene Transition assignment.
+
+VS-05 — Make emotion/effects global. [P1]
+
+Implement the capability across supported Voice Studio profiles and
+projects, not only one character/book.
+
+Use the selected character, current passage and story context.
+
+VS-06 — Accurate multilingual pronunciation. [P0]
+
+Correct foreign-language names and terms when written in English,
+including Japanese names and fantasy terminology.
+
+Requirements:
+- Identify relevant names/terms from the text.
+- Determine language/pronunciation context where possible.
+- Offer AI pronunciation recommendations.
+- Allow manual correction.
+- Save pronunciation rules.
+- Apply only enabled rules in the intended scope.
+- Preserve correct pronunciations through preview and generation.
+- Avoid applying rules to unrelated words.
+
+VS-07 — Emotion and pronunciation must cooperate. [P1]
+
+Pronunciation corrections must not destroy emotional delivery, timing,
+naturalness or character identity.
+
+VS-08 — Preserve all previous Voice Studio fixes. [P0]
+
+Keep and verify:
+- Qwen VoiceDesign preset naming.
+- Saved profile identity and loading.
+- Correct preview voice and Voice State.
+- Correct selected voice in Preview & Assign.
+- Preview controls unavailable until audio is ready.
+- Preview download/playback.
+- Correct Character Studio assignment.
+- Correct provider filters.
+- No visible flickering during wizard transitions.
+- Preview lengths: 10, 30, 60 and 90 seconds.
+- Default duration: 30 seconds.
+- Visible elapsed synthesis time.
+- Bounded reuse of Qwen preview worker.
+- Safe switching between Voice Profile and Preview & Assign while
+  synthesis is running.
+- Correct project/sidebar title and save status.
+
+============================================================
+SECTION 4 — CHARACTER STUDIO
+============================================================
+
+CS-01 — Real Assigned Cast list. [P1]
+
+Populate Assigned Cast with characters actually assigned to the
+currently selected project.
+
+Each character must display:
+- Character name.
+- Series/story name.
+- Dialogue count.
+
+Use actual project data, not sample or stale data.
+
+Search must support character name, alias or voice.
+
+CS-02 — Project isolation and live assignment data. [P1]
+
+The list must update when assignments change and must not mix characters
+from different projects.
+
+A character must not appear as assigned until the assignment is saved.
+
+CS-03 — Audio Profile dropdown. [P1]
+
+Display all saved audio profiles available in the application, including
+profiles created in Voice Studio.
+
+Selecting a profile updates the preview context. It must not silently
+replace the project's narrator or another character's assignment.
+
+CS-04 — Test selected character dialogue. [P1]
+
+Test Voice must generate/play the selected character's actual dialogue
+using the selected audio profile.
+
+The action must:
+- Use the selected dialogue.
+- Use the selected saved profile.
+- Show real progress/status.
+- Play the correct preview.
+- Stop/pause on another click.
+- Resume/replay on another click.
+- Keep a completed valid preview available for replay.
+- Avoid unnecessary regeneration.
+- Never switch characters/profiles unexpectedly.
+
+CS-05 — Assignment statistics. [P1]
+
+Show these four values:
+
+1. Assigned Voice — actual assigned profile.
+2. Dialogue Lines — number of assigned dialogue lines.
+3. Chapters — number of distinct chapters where that character appears.
+4. AI Assigned — percentage of assigned lines attributable to AI.
+
+Chapter count must count each chapter only once, regardless of how many
+dialogue lines the character has in it.
+
+AI Assigned percentage:
+AI-assigned dialogue lines / all assigned dialogue lines × 100.
+
+Example:
+55 AI-assigned lines out of 100 total assigned lines = AI Assigned 55%.
+Manual assignment = 45%.
+
+Do not use AI confidence as a substitute for assignment-source percentage.
+Use actual source metadata and recalculate when assignments change.
+
+CS-06 — Display selected-character dialogue. [P1]
+
+Show the dialogue for the selected character below the four statistics.
+
+Include both AI-analyzed and manually assigned dialogue from the
+currently selected project.
+
+Make entries selectable for testing.
+
+CS-07 — Source highlighting. [P1]
+
+Manual dialogue:
+- Green accent line.
+- Subtle green transparent background.
+- Full-row highlight.
+
+AI-analyzed dialogue:
+- Golden accent line.
+- Subtle golden transparent background.
+- Full-row highlight.
+
+Match the supplied Premium V2 HTML reference.
+
+The selected dialogue state must remain clear without losing the
+manual/AI source distinction.
+
+CS-08 — Persist assignments. [P1]
+
+Assignments must remain correct across page navigation, project changes,
+profile edits and application restarts.
+
+Preserve existing safeguards around saved profiles, aliases, narrator
+assignment and synthesis routing.
+
+Do not present guarded/prototype bulk AI speaker assignment as fully
+supported unless it has actually been implemented and verified.
+
+============================================================
+SECTION 5 — PRONUNCIATION STUDIO
+============================================================
+
+PS-01 — Simplify the interface. [P1]
+
+Remove:
+- Review Terms tab.
+- Voice Test Matrix tab.
+
+Make Dictionary the main pronunciation-management interface.
+
+Do not remove useful functionality without ensuring that the required
+workflow is available in the Dictionary.
+
+PS-02 — Required dictionary table. [P1]
+
+Columns, in order:
+
+1. S.No
+2. Written
+3. Pronounce as
+4. Audio Preview
+5. Options
+6. Enable
+
+S.No is a visible sequential number, updated after deletions.
+
+Written stores the source word/term.
+
+Pronounce as stores the corrected pronunciation.
+
+Audio Preview provides per-entry Play/Pause/Replay.
+
+Options contains Edit and Delete icons.
+
+Enable is a persistent per-entry On/Off switch.
+
+PS-03 — Search all relevant entries. [P1]
+
+Search by:
+- Written word.
+- Pronounce as.
+- AI-generated entries.
+- Manually entered entries.
+- Relevant project-specific entries.
+- Relevant global entries.
+
+Search must work against actual saved data, not merely the currently
+visible rows.
+
+PS-04 — Audio Profile selection. [P1]
+
+Display all saved application audio profiles.
+
+When a profile is selected, previews must use that profile.
+
+Allow preview of the written word or the pronunciation form.
+
+PS-05 — Add Entry. [P1]
+
+Add Entry must accept Written and Pronounce as values, save the entry,
+display it in the Dictionary and identify it as manually added.
+
+The new entry must support preview, edit, delete and enable/disable.
+
+PS-06 — Analyze Book. [P1]
+
+Analyze the selected project's text and identify pronunciation terms,
+character names, foreign-language words and relevant terminology.
+
+Add recommendations to the Dictionary as AI-originated entries.
+
+Avoid unrelated terms and duplicates.
+
+Allow edits; do not assume every AI pronunciation is automatically correct.
+
+PS-07 — Single and multiple delete. [P1]
+
+Allow deletion of one row with its Delete icon.
+
+Allow selection and deletion of multiple pronunciation entries.
+
+Do not delete unrelated entries or corrupt row numbering.
+
+PS-08 — Individual Enable toggle. [P1]
+
+When On, an entry is eligible for pronunciation processing.
+
+When Off, the entry must not be used in audiobook generation.
+
+Persist the value and enforce it in the processing backend.
+
+PS-09 — Global pronunciation toggle. [P1]
+
+Add a global Pronunciation On/Off toggle in Pronunciation Studio.
+
+Also show a corresponding toggle in Generate.
+
+Global Off means pronunciation processing is disabled.
+
+Global On means only individually enabled entries are eligible.
+
+Both controls must stay synchronized with saved project settings.
+
+PS-10 — Differentiate AI and manual rows. [P1]
+
+Use subtle row highlighting that matches Character Studio's style.
+
+Clearly distinguish AI-originated and manually entered entries without
+introducing excessive visual clutter.
+
+PS-11 — Test pronunciation behaviour in real audio. [P1]
+
+Test foreign words, different voices, scope conflicts, editing, deletion,
+disable/enable, project reopen and preview/full-generation consistency.
+
+Preserve earlier requirements relating to profile-specific pronunciation,
+conflict handling and invalidating affected generated audio where needed.
+
+============================================================
+SECTION 6 — SOUND DESIGN: BGM, CHAPTER ASSIGNMENTS AND CUES
+============================================================
+
+SD-01 — Remove specified top-right actions. [P1]
+
+Remove:
+- Preview Book Mix at the top right.
+- Save & Sync to Production at the top right.
+
+Do not remove underlying audio configuration functionality.
+
+Retain Mix & Production Sync as the final review/confirmation area.
+
+SD-02 — Connect Same BGM/Chapter-Based BGM. [P1]
+
+VERSION 1 RULE: Same BGM and Chapter-Based BGM are mutually exclusive
+strategies. They must not play or mix two BGM tracks side by side. Use
+one selected BGM track at a time for the relevant scope. Advanced layered
+or simultaneous multi-track BGM mixing is explicitly deferred until after
+Version 1 is complete.
+
+Same BGM:
+- The user selects one book-default BGM track for the entire story.
+- That same track is used throughout every chapter while BGM is enabled.
+- No chapter-specific BGM overrides are used in this mode.
+- The book-level master BGM volume applies to the selected track.
+- Preview and final audiobook generation use the same saved track and
+  master-volume settings.
+- Opening, Next Chapter and Closing cues remain separate cue assignments,
+  governed by the global BGM/cue On/Off setting.
+
+Chapter-Based BGM:
+- When this strategy is selected, the book-default BGM is ignored entirely
+  for generation. It must not be mixed underneath or automatically applied
+  to any chapter.
+- Each chapter can have at most one explicitly selected BGM track in
+  Version 1, or no BGM.
+- The user must explicitly select and save a track for each chapter where
+  background music is wanted.
+- A chapter without an explicit saved track assignment has no BGM. Do not
+  fall back silently to the book-default track.
+- Per-chapter volume, start offset and end/fade behaviour apply to that
+  chapter's selected track and must affect the actual audio.
+- Preview and final generation use the same saved chapter assignments and
+  their volume/timing settings.
+- Reusing the same track in several chapters is permitted, but the system
+  must not layer it with the ignored book-default track.
+- Switching between strategies must preserve saved configuration safely.
+  Returning to Same BGM uses the saved book-default track; returning to
+  Chapter-Based BGM uses only the explicitly saved chapter assignments.
+
+Both strategies:
+- Global Voice Only / BGM Off overrides the selected strategy and excludes
+  all background music and configured Opening/Next Chapter/Closing cues.
+- When BGM/cues are enabled, the fixed cue assignments remain separate from
+  background music; they are not additional BGM tracks.
+- Do not provide per-chapter Use Book Default as an assignment option in
+  Chapter-Based BGM. The allowed chapter choices are one explicitly selected
+  custom track or No BGM.
+- Do not require side-by-side BGM input, multi-layer composition, automatic
+  default-track fallback or complex cross-track orchestration in Version 1.
+- Advanced layered BGM and multi-track mixing may be considered for a future
+  version only after Version 1 is completed.
+
+This choice must update the Mix & Production Sync summary and Production
+Studio's generation settings. The selected strategy and its exact effective
+tracks must be visible in the current project state.
+
+SD-03 — Chapter BGM filters. [P1]
+
+Provide filters:
+- All.
+- Built-in.
+- Imported.
+
+Also provide the music categories:
+- All.
+- Fantasy adventure.
+- Battle & warfare.
+- Mystery.
+- Horror.
+- Romance.
+- Sci-fi.
+- Calm narration.
+- Others.
+
+Use the same actual category/source logic as Music Library, though the
+layout may differ.
+
+Selecting a filter must really filter tracks.
+
+SD-04 — Chapter track selection. [P1]
+
+Show the Selected Track panel on the right.
+
+Include:
+- Medium-yellow SELECT TRACK label.
+- Selected track name in larger readable type.
+- A Select action to confirm assignment to the current chapter.
+- Clear indication of saved/current assignment.
+
+Selecting a candidate in the library must not silently replace a saved
+chapter assignment until confirmed.
+
+SD-05 — Chapter volume. [P1]
+
+Make the chapter assignment content scrollable.
+
+Show the actual volume percentage.
+
+Maximum chapter volume: 50%.
+
+The saved volume must affect the actual chapter audio mix.
+
+Keep it separate from the book-level master BGM volume.
+
+SD-06 — Start offset and end behaviour. [P1]
+
+Start Offset and End Behaviour must have real effects:
+- Start Offset controls when the track starts.
+- End Behaviour applies the selected ending/fade behaviour.
+
+Persist values by chapter and use them in preview and final production.
+
+SD-07 — Save chapter assignment. [P1]
+
+Persist the selected track, strategy, volume and timing behaviour.
+
+Show a truthful save state.
+
+Do not freeze the application or allow stale autosaves to overwrite newer
+chapter settings.
+
+SD-08 — Separate cue library. [P1]
+
+Book Cue Assignments must contain only:
+- Opening audio.
+- Next chapter audio.
+- Closing audio.
+
+Remove Scene Transition from this fixed assignment interface.
+
+Cue assets should be short clips, no more than approximately 3–5 seconds,
+as requested.
+
+Keep longer background music in Music Library/Chapter BGM, not the
+cue-only selection library.
+
+Contextual story sound effects can still be part of narration/production
+where supported; they must not reintroduce a Scene Transition assignment
+that the user explicitly asked to remove.
+
+SD-09 — Cue card readability. [P1]
+
+Fix collided or unreadable track titles/metadata.
+
+Show readable cue names, selected state and actual track information.
+
+SD-10 — Cue preview. [P1]
+
+Provide Play/Pause/Replay for the selected cue.
+
+Preview must use the selected cue and not another track.
+
+SD-11 — Save Cue Changes and autosave. [P1]
+
+Add Save Cue Changes.
+
+Use reliable autosave as well.
+
+Autosave must not freeze the application, create overlapping saves or
+overwrite new state with stale data.
+
+Report saving/saved/failure status.
+
+SD-12 — Connect cues to final production. [P1]
+
+Opening, Next Chapter and Closing selections must be passed to actual
+production.
+
+When background music/cues are disabled, voice-only mode must not include
+BGM or cues.
+
+When enabled, use the saved selections.
+
+SD-13 — Live Mix & Production Sync summary. [P1]
+
+The final summary must update from actual selected settings.
+
+Remove the Book Default and Scene Cue rows from this summary.
+
+Display relevant information:
+- BGM enabled/disabled.
+- Same BGM or Chapter-Based BGM.
+- Selected book track where applicable.
+- Chapter override count.
+- Opening cue.
+- Next chapter cue.
+- Closing cue.
+- Current narration/BGM/cue levels.
+- Saved/unsaved state.
+
+Do not show stale or sample data.
+
+SD-14 — Live levels. [P1]
+
+Narration, BGM and Cues must have functional audio-level controls.
+
+Their settings must change actual audio output, not just decorative bars.
+
+Use the saved values for previews and final generation.
+
+Keep the relative balance appropriate so that BGM/cues do not overpower
+the narration.
+
+SD-15 — Final production handoff. [P1]
+
+Keep Save & Open Production Studio as the final action in Mix & Production
+Sync.
+
+Before navigating:
+- Save pending changes.
+- Verify current settings.
+- Report save errors.
+- Ensure the project has the correct sound configuration.
+
+It must not falsely report a successful save.
+
+============================================================
+SECTION 7 — MUSIC LIBRARY
+============================================================
+
+MUS-01 — Real music library. [P1]
+
+Display actual available BGM tracks.
+
+Support:
+- Browsing.
+- Category filtering.
+- Searching.
+- Track selection.
+- Preview.
+- Play/Pause.
+- Import.
+- Volume adjustment.
+- Saved configuration for audiobook generation.
+
+MUS-02 — Required categories. [P1]
+
+- All.
+- Fantasy adventure.
+- Battle & warfare.
+- Mystery.
+- Horror.
+- Romance.
+- Sci-fi.
+- Calm narration.
+- Others.
+
+All is a filter for the full collection, not a fabricated separate track.
+Others is a real category for tracks not covered elsewhere.
+
+MUS-03 — Real category filtering. [P1]
+
+Selecting a category must display tracks assigned to that category.
+
+Do not change only the highlighted category while leaving every track
+visible.
+
+MUS-04 — Import track workflow. [P1]
+
+When a track is imported:
+- Select the file.
+- Ask the user to choose its category.
+- Import and validate it.
+- Save its source/category metadata.
+- Display it in the correct category.
+- Make it available to BGM/chapter assignment and generation.
+
+MUS-05 — Track persistence. [P1]
+
+Keep imported tracks available after navigation, project switching and
+application restart.
+
+Do not report an unavailable file as a valid playable track.
+
+MUS-06 — Selected Track panel. [P1]
+
+Display selected track name, source and relevant information.
+
+Provide one Play/Pause button that actually plays/pauses the selected
+track.
+
+Selecting another track must switch preview context correctly.
+
+MUS-07 — Master BGM volume. [P1]
+
+Default master BGM volume: 18%.
+
+Maximum: 50%.
+
+Show the actual volume percentage.
+
+The master level must affect whole-book BGM when the selected strategy
+uses book-level music.
+
+MUS-08 — Chapter volume. [P1]
+
+Chapter-based BGM must have its own chapter-level adjustment, with a
+visible percentage, maximum 50%, persistence and actual impact on output.
+
+Do not confuse chapter volume with book master volume.
+
+MUS-09 — BGM/voice-only configuration. [P1]
+
+Yes — Use BGM:
+- Use the selected mutually exclusive strategy: Same BGM or Chapter-Based
+  BGM.
+- Same BGM uses the one selected book-default track throughout the story.
+- Chapter-Based BGM ignores the book-default track and uses only one
+  explicitly selected/saved track per chapter, or no BGM for an unassigned
+  chapter. Never silently fall back to the book-default track.
+- Include the saved Opening, Next Chapter and Closing cues while the global
+  BGM/cue setting is On.
+- Apply the same effective configuration in preview and final generation.
+
+No — Voice Only:
+- Exclude all background music and all configured cues from the generated
+  audiobook and its preview.
+- Keep narration, selected voices, emotion and pronunciation settings active.
+
+Keep this setting synchronized with Production Studio's generation toggle.
+Do not introduce simultaneous/layered BGM tracks in Version 1; that feature
+is deferred until after Version 1 is complete.
+
+============================================================
+SECTION 8 — PRODUCTION STUDIO: INPUT PROJECT DETAILS
+============================================================
+
+PROD-01 — Add Input Project Details. [P0]
+
+Add the Input Project Details button near Open Output Folder and Cancel
+Job in Production Studio.
+
+Match the intended Project Production Flow styling.
+
+PROD-02 — Metadata fields. [P0]
+
+Book title:
+- Automatically fetch from project name.
+- Editable.
+
+Author:
+- Text input.
+- Dropdown of previously entered/generated values.
+
+Narrator:
+- Automatically fetch the selected narrator/audio profile.
+
+Publisher:
+- Text input.
+- Dropdown of prior values.
+
+Series:
+- Connected to Character Library/series data.
+
+Series Volume:
+- Text input.
+- Dropdown of prior values.
+
+Language:
+- Text input.
+- Dropdown of prior values.
+
+Release Year:
+- Text input.
+- Dropdown of prior values.
+
+Genre:
+- Text input.
+- Dropdown of prior values.
+
+Cover Image:
+- Open a file picker.
+- Select an image in a supported format.
+- Save it with the project's metadata.
+- Embed it in the audiobook output where supported.
+
+Save:
+- Persist values against the correct project.
+- Confirm success or report failure.
+
+Dropdowns must use real saved historical values, not mock entries.
+
+PROD-03 — Metadata completion gate. [P0]
+
+Complete details:
+- Green status.
+- Full-book generation may proceed if other readiness checks pass.
+
+Incomplete/unsaved details:
+- Yellow warning.
+- Full-book generation blocked.
+- Preview remains available.
+- Show exactly which fields need completion.
+
+Validate saved data, not just whether the form has been opened or text
+has been typed.
+
+PROD-04 — Metadata persistence and output. [P0]
+
+Preserve details through reopening projects.
+
+Apply saved metadata to the final audiobook and update the Audiobooks
+summary from the actual saved values.
+
+============================================================
+SECTION 9 — PRODUCTION STUDIO: GENERATION ENGINE
+============================================================
+
+PROD-05 — Real progress animation. [P0]
+
+Idle state:
+Show only the idle outline/state.
+
+Generating:
+Show smooth, accurate progress based on the real job.
+
+Display real:
+- Analysis/generation detail.
+- Current chapter.
+- Elapsed time.
+- Remaining-time estimate when sufficient data exists.
+- Current status.
+- Errors and recovery actions.
+
+Do not display invented progress or fake generation animations.
+
+PROD-06 — Separate preview and full generation states. [P0]
+
+Generate Preview and Generate Full Audiobook must have accurate status.
+
+Both must show their applicable:
+- Progress.
+- Current chapter.
+- Elapsed time.
+- Remaining time.
+- Error state.
+- Cancellation state.
+
+Keep the interface responsive.
+
+PROD-07 — Preview generation controls. [P0]
+
+Keep the duration options:
+10, 30, 60 and 90 seconds.
+
+Default: 30 seconds.
+
+Click Generate Preview:
+- Use the selected duration/profile.
+- Generate the actual audio.
+- Display real elapsed time.
+- Show actual generated duration.
+- Make the generated preview playable.
+
+Add Play/Pause near the preview duration controls.
+
+Allow replay of a valid completed preview without unnecessary regeneration.
+
+Keep cancellation responsive.
+
+PROD-08 — Live pronunciation toggle. [P1]
+
+Show Pronunciation On/Off in Generate.
+
+Use the real saved project setting and allow changes.
+
+Off:
+No pronunciation rules are applied.
+
+On:
+Only enabled rules are eligible.
+
+Keep synchronized with Pronunciation Studio.
+
+PROD-09 — Live BGM/cue toggle. [P1]
+
+Show BGM/cues On/Off in Generate.
+
+Synchronize with Sound Design.
+
+Off:
+Voice only; no BGM or cues.
+
+On:
+Use the selected saved BGM/cue configuration and correct volumes/timing.
+
+The preview and final-generation paths must use the same saved settings.
+
+============================================================
+SECTION 10 — PRODUCTION STUDIO: PROJECT SUMMARY AND READINESS
+============================================================
+
+PROD-10 — Live project summary. [P1]
+
+Show real values:
+- Cover image.
+- Book title.
+- Author.
+- Language.
+- Narrator.
+- Voice cast count.
+- Genre.
+- Music configuration.
+- Output location/configuration.
+
+Fetch values from saved Input Project Details, Character Library,
+Voice Studio, Sound Design and Settings.
+
+Do not use stale or hardcoded values.
+
+PROD-11 — Music summary. [P1]
+
+Same BGM:
+- Display the actual book-default track name.
+- This one track is used throughout the story while BGM is enabled.
+
+Chapter-Based BGM:
+- The book-default track is ignored and is not mixed into chapters.
+- Display the number of unique tracks explicitly assigned to chapters.
+- Count a track only once even if used in multiple chapters.
+- Do not count the ignored book-default track unless it was separately
+  selected as a chapter's explicit track.
+- A chapter with no explicit track assignment is a No BGM chapter.
+
+Example: Chapter-Based BGM (2 unique tracks).
+
+Voice-only:
+Display Voice Only / BGM disabled; no BGM or cues are included.
+
+PROD-12 — Output summary. [P1]
+
+Fetch the actual output folder/path from Settings.
+
+Keep format/bitrate information consistent with the settings used by
+the actual generation job.
+
+PROD-13 — Live Readiness Center. [P1]
+
+Show real readiness of:
+- Book imported.
+- Chapters ready.
+- Narrator assigned.
+- Character voices.
+- Pronunciations.
+- Sound design.
+- Output folder.
+
+Update automatically as relevant saved state changes.
+
+Do not mark a stage ready merely because a placeholder exists.
+
+PROD-14 — Consistent job state. [P0]
+
+The Generation Engine, Readiness Center, project summary, Background
+Jobs, History and actual output must refer to the same project/job/status.
+
+Prevent stale status, false success, incorrect chapter progress and
+contradictory elapsed times.
+
+PROD-15 — Chapter-specific preview audio and download. [P1]
+
+Provide a chapter-selection dropdown for the currently selected project.
+
+Chapter dropdown:
+- Fetch and display all saved chapters belonging to the active project.
+- Use the actual saved chapter order, chapter number and chapter title from
+  Chapter Studio.
+- Refresh the list when the active project or saved chapter structure
+  changes.
+- Never show hardcoded, deleted, unsaved-placeholder or other-project
+  chapters.
+- Make the selected chapter clearly visible before Preview Audio is started.
+
+Preview generation:
+- When a chapter is selected and Preview Audio is clicked, generate the
+  preview from that chapter's saved text only. Do not synthesize the whole
+  book or use text from another chapter.
+- Use the active project's actual narrator, character voice assignments,
+  enabled pronunciation entries, and saved sound/generation settings.
+- Preserve the existing 10/30/60/90-second preview controls and 30-second
+  default. Respect the selected duration and show both the selected chapter
+  and actual generated duration so it is clear whether the result is a
+  duration-limited sample or the complete selected chapter.
+- Chapter selection affects Preview Audio only. It must not limit, reorder,
+  skip or otherwise alter full-book generation.
+- Selecting a chapter must not edit or overwrite that chapter's text,
+  assignments, saved audio or production settings.
+- Display truthful progress, elapsed time, status and errors. A preview is
+  successful only after valid audio has been generated and checked.
+- If the user switches project/chapter while a preview is running, keep job
+  and audio ownership tied to the originating project/chapter. Never attach
+  stale audio to the newly selected project or chapter.
+
+Preview playback and download:
+- After successful generation, allow the preview to play, pause, stop and
+  replay using the existing applicable preview controls.
+- Provide a working Download Preview Audio action for the generated preview.
+- Download the actual generated audio file, not a placeholder, stale file,
+  full-book output or a link to a different chapter's audio.
+- Use a clear filename containing the project and selected chapter number
+  or title, with the correct audio extension.
+- Preview playback and download must work without requiring full-book
+  generation to be completed.
+- Disable playback/download until valid preview audio is available, and
+  report generation or download failures honestly.
+- Keep a completed preview associated with its project, chapter, settings
+  and actual generated file. Do not silently present a previous chapter's
+  preview after the selected chapter changes.
+
+Acceptance criteria:
+- The dropdown lists all saved chapters for the active project.
+- Selecting a chapter and starting Preview Audio produces audio from that
+  chapter only, subject to the selected preview-duration setting.
+- The selected chapter and actual preview duration are displayed accurately.
+- The generated preview can be played and downloaded successfully.
+- Switching chapters/projects does not reuse or mislabel stale preview audio.
+- Chapter selection never changes the scope or behaviour of full-book
+  generation.
+- The workflow remains correct after navigation and after reopening the
+  project.
+
+============================================================
+SECTION 11 — AUDIOBOOKS: LIBRARY AND PLAYER
+============================================================
+
+AB-01 — Compact audiobook cards. [P2]
+
+The current Audiobooks page uses overly large cards and makes the user
+scroll excessively.
+
+Redesign the list/cards to be compact like the Library reference.
+
+Show multiple audiobooks at once with clear cover, title, status and
+play/open action.
+
+Keep responsive layout and readable text.
+
+AB-02 — Fix audio file loading. [P0]
+
+The user reports that audiobook metadata and covers appear but the
+audio fails to load and the player reports no supported source.
+
+Investigate:
+- Actual output-file path.
+- Local-file URL resolution.
+- Supported audio format/codec.
+- File existence/permissions.
+- Completed output registration.
+- Player source attachment.
+- Incorrect mapping between project/audio metadata and actual files.
+
+Do not mark an audiobook playable if the file is absent or invalid.
+
+If missing, report a useful recovery message.
+
+AB-03 — Full player controls. [P0]
+
+Implement functional:
+- Play/Pause.
+- Seek.
+- Current/total time.
+- Playback volume.
+- Playback speed.
+- 15-second forward/backward.
+- Previous/next chapter.
+- Chapter selection.
+
+The volume slider must change actual audio volume while dragging.
+
+AB-04 — Chapter playback. [P0]
+
+Display actual chapters from the selected completed audiobook.
+
+Clicking a chapter must navigate to its real audio position and start
+playback.
+
+Keep chapter selection and the playhead synchronized.
+
+AB-05 — Persistent mini-player. [P1]
+
+When playback is active and the user navigates away from Audiobooks,
+show/retain the mini-player.
+
+It remains available until the user returns to Audiobooks or closes it
+manually.
+
+Preserve:
+- Selected audiobook.
+- Playback position/state.
+- Play/Pause.
+- Volume and relevant controls.
+- Full-player/mini-player synchronization.
+
+AB-06 — Playback position persistence. [P1]
+
+Preserve the earlier requirement to save and restore playback position
+where supported, including after application restart.
+
+AB-07 — Preserve completed output integrity. [P0]
+
+Keep the correct cover, title, narrator, metadata and chapter data
+associated with the actual audio file.
+
+Do not treat metadata presence alone as proof that playable audio exists.
+
+============================================================
+SECTION 12 — HISTORY
+============================================================
+
+HIS-01 — Accurate history records. [P2]
+
+Show real job/operation data:
+- Operation name.
+- Project.
+- Status.
+- Relevant chapter/phase.
+- Progress for active jobs.
+- Elapsed time when available.
+- Error/result summary.
+- Valid actions.
+
+Distinguish completed, running, queued, failed, cancelled and recoverable
+operations correctly.
+
+HIS-02 — Date filtering. [P2]
+
+Add From Date and To Date controls.
+
+Apply date range in combination with existing status filters/search.
+
+Use real operation timestamps.
+
+HIS-03 — Durable history. [P1]
+
+History must survive restarts and active-job queue cleanup.
+
+Preserve the earlier requirement that terminal history is stored
+independently from the current active queue.
+
+============================================================
+SECTION 13 — BACKGROUND JOBS / TASK MANAGER
+============================================================
+
+JOB-01 — Fix readability and layout. [P2]
+
+The supplied Task Manager image shows text collisions and poorly
+separated content.
+
+Make the job list clear, readable and consistently spaced.
+
+JOB-02 — Job details. [P2]
+
+Where available, show:
+- Job name/type.
+- Associated project.
+- Status.
+- Progress.
+- Elapsed time.
+- Completion/result.
+- Failure details.
+- Valid actions.
+
+JOB-03 — Accurate totals and filters. [P2]
+
+Running, Queued and Completed totals must come from real job data.
+
+Active, Completed and All filters must work.
+
+JOB-04 — Safe operations. [P1]
+
+Support real View/Cancel/Retry/Recover actions where appropriate.
+
+Do not claim cancellation/recovery succeeded if it did not.
+
+Keep UI responsive while long-running work continues.
+
+JOB-05 — Consistency with History. [P1]
+
+The job manager and History must not create contradictory or duplicate
+records for the same operation.
+
+Retain terminal state independently of queue visibility.
+
+============================================================
+SECTION 14 — MODELS CENTER
+============================================================
+
+MOD-01 — Audit actual model installation inventory. [P1]
+
+The screenshot showed 8 of 10 managed components ready and 2 needing
+setup or attention.
+
+Verify installed models/runtime dependencies and display actual state:
+- Installed.
+- Missing.
+- Not configured.
+- Unhealthy.
+- Partially installed.
+- Ready.
+
+Show real model/provider name, files/location/size where available,
+dependencies and runtime health.
+
+Do not mark installed-but-unusable models Ready.
+
+MOD-02 — Synchronize voice/model selectors. [P1]
+
+All supported installed models must appear in the relevant selectors.
+
+Refresh selectors after relevant model lifecycle operations.
+
+Do not show missing or incompatible models as ready.
+
+MOD-03 — Model lifecycle. [P1]
+
+Verify:
+- Install.
+- Verify.
+- Repair.
+- Uninstall.
+- Local status refresh.
+
+Operations must be safe, show truthful progress and provide actionable
+errors.
+
+Prevent uninstallation when a model is used by an active job.
+
+MOD-04 — Preserve profile and storage integrity. [P1]
+
+Handle model removal/reinstall without corrupting saved profiles or
+project assignments.
+
+Show actual model/cache locations and disk capacity.
+
+Model/cache root customization and external-drive recovery remain
+outstanding unless verified implemented.
+
+MOD-05 — Be clear about remote actions. [P2]
+
+Local status refresh must not pretend to be a remote update check.
+
+Remote model-update checking, universal default selection and generic
+model test-generation were listed as limitations in the existing ledger.
+Verify status and implement or document the actual limitation.
+
+============================================================
+SECTION 15 — PERFORMANCE CENTER AND BENCHMARKING
+============================================================
+
+PERF-01 — Actual PC compatibility information. [P1]
+
+Where available, gather:
+- CPU model/core information.
+- RAM.
+- GPU model.
+- GPU memory.
+- CUDA/runtime availability.
+- OS/runtime versions.
+- Disk free space.
+- Installed models and compatibility.
+
+If unavailable, explicitly say unavailable/not measured.
+
+Never invent CPU/GPU/VRAM or benchmark values.
+
+PERF-02 — Real benchmark. [P1]
+
+Run a repeatable benchmark using an actual supported model and workload.
+
+Measure:
+- Synthesis time.
+- Generated audio duration.
+- Real-time factor.
+- Throughput.
+- CPU/GPU/memory usage when reliably available.
+- Errors/fallbacks.
+- Model/runtime/hardware context.
+
+Persist benchmark results.
+
+PERF-03 — Real backend recommendations. [P1]
+
+Recommend only compatible configurations based on actual hardware,
+installed models and dependencies.
+
+Distinguish compatible, not installed, unhealthy and unsupported.
+
+PERF-04 — PC comparison. [P2]
+
+Allow comparison against actual results from other PCs when comparable
+measurements exist.
+
+Show hardware, model, workload and runtime alongside comparisons.
+
+Do not invent performance comparison scores.
+
+PERF-05 — Preview performance target. [P0]
+
+Use benchmark data to determine why the 30-second preview target is
+being missed and validate improvements on the relevant configuration.
+
+============================================================
+SECTION 16 — IMPORT STUDIO AND CHAPTER STUDIO
+============================================================
+
+IMP-01 — Correct import and source preservation. [P1]
+
+Verify TXT, EPUB, searchable PDF and DOCX imports.
+
+Preserve extracted text, chapter order, book metadata and source
+information.
+
+Handle duplicate, failed, corrupt, unsupported and cancelled imports
+without creating broken projects.
+
+IMP-02 — Correct chapter segmentation. [P1]
+
+Preserve first-page content, including when a document has no heading.
+
+Handle:
+- Ordinary chapter headings.
+- Roman numerals.
+- Numbered chapters.
+- Compound headings.
+- Slash headings such as BLACK DOG/BIRTH.
+- Headings such as Part 1.
+- Documents with preambles or missing headings.
+
+Preserve chapter count and order.
+
+Scanned/image-only PDF OCR is not implemented unless verified otherwise.
+Do not claim OCR support if absent.
+
+IMP-03 — Preserve chapter editing. [P1]
+
+Retain existing requirements for:
+- Add.
+- Rename.
+- Delete current.
+- Multi-select delete.
+- Reorder.
+- Split.
+- Merge where supported.
+- Clean.
+- Find/replace.
+- Undo/redo.
+- Review.
+- Skip/exclude from generation.
+
+IMP-04 — Prevent autosave/navigation races. [P0]
+
+Save pending edits before switching chapters.
+
+Prevent older queued autosaves from overwriting newer text.
+
+Keep chapter draft and scroll position stable.
+
+If saving fails, stop the action and show a clear message.
+
+IMP-05 — Source/project persistence. [P1]
+
+Verify saved project data after switching pages, closing/reopening the
+project and restarting the application.
+
+Do not lose the first page, source content or chapter edits.
+
+============================================================
+SECTION 17 — LIBRARY AND PROJECT LIFECYCLE
+============================================================
+
+LIB-01 — Safe single and multiple project deletion. [P1]
+
+Support delete-one and select/delete-multiple where provided.
+
+Confirm destructive actions.
+
+Avoid deleting unrelated projects.
+
+LIB-02 — Preserve history. [P1]
+
+Deleting a project must not unintentionally remove the operation history
+the user previously requested to retain.
+
+LIB-03 — Recoverable projects. [P1]
+
+Support project trash/restore and recovery of interrupted projects
+where implemented.
+
+Keep valid generation checkpoints and project state.
+
+LIB-04 — Project identity and save state. [P1]
+
+The current project title/save status must reflect the actual active
+project and saved state.
+
+LIB-05 — Known project-lifecycle limitations. [P2]
+
+Standalone blank-project creation and richer duplicate/archive/export/
+backup-restore workflows were identified as incomplete in the existing
+closure ledger.
+
+Verify each capability. Implement as required or record it clearly as
+still open; do not silently remove it from the backlog.
+
+============================================================
+SECTION 18 — AUDIOBOOK GENERATION, CHECKPOINTS AND OUTPUT
+============================================================
+
+GEN-01 — Real generation workflow. [P0]
+
+Ensure generation uses the actual selected:
+- Project.
+- Narrator/audio profile.
+- Character assignments.
+- Pronunciation settings.
+- BGM/cue settings.
+- Output settings.
+- Saved metadata.
+
+GEN-02 — Resumable and recoverable generation. [P1]
+
+Preserve existing per-chapter/per-chunk checkpoint safeguards.
+
+Resume only valid chunks from compatible narration, voice and settings.
+
+Invalidate/regenerate chunks that are no longer compatible.
+
+Handle missing/corrupt chunks, cancellation and failures safely.
+
+GEN-03 — Pause/cancel/retry. [P1]
+
+Ensure operations remain responsive and report true status.
+
+Verify pause/resume at safe checkpoints, cancellation, retry and
+recovery from interrupted jobs.
+
+GEN-04 — Empty/ineligible chapters. [P1]
+
+Skip empty/ineligible chapters according to the existing generation
+rules and reject an all-empty book with a clear repair message.
+
+Do not silently generate an empty audiobook.
+
+GEN-05 — M4B validation and metadata. [P0]
+
+The current supported audiobook output is chaptered M4B.
+
+Validate actual output audio, chapter markers, title, author, narrator,
+language, genre, cover art, decodability and configured bitrate.
+
+M4A and MP3 audiobook export were identified as unsupported; do not
+rename files to imply those formats are supported.
+
+GEN-06 — Preview/final parity. [P0]
+
+Preview and final generation must use the same saved voice identity,
+pronunciation state, BGM enabled/disabled state, selected BGM strategy,
+effective track assignments, volume settings, timing and relevant cue rules.
+
+Same BGM:
+Use the one selected book-default track throughout the story while BGM is On.
+
+Chapter-Based BGM:
+Ignore the book-default BGM. Use only the explicitly saved single BGM track
+for each assigned chapter. An unassigned chapter has no BGM; there is no
+silent fallback to the book-default track.
+
+Voice Only:
+Exclude all BGM and configured cues from both preview and final output.
+
+Version 1 does not support simultaneous/layered BGM tracks. Advanced
+multi-track mixing is deferred until after Version 1 is complete.
+
+============================================================
+SECTION 19 — INSTALLER, PACKAGE SIZE AND DOWNLOAD PERFORMANCE
+============================================================
+
+PKG-01 — Installer below 500 MB target. [P1]
+
+The user wants installation/download artifacts below 500 MB where
+feasible, without losing required functionality or reducing audio
+quality.
+
+Audit:
+- Largest bundled assets.
+- Duplicate files.
+- Compression/package options.
+- Optional vs required models.
+- Voice assets and dependencies.
+- Installer vs portable contents.
+- Artifact archive size vs installer executable size.
+
+Do not delete required assets or quality-related components merely to
+hit a number.
+
+If the target cannot be met without changing the supported offline/
+local-first experience, provide evidence and explain options.
+
+PKG-02 — Investigate slow downloads. [P2]
+
+The user reported inconsistent download speed even with fast internet
+and improved speed over hotspot.
+
+Investigate transfer throughput, artifact size, host/connection factors
+where measurable. Do not assume that Wi-Fi alone is the problem.
+
+PKG-03 — Preserve installer quality and branding. [P1]
+
+Retain correct:
+- Icon and transparent logo.
+- Installer branding.
+- Version/build display.
+- Desktop shortcuts where chosen.
+- Data-preserving installation/uninstallation behaviour.
+- Correct Premium V2 startup.
+
+PKG-04 — Verify exact artifacts. [P0]
+
+The final install/portable artifacts must correspond to the tested
+commit. Record artifact names, sizes, hashes, expiry and run URL.
+
+============================================================
+SECTION 20 — HELP & GUIDE
+============================================================
+
+HELP-01 — Update the complete guide after implementation. [P2]
+
+Document the final verified application, including:
+- Dashboard.
+- Library.
+- Import Studio.
+- Chapter Studio.
+- Voice Studio.
+- Character Studio.
+- Character Library.
+- Pronunciation Studio.
+- Sound Design.
+- Chapter BGM.
+- Production Studio and Input Project Details.
+- Audiobooks and mini-player.
+- History.
+- Background Jobs.
+- Models Center.
+- Performance Center.
+- Settings.
+- Help & Guide.
+
+HELP-02 — Reflect actual functionality. [P2]
+
+Explain real controls, saved state, data flow and error recovery.
+
+Do not document a simulated control as working.
+
+Remove outdated instructions for deleted workflows and update screenshots
+only after the implementation has been verified.
+
+HELP-03 — Document limitations honestly. [P2]
+
+Explicitly document unsupported capabilities and known limitations.
+Do not claim the application is bug-free merely because the test suite
+passes.
+
+============================================================
+SECTION 21 — INTEGRATION AND RELEASE ACCEPTANCE
+============================================================
+
+REL-01 — Reconcile outstanding change branches. [P0]
+
+Inspect PR #15, #18, #19, #20, #26 and #4, plus any newer branches/PRs.
+
+Determine:
+- Which fixes are already in the current branch.
+- Which are unmerged.
+- Which branches depend on other branches.
+- Whether the same files/behaviours conflict.
+- Which changes must be integrated.
+- Which tests must be repeated after integration.
+
+Preserve valid changes and avoid duplicate implementations.
+
+REL-02 — Verify full regression suite. [P0]
+
+Run tests only after implementation is authorized and the planned
+changes are ready.
+
+Investigate failures rather than changing tests merely to make a build
+green.
+
+Update outdated contracts only when the intended product behaviour
+has genuinely changed. Preserve meaningful regression coverage.
+
+REL-03 — Package the exact verified candidate. [P0]
+
+The final candidate must pass:
+- Regression tests.
+- Application/frozen build validation.
+- Required asset/critical module checks.
+- Installer build.
+- Portable build.
+- Artifact/hash generation.
+- Other relevant CI/security checks.
+
+The successful run's HEAD SHA must equal the intended candidate SHA.
+
+REL-04 — Test the real Windows app. [P0]
+
+Manually test the installed/portable app:
+- First launch.
+- Close/reopen.
+- Startup to Premium V2.
+- Main menu navigation.
+- Window resizing and scrolling.
+- Import.
+- Chapter editing and saving.
+- Voice selection/preview.
+- Character assignment.
+- Pronunciation.
+- Sound Design/BGM/cues.
+- Full generation.
+- Playback/seek/volume/chapter navigation.
+- Cancellation/recovery.
+- History and Background Jobs.
+- Settings persistence.
+- Error/recovery states.
+
+Repeat key UI tests at the specified resolutions.
+
+REL-05 — Real audio acceptance. [P0]
+
+Validate actual generated audio rather than static files or placeholder
+metrics.
+
+Check:
+- Voice identity.
+- Emotion.
+- Foreign-language pronunciation.
+- Character assignment.
+- BGM/cues.
+- Audio level balance.
+- Chapter transitions.
+- M4B playback.
+- Metadata/cover/chapter markers.
+- Actual generation time and preview target.
+
+REL-06 — Never misrepresent completion. [P0]
+
+A successful build only proves what its tests/build steps actually cover.
+
+Do not call the app complete until the requested code changes, matching
+tests, packaging and required runtime acceptance have evidence.
+
+REL-07 — Version 1.2.0 release/versioning gate. [P0]
+
+Version 1.2.0 is the planned target for the complete frozen scope in this
+register. Continue fixing, integrating and verifying requirements without
+prematurely changing the product version or publishing a release candidate
+as if it were final.
+
+Only after all requested requirements are verified complete—or any remaining
+blocked/unsupported item is explicitly reviewed and approved by the user—may
+the application version be updated to 1.2.0. Then build installer and
+portable artifacts from the exact accepted commit, verify their hashes and
+version display, and record the final run/artifact evidence. Do not tag or
+publish Version 1.2.0 from an older or unverified commit.
+
+============================================================
+SECTION 22 — NEW REQUIREMENTS ADDED FROM THE 26 OCTOBER 2026
+SCREENSHOTS AND AUDIO
+============================================================
+
+This section is a consolidated reminder of the most recent batch.
+It is included separately so none of those additions is overlooked.
+
+A. Voice Studio preview performance:
+30-second preview under 60 seconds, without deliberate quality loss.
+The supplied screenshot reported approximately 266.5 seconds synthesis
+time for approximately 34.6 seconds of audio.
+
+B. Voice quality:
+Preserve character identity while varying emotional delivery naturally.
+
+C. Story-aware audio:
+Laughter, sobbing, sad delivery, background voices, door creaks,
+glass cracks and other appropriate effects should be considered according
+to story context.
+
+D. Global pronunciation:
+Correct pronunciation for Japanese and other foreign-language names
+written in English; saved rules must be used in production.
+
+E. Character Studio:
+Assigned Cast lists character name, series and dialogue count.
+Audio Profile dropdown lists all saved profiles.
+Test Voice uses selected dialogue/profile and supports stop/resume/replay.
+Statistics become Assigned Voice, Dialogue Lines, Chapters and AI Assigned.
+AI Assigned is a real percentage of AI-assigned dialogue, not confidence.
+Manual rows use green highlighting; AI rows use golden highlighting.
+
+F. Pronunciation Studio:
+Remove Review Terms and Voice Test Matrix.
+Dictionary is the primary interface.
+Columns: S.No, Written, Pronounce as, Audio Preview, Options, Enable.
+Search both written/pronunciation text across AI/manual entries.
+Support profile selection, preview, edit/delete, bulk deletion, Add Entry,
+Analyze Book, individual Enable switches and the global pronunciation
+toggle synchronized with Generate.
+
+G. Sound Design:
+Remove top-right Preview Book Mix and Save & Sync to Production.
+Same BGM/Chapter-Based BGM must affect the actual output and are mutually
+exclusive Version 1 strategies.
+Same BGM uses one book-default track throughout the whole story.
+Chapter-Based BGM ignores the book-default track; only one explicitly
+selected track per chapter is used, and an unassigned chapter has no BGM.
+Do not silently fall back to book-default music or layer two BGM tracks.
+Advanced multi-track/layered mixing is deferred until after Version 1.
+Chapter assignment filters match the Music Library source filters and
+categories.
+Selected Track label in medium yellow, large track name and explicit
+Select confirmation.
+Chapter volume capped at 50%, with percentage display and real effect.
+Start offset/end behaviour must work and persist.
+Cue list contains Opening, Next Chapter and Closing only.
+Remove Scene Transition from fixed Book Cue Assignments.
+Cues are short clips of approximately 3–5 seconds maximum.
+Add preview Play/Pause and Save Cue Changes; keep auto-save responsive.
+Mix & Production Sync shows live current settings and audio levels.
+Save & Open Production Studio is the final confirmation action.
+
+H. Music Library:
+Categories: All, Fantasy adventure, Battle & warfare, Mystery, Horror,
+Romance, Sci-fi, Calm narration and Others.
+Import asks for category.
+Selected track preview supports Play/Pause.
+Master BGM volume defaults to 18%, maximum 50%.
+Same BGM uses one book-default track for the entire story.
+Chapter-Based BGM ignores the book-default track and uses only explicitly
+selected single tracks per chapter; unassigned chapters have no BGM.
+No side-by-side or layered BGM input is required for Version 1.
+Both strategies and their saved settings must be used in production.
+
+I. Input Project Details:
+Add the button near Open Output Folder and Cancel Job.
+Fields: Book Title, Author, Narrator, Publisher, Series, Series Volume,
+Language, Release Year, Genre, Cover Image and Save.
+Use real saved-value dropdowns for previous author/publisher/volume/
+language/year/genre entries.
+Narrator is fetched from the selected profile.
+Series connects to Character Library.
+Complete = green; incomplete = yellow and blocks full generation while
+preview remains available.
+
+J. Generation Engine:
+Real progress animation only while generating.
+Display actual chapter/details, elapsed time and remaining time for both
+preview and full generation.
+Provide Play/Pause for generated preview near the duration selector.
+Maintain 10/30/60/90-second options, default 30 seconds.
+Pronunciation and BGM/cue toggles must be live and synchronized.
+
+K. Production summary:
+Cover, author, language, narrator, character count, genre, music and
+output location must all be fetched from saved project/settings data.
+Same BGM displays the single book-default track used throughout the story.
+Chapter-Based BGM displays count of UNIQUE tracks explicitly assigned to
+chapters; the ignored book-default track is not counted unless it is also
+explicitly assigned to a chapter.
+An unassigned chapter is shown as No BGM; do not imply default fallback.
+Output path comes from Settings.
+
+L. Audiobooks:
+Make cards compact like Library.
+Fix actual audio-file loading despite metadata/cover being present.
+Full playback controls: seek, volume, speed, 15-second forward/back,
+chapter selection and previous/next chapter.
+Mini-player remains available after navigating away until explicitly
+closed or the user returns to Audiobooks.
+
+M. History:
+Accurate operation records and From Date/To Date filtering.
+
+N. Background Jobs:
+Readable layout, accurate counts, current status, progress/time/result
+details and real action states.
+
+O. Models Center:
+Audit installed model inventory, runtime health, dependencies, selectors,
+install/verify/repair/uninstall, storage and missing-model behaviour.
+
+P. Performance Center:
+Real PC hardware information and repeatable benchmark. Honest CPU/GPU/
+memory reporting, compatibility recommendations and comparisons using
+actual comparable measurements.
+
+Q. Help & Guide:
+Update the whole guide after implementation to match the verified app.
+
+
+R. Production Studio chapter-specific preview:
+Add a dropdown populated with every saved chapter in the selected project.
+Use the selected chapter only for Preview Audio; keep full-book generation
+unchanged. Preserve preview-duration controls, show the actual chapter and
+generated duration, and allow the valid generated preview file to be
+played and downloaded independently of full-book generation.
+
+============================================================
+SECTION 23 — FINAL ACCEPTANCE CHECKLIST
+============================================================
+
+Mark each item complete only with supporting evidence.
+
+[ ] Correct Premium V2 default and startup behaviour.
+[ ] UI layouts corrected across menus/resolutions.
+[ ] No persistent flicker with effects enabled.
+[ ] Navigation, sizing and scrolling are stable.
+[ ] 30-second preview under 60 seconds on a compatible tested setup.
+[ ] Voice identity stays consistent while emotion changes.
+[ ] Story-aware effects behave appropriately.
+[ ] Foreign-language pronunciation is correct in tested audio.
+[ ] Character assignments are real, project-specific and persistent.
+[ ] Character dialogue counts and unique chapter counts are accurate.
+[ ] AI Assigned percentage uses actual assignment-source data.
+[ ] Character Test Voice uses selected dialogue/profile and replays.
+[ ] Pronunciation Dictionary has requested columns/actions.
+[ ] Add Entry and Analyze Book populate the table correctly.
+[ ] Search and bulk delete work.
+[ ] Individual/global pronunciation toggles affect production.
+[ ] Same BGM uses one book-default track throughout the story.
+[ ] Chapter-Based BGM ignores the default track and uses only explicit
+    single-track chapter assignments; unassigned chapters have no BGM.
+[ ] No default-track fallback or simultaneous/layered BGM occurs in Version 1.
+[ ] Preview and final generation use the same BGM strategy and assignments.
+[ ] Chapter track filters and categories work.
+[ ] Chapter volume, start offset and end behaviour affect audio.
+[ ] Opening/Next Chapter/Closing cues are functional and readable.
+[ ] Mix levels update real preview/final audio.
+[ ] Input Project Details validates and persists metadata.
+[ ] Generation progress and timing reflect actual jobs.
+[ ] Production Studio chapter dropdown lists the active project's actual
+    saved chapters.
+[ ] Preview Audio can generate audio for the selected chapter only.
+[ ] Chapter preview respects duration controls and identifies the selected
+    chapter and actual generated duration.
+[ ] Chapter-specific preview audio plays and downloads as the actual file.
+[ ] Switching chapters/projects cannot attach stale preview audio to the
+    wrong project/chapter.
+[ ] Chapter selection affects Preview Audio only and never changes
+    full-book generation.
+[ ] Generation uses actual selected voice/pronunciation/sound settings.
+[ ] Completed M4B contains correct audio/metadata/chapters/cover.
+[ ] Audiobook card layout is compact.
+[ ] Audio files load and play from the actual local output.
+[ ] Player seek, volume, speed and chapter controls work.
+[ ] Mini-player persists appropriately across menus.
+[ ] History date range filters and durable records work.
+[ ] Background Jobs displays accurate data/status.
+[ ] Models Center reports the true inventory and health.
+[ ] Performance Center runs an actual benchmark.
+[ ] Import/chapter editing and recovery are verified.
+[ ] Library delete/recovery requirements are verified.
+[ ] Installer and portable package correspond to the tested commit.
+[ ] Package-size target and download performance have been audited.
+[ ] Help & Guide matches the verified application.
+[ ] All open PR dependencies and integration requirements are reconciled.
+[ ] Latest regression tests pass on the intended candidate SHA.
+[ ] Version 1.2.0 is applied/tagged only after all release acceptance gates
+    pass or remaining exceptions are explicitly approved by the user.
+[ ] Windows packaging succeeds on that same candidate SHA.
+[ ] Required real Windows and audio acceptance is recorded.
+[ ] Remaining unsupported features are explicitly documented.
+[ ] Master register and final handoff are updated.
+
+============================================================
+SECTION 24 — INSTRUCTIONS FOR EVERY FUTURE CHAT
+============================================================
+
+When this master register is pasted into a new chat:
+
+1. Verify the latest GitHub Actions state, current branch head, commit SHA,
+   artifacts and open PRs before assuming anything has changed or completed.
+
+2. Read the latest repository closure/roadmap/acceptance documents and
+   compare them with this master register.
+
+3. Reconcile completed requirements using real evidence. Do not just
+   repeat the entire list and call everything pending.
+
+4. Preserve all requirements, including newly added ones from this register
+   or from later user messages.
+
+5. If a requirement has been completed in a newer build, record the exact
+   requirement ID, commit SHA, test evidence and run URL. Do not mark it
+   complete solely because code mentions the feature.
+
+6. Distinguish automated pass from manual runtime acceptance.
+
+7. Do not start builds or modify code until the user explicitly authorizes
+   implementation. When authorized, make useful changes directly and avoid
+   repeatedly asking for information already given.
+
+8. Fix root causes rather than endlessly patching symptoms. Do not re-open
+   proven fixes unless new evidence reveals a regression.
+
+9. Work through dependencies in the appropriate order and preserve existing
+   working features.
+
+10. Every time a chat ends or is transferred, provide an updated continuation
+    checkpoint with:
+    - Latest verified build/run URL and number.
+    - Branch and HEAD SHA.
+    - Build/test outcome.
+    - Requirements completed with evidence.
+    - Requirements still open/unverified.
+    - Failures and cause.
+    - PR/branch dependencies.
+    - New requirements added.
+    - Exact next action.
+
+11. Do not ask the user to reconstruct the bugs list in each new chat.
+
+12. Do not state that the project is finished or bug-free until the final
+    acceptance criteria have been met.
+
+13. If any requirement cannot be implemented or verified, state why and
+    keep it explicitly open rather than silently removing it.
+
+14. Keep the intended Premium V2 Dragon Studio design and the user's real
+    functional requirements as the baseline.
+
+15. Prioritize a stable, working, fully integrated application over simply
+    increasing the build number.
+
+CURRENT HANDOFF STATE:
+- Last verified successful Windows build: #1441.
+- Last verified successful build SHA:
+  9d62701877ed4a99280607f1932c1c7accaf3d05.
+- Branch at that checkpoint:
+  fix/native-ui-font-scale-learning-ai.
+- Automated tests/build/cleanup passed for that run.
+- Release publication was skipped.
+- The screenshots demonstrate remaining UI/audio/workflow defects.
+- Multiple feature branches/PRs were still open at the last check.
+- The full request list above remains the source of truth.
+- Planned release target: Version 1.2.0, after all requested changes meet
+  the release acceptance requirements. Do not bump/tag/publish that version
+  before acceptance on the exact candidate commit.
+- PROD-15 is now part of the frozen Version 1.2.0 scope: select a saved
+  project chapter for Preview Audio only and download the resulting audio.
+- No requirements are to be dropped silently.
+- BGM Version 1 rules are fixed in this register: Same BGM means one
+  book-default track throughout the story; Chapter-Based BGM ignores that
+  default and uses only explicitly assigned single tracks per chapter, with
+  no default fallback or layered BGM. An unassigned chapter has no BGM.
+- Advanced simultaneous/layered BGM mixing is deferred until after Version 1.
+- No code changes/builds are authorized just by receiving this register.
+- Wait for the user's explicit instruction to begin implementation.
+
+END OF MASTER REGISTER
+============================================================
