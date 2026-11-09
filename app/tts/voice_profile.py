@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import hashlib
 from pathlib import Path
 import json
 import shutil
@@ -39,6 +40,58 @@ class VoiceProfile:
     # profiles migrate automatically on load; this prevents stale generated
     # reference audio from being reused by a newly saved voice.
     qwen_profile_id: str = ""
+
+
+def stable_qwen_profile_id(
+    *,
+    mode: str,
+    voice_id: str,
+    language: str = "English",
+    prompt: str = "",
+    seed: int | None = None,
+    sample_path: str | None = None,
+    reference_text: str = "",
+    anchor_text: str = "",
+) -> str:
+    """Return the same Qwen identity for a live draft preview and its saved profile.
+
+    A new VoiceDesign draft is previewed before it is saved. Generating a random
+    profile ID independently in those two paths makes the preview's canonical
+    voice anchor differ from the saved profile used by audiobook generation.
+    Derive the ID only from voice-defining settings so a profile rename does not
+    change its acoustic identity.
+    """
+    normalized_mode = str(mode or "custom").strip().casefold()
+    normalized_voice = str(voice_id or "").strip()
+    sample_signature = ""
+    if sample_path:
+        candidate = Path(str(sample_path)).expanduser()
+        try:
+            candidate = candidate.resolve()
+        except OSError:
+            candidate = candidate.absolute()
+        try:
+            stat = candidate.stat()
+            sample_signature = f"{candidate}:{stat.st_size}:{stat.st_mtime_ns}"
+        except OSError:
+            sample_signature = f"{candidate}:missing"
+    try:
+        normalized_seed = int(seed) if seed not in (None, "") else None
+    except (TypeError, ValueError, OverflowError):
+        normalized_seed = None
+    identity = {
+        "schema": "ryu-qwen-profile-identity-v1",
+        "mode": normalized_mode,
+        "voice_id": normalized_voice,
+        "language": str(language or "English").strip().casefold(),
+        "prompt": str(prompt or "").strip(),
+        "seed": normalized_seed,
+        "sample": sample_signature,
+        "reference_text": str(reference_text or "").strip(),
+        "anchor_text": str(anchor_text or "").strip(),
+    }
+    payload = json.dumps(identity, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
 
 
 def profiles_file() -> Path:
