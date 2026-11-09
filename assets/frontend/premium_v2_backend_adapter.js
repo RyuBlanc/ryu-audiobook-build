@@ -6186,22 +6186,36 @@ function renderProductionMetadataGate(active) {
           input.disabled = true;
           narratorOnlySavePromise = (async () => {
             try {
+              // The control is created once and reused when the user switches
+              // books. Resolve the displayed and persisted identities at click
+              // time; never retain the project from the first render closure.
+              const displayedProject = window.ryuPremiumActiveProject || null;
+              if (!displayedProject?.folder) {
+                throw new Error('Open a saved project before changing Narrator-Only Generation.');
+              }
+              const active = await call('project.get_active', {});
+              const normalizeFolder = value => String(value || '')
+                .replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+              if (!active?.folder ||
+                  normalizeFolder(active.folder) !== normalizeFolder(displayedProject.folder)) {
+                throw new Error('The active project changed while saving Narrator-Only Generation. Reopen Production and retry.');
+              }
               const saved = await call('production.narrator_only.save', {
                 enabled:requested,
-                expected_project_folder:String(project?.folder || '')
+                expected_project_folder:String(active.folder || '')
               });
-              if (saved.project_folder !== String(project?.folder || '')) {
+              if (normalizeFolder(saved?.project_folder) !== normalizeFolder(active.folder)) {
                 throw new Error('The active project changed while saving Narrator-Only Generation. Reopen Production and retry.');
               }
               input.checked = saved.enabled === true;
-              project.narrator_only_generation = input.checked;
-              window.ryuPremiumActiveProject = {...project,narrator_only_generation:input.checked};
+              window.ryuPremiumActiveProject = {...active,narrator_only_generation:input.checked};
               const status = $('narratorOnlyGenerationStatus');
               if (status) status.textContent = input.checked
                 ? 'Saved for this book. 0 configured character voice profiles; the saved narrator reads all narration and dialogue.'
                 : 'Off. Character assignments and speaker review will be used.';
             } catch (error) {
-              input.checked = project?.narrator_only_generation === true;
+              const currentProject = window.ryuPremiumActiveProject || null;
+              input.checked = currentProject?.narrator_only_generation === true;
               message(error?.message || String(error), true);
               throw error;
             } finally { input.disabled = false; }
