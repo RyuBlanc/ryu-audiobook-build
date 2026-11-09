@@ -1014,7 +1014,8 @@
             .map(element => ({element,rect:element.getBoundingClientRect(),style:getComputedStyle(element)}))
             .filter(item => item.rect.width > 1 && item.rect.height > 1 &&
               item.style.display !== "none" && item.style.visibility !== "hidden" &&
-              Number(item.style.opacity || 1) > 0 && !item.element.closest('[aria-hidden="true"]'));
+              Number(item.style.opacity || 1) > 0 && !item.element.closest('[aria-hidden="true"]') &&
+              !item.element.closest("details:not([open])"));
           if (destination === "models") {
             const overflowingCardControls = visibleControls.flatMap(item => {
               const card = item.element.closest(".model-card");
