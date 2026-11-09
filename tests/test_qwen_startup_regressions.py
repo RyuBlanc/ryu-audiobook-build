@@ -147,5 +147,15 @@ class StartupAndNavigationRegressionTests(unittest.TestCase):
         self.assertIn("route_character_cast:false", preview)
 
 
+    def test_navigation_does_not_refresh_the_whole_library_on_every_module_change(self):
+        source = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        start = source.index("function bindMiniPlayerNavigation()")
+        end = source.index("function updateProjectDeleteButton()", start)
+        navigation = source[start:end]
+        self.assertIn("if (page === 'dashboard' || page === 'library')", navigation)
+        self.assertEqual(1, navigation.count("refreshProjects().catch(() => {});"))
+        self.assertIn("}, 15000);", navigation)
+
+
 if __name__ == "__main__":
     unittest.main()
