@@ -667,3 +667,17 @@ The next `[artifact-checkpoint]` run must execute the frozen Windows executable,
 
 Even if that run passes, the user's actual saved book, installed-PC full-book listening, real interruption/recovery, and physical Qwen CUDA/AMD/Intel/iGPU benchmarks remain separate acceptance gates. This correction does not close unrelated P0/P1 requirements or authorize Version 1.2.0 release.
 
+
+
+## 9 November 2026 — GEN-07 packaged project-summary persistence correction
+
+**Active branch:** `stage-5/xapp08-recovery-reentry-2026-11-08`  
+**Failing packaged checkpoint:** Build #2996, source head `807f17337a366639cd23aa4a0ee4c5781ebe6215`  
+**Regression:** `d3a89ea475b816a969a2ae65cd0ed94600ec7f1a`  
+**Source correction:** `e8885c010eba64c92eba604bec2f246a2fa8f626`
+
+Build #2996 passed 1,438 regression tests, frozen application startup and bundled asset checks. Its real packaged Sound Design/Music Library acceptance generated the narrator-only book, and the durable job and History assertions passed. The final owning-project assertion failed because the project summary did not return `character_voice_profile_count`, even though generation completion persists that immutable per-generation value in `state.json`. The summary already exposed a separate `configured_character_voice_profile_count` derived from the current saved character assignments; that is not the same field as the generation snapshot asserted by GEN-07.
+
+The added regression requires the active-project summary to return the persisted `generation_mode`, `narrator_only_generation`, and `character_voice_profile_count`. The fix exposes the saved count with non-negative integer normalization and falls back to the currently configured count for older projects without a generation snapshot. It preserves the existing derived configured-cast field and does not weaken job ownership, output validation, or readiness guards.
+
+**Status:** code and regression committed; matching-head full tests and packaged Windows acceptance are pending. Build #2996 produced no installer or release artifacts because the package gate correctly stopped at the failed acceptance. Actual saved-book listening, user-PC performance, physical Qwen device tests, and display/DPI acceptance remain pending.
