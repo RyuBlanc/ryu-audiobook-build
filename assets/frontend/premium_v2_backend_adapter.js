@@ -5594,7 +5594,7 @@ function renderProductionMetadataGate(active) {
       narratorReady ? 'ready' : 'warn');
 
     const narratorOnly = active.narrator_only_generation === true;
-    let characterStatus = narratorOnly ? 'Bypassed · saved narrator reads all passages' : 'Character analysis not run';
+    let characterStatus = narratorOnly ? '0 configured character voice profiles · character voice assignment not required; saved narrator reads all passages' : 'Character analysis not run';
     let characterKind = narratorOnly ? 'ready' : 'warn';
     if (!narratorOnly && analysisDone && totalCharacters === 0) {
       characterStatus = 'No character speakers detected';
@@ -6127,7 +6127,7 @@ function renderProductionMetadataGate(active) {
               window.ryuPremiumActiveProject = {...project,narrator_only_generation:input.checked};
               const status = $('narratorOnlyGenerationStatus');
               if (status) status.textContent = input.checked
-                ? 'Saved for this book. The saved narrator reads all narration and dialogue.'
+                ? 'Saved for this book. 0 configured character voice profiles; the saved narrator reads all narration and dialogue.'
                 : 'Off. Character assignments and speaker review will be used.';
             } catch (error) {
               input.checked = project?.narrator_only_generation === true;
@@ -6143,12 +6143,12 @@ function renderProductionMetadataGate(active) {
         title.textContent = 'Narrator-Only Generation';
         const description = document.createElement('small');
         description.className = 'muted';
-        description.textContent = 'Use the saved narrator for every passage, including dialogue. Requires a saved book or series narrator.';
+        description.textContent = 'Use the saved narrator for every passage, including dialogue. Available only with zero configured character voice profiles and a saved book or series narrator. Adding a character voice profile returns production to multi-character speaker review.';
         const status = document.createElement('small');
         status.id = 'narratorOnlyGenerationStatus';
         status.className = 'muted';
         status.textContent = input.checked
-          ? 'Saved for this book. The saved narrator reads all narration and dialogue.'
+          ? 'Saved for this book. 0 configured character voice profiles; the saved narrator reads all narration and dialogue.'
           : 'Off. Character assignments and speaker review will be used.';
         copy.append(title,description,status);
         row.append(input,copy);
