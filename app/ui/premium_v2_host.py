@@ -925,23 +925,14 @@ class PremiumV2Bridge(QObject):
         narrator_only_eligible = (
             narrator_only_requested and configured_character_voice_profile_count == 0
         )
-        character_cast_readiness_complete = (
-            dialogue_index_ready
-            and len(character_assignment_issues) == 0
-            and pending_dialogue_count == 0
-            and conflicting_dialogue_count == 0
-            and dialogue_index_issue_count == 0
-        )
-        # Once analysis confirms that a book has no character speakers, there is
-        # no missing assignment to penalize. Otherwise keep the existing
-        # character roster ratio, but never score a stale/unreviewed dialogue
-        # index as fully prepared.
+        # The existing Dashboard "prepared" percentage remains a project
+        # completeness score. Cast/dialogue eligibility is reported separately
+        # and is a hard gate on generation; do not silently change the meaning
+        # of the historical percentage when the canonical index is pending.
         character_voice_ratio = (
             len(assigned_character_names) / len(character_names)
             if character_names else (1.0 if character_analysis_done else 0.0)
         )
-        if not narrator_only_eligible and not character_cast_readiness_complete:
-            character_voice_ratio = 0.0
         # Resolve the effective narrator from the saved project override or the live
         # series default. A missing/deleted profile is not considered ready.
         narrator_selection = self._narrator_series_default_read(
