@@ -811,15 +811,39 @@
     const narratorName = String(project.narrator || project.voice_profile || '').trim();
     const narratorReady = project.narrator_voice_configured === true &&
       project.narrator_profile_available === true && Boolean(String(project.voice_profile || '').trim());
+    const narratorOnlyRequested = project.narrator_only_generation === true;
+    const configuredCharacterVoiceCount = Math.max(0, Number(
+      project.configured_character_voice_profile_count ?? project.character_voice_count ?? 0
+    ));
+    const narratorOnly = narratorOnlyRequested && configuredCharacterVoiceCount === 0;
     const characterCount = Number(project.character_count || 0);
     const characterVoiceCount = Math.max(0, Number(project.character_voice_count || 0));
-    const narratorOnly = project.narrator_only_generation === true && characterVoiceCount === 0;
-    const characterReviewed = Boolean(project.character_analysis_done);
-    const charactersReady = narratorOnly || (characterReviewed &&
-      (characterCount === 0 || characterVoiceCount >= characterCount));
+    const dialogueIndexReady = project.dialogue_index_ready === true;
+    const dialogueReviewComplete = project.dialogue_review_complete === true;
+    const characterAssignmentIssues = Math.max(0, Number(project.character_assignment_issue_count || 0));
+    const pendingDialogue = Math.max(0, Number(project.pending_dialogue_count || 0));
+    const conflictingDialogue = Math.max(0, Number(project.conflicting_dialogue_count || 0));
+    const dialogueIndexIssues = Math.max(0, Number(project.dialogue_index_issue_count || 0));
+    const charactersReady = narratorOnly || (
+      dialogueIndexReady && dialogueReviewComplete && characterAssignmentIssues === 0
+    );
+    const charactersDetail = narratorOnly
+      ? '0 configured character voice profiles · saved narrator reads all passages'
+      : (narratorOnlyRequested && configuredCharacterVoiceCount > 0
+        ? configuredCharacterVoiceCount + ' configured profile(s) · switch to multi-character review'
+        : (!dialogueIndexReady
+          ? 'Dialogue index unavailable · refresh Character Studio'
+          : (characterAssignmentIssues
+            ? characterAssignmentIssues + ' saved character assignment(s) need attention'
+            : (!dialogueReviewComplete
+              ? pendingDialogue + ' passage(s) need review · ' + conflictingDialogue
+                + ' conflict(s) · ' + dialogueIndexIssues + ' index issue(s)'
+              : (characterCount === 0
+                ? 'No character dialogue needs review'
+                : characterVoiceCount + ' / ' + characterCount + ' character voice assignment(s)')))));
     const outputReady = project.output_configured === true &&
       project.output_folder_ready === true && project.output_format_supported === true;
-    const canGenerate = chaptersReady && metadataComplete && narratorReady && outputReady;
+    const canGenerate = chaptersReady && metadataComplete && narratorReady && outputReady && charactersReady;
     const pronunciationCount = Number(project.pronunciation_rule_count || 0);
     const soundConfigured = Boolean(project.sound_design_configured);
     const chapterDetail = chaptersReady
@@ -835,10 +859,7 @@
       {key:'import', ready:metadataComplete, detail:metadataDetail},
       {key:'chapters', ready:chaptersReady, detail:chapterDetail},
       {key:'voices', ready:narratorReady, detail:narratorReady ? (narratorName || project.voice_profile) : 'Choose an available saved narrator'},
-      {key:'characters', ready:charactersReady, detail:narratorOnly ? 'Narrator-only · character voices bypassed' :
-        (!characterReviewed ? 'Not analyzed' :
-          (characterCount === 0 ? 'No characters found' :
-            (charactersReady ? 'Voices assigned' : (characterCount-characterVoiceCount) + ' need review')))},
+      {key:'characters', ready:charactersReady, detail:charactersDetail},
       {key:'pronunciation', ready:true, detail:pronunciationCount ? pronunciationCount + ' saved rules' : 'Names & terms'},
       {key:'sound', ready:true, detail:soundConfigured ? 'Configured' : 'Music & effects'},
       {key:'generate', ready:canGenerate, detail:project.completed && project.output_path ? 'Audiobook ready' :
@@ -5266,11 +5287,30 @@
 
   function productionGenerationBlockReason(active) {
     if (!active?.folder) return 'Open a saved project before starting full generation.';
-    const configuredCharacterVoiceCount = Math.max(0, Number(active.character_voice_count || 0));
-    if (active.narrator_only_generation === true && configuredCharacterVoiceCount > 0) {
+    const configuredCharacterVoiceCount = Math.max(0, Number(
+      active.configured_character_voice_profile_count ?? active.character_voice_count ?? 0
+    ));
+    const narratorOnly = active.narrator_only_generation === true;
+    if (narratorOnly && configuredCharacterVoiceCount > 0) {
       return 'Narrator-Only Generation is no longer available because '
         + configuredCharacterVoiceCount
-        + ' character voice profile(s) are configured. Turn it off to use multi-character speaker review.';
+        + ' valid character voice profile(s) are configured. Turn it off to use multi-character speaker review.';
+    }
+    if (!narratorOnly && active.dialogue_index_ready !== true) {
+      return 'The canonical dialogue index could not be verified. Refresh Character Studio and retry before generating.';
+    }
+    const assignmentIssues = Math.max(0, Number(active.character_assignment_issue_count || 0));
+    if (!narratorOnly && assignmentIssues > 0) {
+      return assignmentIssues + ' saved character voice assignment(s) need attention before generation.';
+    }
+    const pendingDialogue = Math.max(0, Number(active.pending_dialogue_count || 0));
+    const conflictingDialogue = Math.max(0, Number(active.conflicting_dialogue_count || 0));
+    const indexIssues = Math.max(0, Number(active.dialogue_index_issue_count || 0));
+    if (!narratorOnly && active.dialogue_review_complete !== true) {
+      return 'Generation is blocked until dialogue review is complete: '
+        + pendingDialogue + ' passage(s) need speaker review, '
+        + conflictingDialogue + ' conflict(s), and '
+        + indexIssues + ' source/index issue(s).';
     }
     const unsaved = metadataDialogDirty && metadataDialogProjectFolder === String(active.folder);
     if (unsaved) return 'Save or discard Input Project Details changes before generation.';
@@ -5599,25 +5639,39 @@ function renderProductionMetadataGate(active) {
       narratorReady ? 'Saved voice profile · ' + narratorProfile : 'No saved narrator voice profile',
       narratorReady ? 'ready' : 'warn');
 
-    const configuredCharacterVoiceCount = Math.max(0, Number(active.character_voice_count || 0));
+    const configuredCharacterVoiceCount = Math.max(0, Number(
+      active.configured_character_voice_profile_count ?? active.character_voice_count ?? 0
+    ));
     const narratorOnlyRequested = active.narrator_only_generation === true;
     const narratorOnly = narratorOnlyRequested && configuredCharacterVoiceCount === 0;
+    const assignmentIssues = Math.max(0, Number(active.character_assignment_issue_count || 0));
+    const pendingDialogue = Math.max(0, Number(active.pending_dialogue_count || 0));
+    const conflictingDialogue = Math.max(0, Number(active.conflicting_dialogue_count || 0));
+    const dialogueIndexIssues = Math.max(0, Number(active.dialogue_index_issue_count || 0));
     let characterStatus = narratorOnly
       ? '0 configured character voice profiles · character voice assignment not required; saved narrator reads all passages'
       : 'Character analysis not run';
     let characterKind = narratorOnly ? 'ready' : 'warn';
     if (narratorOnlyRequested && configuredCharacterVoiceCount > 0) {
       characterStatus = configuredCharacterVoiceCount
-        + ' configured character voice profile(s) · narrator-only is no longer eligible; switch to multi-character speaker review';
+        + ' valid character voice profile(s) · narrator-only is no longer eligible; switch to multi-character speaker review';
+      characterKind = 'warn';
+    } else if (!narratorOnly && active.dialogue_index_ready !== true) {
+      characterStatus = 'Canonical dialogue index unavailable · refresh Character Studio before generation';
+      characterKind = 'warn';
+    } else if (!narratorOnly && assignmentIssues > 0) {
+      characterStatus = assignmentIssues + ' saved character voice assignment(s) need attention';
+      characterKind = 'warn';
+    } else if (!narratorOnly && active.dialogue_review_complete !== true) {
+      characterStatus = pendingDialogue + ' passage(s) need speaker review · '
+        + conflictingDialogue + ' conflict(s) · ' + dialogueIndexIssues + ' index issue(s)';
       characterKind = 'warn';
     } else if (!narratorOnly && analysisDone && totalCharacters === 0) {
-      characterStatus = 'No character speakers detected';
+      characterStatus = 'No character dialogue needs speaker review';
       characterKind = 'ready';
-    } else if (!narratorOnly && totalCharacters > 0) {
-      const missing = Math.max(0, totalCharacters - assignedCharacters);
-      characterStatus = assignedCharacters + ' / ' + totalCharacters + ' assigned' +
-        (missing ? ' · ' + missing + ' need voice assignment' : '');
-      characterKind = missing ? 'warn' : 'ready';
+    } else if (!narratorOnly) {
+      characterStatus = configuredCharacterVoiceCount + ' valid character voice profile(s) · dialogue index reviewed';
+      characterKind = 'ready';
     }
     setProductionStatus('productionCharacterVoices', characterStatus, characterKind);
 
