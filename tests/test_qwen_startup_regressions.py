@@ -153,7 +153,11 @@ class StartupAndNavigationRegressionTests(unittest.TestCase):
         end = source.index("function updateProjectDeleteButton()", start)
         navigation = source[start:end]
         self.assertIn("if (page === 'dashboard' || page === 'library')", navigation)
-        self.assertEqual(1, navigation.count("refreshProjects().catch(() => {});"))
+        # One guarded refresh runs when entering Dashboard/Library; the
+        # other is the low-frequency Dashboard-only refresh timer.
+        self.assertEqual(2, navigation.count("refreshProjects().catch(() => {});"))
+        self.assertIn("if (page === 'dashboard' || page === 'library')", navigation)
+        self.assertIn("if (dashboardPageActive()) refreshProjects().catch(() => {});", navigation)
         self.assertIn("}, 15000);", navigation)
 
 
