@@ -1015,6 +1015,25 @@
             .filter(item => item.rect.width > 1 && item.rect.height > 1 &&
               item.style.display !== "none" && item.style.visibility !== "hidden" &&
               Number(item.style.opacity || 1) > 0 && !item.element.closest('[aria-hidden="true"]'));
+          if (destination === "models") {
+            const overflowingCardControls = visibleControls.flatMap(item => {
+              const card = item.element.closest(".model-card");
+              if (!card) return [];
+              const controlRect = item.element.getBoundingClientRect();
+              const cardRect = card.getBoundingClientRect();
+              const outside = controlRect.left < cardRect.left - 2 ||
+                controlRect.right > cardRect.right + 2 ||
+                controlRect.top < cardRect.top - 2 || controlRect.bottom > cardRect.bottom + 2;
+              return outside ? [{model:card.dataset.modelId,
+                control:item.element.getAttribute("aria-label") || item.element.textContent.trim().slice(0,48),
+                controlRect:{left:Math.round(controlRect.left),top:Math.round(controlRect.top),right:Math.round(controlRect.right),bottom:Math.round(controlRect.bottom)},
+                cardRect:{left:Math.round(cardRect.left),top:Math.round(cardRect.top),right:Math.round(cardRect.right),bottom:Math.round(cardRect.bottom)},
+                position:getComputedStyle(item.element).position}] : [];
+            });
+            must(overflowingCardControls.length === 0,
+              "Models Center controls escape their owning cards at " + label + ": " +
+                JSON.stringify(overflowingCardControls.slice(0,8)));
+          }
           const overlappingControls = [];
           for (let leftIndex = 0; leftIndex < visibleControls.length; leftIndex += 1) {
             const left = visibleControls[leftIndex];

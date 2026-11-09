@@ -64,6 +64,7 @@ class Stage8PackagedAcceptanceContractTests(unittest.TestCase):
         self.assertIn(".model-actions .btn{min-width:0;max-width:100%;white-space:normal;overflow-wrap:anywhere}", html)
         self.assertIn("#models .model-grid{margin-bottom:40px}#models .install-queue{margin-top:0}", html)
         self.assertIn("grid.style.paddingBottom = '48px';", adapter)
+        self.assertIn('align-self:flex-start;height:fit-content;min-height:0', adapter)
 
     def test_production_chapter_refresh_preserves_explicit_selection(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
