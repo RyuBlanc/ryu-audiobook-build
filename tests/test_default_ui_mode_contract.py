@@ -43,7 +43,11 @@ class DefaultUiModeContractTests(unittest.TestCase):
         self.assertIn("RYU_UI_MODE=native", self.source)
         self.assertRegex(
             self.source,
-            r'if ui_mode == "native":\s*\n\s*window = ProjectWorkflow\(\)',
+            r'if ui_mode == "native":\s*\n(?:\s*#.*\n)*\s*from app\.ui\.workflow import ProjectWorkflow\s*\n\s*window = ProjectWorkflow\(\)',
+        )
+        self.assertNotRegex(
+            self.source.split("def main()", 1)[0],
+            r"from app\.ui\.workflow import ProjectWorkflow",
         )
         self.assertNotRegex(self.source, r"else:\s*\n\s*window = ProjectWorkflow\(\)")
 
