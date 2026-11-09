@@ -584,6 +584,10 @@ class MetadataBridgeTests(unittest.TestCase):
 
 class ProjectSummaryReadinessHarness:
     _project_summary = host.PremiumV2Bridge._project_summary
+    _effective_generation_character_rows = host.PremiumV2Bridge._effective_generation_character_rows
+    _character_series_for_voice_assignment = staticmethod(
+        host.PremiumV2Bridge._character_series_for_voice_assignment
+    )
 
     def _project_series_name(self, project, state=None):
         values = state if isinstance(state, dict) else load_state(project.folder)
@@ -633,12 +637,15 @@ class ProjectSummaryReadinessTests(unittest.TestCase):
         save_state(folder, state)
         return project, state, cover
 
-    def _summary(self, project, root: Path, *, writable: bool = True):
+    def _summary(
+        self, project, root: Path, *, writable: bool = True, profiles=None
+    ):
         audio_root = root / "AudioBooks"
         audio_root.mkdir(parents=True, exist_ok=True)
         with (
             patch.object(host, "audiobooks_root", return_value=audio_root),
             patch.object(host, "persist_project_cover", side_effect=lambda source, _folder: Path(source).resolve()),
+            patch.object(host, "load_profiles", return_value=list(profiles or [])),
             patch.object(host.os, "access", return_value=writable),
         ):
             return ProjectSummaryReadinessHarness()._project_summary(project)
@@ -659,6 +666,69 @@ class ProjectSummaryReadinessTests(unittest.TestCase):
             self.assertEqual(summary["empty_chapter_count"], 1)
             self.assertEqual(summary["excluded_chapter_count"], 1)
             self.assertTrue(summary["metadata_complete"])
+
+    def test_production_readiness_uses_the_canonical_dialogue_passage_index(self):
+        from types import SimpleNamespace
+        from app.chapters.speaker_segmentation import segment_chapter_speakers
+        from app.chapters.assignment_utils import assign_dialogue_to_chapters
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project, state, _cover = self._project(root)
+            chapter = Chapter(
+                1,
+                "Opening",
+                'The door opened. “Hello there,” Mira said. The room was quiet.',
+            )
+            project.chapters = [chapter]
+            project.save()
+            state["characters"] = [{"name": "Mira", "voice_profile": "Mira Voice"}]
+            save_state(project.folder, state)
+            profiles = [
+                SimpleNamespace(name="Mira Voice", voice_id="mira", provider="piper"),
+            ]
+
+            pending = self._summary(project, root, profiles=profiles)
+            self.assertTrue(pending["dialogue_index_ready"])
+            self.assertGreater(pending["dialogue_passage_count"], 0)
+            self.assertGreater(pending["pending_dialogue_count"], 0)
+            self.assertFalse(pending["dialogue_review_complete"])
+            self.assertEqual(pending["configured_character_voice_profile_count"], 1)
+
+            dialogue = next(
+                segment for segment in segment_chapter_speakers(chapter)
+                if segment.kind != "narration"
+            )
+            assign_dialogue_to_chapters(
+                project.chapters,
+                dialogue.text,
+                ["Mira"],
+                chapter_number=1,
+            )
+            project.save()
+
+            reviewed = self._summary(project, root, profiles=profiles)
+            self.assertTrue(reviewed["dialogue_index_ready"])
+            self.assertTrue(reviewed["dialogue_review_complete"])
+            self.assertEqual(reviewed["pending_dialogue_count"], 0)
+            self.assertGreater(reviewed["assigned_dialogue_count"], 0)
+            self.assertEqual(reviewed["configured_character_voice_profile_count"], 1)
+
+    def test_stale_character_profile_references_are_reported_not_counted_as_configured(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project, state, _cover = self._project(root)
+            project.chapters = [
+                Chapter(1, "Opening", '“Hello there,” Mira said.'),
+            ]
+            project.save()
+            state["characters"] = [{"name": "Mira", "voice_profile": "Deleted Voice"}]
+            save_state(project.folder, state)
+
+            summary = self._summary(project, root, profiles=[])
+            self.assertEqual(summary["configured_character_voice_profile_count"], 0)
+            self.assertGreater(summary["character_assignment_issue_count"], 0)
+            self.assertFalse(summary["dialogue_review_complete"])
 
     def test_missing_custom_output_directory_is_ready_when_existing_parent_is_writable(self):
         with tempfile.TemporaryDirectory() as temporary:
