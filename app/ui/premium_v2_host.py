@@ -4274,10 +4274,13 @@ class PremiumV2Bridge(QObject):
                         with preview_status_lock:
                             current_stage = str(preview_status.get("stage") or "Preparing preview")
                             current_detail = str(preview_status.get("message") or "")
+                        if not current_detail:
+                            # Keep a useful fallback before the provider reports
+                            # its first phase; once Qwen emits a real status, keep
+                            # that stage (for example, Loading model) intact.
+                            current_detail = "Synthesis is still running"
                         if "elapsed " not in current_detail.casefold():
-                            current_detail = (
-                                current_detail + " • " if current_detail else ""
-                            ) + f"elapsed {clock}"
+                            current_detail = current_detail + f" • elapsed {clock}"
                         self._job_update(
                             job_id, stage=current_stage,
                             message=current_detail,
