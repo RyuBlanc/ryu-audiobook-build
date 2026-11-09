@@ -38,10 +38,10 @@ class ProductionGenerationHarness:
                     "profile_name": profile.name,
                     "generation_mode": "narrator_only" if narrator_only else "character_cast",
                     "narrator_only": narrator_only,
-                    "character_voice_profile_count": 1 if narrator_only else 0,
-                    "effective_character_rows": [
-                        {"name":"Mira","series":"Saved Series","voice_profile":"Mira Voice"}
-                    ] if narrator_only else [],
+                    # Narrator-only mode is eligible only when no valid
+                    # character voice profiles are configured for this book.
+                    "character_voice_profile_count": 0,
+                    "effective_character_rows": [],
                 },
             )
         )
@@ -198,11 +198,14 @@ class Stage53ProductionPreflightTests(unittest.TestCase):
             self.assertNotEqual(positional[0].__class__.__name__, "CastAwareProvider")
             self.assertTrue(state["narrator_only_generation"])
             self.assertEqual(state["generation_mode"], "narrator_only")
+            self.assertEqual(state["character_voice_profile_count"], 0)
             job_result = bridge._job_update.call_args.kwargs["result"]
             self.assertTrue(job_result["narrator_only"])
             self.assertEqual(job_result["generation_mode"], "narrator_only")
+            self.assertEqual(job_result["character_voice_profile_count"], 0)
             self.assertTrue(result["narrator_only"])
             self.assertEqual(result["generation_mode"], "narrator_only")
+            self.assertEqual(result["character_voice_profile_count"], 0)
             bridge._resolve_narrator_for_generation.assert_called_once()
 
     def _run_terminal_callback(self, root: Path, *, narrator_only: bool, failed: bool = False,
