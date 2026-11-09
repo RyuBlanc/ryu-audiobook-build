@@ -2396,6 +2396,21 @@
         const active = await invoke("project.get_active", {});
         return String(active?.folder || "") === String(folder);
       }, 20000);
+      const expectedChapters = await invoke("chapter.list", {});
+      await waitFor(label + " chapter records hydrated in the UI", function () {
+        const active = window.ryuPremiumActiveProject;
+        const visible = window.ryuPremiumChapters;
+        return String(active?.folder || "") === String(folder) &&
+          Array.isArray(visible) && Array.isArray(expectedChapters) &&
+          visible.length === expectedChapters.length &&
+          expectedChapters.every(expected => {
+            const actual = visible.find(chapter => Number(chapter.number) === Number(expected.number));
+            return Boolean(actual) &&
+              String(actual.chapter_id || actual.id || "") === String(expected.chapter_id || expected.id || "") &&
+              String(actual.title || "") === String(expected.title || "") &&
+              String(actual.text || "") === String(expected.text || "");
+          });
+      }, 20000);
     }
     await openProjectFromDashboard(config.secondary_project_folder, "Secondary");
     await waitFor("Secondary project active", async function () {
@@ -3718,113 +3733,3 @@
     }, 360000);
     const controlHistory = await invoke("history.list", {});
     const controlHistoryRow = Array.isArray(controlHistory)
-      ? controlHistory.find(item => String(item.job_id || "") === retriedControlJobId) : null;
-    const controlProjectSummary = await invoke("project.get_active", {});
-    const normalizeControlOutput = value => String(value || "").replace(/\\/g, "/").toLowerCase();
-    const expectedControlOutput = normalizeControlOutput(config.control_output_path);
-    must(retriedControlJob.state === "completed" &&
-      String(retriedControlJob.retry_of_job_id || "") === controlJobId &&
-      normalizeControlOutput(retriedControlJob.output_path) === expectedControlOutput,
-      "The completed retry is not linked to the cancelled source job and expected M4B output.");
-    must(controlHistoryRow && controlHistoryRow.state === "completed" &&
-      String(controlHistoryRow.project_folder || "") === String(config.control_project_folder || "") &&
-      normalizeControlOutput(controlHistoryRow.output_path) === expectedControlOutput,
-      "History did not preserve the retried job's original project/output identity.");
-    must(String(controlProjectSummary.folder || "") === String(config.control_project_folder || "") &&
-      controlProjectSummary.completed === true &&
-      normalizeControlOutput(controlProjectSummary.output_path) === expectedControlOutput,
-      "The retried output is not attached to the original project summary.");
-    record("stage54_real_generation_retry_and_history_ownership", true,
-      "The installed Retry action restarted the original project from compatible checkpoints and unified the new job, History and output ownership.");
-    jobsModal.classList.remove("show");
-    window.go("dashboard");
-    await waitFor("Dashboard readiness flow updates for retried project", async function () {
-      const active = await invoke("project.get_active", {});
-      const stages = Array.from(document.querySelectorAll(".production-flow .flow-stage"));
-      const finalStage = stages[stages.length - 1];
-      const detail = finalStage?.querySelector(".flow-copy small");
-      return String(active.folder || "") === String(config.control_project_folder || "") &&
-        active.completed === true &&
-        Boolean(finalStage && finalStage.dataset.projectReady === "true" &&
-          String(detail?.textContent || "").includes("Audiobook ready"));
-    }, 20000);
-    const readinessProject = await invoke("project.get_active", {});
-    const readinessLabel = document.querySelector(".production-flow .flow-readiness span")?.textContent || "";
-    must(readinessProject.completed === true &&
-      String(readinessProject.status || "").toLowerCase() === "completed" &&
-      String(readinessLabel).includes("stages ready"),
-      "Dashboard production readiness did not reflect the completed retried audiobook.");
-    record("stage54_real_readiness_and_dashboard_ownership", true,
-      "Dashboard's live seven-stage production-readiness flow reported the retried project as Audiobook ready using the same completed project identity.");
-
-    // Now leave a real job paused at a persisted chunk checkpoint. The runner
-    // exits this frozen app process immediately after this marker; the next
-    // process must classify the durable paused job as interrupted and recover it.
-    await openProjectFromDashboard(config.recovery_project_folder, "Stage 5.4 restart recovery");
-    await waitFor("Stage 5.4 restart-recovery project activation", async function () {
-      const active = await invoke("project.get_active", {});
-      return String(active.folder || "") === String(config.recovery_project_folder || "");
-    }, 20000);
-    const selectedRecoveryNarrator = await invoke("voice.select", {
-      profile_name:narratorProfileName, backend:"automatic"
-    });
-    must(selectedRecoveryNarrator && selectedRecoveryNarrator.saved === true &&
-      String(selectedRecoveryNarrator.name || "") === narratorProfileName,
-      "The restart-recovery project could not persist the saved Offline Neural narrator.");
-    window.go("generate");
-    await waitFor("Stage 5.4 restart-recovery Production page", function () {
-      return document.querySelector("#generate")?.classList.contains("active") === true &&
-        Boolean(document.querySelector("#startGenerate"));
-    }, 20000);
-    await waitFor("Stage 5.4 restart-recovery metadata gate", function () {
-      const button = document.querySelector("#startGenerate");
-      return Boolean(button && !button.disabled);
-    }, 20000);
-    const jobsBeforeRecoveryStage = await invoke("job.list", {include_hidden:true});
-    const previousRecoveryIds = new Set((Array.isArray(jobsBeforeRecoveryStage) ? jobsBeforeRecoveryStage : [])
-      .filter(job => job.type === "audiobook-generation" &&
-        String(job.project_folder || "") === String(config.recovery_project_folder || ""))
-      .map(job => String(job.job_id || "")));
-    document.querySelector("#startGenerate").click();
-    let interruptedSourceJobId = "";
-    await waitFor("real restart-recovery generation start", async function () {
-      const rows = await invoke("job.list", {include_hidden:true});
-      const job = Array.isArray(rows) ? rows.find(item =>
-        item.type === "audiobook-generation" &&
-        String(item.project_folder || "") === String(config.recovery_project_folder || "") &&
-        !previousRecoveryIds.has(String(item.job_id || "")) &&
-        Boolean(item.job_id)) : null;
-      if (!job) return false;
-      interruptedSourceJobId = String(job.job_id);
-      return true;
-    }, 30000);
-    if (!jobsModal.classList.contains("show")) jobsButton.click();
-    const activeFilterForRecovery = jobsModal.querySelector('[data-job-filter="active"]');
-    if (activeFilterForRecovery) activeFilterForRecovery.click();
-    const recoveryRowSelector = '[data-backend-job="' + interruptedSourceJobId + '"]';
-    await waitFor("restart-recovery job appears as a real active row", function () {
-      return Boolean(document.querySelector(recoveryRowSelector));
-    }, 15000);
-    await waitFor("restart-recovery job exposes safe Pause", function () {
-      const row = document.querySelector(recoveryRowSelector);
-      return Boolean(row && row.querySelector('[data-job-action="pause"]'));
-    }, 60000);
-    document.querySelector(recoveryRowSelector).querySelector('[data-job-action="pause"]').click();
-    await waitFor("restart-recovery generation pauses at a saved chunk", async function () {
-      const job = await readJob(interruptedSourceJobId);
-      return Boolean(job && job.state === "paused");
-    }, 120000);
-    jobsModal.classList.remove("show");
-    await openProjectFromDashboard(config.project_folder, "Primary");
-    await waitFor("Primary project restored before forced app restart", async function () {
-      const active = await invoke("project.get_active", {});
-      return String(active.folder || "") === String(config.project_folder || "");
-    }, 20000);
-    record("stage54_real_restart_interruption_staged", true,
-      "A real saved-project GenerationManager job was paused at a committed chunk checkpoint and left durable for the next frozen-app process to recover.");
-    publish("passed");
-  } catch (error) {
-    errors.push(String(error && error.stack || error));
-    publish("failed");
-  }
-})();
