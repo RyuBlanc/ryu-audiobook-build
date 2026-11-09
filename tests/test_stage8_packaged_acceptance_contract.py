@@ -49,6 +49,14 @@ class Stage8PackagedAcceptanceContractTests(unittest.TestCase):
         self.assertIn("Production chapter selector diagnostic=", helper)
         self.assertIn("productionChapterPicker.selectedOptions?.[0]?.textContent", predicate_source)
 
+    def test_packaged_acceptance_rejects_overlapping_independent_controls_on_all_pages(self):
+        source = (ROOT / "tests" / "stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
+        self.assertIn("const visibleControls = Array.from(page.querySelectorAll(", source)
+        self.assertIn("const overlappingControls = [];", source)
+        self.assertIn('overlapWidth > 3 && overlapHeight > 3', source)
+        self.assertIn('page has overlapping independent controls at ', source)
+        self.assertIn('record("stage8_no_overlapping_controls_" + destination', source)
+
 
 if __name__ == "__main__":
     unittest.main()
