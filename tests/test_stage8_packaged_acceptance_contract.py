@@ -62,6 +62,17 @@ class Stage8PackagedAcceptanceContractTests(unittest.TestCase):
         self.assertIn(".model-actions{display:flex;flex-wrap:wrap;gap:6px;min-width:0}", html)
         self.assertIn(".model-actions .btn{min-width:0;max-width:100%;white-space:normal;overflow-wrap:anywhere}", html)
 
+    def test_production_chapter_refresh_preserves_explicit_selection(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        start = adapter.index("function syncProductionPreviewChapterSelector()")
+        end = adapter.index("function ensureProductionPreviewMonitorUi()", start)
+        selector = adapter[start:end]
+        stale_data_branch = selector[selector.index("} else if (currentRow && ("):selector.index("if (!rows.length)")]
+        self.assertIn("invalidateVoicePreview();", stale_data_branch)
+        self.assertIn("productionPreviewSelectedChapterId = currentId;", stale_data_branch)
+        self.assertIn("productionPreviewSelectedChapterSignature = currentSignature;", stale_data_branch)
+        self.assertNotIn("productionPreviewSelectedChapter = null;", stale_data_branch)
+
     def test_live_qwen_smoke_download_has_official_fallback_and_pinned_digest(self):
         workflow = (ROOT / ".github" / "workflows" / "build-windows.yml").read_text(encoding="utf-8")
         self.assertIn("$llamaZipExpectedSha256 = '1110e183589e0e2ac5b365fb5c3c4a7e149e0760c1989cac18ee426b08e5813a'", workflow)

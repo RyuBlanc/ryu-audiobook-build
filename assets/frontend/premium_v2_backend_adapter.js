@@ -5774,12 +5774,13 @@ function renderProductionMetadataGate(active) {
       (productionPreviewSelectedChapterId && currentId && productionPreviewSelectedChapterId !== currentId) ||
       (productionPreviewSelectedChapterSignature && currentSignature !== productionPreviewSelectedChapterSignature)
     )) {
-      // Chapter numbers can be reused, and saved text/title can change while
-      // retaining the same ID. Neither case may keep stale playable audio.
+      // Chapter data can change during a refresh while the user's selected
+      // chapter number remains valid. Invalidate stale audio, but preserve
+      // that explicit Production selection instead of falling back to the
+      // independent Chapter Studio selection.
       invalidateVoicePreview();
-      productionPreviewSelectedChapter = null;
-      productionPreviewSelectedChapterId = '';
-      productionPreviewSelectedChapterSignature = '';
+      productionPreviewSelectedChapterId = currentId;
+      productionPreviewSelectedChapterSignature = currentSignature;
     }
     if (!rows.length) {
       productionPreviewSelectedChapter = null;

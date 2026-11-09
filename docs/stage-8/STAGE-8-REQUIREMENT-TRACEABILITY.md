@@ -756,3 +756,8 @@ Byte-exact copies of the user's 9 November pasted Master Bug & Change Register a
 ## 9 November 2026 — Build #3009 packaged Models Center overlap
 
 Build #3009 passed its regression job but failed packaged acceptance on attempt 2: at the restored 1366×768 viewport, Models Center had overlap between model folder/path actions and adjacent Verify files / Open Voice Studio controls. Attempt 1 also timed out in Production chapter selection. The current fix confines model actions to wrapping flex rows with bounded button widths; the packaged all-page overlap assertion remains enabled. Build #3010 must confirm the actual UI geometry and finish every install/portable gate before any release claim.
+
+
+## 9 November 2026 — Build #3010 and Production selection race
+
+Build #3010 passed the regression job, including the new Models Center action-wrap contract. Its package job was skipped because the push did not carry the workflow's `[artifact-checkpoint]` marker; it produced no package evidence. Review of #3009 attempt 1 showed Production preview chapter selection reverting to Chapter Studio's selection after a live saved-chapter refresh, while attempt 2 independently found the Models Center overlaps. The selector now retains a still-valid explicit Production chapter when refreshed title/text/identity changes, while invalidating stale preview audio. Build #3011 is the packaging checkpoint for both fixes; exact-head package gates remain pending.
