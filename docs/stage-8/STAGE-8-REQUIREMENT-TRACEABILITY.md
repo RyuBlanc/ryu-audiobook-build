@@ -608,3 +608,40 @@ The `1.2.0+build.test` fixture in package-size-report tests is test data, not th
 - A Stage 5.3 production-path regression now creates a narrator-only book with a saved character voice assignment and asserts that the generation manager receives the saved narrator-bound provider, no cast router, and narrator-only state/mode in the project state, job result and launch response.
 - The normal cast-aware path remains covered and must continue routing character dialogue to assigned profiles when narrator-only is off.
 - This is automated source evidence only until a matching-head Windows regression/package run and actual full-book audio/M4B acceptance complete.
+
+
+## Recovery-reentry evidence overlay — 9 November 2026
+
+This overlay updates the evidence available after the historical #2950/#2929 snapshot. It does not delete prior failed attempts or close requirements that still need packaged Windows, target-device, actual-book or audible acceptance.
+
+### Exact-head automated evidence
+
+| Area | Implementation / matching run | Automated result | Remaining boundary |
+|---|---|---|---|
+| GEN-07 / XAPP-08 narrator-only generation | `f4ff2c65136e4115a73dcb7794bfe358a38f45b8`, [#2981](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42548580031) | 1,436 tests passed; frontend syntax, native Qt lifecycle and 45 focused tests passed. | Frozen Windows package, real narrator-only full book, M4B/playback and recovery listening. |
+| XAPP-03 / XAPP-12 canonical dialogue readiness | `3fb5c83cb8265b5b30ec9028de0de3c58fa17d30`, [#2982](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42548740386) and `b9ce3be284718a03edabaeecf9e788cfb35c1084`, [#2983](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42548758031) | Both exact-head runs passed 1,436 tests and the 45-test focused preflight. Production summary reports the canonical revision-aware passage index; Dashboard and Production generation gates consume backend-derived review/readiness state. | Reconcile actual-book passage counts and inspect Character Studio/Production live in the frozen Windows app. |
+| XAPP-05 / XAPP-06 profile and legacy Qwen backend migration | `f13c14380551a487aa6e6511d46bfe11ddd22ec5`, [#2970](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42547124660) | 1,433 tests passed. Invalid legacy Qwen backend values are normalized and persisted atomically; valid explicit compute backends are preserved; profile saves normalize as well. | Confirm saved profile migration on a real existing user catalogue and restart. |
+| XAPP-09 responsiveness | #2981–#2983 focused checks | 45 UI/History/Task Manager preflight tests and native Qt lifecycle check passed on matching source. | Large target-PC catalogue scan while preview/generation are active, real UI freeze/flicker and multi-monitor/DPI acceptance. |
+| PROD/GEN durable generation lifecycle | #2981 cumulative regression | Current 1,436-test suite includes generation job identity, History/Task Manager and recovery/control regression coverage. | Current-head packaged interruption/retry/resume/cancel and full-book acceptance. |
+| PS / SD / MUS / AB | Existing Stage 5/Stage 8 regression and prior package records retained | Configuration and renderer regressions remain in suite; Stage 5.5 historical M4B/AudioBooks package checkpoint #2253 remains historical accepted evidence. | Current-head frozen app, actual listening, language pronunciation quality, Sound Design/BGM/cue mix parity and chapter playback/seek. |
+
+### Narrator-only and shared-readiness rules now enforced
+
+- Narrator-only mode is an explicit per-book setting and requires **zero valid configured character voice profiles**. A saved but unavailable/deleted character-profile name is not counted as a valid profile.
+- Adding a valid character profile after narrator-only is enabled makes the resolver persist narrator-only OFF and return to strict multi-character speaker review. Production and the Dashboard both fail closed while the stale flag remains inconsistent.
+- Production Preview and full-book generation use the same saved narrator/mode resolver. Narrator-only preview disables character-cast routing.
+- The immediate generation response, project state and durable job result carry the same narrator-only flag, generation mode and valid character-profile count.
+- Production readiness uses the canonical revision-aware passage index and exposes pending/conflicting passages, index issues, assignment issues and index revision. Dashboard and Production gates consume these backend-derived readiness fields; the legacy “prepared” percentage retains its previous meaning and is not repurposed as the hard generation gate.
+
+### Hardware and performance acceptance remains open
+
+- The dedicated NVIDIA and AMD/Intel Qwen acceptance workflows must produce real device/backend/inference/timing artifacts. The green #2952/#2953 regression workflows are not physical-GPU benchmark proof.
+- The historical Qwen 1.7B CPU previews of roughly 268–305 seconds do not meet the 30-second-preview-under-60-second target. No matching-head physical NVIDIA, AMD ROCm or Intel XPU result currently proves that target.
+- Runtime selection and accelerator-install policy regressions cover supported CUDA/ROCm/XPU candidate detection and guarded runtime activation/fallback. They do not replace the real hardware benchmark.
+
+### Integration and release boundary
+
+- Current working branch at this overlay: `stage-5/xapp08-recovery-reentry-2026-11-08`.
+- It is 94 commits ahead and zero behind PR #31's head `82a39ffa2b54b8ce7cab5468affde0cbaf02db0e`; PR #31 remains open and draft. The recovery branch is already stacked on that integration candidate; do not create a duplicate branch or merge the PR's existing lineage into itself.
+- Current recovery-reentry code has passing matching-head regression evidence but no new exact-head frozen-Windows artifact checkpoint yet. Do not call the present branch a release candidate, publish 1.2.0, or mark the frozen Master inventory complete.
+- Requirements that still call for actual-book inspection, physical hardware, human listening, installed-app navigation, display/DPI or a fresh packaged Windows artifact remain **RUNTIME ACCEPTANCE PENDING** or **OPEN**, even where their code regressions pass.
