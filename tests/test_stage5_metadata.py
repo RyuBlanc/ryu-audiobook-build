@@ -821,7 +821,11 @@ class ProductionReadinessUiTests(unittest.TestCase):
         ):
             self.assertIn(marker, flow)
         self.assertNotIn("{key:'import', ready:Boolean(project.source_exists)", flow)
-        self.assertIn("Narrator-only · character voices bypassed", flow)
+        self.assertIn(
+            "0 configured character voice profiles · saved narrator reads all passages",
+            flow,
+        )
+        self.assertNotIn("Narrator-only · character voices bypassed", flow)
 
 
 class MetadataPremiumV2UiTests(unittest.TestCase):
