@@ -1062,6 +1062,10 @@ class PremiumV2Bridge(QObject):
             "narrator_voice_configured": narrator_ready,
             "narrator_profile_available": bool(narrator_selection.get("profile_available")),
             "narrator_only_generation": state.get("narrator_only_generation", False) is True,
+            "generation_mode": str(
+                state.get("generation_mode")
+                or ("narrator_only" if state.get("narrator_only_generation", False) is True else "character_cast")
+            ),
             "output_target_path": str(output_target),
             "output_folder": str(output_folder),
             "output_folder_ready": bool(output_folder_ready),
