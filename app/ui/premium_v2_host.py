@@ -7273,8 +7273,13 @@ class PremiumV2Bridge(QObject):
                 f"Chapter {number}: {text[:64].strip()!r}"
                 for number, text in unresolved[:3]
             )
+            mode_notice = (
+                narrator_only_disabled_reason + " "
+                if narrator_only_disabled_reason else ""
+            )
             raise ValueError(
-                f"Generation is blocked: {len(unresolved)} dialogue passage(s) still need speaker review. "
+                mode_notice
+                + f"Generation is blocked: {len(unresolved)} dialogue passage(s) still need speaker review. "
                 "Assign a character speaker or correct the narration classification before generating. "
                 + examples
             )
@@ -7551,6 +7556,9 @@ class PremiumV2Bridge(QObject):
         with self._jobs_lock:
             self._generators[job_id] = manager
         start_message = f"Starting with {empty_skipped} empty and {excluded_skipped} excluded chapter(s) skipped"
+        mode_notice = str(narrator_selection.get("narrator_only_disabled_reason") or "").strip()
+        if mode_notice:
+            start_message = mode_notice + " " + start_message
         if narrator_only:
             start_message += " • Narrator-only mode: the saved narrator will read narration and all dialogue"
         self._job_update(job_id, state="running", started_at=self._now(), stage="Preparing generation",
