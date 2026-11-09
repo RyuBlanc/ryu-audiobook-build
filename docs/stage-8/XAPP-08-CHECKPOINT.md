@@ -75,3 +75,26 @@ This documentation-only marker requests the full `build` job for the current rec
 The build must be accepted only if the full package pipeline passes: frozen EXE verification, packaged Sound Design/Music Library UI, the Production generation/recovery UI acceptance, real narrator-only/multi-character acceptance where covered, Audiobooks/M4B chapter and playback checks, installer/portable creation, SHA-256 manifest, and Defender scan/upload steps.
 
 This run is a hosted Windows package gate. It does not close the physical NVIDIA/AMD/Intel Qwen benchmark or the user's actual-book perceptual listening and target-PC responsiveness gates.
+
+
+## GEN-07 — frozen narrator-only full-book acceptance added — 9 November 2026
+
+The packaged Windows acceptance harness now creates a separate real saved book with:
+- One non-empty chapter containing quoted dialogue.
+- A saved project narrator and complete required metadata/cover.
+- Zero configured character voice profiles.
+- Narrator-only disabled by default.
+
+The frozen Premium V2 app acceptance then:
+1. Opens that saved project and verifies the zero-profile state.
+2. Enables Narrator-Only Generation through the actual Production checkbox and verifies per-book persistence.
+3. Navigates away and back to verify the saved mode, the zero-profile readiness indicator and enabled generation gate.
+4. Starts a real full-book GenerationManager job through the installed Generate control.
+5. Verifies completion, saved narrator identity, narrator-only mode and zero character-profile count in the durable job result, History and project state.
+6. Opens the actual generated M4B in Audiobooks, verifies its chapter/narrator metadata and starts real decoded playback.
+
+The acceptance contract is protected by `test_packaged_acceptance_runs_real_narrator_only_full_book_generation`.
+
+**Matching-head regression:** [Build #2990](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42549714044) — SUCCESS, 1,437 regression tests plus the 45-test focused preflight. This is regression evidence only; the new frozen Windows execution is the purpose of the next artifact-checkpoint run.
+
+The frozen Windows acceptance must report `xapp08_packaged_narrator_only_full_book_generation` as PASS. Until that marker is observed from a successful matching-head artifact run, GEN-07 packaged runtime acceptance remains pending.
