@@ -19,6 +19,9 @@ class Stage8PackagedAcceptanceContractTests(unittest.TestCase):
         self.assertIn('Number(narratorOnlyJob.result?.character_voice_profile_count) === 0', javascript_source)
         self.assertIn('xapp08_packaged_narrator_only_full_book_generation', javascript_source)
         self.assertIn("real narrator-only M4B audio in the Premium V2 Audiobooks player", javascript_source)
+        self.assertIn('narratorOnlyInitialProject.narrator_only_generation === true', javascript_source)
+        self.assertIn('narratorOnlyControl.checked === true', javascript_source)
+        self.assertIn('Automatically enabled because this book has no configured character voice profiles', javascript_source)
         playback_start = javascript_source.index('let narratorOnlyCard = null;')
         playback_end = javascript_source.index('record("xapp08_packaged_narrator_only_full_book_generation"', playback_start)
         playback_flow = javascript_source[playback_start:playback_end]

@@ -3127,8 +3127,9 @@
       "GEN-07 native active-project identity did not settle before narrator-only save.");
     const narratorOnlyInitialProject = await invoke("project.get_active", {});
     must(Number(narratorOnlyInitialProject.configured_character_voice_profile_count || 0) === 0 &&
-      Number(narratorOnlyInitialProject.character_count || 0) === 0,
-      "GEN-07 fixture must have zero configured character voice profiles.");
+      Number(narratorOnlyInitialProject.character_count || 0) === 0 &&
+      narratorOnlyInitialProject.narrator_only_generation === true,
+      "GEN-07 fixture must automatically select narrator-only with zero configured character voice profiles and an available narrator.");
 
     window.go("generate");
     await waitFor("GEN-07 narrator-only Production controls", function () {
@@ -3137,16 +3138,15 @@
         Boolean(document.querySelector("#startGenerate"));
     }, 20000);
     const narratorOnlyControl = document.querySelector("#narratorOnlyGeneration");
-    must(narratorOnlyControl.checked === false,
-      "GEN-07 narrator-only must be an explicit opt-in and start disabled for a new book.");
-    narratorOnlyControl.click();
+    must(narratorOnlyControl.checked === true,
+      "GEN-07 narrator-only must automatically be selected for a new book with zero configured character voice profiles and an available narrator.");
     await waitFor("GEN-07 per-book narrator-only opt-in persisted", async function () {
       const active = await invoke("project.get_active", {});
       return active.narrator_only_generation === true &&
         Number(active.configured_character_voice_profile_count || 0) === 0;
     }, 20000);
-    must(document.querySelector("#narratorOnlyGenerationStatus")?.textContent.includes("Saved for this book"),
-      "The Production narrator-only control did not report a successful per-book save.");
+    must(document.querySelector("#narratorOnlyGenerationStatus")?.textContent.includes("Automatically enabled because this book has no configured character voice profiles"),
+      "Production did not clearly report automatic narrator-only mode for this book.");
 
     // Re-enter Production so all live readiness indicators are rebuilt from
     // the saved project state, not the checkbox's transient DOM value.
