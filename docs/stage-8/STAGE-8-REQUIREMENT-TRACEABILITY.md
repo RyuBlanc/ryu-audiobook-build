@@ -766,3 +766,8 @@ Build #3010 passed the regression job, including the new Models Center action-wr
 ## 9 November 2026 — Build #3011 packaged overlap follow-up
 
 Build #3011 passed all 1,442 regression tests and frozen executable checks. Packaged acceptance passed Production chapter selection after the refresh-state fix and generated the Stage 5.4 full-book and retry M4B fixtures. It then detected a remaining 16×9-pixel control overlap at 1920×1080 between a Models Center `Copy path` button and the installation queue's `Clear completed` button. The overlap assertion remains strict; its failure report now includes both control bounds and model-card ownership. Next exact-head checkpoint must use that geometry to correct the layout, then complete installer, portable, scan and hash gates.
+
+
+## 9 November 2026 — Build #3012 residual overlap geometry
+
+Build #3012 attempt 1 stopped during dependency setup because the Kokoro voice-pack endpoint returned HTTP 504; no product checks ran. Attempt 2 passed regression and frozen-app checks, then passed Production chapter-selection and full-book/retry generation. Packaged responsive acceptance measured the remaining Models Center overlap precisely at 1920×1080: the `base-1.7b` card's Copy path control and installation queue's Clear completed control intersected 16×9 pixels at the inventory/queue boundary. The UI now adds explicit 40px separation between inventory and queue. Build #3013 must verify this layout and complete packaging; no release artifacts yet.
