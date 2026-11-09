@@ -869,6 +869,7 @@ class PremiumV2Bridge(QObject):
         # the canonical revision-aware passage index used by generation.
         character_assignment_issues: list[str] = []
         effective_character_rows: list[dict[str, Any]] = []
+        profile_catalogue = []
         try:
             profile_catalogue = load_profiles()
             effective_character_rows, character_assignment_issues = (
@@ -883,11 +884,16 @@ class PremiumV2Bridge(QObject):
             log.exception("Could not resolve saved character voice assignments for Production readiness")
             character_assignment_issues = ["Saved character voice profiles could not be verified."]
 
+        available_character_profile_names = {
+            str(getattr(profile, "name", "") or "").strip().casefold()
+            for profile in profile_catalogue
+            if str(getattr(profile, "name", "") or "").strip()
+        }
         configured_character_rows = [
             row for row in effective_character_rows
             if isinstance(row, dict)
             and str(row.get("name") or row.get("primary_name") or "").strip().casefold() != "narrator"
-            and str(row.get("voice_profile") or "").strip()
+            and str(row.get("voice_profile") or "").strip().casefold() in available_character_profile_names
         ]
         configured_character_voice_profile_count = len(configured_character_rows)
 
