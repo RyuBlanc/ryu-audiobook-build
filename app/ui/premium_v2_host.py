@@ -927,7 +927,7 @@ class PremiumV2Bridge(QObject):
             # verified. Generation resolves the same index and will also block.
             log.exception("Could not resolve the canonical dialogue passage index for Production readiness")
 
-        narrator_only_requested = state.get("narrator_only_generation", False) is True
+        narrator_only_user_opt_out = state.get("narrator_only_generation_user_opt_out", False) is True
         try:
             generation_character_voice_profile_count = max(
                 0,
@@ -938,9 +938,6 @@ class PremiumV2Bridge(QObject):
             )
         except (TypeError, ValueError, OverflowError):
             generation_character_voice_profile_count = configured_character_voice_profile_count
-        narrator_only_eligible = (
-            narrator_only_requested and configured_character_voice_profile_count == 0
-        )
         # The existing Dashboard "prepared" percentage remains a project
         # completeness score. Cast/dialogue eligibility is reported separately
         # and is a hard gate on generation; do not silently change the meaning
@@ -958,6 +955,8 @@ class PremiumV2Bridge(QObject):
         narrator_ready = bool(
             effective_narrator_profile and narrator_selection.get("profile_available")
         )
+        narrator_only_eligible = narrator_ready and configured_character_voice_profile_count == 0
+        narrator_only_automatic = narrator_only_eligible and not narrator_only_user_opt_out
         metadata_missing = missing_required_metadata_fields(
             project.title, state, effective_narrator_profile if narrator_ready else ""
         )
@@ -1071,7 +1070,9 @@ class PremiumV2Bridge(QObject):
             "series_narrator_profile": str(narrator_selection.get("profile_name") or ""),
             "narrator_voice_configured": narrator_ready,
             "narrator_profile_available": bool(narrator_selection.get("profile_available")),
-            "narrator_only_generation": state.get("narrator_only_generation", False) is True,
+            "narrator_only_generation": narrator_only_automatic,
+            "narrator_only_generation_auto": narrator_only_automatic,
+            "narrator_only_generation_user_opt_out": narrator_only_user_opt_out,
             # Preserve the last generation's immutable cast snapshot for the
             # active-project readiness/recovery UI. The independently derived
             # configured_character_voice_profile_count below describes the
@@ -1079,7 +1080,7 @@ class PremiumV2Bridge(QObject):
             "character_voice_profile_count": generation_character_voice_profile_count,
             "generation_mode": str(
                 state.get("generation_mode")
-                or ("narrator_only" if state.get("narrator_only_generation", False) is True else "character_cast")
+                or ("narrator_only" if narrator_only_automatic else "character_cast")
             ),
             "output_target_path": str(output_target),
             "output_folder": str(output_folder),
@@ -7212,7 +7213,7 @@ class PremiumV2Bridge(QObject):
         return rows, issues
 
     def _production_narrator_only_save(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Persist the narrator-only opt-in to the active book, never globally."""
+        """Persist a per-book narrator-only choice, including an explicit opt-out."""
         project = self._active_project()
         expected_folder = str(payload.get("expected_project_folder") or "").strip()
         if expected_folder and Path(expected_folder).expanduser().resolve() != project.folder.resolve():
@@ -7224,55 +7225,62 @@ class PremiumV2Bridge(QObject):
         if not isinstance(enabled, bool):
             raise ValueError("Narrator-Only Generation must be enabled or disabled explicitly.")
         state = load_state(project.folder)
-        if enabled:
-            series = self._project_series_name(project, state)
-            narrator = self._narrator_series_default_read(project, state, series)
-            profile_name = str(narrator.get("effective_profile_name") or "").strip()
-            if not profile_name or not narrator.get("profile_available"):
-                raise ValueError(
-                    "Save an available narrator profile for this book or its series before enabling Narrator-Only Generation."
-                )
+        series = self._project_series_name(project, state)
+        narrator = self._narrator_series_default_read(project, state, series)
+        profile_name = str(narrator.get("effective_profile_name") or "").strip()
+        narrator_available = bool(profile_name and narrator.get("profile_available"))
 
-            # Narrator-only is available only while this project has no valid
-            # character voice-profile assignments. Count resolved saved profiles,
-            # not stale profile names or invalid legacy IDs.
-            saved_profiles = load_profiles()
-            saved_profile_names = {
-                str(getattr(profile, "name", "") or "").strip().casefold()
-                for profile in saved_profiles
-                if str(getattr(profile, "name", "") or "").strip()
-            }
-            character_rows, _issues = self._effective_generation_character_rows(
-                state,
-                series,
-                strict=False,
+        # Count resolved saved profiles, not stale profile names or invalid
+        # legacy IDs. Narrator-only is available only for a valid narrator and
+        # zero configured character voice profiles.
+        saved_profiles = load_profiles()
+        saved_profile_names = {
+            str(getattr(profile, "name", "") or "").strip().casefold()
+            for profile in saved_profiles
+            if str(getattr(profile, "name", "") or "").strip()
+        }
+        character_rows, _issues = self._effective_generation_character_rows(
+            state,
+            series,
+            strict=False,
+        )
+        configured_profiles = [
+            row for row in character_rows
+            if str(row.get("voice_profile") or "").strip().casefold() in saved_profile_names
+        ]
+        if enabled and not narrator_available:
+            raise ValueError(
+                "Save an available narrator profile for this book or its series before enabling Narrator-Only Generation."
             )
-            configured_profiles = [
-                row for row in character_rows
-                if str(row.get("voice_profile") or "").strip().casefold() in saved_profile_names
-            ]
-            if configured_profiles:
-                raise ValueError(
-                    "Narrator-Only Generation is available only when this project has zero "
-                    "configured character voice profiles. Switch to multi-character production "
-                    "to use the saved character assignments."
-                )
+        if enabled and configured_profiles:
+            raise ValueError(
+                "Narrator-Only Generation is available only when this project has zero "
+                "configured character voice profiles. Switch to multi-character production "
+                "to use the saved character assignments."
+            )
         state["narrator_only_generation"] = enabled
+        user_opt_out = bool(not enabled and narrator_available and not configured_profiles)
+        if user_opt_out:
+            state["narrator_only_generation_user_opt_out"] = True
+        else:
+            state.pop("narrator_only_generation_user_opt_out", None)
         state["modified_at"] = self._now()
         save_state(project.folder, state)
         return {
             "saved": True,
             "enabled": enabled,
+            "user_opt_out": user_opt_out,
+            "automatic": bool(narrator_available and not configured_profiles and not user_opt_out),
             "project_folder": str(project.folder),
         }
 
     def _resolve_narrator_for_generation(self, project, state: dict[str, Any], chapters):
-        """Resolve narrator and choose explicit narrator-only or cast-aware routing.
+        """Resolve narrator and choose automatic zero-cast or cast-aware routing.
 
-        Narrator-only routing is an explicit per-book opt-in persisted in
-        project state. When enabled, the saved narrator reads every passage,
-        including dialogue. When disabled, normal cast-aware speaker review
-        applies even when no character profiles are configured.
+        A valid narrator automatically reads every passage when the project
+        has no configured character voice profiles, unless the user explicitly
+        opts out. Configured character profiles always return the project to
+        normal cast-aware speaker review.
         """
         series = self._project_series_name(project, state)
         selection = self._narrator_series_default_read(project, state, series)
@@ -7289,7 +7297,7 @@ class PremiumV2Bridge(QObject):
                 "Restore the saved Voice Studio profile or choose another narrator."
             )
 
-        narrator_only = state.get("narrator_only_generation", False) is True
+        user_opt_out = state.get("narrator_only_generation_user_opt_out", False) is True
         saved_profiles = load_profiles()
         saved_profile_names = {
             str(getattr(saved_profile, "name", "") or "").strip().casefold()
@@ -7297,43 +7305,46 @@ class PremiumV2Bridge(QObject):
             if str(getattr(saved_profile, "name", "") or "").strip()
         }
 
-        # A narrator-only book must not be blocked by stale/unavailable cast
-        # references. Resolve them non-strictly first, counting only profile
-        # assignments that point to profiles which are actually saved.
+        # Resolve non-strictly first so stale references cannot masquerade as
+        # configured profiles or prevent automatic narrator-only mode.
         character_rows, cast_mapping_issues = self._effective_generation_character_rows(
             state if isinstance(state, dict) else {},
             series,
-            strict=not narrator_only,
+            strict=False,
         )
         configured_profiles = [
             row for row in character_rows
             if str(row.get("voice_profile") or "").strip().casefold() in saved_profile_names
         ]
 
+        narrator_only = not configured_profiles and not user_opt_out
         narrator_only_disabled_reason = ""
-        if narrator_only and configured_profiles:
-            # A project that has moved back to a multi-voice configuration must
-            # return to normal cast-aware readiness. Do not silently keep the
-            # previous narrator-only opt-in active.
-            narrator_only = False
-            narrator_only_disabled_reason = (
-                "Narrator-Only Generation was switched off because this project now has "
-                "one or more configured character voice profiles. Multi-character speaker "
-                "review and saved character assignments apply."
-            )
+        if configured_profiles:
+            if state.get("narrator_only_generation", False) is True:
+                narrator_only_disabled_reason = (
+                    "Narrator-Only Generation was switched off because this project now has "
+                    "one or more configured character voice profiles. Multi-character speaker "
+                    "review and saved character assignments apply."
+                )
             state["narrator_only_generation"] = False
-            state["modified_at"] = self._now()
-            if getattr(project, "folder", None) is not None:
-                save_state(project.folder, state)
-
-            # Re-run strict cast validation now that multi-character mode is
-            # authoritative. Invalid or conflicting saved assignments remain
-            # genuine blockers in this mode.
+            state.pop("narrator_only_generation_user_opt_out", None)
             character_rows, cast_mapping_issues = self._effective_generation_character_rows(
                 state if isinstance(state, dict) else {},
                 series,
                 strict=True,
             )
+        elif narrator_only:
+            state["narrator_only_generation"] = True
+            state.pop("narrator_only_generation_user_opt_out", None)
+        else:
+            state["narrator_only_generation"] = False
+
+        if getattr(project, "folder", None) is not None and (
+            state.get("narrator_only_generation", False) is True
+            or narrator_only_disabled_reason
+        ):
+            state["modified_at"] = self._now()
+            save_state(project.folder, state)
 
         effective_selection = dict(selection)
         effective_selection.update({

@@ -6180,6 +6180,7 @@ function renderProductionMetadataGate(active) {
         input.type = 'checkbox';
         input.id = 'narratorOnlyGeneration';
         input.checked = project?.narrator_only_generation === true;
+        input.disabled = project?.narrator_only_eligible !== true;
         input.style.cssText = 'margin-top:3px;flex:0 0 auto';
         input.addEventListener('change', () => {
           const requested = input.checked === true;
@@ -6208,17 +6209,26 @@ function renderProductionMetadataGate(active) {
                 throw new Error('The active project changed while saving Narrator-Only Generation. Reopen Production and retry.');
               }
               input.checked = saved.enabled === true;
-              window.ryuPremiumActiveProject = {...active,narrator_only_generation:input.checked};
+              input.disabled = saved.automatic !== true && saved.user_opt_out !== true &&
+                active.narrator_only_eligible !== true;
+              window.ryuPremiumActiveProject = {...active,
+                narrator_only_generation:input.checked,
+                narrator_only_generation_user_opt_out:saved.user_opt_out === true,
+                narrator_only_generation_auto:saved.automatic === true};
               const status = $('narratorOnlyGenerationStatus');
               if (status) status.textContent = input.checked
-                ? 'Saved for this book. 0 configured character voice profiles; the saved narrator reads all narration and dialogue.'
-                : 'Off. Character assignments and speaker review will be used.';
+                ? (saved.automatic === true
+                  ? 'Automatically enabled because this book has no configured character voice profiles. The saved narrator reads all narration and dialogue.'
+                  : 'Saved for this book. The narrator reads all narration and dialogue.')
+                : 'Off by your choice. Character assignments and speaker review will be used.';
             } catch (error) {
               const currentProject = window.ryuPremiumActiveProject || null;
               input.checked = currentProject?.narrator_only_generation === true;
               message(error?.message || String(error), true);
               throw error;
-            } finally { input.disabled = false; }
+            } finally {
+              input.disabled = (window.ryuPremiumActiveProject || {}).narrator_only_eligible !== true;
+            }
           })();
           narratorOnlySavePromise.catch(() => {});
         });
@@ -6228,13 +6238,19 @@ function renderProductionMetadataGate(active) {
         title.textContent = 'Narrator-Only Generation';
         const description = document.createElement('small');
         description.className = 'muted';
-        description.textContent = 'Use the saved narrator for every passage, including dialogue. Available only with zero configured character voice profiles and a saved book or series narrator. Adding a character voice profile returns production to multi-character speaker review.';
+        description.textContent = 'Automatically use the saved narrator for every passage, including dialogue, when this book has zero configured character voice profiles and an available narrator. Uncheck to review dialogue before generation; adding a character voice profile returns production to multi-character routing.';
         const status = document.createElement('small');
         status.id = 'narratorOnlyGenerationStatus';
         status.className = 'muted';
         status.textContent = input.checked
-          ? 'Saved for this book. 0 configured character voice profiles; the saved narrator reads all narration and dialogue.'
-          : 'Off. Character assignments and speaker review will be used.';
+          ? (project?.narrator_only_generation_auto === true
+            ? 'Automatically enabled because this book has no configured character voice profiles. The saved narrator reads all narration and dialogue.'
+            : 'Saved for this book. The narrator reads all narration and dialogue.')
+          : (project?.narrator_only_generation_user_opt_out === true
+            ? 'Off by your choice. Character assignments and speaker review will be used.'
+            : (project?.narrator_only_eligible === true
+              ? 'Available. This book has no configured character voice profiles.'
+              : 'Unavailable until this book has an available narrator and no configured character voice profiles.'));
         copy.append(title,description,status);
         row.append(input,copy);
         generateButton?.parentElement?.insertBefore(row,generateButton);
@@ -6245,6 +6261,17 @@ function renderProductionMetadataGate(active) {
       if (document.activeElement !== narratorOnlyControl && narratorOnlyControl.checked !== savedValue) {
         narratorOnlyControl.checked = savedValue;
       }
+      narratorOnlyControl.disabled = project?.narrator_only_eligible !== true;
+      const status = $('narratorOnlyGenerationStatus');
+      if (status) status.textContent = savedValue
+        ? (project?.narrator_only_generation_auto === true
+          ? 'Automatically enabled because this book has no configured character voice profiles. The saved narrator reads all narration and dialogue.'
+          : 'Saved for this book. The narrator reads all narration and dialogue.')
+        : (project?.narrator_only_generation_user_opt_out === true
+          ? 'Off by your choice. Character assignments and speaker review will be used.'
+          : (project?.narrator_only_eligible === true
+            ? 'Available. This book has no configured character voice profiles.'
+            : 'Unavailable until this book has an available narrator and no configured character voice profiles.'));
     }
     // Job-state refreshes must reuse the exact Production prerequisite
     // gate; polling must never re-enable generation after a blocker is found.

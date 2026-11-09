@@ -251,11 +251,11 @@ class NarratorOnlyGenerationTests(unittest.TestCase):
             adapter,
         )
         self.assertIn(
-            "Available only with zero configured character voice profiles and a saved book or series narrator.",
+            "Automatically use the saved narrator for every passage, including dialogue, when this book has zero configured character voice profiles and an available narrator.",
             adapter,
         )
         self.assertIn(
-            "Adding a character voice profile returns production to multi-character speaker review.",
+            "adding a configured character voice profile returns production to multi-character routing.",
             adapter,
         )
         self.assertIn(

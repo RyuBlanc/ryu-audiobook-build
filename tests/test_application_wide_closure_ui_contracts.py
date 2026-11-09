@@ -98,7 +98,7 @@ class CharacterStudioUIContracts(unittest.TestCase):
         self.assertIn("production.narrator_only.save", adapter)
         self.assertIn("narrator_only_generation:narratorOnly", adapter)
         self.assertIn('state["narrator_only_generation"] = enabled', host)
-        self.assertIn('state["narrator_only_generation_user_opt_out"] = not enabled', host)
+        self.assertIn('state["narrator_only_generation_user_opt_out"] = True', host)
         self.assertIn('"route_character_cast": not narrator_only', host)
 
 
