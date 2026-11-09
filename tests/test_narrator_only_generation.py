@@ -34,6 +34,7 @@ class NarratorResolverHarness:
         })
         self._find_profile = Mock(return_value=profile)
         self._saved_profiles = [profile] if profile is not None else []
+        self._now = Mock(return_value="2026-11-09T01:20:00+00:00")
 
     def _effective_generation_character_rows(self, state, default_series, **kwargs):
         return host.PremiumV2Bridge._effective_generation_character_rows(
