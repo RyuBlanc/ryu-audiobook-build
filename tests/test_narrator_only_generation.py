@@ -239,6 +239,24 @@ class NarratorOnlyGenerationTests(unittest.TestCase):
         self.assertTrue(state["narrator_only_generation"])
         save_state.assert_called_once()
 
+    def test_production_readiness_explains_zero_profile_narrator_only_mode(self):
+        adapter = (
+            Path(__file__).resolve().parents[1]
+            / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "0 configured character voice profiles · character voice assignment not required; saved narrator reads all passages",
+            adapter,
+        )
+        self.assertIn(
+            "Available only with zero configured character voice profiles and a saved book or series narrator.",
+            adapter,
+        )
+        self.assertIn(
+            "Adding a character voice profile returns production to multi-character speaker review.",
+            adapter,
+        )
+
     def test_narrator_is_still_required_in_narrator_only_mode(self):
         project = SimpleNamespace(title="Narrator-only book")
         harness = NarratorResolverHarness(None)
