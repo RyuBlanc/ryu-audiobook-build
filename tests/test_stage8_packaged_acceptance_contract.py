@@ -57,6 +57,14 @@ class Stage8PackagedAcceptanceContractTests(unittest.TestCase):
         self.assertIn('page has overlapping independent controls at ', source)
         self.assertIn('record("stage8_no_overlapping_controls_" + destination', source)
 
+    def test_live_qwen_smoke_download_has_official_fallback_and_pinned_digest(self):
+        workflow = (ROOT / ".github" / "workflows" / "build-windows.yml").read_text(encoding="utf-8")
+        self.assertIn("$llamaZipExpectedSha256 = '1110e183589e0e2ac5b365fb5c3c4a7e149e0760c1989cac18ee426b08e5813a'", workflow)
+        self.assertIn("https://api.github.com/repos/ggml-org/llama.cpp/releases/assets/589841111", workflow)
+        self.assertIn("Accept: application/octet-stream", workflow)
+        self.assertIn("$actualLlamaZipSha256 -eq $llamaZipExpectedSha256", workflow)
+        self.assertIn("Could not obtain the pinned llama.cpp CPU runtime through either official GitHub release route.", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

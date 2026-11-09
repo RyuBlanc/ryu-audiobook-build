@@ -413,7 +413,31 @@ jobs:
           if (-not (Test-Path $aiBin)) {
             New-Item -ItemType Directory -Force -Path $aiBin | Out-Null
             Write-Host 'Downloading llama.cpp CPU runtime (maximum 300 seconds).'
-            curl.exe --connect-timeout 15 --max-time 300 -L --fail --retry 2 -o $llamaZip 'https://github.com/ggml-org/llama.cpp/releases/download/b11193/llama-b11193-bin-win-cpu-x64.zip'
+            $llamaZipExpectedSha256 = '1110e183589e0e2ac5b365fb5c3c4a7e149e0760c1989cac18ee426b08e5813a'
+            $llamaZipSources = @(
+              @{ Url='https://github.com/ggml-org/llama.cpp/releases/download/b11193/llama-b11193-bin-win-cpu-x64.zip'; Headers=@() },
+              @{ Url='https://api.github.com/repos/ggml-org/llama.cpp/releases/assets/589841111'; Headers=@('-H','Accept: application/octet-stream','-H','X-GitHub-Api-Version: 2022-11-28') }
+            )
+            $llamaZipDownloaded = $false
+            foreach ($source in $llamaZipSources) {
+              $llamaZipPart = "$llamaZip.part"
+              Remove-Item -LiteralPath $llamaZipPart -Force -ErrorAction SilentlyContinue
+              $curlArgs = @('--connect-timeout','20','--max-time','300','-L','--fail','--retry','2','-o',$llamaZipPart) + $source.Headers + @($source.Url)
+              & curl.exe @curlArgs
+              if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $llamaZipPart -PathType Leaf)) {
+                $actualLlamaZipSha256 = (Get-FileHash -LiteralPath $llamaZipPart -Algorithm SHA256).Hash.ToLowerInvariant()
+                if ($actualLlamaZipSha256 -eq $llamaZipExpectedSha256) {
+                  Move-Item -LiteralPath $llamaZipPart -Destination $llamaZip -Force
+                  $llamaZipDownloaded = $true
+                  break
+                }
+                Write-Warning "Rejected llama.cpp archive from $($source.Url): SHA-256 $actualLlamaZipSha256 did not match the pinned release digest."
+              } else {
+                Write-Warning "llama.cpp download route failed: $($source.Url)"
+              }
+              Remove-Item -LiteralPath $llamaZipPart -Force -ErrorAction SilentlyContinue
+            }
+            if (-not $llamaZipDownloaded) { throw 'Could not obtain the pinned llama.cpp CPU runtime through either official GitHub release route.' }
             Expand-Archive -Force $llamaZip $aiBin
           }
           $server = Get-ChildItem $aiBin -Recurse -Filter 'llama-server.exe' | Select-Object -First 1
