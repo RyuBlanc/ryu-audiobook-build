@@ -7676,7 +7676,10 @@ class PremiumV2Bridge(QObject):
                 "chapter_count": len(chapters), "empty_chapters_skipped": empty_skipped,
                 "excluded_chapters_skipped": excluded_skipped,
                 "chapters_skipped_for_generation": skipped, "voice_profile": profile.name,
-                "generation_mode": generation_mode, "narrator_only": narrator_only}
+                "generation_mode": generation_mode, "narrator_only": narrator_only,
+                "character_voice_profile_count": int(
+                    narrator_selection.get("character_voice_profile_count") or 0
+                )}
 
     def _generation_progress(self, job_id: str, chapter: int, total: int, done: int, message: str) -> None:
         msg = str(message or "")
