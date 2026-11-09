@@ -66,3 +66,12 @@ The earlier #2954–#2959 and #2969–#2980 failures remain visible historical a
 ### Integration and release boundary
 
 The current recovery branch is a direct descendant of PR #31's head `82a39ffa2b54b8ce7cab5468affde0cbaf02db0e` (94 commits ahead, zero behind at this checkpoint). PR #31 remains open and draft; do not merge a second divergent branch or duplicate its integration work. The version remains 1.1.1 until the frozen Master acceptance gates pass; 1.2.0 is not approved for release by this checkpoint.
+
+
+## Exact-head frozen Windows artifact checkpoint request — 9 November 2026
+
+This documentation-only marker requests the full `build` job for the current recovery-reentry branch head. It follows the successful exact-head regression evidence in #2981–#2983 and does not change application source.
+
+The build must be accepted only if the full package pipeline passes: frozen EXE verification, packaged Sound Design/Music Library UI, the Production generation/recovery UI acceptance, real narrator-only/multi-character acceptance where covered, Audiobooks/M4B chapter and playback checks, installer/portable creation, SHA-256 manifest, and Defender scan/upload steps.
+
+This run is a hosted Windows package gate. It does not close the physical NVIDIA/AMD/Intel Qwen benchmark or the user's actual-book perceptual listening and target-PC responsiveness gates.
