@@ -2295,9 +2295,13 @@
 
   async function refreshVoices() {
     const requestToken = ++voiceListEpoch;
-    // Qwen/provider readiness is gated by the same model registry used in Models
-    // Center. Ensure its initial cold scan completes off-thread before cataloguing voices.
-    await loadModelInventory(false);
+    // Load the lightweight persisted profile list first so Voice Studio can
+    // render immediately. A cold Models scan is useful for provider-health
+    // badges, but must never hold the screen-navigation path open.
+    const inventoryTask = loadModelInventory(false).catch(error => {
+      console.warn('[Ryu model inventory]', error?.message || error);
+      return null;
+    });
     const loadedVoices = await call('voice.list');
     if (requestToken !== voiceListEpoch) return voices;
     voices = Array.isArray(loadedVoices) ? loadedVoices : [];
@@ -2335,7 +2339,10 @@
     }
     updateSavedProfileOptions();
     const activeProviderKey = document.querySelector('#voices .provider.active')?.dataset.provider || 'offline';
-    void refreshProviderCatalog(activeProviderKey, false).catch(error => console.warn('[Ryu voice catalogue]', error));
+    void inventoryTask.then(() => {
+      if (requestToken !== voiceListEpoch) return null;
+      return refreshProviderCatalog(activeProviderKey, false);
+    }).catch(error => console.warn('[Ryu voice catalogue]', error));
     // A catalogue selection is not a saved custom profile; the profile name is supplied by the user.
     renderCharacterStudioLive();
     // Keep Pronunciation Studio's per-row preview selector in sync with saved
