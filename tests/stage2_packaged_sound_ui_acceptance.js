@@ -3116,6 +3116,15 @@
     must(narratorOnlySavedVoice && narratorOnlySavedVoice.saved === true &&
       String(narratorOnlySavedVoice.name || "") === narratorProfileName,
       "GEN-07 narrator-only project could not persist the saved narrator profile.");
+    // Project-opening is an asynchronous native settings change. The active
+    // project lookup can update its cache before QSettings has flushed to disk;
+    // force a read-after-write of the same native setting before the
+    // ownership-bound narrator-only save. This validates UI selection and
+    // avoids racing a stale QSettings snapshot.
+    const narratorOnlyActiveForSave = await invoke("project.get_active", {});
+    must(String(narratorOnlyActiveForSave.folder || "") ===
+      String(config.narrator_only_project_folder || ""),
+      "GEN-07 native active-project identity did not settle before narrator-only save.");
     const narratorOnlyInitialProject = await invoke("project.get_active", {});
     must(Number(narratorOnlyInitialProject.configured_character_voice_profile_count || 0) === 0 &&
       Number(narratorOnlyInitialProject.character_count || 0) === 0,
