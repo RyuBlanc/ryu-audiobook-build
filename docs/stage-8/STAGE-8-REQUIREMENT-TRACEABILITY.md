@@ -751,3 +751,8 @@ The user explicitly selected automatic Narrator-Only Mode whenever a project has
 ## 9 November 2026 — authoritative pasted registers added
 
 Byte-exact copies of the user's 9 November pasted Master Bug & Change Register and Additional UI Continuation are preserved under `docs/stage-8/source-registers/`. The continuation contributes five stable IDs absent from the prior matrix: CS-09–CS-12 and GEN-07. The inventory now records 133 Master/continuation IDs plus all 20 Cross-App Addendum IDs. Existing requirements and completed stages are retained; the source texts remain unchanged.
+
+
+## 9 November 2026 — Build #3009 packaged Models Center overlap
+
+Build #3009 passed its regression job but failed packaged acceptance on attempt 2: at the restored 1366×768 viewport, Models Center had overlap between model folder/path actions and adjacent Verify files / Open Voice Studio controls. Attempt 1 also timed out in Production chapter selection. The current fix confines model actions to wrapping flex rows with bounded button widths; the packaged all-page overlap assertion remains enabled. Build #3010 must confirm the actual UI geometry and finish every install/portable gate before any release claim.

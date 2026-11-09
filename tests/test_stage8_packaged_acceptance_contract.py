@@ -57,6 +57,11 @@ class Stage8PackagedAcceptanceContractTests(unittest.TestCase):
         self.assertIn('page has overlapping independent controls at ', source)
         self.assertIn('record("stage8_no_overlapping_controls_" + destination', source)
 
+    def test_models_center_action_buttons_wrap_without_overlapping_neighbor_controls(self):
+        html = (ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
+        self.assertIn(".model-actions{display:flex;flex-wrap:wrap;gap:6px;min-width:0}", html)
+        self.assertIn(".model-actions .btn{min-width:0;max-width:100%;white-space:normal;overflow-wrap:anywhere}", html)
+
     def test_live_qwen_smoke_download_has_official_fallback_and_pinned_digest(self):
         workflow = (ROOT / ".github" / "workflows" / "build-windows.yml").read_text(encoding="utf-8")
         self.assertIn("$llamaZipExpectedSha256 = '1110e183589e0e2ac5b365fb5c3c4a7e149e0760c1989cac18ee426b08e5813a'", workflow)
