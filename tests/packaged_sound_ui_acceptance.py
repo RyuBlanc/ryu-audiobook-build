@@ -596,6 +596,63 @@ def _run(args: argparse.Namespace) -> int:
         "characters": [],
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    # GEN-07 / XAPP-08 acceptance uses a separate real book containing quoted
+    # dialogue but no configured character voice profiles. The installed app
+    # must enable Narrator-Only Generation explicitly and synthesize every
+    # passage, including the quoted dialogue, with the saved narrator.
+    narrator_only_project_folder = app_root / "Library" / f"Stage 5.4 Narrator Only {token}"
+    narrator_only_project_folder.mkdir(parents=True, exist_ok=False)
+    narrator_only_cover = narrator_only_project_folder / "assets" / "cover.png"
+    write_png_fixture(narrator_only_cover)
+    narrator_only_output_path = temp_root / "stage5.4-narrator-only-full-book.m4b"
+    narrator_only_title = f"Stage 5.4 Narrator Only {token}"
+    narrator_only_chapters = [{
+        "number": 1,
+        "title": "Narrator Only Dialogue Acceptance",
+        "chapter_id": f"stage54-{token}-narrator-only-chapter-1",
+        "text": (
+            "The station clock struck six. “I am ready,” Mira said. "
+            "The train began to move, and the platform disappeared behind her."
+        ),
+        "dialogue_assignments": [],
+        "review_status": "complete",
+        "skip_for_generation": False,
+    }]
+    (narrator_only_project_folder / "project.json").write_text(json.dumps({
+        "title": narrator_only_title, "source_file": None,
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    (narrator_only_project_folder / "chapters.json").write_text(
+        json.dumps(narrator_only_chapters, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    (narrator_only_project_folder / "state.json").write_text(json.dumps({
+        "status": "new",
+        "author": f"Stage 5.4 Narrator Only Author {token}",
+        "publisher": f"Stage 5.4 Narrator Only Press {token}",
+        "series": f"Stage 5.4 Narrator Only Series {token}",
+        "series_volume": "1",
+        "language": "en-US",
+        "year": "2026",
+        "genre": "Acceptance",
+        "cover_path": str(narrator_only_cover.resolve()),
+        "voice_profile": narrator_profile_name,
+        "narrator": narrator_profile_name,
+        "narrator_profile_source": "project_override",
+        "backend": "automatic",
+        "audio_bitrate": 128,
+        "output_path": str(narrator_only_output_path.resolve()),
+        "background_audio_mode": "off",
+        "background_audio_enabled": False,
+        "background_audio_path": "",
+        "background_audio_preferred_path": "",
+        "chapter_bgm_strategy": "same",
+        "chapter_bgm_overrides": {},
+        "sound_cues": {"opening": None, "chapter": None, "closing": None},
+        "narrator_only_generation": False,
+        "character_voice_profile_count": 0,
+        "characters": [],
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+
     def create_generation_project(folder: Path, title: str, output: Path, chapter_id: str, chapter_text: str) -> None:
         folder.mkdir(parents=True, exist_ok=False)
         cover = folder / "assets" / "cover.png"
@@ -705,6 +762,8 @@ def _run(args: argparse.Namespace) -> int:
         "secondary_project_folder": str(secondary_project_folder.resolve()),
         "full_generation_project_folder": str(full_generation_project_folder.resolve()),
         "full_generation_output_path": str(full_generation_output_path.resolve()),
+        "narrator_only_project_folder": str(narrator_only_project_folder.resolve()),
+        "narrator_only_output_path": str(narrator_only_output_path.resolve()),
         "control_project_folder": str(control_project_folder.resolve()),
         "control_output_path": str(control_output_path.resolve()),
         "recovery_project_folder": str(recovery_project_folder.resolve()),
