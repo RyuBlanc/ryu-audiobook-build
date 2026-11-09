@@ -41,6 +41,55 @@ class QwenGlobalModelPreferenceTests(unittest.TestCase):
             (None, None),
         )
 
+    def test_legacy_qwen_backend_values_are_migrated_and_persisted(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        import app.tts.voice_profile as voice_profiles
+
+        legacy_records = [
+            {
+                "name": "Legacy Provider Backend",
+                "provider": "qwen-character",
+                "voice_id": "Ryan",
+                "backend": "qwen-character",
+                "qwen_mode": "custom",
+            },
+            {
+                "name": "Legacy Unknown Backend",
+                "provider": "qwen-character",
+                "voice_id": "Aiden",
+                "backend": "not-a-compute-backend",
+                "qwen_mode": "custom",
+            },
+            {
+                "name": "Explicit CUDA Backend",
+                "provider": "qwen-character",
+                "voice_id": "Vivian",
+                "backend": "cuda",
+                "qwen_mode": "custom",
+            },
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            profile_file = Path(temporary) / "voices.json"
+            profile_file.write_text(json.dumps(legacy_records), encoding="utf-8")
+            with patch.object(voice_profiles, "profiles_file", return_value=profile_file):
+                loaded = voice_profiles.load_saved_profiles()
+
+            by_name = {profile.name: profile for profile in loaded}
+            self.assertEqual(by_name["Legacy Provider Backend"].backend, "automatic")
+            self.assertEqual(by_name["Legacy Unknown Backend"].backend, "automatic")
+            self.assertEqual(by_name["Explicit CUDA Backend"].backend, "cuda")
+            self.assertTrue(all(profile.qwen_profile_id for profile in loaded))
+
+            persisted = json.loads(profile_file.read_text(encoding="utf-8"))
+            persisted_by_name = {record["name"]: record for record in persisted}
+            self.assertEqual(persisted_by_name["Legacy Provider Backend"]["backend"], "automatic")
+            self.assertEqual(persisted_by_name["Legacy Unknown Backend"]["backend"], "automatic")
+            self.assertEqual(persisted_by_name["Explicit CUDA Backend"]["backend"], "cuda")
+            self.assertTrue(all(record.get("qwen_profile_id") for record in persisted))
+
     def test_global_hardware_preference_and_low_memory_apply_to_auto_profiles(self):
         saved_profile = VoiceProfile(
             "Saved Hero", "qwen-character", "Ryan",
