@@ -97,18 +97,50 @@ class NarratorOnlyGenerationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "still need speaker review"):
                 harness._resolve_narrator_for_generation(project, {"characters": characters}, chapters)
 
-    def test_explicit_narrator_only_ignores_character_voice_assignments(self):
+    def test_character_profile_added_after_narrator_only_resets_mode_and_restores_speaker_review(self):
         project = SimpleNamespace(title="Narrator-only book")
-        characters = [{"name":"Mira","voice_profile":"Mira Voice"}]
+        state = {
+            "characters": [{"name": "Mira", "voice_profile": "Mira Voice"}],
+            "narrator_only_generation": True,
+        }
         harness = NarratorResolverHarness(SimpleNamespace(name="Saved Narrator"))
         harness._saved_profiles.append(SimpleNamespace(name="Mira Voice", voice_id="mira-voice"))
-        _profile, selection = harness._resolve_narrator_for_generation(
-            project, {"characters":characters,"narrator_only_generation":True},
-            [Chapter(1, "Opening", "“Hello there,” she said.")]
+        unresolved = SimpleNamespace(
+            needs_review=True,
+            kind="needs_speaker_review",
+            text="“Hello there,”",
+            chapter_number=1,
         )
+        with patch(
+            "app.chapters.speaker_segmentation.segment_chapter_speakers",
+            return_value=[unresolved],
+        ):
+            with self.assertRaisesRegex(ValueError, "still need speaker review"):
+                harness._resolve_narrator_for_generation(
+                    project, state, [Chapter(1, "Opening", "“Hello there,” she said.")]
+                )
+
+        self.assertFalse(state["narrator_only_generation"])
+
+    def test_narrator_only_ignores_unavailable_character_profile_references(self):
+        project = SimpleNamespace(title="Narrator-only book")
+        state = {
+            "characters": [{"name": "Mira", "voice_profile": "Deleted Voice Profile"}],
+            "narrator_only_generation": True,
+        }
+        harness = NarratorResolverHarness(SimpleNamespace(name="Saved Narrator"))
+        with patch(
+            "app.chapters.speaker_segmentation.segment_chapter_speakers",
+            side_effect=AssertionError("Narrator-only mode must not demand character review"),
+        ):
+            _profile, selection = harness._resolve_narrator_for_generation(
+                project, state, [Chapter(1, "Opening", "“Hello there,” she said.")]
+            )
+
         self.assertTrue(selection["narrator_only"])
-        self.assertEqual(selection["character_voice_profile_count"], 1)
+        self.assertEqual(selection["character_voice_profile_count"], 0)
         self.assertEqual(selection["dialogue_routing"], "narrator_for_all_passages")
+        self.assertTrue(state["narrator_only_generation"])
 
     def test_configured_character_profile_keeps_unresolved_dialogue_gate(self):
         project = SimpleNamespace(title="Cast book")
