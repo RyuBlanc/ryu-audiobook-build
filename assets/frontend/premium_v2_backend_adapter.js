@@ -2063,7 +2063,12 @@
         if(selectedVoice){
           const profile=voices.find(item=>item.saved===true&&item.name.toLowerCase()===selectedVoice.toLowerCase());
           if(profile&&profile.provider==='qwen-character'&&profile.qwen_mode==='design'){
-            profileEditOriginalName=profile.name;selectedVoice=null;selectedVoiceId=null;selectedVoiceProvider='qwen-character';
+            // Editing the VoiceDesign prompt/preset creates a new draft by
+            // default. Do not retain the prior saved profile as a hidden rename
+            // target; that could overwrite the selected saved voice when saving
+            // a new Anime Hero preset. Updating/renaming an existing profile
+            // remains available through an explicit originalNameOverride.
+            profileEditOriginalName='';selectedVoice=null;selectedVoiceId=null;selectedVoiceProvider='qwen-character';
             updateVoiceSummary({name:$('profileName')?.value||profile.name,provider:'qwen-character',qwen_mode:'design'},{saved:false,previewReady:false,assignment:''});
           }
         }
@@ -7945,7 +7950,15 @@ function renderProductionMetadataGate(active) {
       if (!previewText.trim()) throw new Error('Select a passage in Chapter Studio before generating a passage preview.');
     }
     if (!previewText.trim()) throw new Error('The selected preview text is empty.');
-    const payload = {profile_name:name,text:previewText,duration_seconds:Number(duration),chapter_number:c?.number};
+    const payload = {
+      profile_name:name,
+      text:previewText,
+      duration_seconds:Number(duration),
+      chapter_number:c?.number,
+      // Voice Studio auditions the selected profile itself. Character cast
+      // routing belongs to Production/Character Studio, not this voice test.
+      route_character_cast:false
+    };
     if (!savedProfile) {
       const panel = document.querySelector('#voices .provider.active');
       const design = document.querySelector('#voices .provider[data-provider="voicedesign"]');
