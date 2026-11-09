@@ -126,11 +126,12 @@ class NarratorOnlyGenerationTests(unittest.TestCase):
             "app.chapters.speaker_segmentation.segment_chapter_speakers",
             return_value=[unresolved],
         ):
-            with self.assertRaisesRegex(ValueError, "still need speaker review"):
+            with self.assertRaisesRegex(ValueError, "still need speaker review") as raised:
                 harness._resolve_narrator_for_generation(
                     project, state, [Chapter(1, "Opening", "“Hello there,” she said.")]
                 )
 
+        self.assertIn("Narrator-Only Generation was switched off", str(raised.exception))
         self.assertFalse(state["narrator_only_generation"])
 
     def test_narrator_only_ignores_unavailable_character_profile_references(self):
