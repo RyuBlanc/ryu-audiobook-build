@@ -1152,7 +1152,12 @@
         if (stage && dashboardProject?.folder) writeResumeCheckpoint(dashboardProject.folder, stage);
         setTimeout(() => {
           syncMiniPlayer();
-          refreshProjects().catch(() => {});
+          // Project cards are only rendered by Dashboard and Library. Do not
+          // scan the whole project collection while navigating Voice, Chapters,
+          // Production, Models, History or other unrelated modules.
+          if (page === 'dashboard' || page === 'library') {
+            refreshProjects().catch(() => {});
+          }
           if (page === 'history') refreshHistory().catch(() => {});
         },0);
         return result;
@@ -1171,7 +1176,7 @@
     if (!window.__ryuDashboardProjectTimer) {
       window.__ryuDashboardProjectTimer = setInterval(() => {
         if (dashboardPageActive()) refreshProjects().catch(() => {});
-      }, 3000);
+      }, 15000);
     }
   }
   function updateProjectDeleteButton() {
