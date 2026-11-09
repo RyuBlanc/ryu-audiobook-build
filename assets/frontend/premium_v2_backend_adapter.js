@@ -9104,7 +9104,7 @@ function renderProductionMetadataGate(active) {
     if (!document.getElementById('modelInstallDetailsStyle')) {
       const style = document.createElement('style');
       style.id = 'modelInstallDetailsStyle';
-      style.textContent = '.model-install-details[open]>.model-install-content{display:grid;gap:10px;padding-top:10px}';
+      style.textContent = '.model-install-details[open]>.model-install-content{display:grid;gap:10px;padding-top:10px}#backgroundJobsModal .jobs-modal,.modal-back .jobs-modal{box-sizing:border-box;width:min(780px,calc(100vw - 40px));min-width:0;max-width:calc(100vw - 40px)}';
       document.head.appendChild(style);
     }
     const rows = Array.isArray(window.ryuModelInventoryRows) ? window.ryuModelInventoryRows : [];

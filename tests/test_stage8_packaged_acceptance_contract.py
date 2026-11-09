@@ -65,6 +65,7 @@ class Stage8PackagedAcceptanceContractTests(unittest.TestCase):
         self.assertIn("#models .model-grid{margin-bottom:40px}#models .install-queue{margin-top:0}", html)
         self.assertIn("grid.style.paddingBottom = '48px';", adapter)
         self.assertIn('.model-install-details[open]>.model-install-content{display:grid;gap:10px;padding-top:10px}', adapter)
+        self.assertIn('#backgroundJobsModal .jobs-modal,.modal-back .jobs-modal{box-sizing:border-box;width:min(780px,calc(100vw - 40px));min-width:0;max-width:calc(100vw - 40px)}', adapter)
         self.assertIn('<div class="model-install-content">', adapter)
         self.assertNotIn('<div style="display:grid;gap:10px;padding-top:10px">', adapter)
 
