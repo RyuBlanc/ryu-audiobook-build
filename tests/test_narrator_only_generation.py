@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -177,7 +178,7 @@ class NarratorOnlyGenerationTests(unittest.TestCase):
     def test_narrator_only_save_rejects_a_project_with_a_valid_character_voice_profile(self):
         narrator = SimpleNamespace(name="Saved Narrator")
         character_voice = SimpleNamespace(name="Mira Voice")
-        project = SimpleNamespace(folder=__import__("pathlib").Path.cwd())
+        project = SimpleNamespace(folder=Path.cwd())
         state = {
             "characters": [{"name": "Mira", "voice_profile": "Mira Voice"}],
             "narrator_only_generation": False,
