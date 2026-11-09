@@ -761,3 +761,8 @@ Build #3009 passed its regression job but failed packaged acceptance on attempt 
 ## 9 November 2026 — Build #3010 and Production selection race
 
 Build #3010 passed the regression job, including the new Models Center action-wrap contract. Its package job was skipped because the push did not carry the workflow's `[artifact-checkpoint]` marker; it produced no package evidence. Review of #3009 attempt 1 showed Production preview chapter selection reverting to Chapter Studio's selection after a live saved-chapter refresh, while attempt 2 independently found the Models Center overlaps. The selector now retains a still-valid explicit Production chapter when refreshed title/text/identity changes, while invalidating stale preview audio. Build #3011 is the packaging checkpoint for both fixes; exact-head package gates remain pending.
+
+
+## 9 November 2026 — Build #3011 packaged overlap follow-up
+
+Build #3011 passed all 1,442 regression tests and frozen executable checks. Packaged acceptance passed Production chapter selection after the refresh-state fix and generated the Stage 5.4 full-book and retry M4B fixtures. It then detected a remaining 16×9-pixel control overlap at 1920×1080 between a Models Center `Copy path` button and the installation queue's `Clear completed` button. The overlap assertion remains strict; its failure report now includes both control bounds and model-card ownership. Next exact-head checkpoint must use that geometry to correct the layout, then complete installer, portable, scan and hash gates.

@@ -73,6 +73,11 @@ class Stage8PackagedAcceptanceContractTests(unittest.TestCase):
         self.assertIn("productionPreviewSelectedChapterSignature = currentSignature;", stale_data_branch)
         self.assertNotIn("productionPreviewSelectedChapter = null;", stale_data_branch)
 
+    def test_overlap_failure_reports_exact_controls_and_model_card(self):
+        source = (ROOT / "tests" / "stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
+        self.assertIn('leftRect:{left:Math.round(left.rect.left)', source)
+        self.assertIn('leftModelCard:left.element.closest(".model-card")', source)
+
     def test_live_qwen_smoke_download_has_official_fallback_and_pinned_digest(self):
         workflow = (ROOT / ".github" / "workflows" / "build-windows.yml").read_text(encoding="utf-8")
         self.assertIn("$llamaZipExpectedSha256 = '1110e183589e0e2ac5b365fb5c3c4a7e149e0760c1989cac18ee426b08e5813a'", workflow)

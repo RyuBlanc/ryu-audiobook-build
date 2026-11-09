@@ -1029,6 +1029,10 @@
                 overlappingControls.push({
                   left:left.element.id || left.element.getAttribute("aria-label") || left.element.textContent.trim().slice(0,48),
                   right:right.element.id || right.element.getAttribute("aria-label") || right.element.textContent.trim().slice(0,48),
+                  leftRect:{left:Math.round(left.rect.left),top:Math.round(left.rect.top),right:Math.round(left.rect.right),bottom:Math.round(left.rect.bottom)},
+                  rightRect:{left:Math.round(right.rect.left),top:Math.round(right.rect.top),right:Math.round(right.rect.right),bottom:Math.round(right.rect.bottom)},
+                  leftModelCard:left.element.closest(".model-card")?.getAttribute("data-model-id") || null,
+                  rightModelCard:right.element.closest(".model-card")?.getAttribute("data-model-id") || null,
                   overlapWidth:Math.round(overlapWidth),overlapHeight:Math.round(overlapHeight)
                 });
                 if (overlappingControls.length >= 8) break;
