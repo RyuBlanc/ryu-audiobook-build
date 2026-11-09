@@ -928,6 +928,16 @@ class PremiumV2Bridge(QObject):
             log.exception("Could not resolve the canonical dialogue passage index for Production readiness")
 
         narrator_only_requested = state.get("narrator_only_generation", False) is True
+        try:
+            generation_character_voice_profile_count = max(
+                0,
+                int(state.get(
+                    "character_voice_profile_count",
+                    configured_character_voice_profile_count,
+                ) or 0),
+            )
+        except (TypeError, ValueError, OverflowError):
+            generation_character_voice_profile_count = configured_character_voice_profile_count
         narrator_only_eligible = (
             narrator_only_requested and configured_character_voice_profile_count == 0
         )
@@ -1062,6 +1072,11 @@ class PremiumV2Bridge(QObject):
             "narrator_voice_configured": narrator_ready,
             "narrator_profile_available": bool(narrator_selection.get("profile_available")),
             "narrator_only_generation": state.get("narrator_only_generation", False) is True,
+            # Preserve the last generation's immutable cast snapshot for the
+            # active-project readiness/recovery UI. The independently derived
+            # configured_character_voice_profile_count below describes the
+            # current saved cast and must not replace that historical identity.
+            "character_voice_profile_count": generation_character_voice_profile_count,
             "generation_mode": str(
                 state.get("generation_mode")
                 or ("narrator_only" if state.get("narrator_only_generation", False) is True else "character_cast")
