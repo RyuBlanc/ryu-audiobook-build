@@ -810,6 +810,8 @@ class ProductionReadinessUiTests(unittest.TestCase):
             "project.eligible_chapter_count ?? project.prepared_chapter_count ?? 0",
             "project.narrator_only_generation === true",
             "project.configured_character_voice_profile_count",
+            "const narratorOnlyEligibilityInvalid = narratorOnlyRequested && configuredCharacterVoiceCount > 0;",
+            "const charactersReady = !narratorOnlyEligibilityInvalid && (",
             "project.dialogue_index_ready === true",
             "project.dialogue_review_complete === true",
             "project.character_assignment_issue_count",
