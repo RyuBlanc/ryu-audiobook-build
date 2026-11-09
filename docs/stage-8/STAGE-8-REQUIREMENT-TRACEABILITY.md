@@ -645,3 +645,25 @@ This overlay updates the evidence available after the historical #2950/#2929 sna
 - It is 94 commits ahead and zero behind PR #31's head `82a39ffa2b54b8ce7cab5468affde0cbaf02db0e`; PR #31 remains open and draft. The recovery branch is already stacked on that integration candidate; do not create a duplicate branch or merge the PR's existing lineage into itself.
 - Current recovery-reentry code has passing matching-head regression evidence but no new exact-head frozen-Windows artifact checkpoint yet. Do not call the present branch a release candidate, publish 1.2.0, or mark the frozen Master inventory complete.
 - Requirements that still call for actual-book inspection, physical hardware, human listening, installed-app navigation, display/DPI or a fresh packaged Windows artifact remain **RUNTIME ACCEPTANCE PENDING** or **OPEN**, even where their code regressions pass.
+
+## 9 November 2026 — GEN-07 narrator-only active-project closure
+
+**Working branch:** `stage-5/xapp08-recovery-reentry-2026-11-08`  
+**Exact source head before artifact checkpoint:** `6e696bbe6f5f61a1c5ca21c8fd8f2b29636bc8fd`
+
+### Defect and test-first evidence
+
+The packaged GEN-07 flow exposed a real cross-project UI state defect. The narrator-only checkbox is created once and reused across project navigation, but its original change handler closed over the `project` object from the first render. After switching projects, the displayed project could be current while that retained handler still sent the first project's folder. The backend's `expected_project_folder` ownership guard correctly rejected the stale request; that guard was not weakened.
+
+- **Build #2994** — commit `7e40fcac1c0ac752598f3c1dcc22d2e8a08d226b`: test-first regression failed as intended. **1,438 tests ran; exactly the new stale-project listener assertion failed.** [Actions run](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42554088864).
+- **Fix commit** — `6e696bbe6f5f61a1c5ca21c8fd8f2b29636bc8fd`: the handler now reads the currently displayed active project and independently reads the native `project.get_active` identity at interaction time, normalizes Windows path spelling, sends the verified active folder to the backend, verifies the saved folder, and updates the live project summary. The handler no longer depends on the first-render `project` closure.
+- **Build #2995** — exact fix head `6e696bbe6f5f61a1c5ca21c8fd8f2b29636bc8fd`: **1,438 tests passed**, including the new regression; the 45-test focused Stage 6 preflight, native Qt lifecycle step and frontend JavaScript syntax step passed. [Actions run](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42554340947).
+
+### Acceptance boundary
+
+Build #2995's Windows packaging job was skipped by the feature-branch workflow condition. It produced no Windows installer/portable artifacts. Therefore this overlay records **AUTOMATED TESTS PASSED** for the listener correction, not packaged Windows acceptance or final GEN-07 completion.
+
+The next `[artifact-checkpoint]` run must execute the frozen Windows executable, full packaged Sound Design acceptance (which includes the GEN-07 narrator-only full-book fixture), installer/portable build, install/upgrade/uninstall and user-data preservation checks, SHA-256 manifest generation, and artifact-to-commit verification.
+
+Even if that run passes, the user's actual saved book, installed-PC full-book listening, real interruption/recovery, and physical Qwen CUDA/AMD/Intel/iGPU benchmarks remain separate acceptance gates. This correction does not close unrelated P0/P1 requirements or authorize Version 1.2.0 release.
+
