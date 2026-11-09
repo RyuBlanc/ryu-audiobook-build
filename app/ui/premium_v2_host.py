@@ -2118,6 +2118,7 @@ class PremiumV2Bridge(QObject):
             "cancel_requested", "retrying",
         }
         jobs_changed = False
+        history_changed = False
         for row in rows:
             if not isinstance(row, dict) or not row.get("job_id"):
                 continue
@@ -2143,15 +2144,27 @@ class PremiumV2Bridge(QObject):
                 self._reconcile_interrupted_generation_project(row)
                 jobs_changed = True
 
-            self._jobs[str(row["job_id"])] = row
-            if self._terminal_job_state(row):
-                self._record_history_job(row)
+            job_key = str(row["job_id"])
+            self._jobs[job_key] = row
+            # History already contains the terminal snapshot for completed jobs.
+            # Only add missing records (including newly interrupted jobs) and
+            # flush the history file once after the loop. Calling
+            # _record_history_job() here performed a full fsync/replace for every
+            # terminal job, making startup cost grow quadratically with history.
+            if self._terminal_job_state(row) and job_key not in self._history:
+                snapshot = dict(row)
+                snapshot["job_id"] = job_key
+                snapshot["id"] = job_key
+                snapshot["history_recorded_at"] = self._now()
+                self._history[job_key] = snapshot
+                history_changed = True
 
-        # Persist the normalized rows, otherwise every subsequent restart would
-        # rediscover the same running/paused jobs and the queue could disagree
-        # with the terminal snapshots already written to History.
+        # Batch persistence so a restart with many historical jobs performs at
+        # most one write to each durable store.
         if jobs_changed:
             self._persist_jobs()
+        if history_changed:
+            self._persist_history()
 
     def _new_job(self, job_type: str, title: str, description: str, project=None) -> str:
         job_id = uuid.uuid4().hex
