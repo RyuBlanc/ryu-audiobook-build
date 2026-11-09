@@ -29,11 +29,16 @@ class QwenPreviewPerformancePolicyTests(unittest.TestCase):
         self.assertTrue(
             any(
                 isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "set_status_callback"
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "getattr"
+                and len(node.args) >= 2
+                and isinstance(node.args[0], ast.Name)
+                and node.args[0].id == "provider"
+                and isinstance(node.args[1], ast.Constant)
+                and node.args[1].value == "set_status_callback"
                 for node in ast.walk(worker)
             ),
-            "The benchmark must attach progress using the provider's supported setter.",
+            "The benchmark must use the provider's optional progress setter safely.",
         )
 
     def _provider(self, mode: str = "design-preview") -> QwenCharacterProvider:
