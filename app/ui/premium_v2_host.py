@@ -7137,7 +7137,6 @@ class PremiumV2Bridge(QObject):
             character_rows, _issues = self._effective_generation_character_rows(
                 state,
                 series,
-                available_profiles=saved_profiles,
                 strict=False,
             )
             configured_profiles = [
@@ -7196,7 +7195,6 @@ class PremiumV2Bridge(QObject):
         character_rows, cast_mapping_issues = self._effective_generation_character_rows(
             state if isinstance(state, dict) else {},
             series,
-            available_profiles=saved_profiles,
             strict=not narrator_only,
         )
         configured_profiles = [
@@ -7226,7 +7224,6 @@ class PremiumV2Bridge(QObject):
             character_rows, cast_mapping_issues = self._effective_generation_character_rows(
                 state if isinstance(state, dict) else {},
                 series,
-                available_profiles=saved_profiles,
                 strict=True,
             )
 
@@ -7867,10 +7864,29 @@ class PremiumV2Bridge(QObject):
         # full-book generation. Never let a transient Voice Studio card selection
         # or an unsaved provider/voice payload silently change production identity.
         state = load_state(project.folder)
-        profile, narrator_selection = self._resolve_narrator_for_generation(
-            project, state, [chapter]
-        )
-        narrator_only = bool(narrator_selection.get("narrator_only"))
+        resolver = getattr(self, "_resolve_narrator_for_generation", None)
+        if callable(resolver):
+            # The real bridge always exposes this shared resolver so Production
+            # Preview and full-book generation use the same effective mode.
+            profile, narrator_selection = resolver(project, state, [chapter])
+            narrator_only = bool(narrator_selection.get("narrator_only"))
+        else:
+            # Retain compatibility for lightweight bridge adapters that predate
+            # the shared resolver. The application bridge never takes this path.
+            series = self._project_series_name(project, state)
+            narrator = self._narrator_series_default_read(project, state, series)
+            narrator_only = state.get("narrator_only_generation", False) is True
+            name = str(narrator.get("effective_profile_name") or "").strip()
+            if not name:
+                raise ValueError(
+                    "Select and save this project's narrator profile before creating a Production preview."
+                )
+            profile = self._find_profile(name)
+            if profile is None or not narrator.get("profile_available"):
+                raise ValueError(
+                    f"The project's saved narrator profile '{name}' is unavailable. Restore or reassign it in Voice Studio."
+                )
+            narrator_selection = {"narrator_only": narrator_only}
 
         # Production preview is a saved-project operation, not an arbitrary
         # text/provider audition. Always use the selected chapter's persisted
