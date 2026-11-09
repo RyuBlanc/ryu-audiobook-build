@@ -3235,10 +3235,39 @@
     window.go("player");
     await waitFor("GEN-07 Audiobooks page activation", () =>
       Boolean(document.querySelector("#player")?.classList.contains("active")), 15000);
+    let narratorOnlyCard = null;
+    await waitFor("GEN-07 narrator-only audiobook card", () => {
+      narratorOnlyCard = Array.from(document.querySelectorAll(
+        "#backendAudiobookLibrary .audiobook-library-card"
+      )).find(card => String(card.dataset.projectFolder || "") ===
+        String(config.narrator_only_project_folder || "")) || null;
+      return Boolean(narratorOnlyCard);
+    }, 20000);
+    must(narratorOnlyCard.querySelector("[data-open-project-folder]") &&
+      narratorOnlyCard.querySelector("[data-play-project-folder]"),
+      "GEN-07 narrator-only Audiobooks card is missing Open or Play.");
+    narratorOnlyCard.querySelector("[data-open-project-folder]").click();
+    await waitFor("GEN-07 narrator-only M4B loaded without autoplay", () => {
+      const audio = latestAcceptanceAudio();
+      return Boolean(audio && String(audio.dataset.projectFolder || "") ===
+        String(config.narrator_only_project_folder || "") && audio.readyState >= 1 && audio.paused);
+    }, 18000);
+    const narratorOnlyLoadedAudio = latestAcceptanceAudio();
+    must(audioUsesPath(narratorOnlyLoadedAudio, narratorOnlyPlayer.playback_output_path),
+      "GEN-07 Open loaded audio from a different project or output.");
+    narratorOnlyCard = Array.from(document.querySelectorAll(
+      "#backendAudiobookLibrary .audiobook-library-card"
+    )).find(card => String(card.dataset.projectFolder || "") ===
+      String(config.narrator_only_project_folder || "")) || null;
+    must(narratorOnlyCard && narratorOnlyCard.isConnected,
+      "GEN-07 narrator-only audiobook card was detached after Open.");
+    narratorOnlyCard.querySelector("[data-play-project-folder]").click();
     const narratorOnlyAudio = await waitForRealPlayback(
       "real narrator-only M4B audio in the Premium V2 Audiobooks player",
       narratorOnlyPlayer.playback_output_path
     );
+    must(narratorOnlyAudio === narratorOnlyLoadedAudio,
+      "GEN-07 Play switched away from the loaded narrator-only book.");
     narratorOnlyAudio.pause();
     record("xapp08_packaged_narrator_only_full_book_generation", true,
       "The frozen app explicitly saved narrator-only for a zero-character-profile book, generated an actual dialogue-containing M4B using the saved narrator, persisted narrator-only mode/profile count in project/job/History, and opened the real output in Audiobooks playback.");

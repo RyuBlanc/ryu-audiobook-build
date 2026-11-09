@@ -19,15 +19,17 @@ class Stage8PackagedAcceptanceContractTests(unittest.TestCase):
         self.assertIn('Number(narratorOnlyJob.result?.character_voice_profile_count) === 0', javascript_source)
         self.assertIn('xapp08_packaged_narrator_only_full_book_generation', javascript_source)
         self.assertIn("real narrator-only M4B audio in the Premium V2 Audiobooks player", javascript_source)
-        playback_start = javascript_source.index('const narratorOnlyCard = await waitFor(')
+        playback_start = javascript_source.index('let narratorOnlyCard = null;')
         playback_end = javascript_source.index('record("xapp08_packaged_narrator_only_full_book_generation"', playback_start)
         playback_flow = javascript_source[playback_start:playback_end]
-        self.assertIn('card.dataset.projectFolder || "") === String(config.narrator_only_project_folder || "")', playback_flow)
+        self.assertIn('String(card.dataset.projectFolder || "") ===', playback_flow)
+        self.assertIn('String(config.narrator_only_project_folder || "")', playback_flow)
         self.assertIn('querySelector("[data-open-project-folder]").click()', playback_flow)
         self.assertIn('readyState >= 1 && audio.paused', playback_flow)
         self.assertIn('audioUsesPath(narratorOnlyLoadedAudio, narratorOnlyPlayer.playback_output_path)', playback_flow)
         self.assertIn('querySelector("[data-play-project-folder]").click()', playback_flow)
-        self.assertIn('!narratorOnlyAudio.paused && narratorOnlyAudio.readyState >= 2', playback_flow)
+        self.assertIn('const narratorOnlyAudio = await waitForRealPlayback(', playback_flow)
+        self.assertIn('must(narratorOnlyAudio === narratorOnlyLoadedAudio', playback_flow)
 
     def test_production_preview_selector_resolves_live_option_during_polling(self):
         source = (ROOT / "tests" / "stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
