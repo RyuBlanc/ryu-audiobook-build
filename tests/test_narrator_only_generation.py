@@ -9,10 +9,20 @@ from app.ui import premium_v2_host as host
 
 
 class NarratorResolverHarness:
-    _resolve_narrator_for_generation = host.PremiumV2Bridge._resolve_narrator_for_generation
     _character_series_for_voice_assignment = staticmethod(
         host.PremiumV2Bridge._character_series_for_voice_assignment
     )
+
+    def _resolve_narrator_for_generation(self, project, state, chapters):
+        # Keep the test profile catalogue consistent with the resolver's
+        # independent profile lookup and the effective-cast normalization.
+        with patch(
+            "app.ui.premium_v2_host.load_profiles",
+            return_value=list(self._saved_profiles),
+        ):
+            return host.PremiumV2Bridge._resolve_narrator_for_generation(
+                self, project, state, chapters
+            )
 
     def __init__(self, profile):
         self._project_series_name = Mock(return_value="Test Series")
