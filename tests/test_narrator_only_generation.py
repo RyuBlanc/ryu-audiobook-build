@@ -284,5 +284,25 @@ class NarratorOnlyGenerationTests(unittest.TestCase):
             )
 
 
+    def test_narrator_only_toggle_uses_live_project_identity_after_project_switch(self):
+        adapter = (
+            Path(__file__).resolve().parents[1]
+            / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        start = adapter.index(
+            "input.addEventListener('change', () => {",
+            adapter.index("input.id = 'narratorOnlyGeneration'"),
+        )
+        end = adapter.index("const copy = document.createElement('span');", start)
+        handler = adapter[start:end]
+
+        # The control is reused across project navigation. Its handler must not
+        # retain the project object from the render that originally created it.
+        self.assertIn("window.ryuPremiumActiveProject", handler)
+        self.assertIn("call('project.get_active'", handler)
+        self.assertIn("expected_project_folder:String(active.folder || '')", handler)
+        self.assertNotIn("project?.folder", handler)
+
+
 if __name__ == "__main__":
     unittest.main()
