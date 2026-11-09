@@ -129,5 +129,22 @@ class StartupAndNavigationRegressionTests(unittest.TestCase):
         self.assertEqual(1, loader.count("self._persist_jobs()"))
 
 
+    def test_voice_design_preset_edits_clear_implicit_rename_target(self):
+        source = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        start = source.index("const detachForEdit=()=>{")
+        end = source.index("      };", start)
+        detach = source[start:end]
+        self.assertIn("profileEditOriginalName=''", detach)
+        self.assertIn("selectedVoice=null", detach)
+        self.assertNotIn("profileEditOriginalName=profile.name", detach)
+
+    def test_voice_studio_preview_does_not_route_through_project_character_cast(self):
+        source = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        start = source.index("async function previewVoice()")
+        end = source.index("function setPlaybackButtonState()", start)
+        preview = source[start:end]
+        self.assertIn("route_character_cast:false", preview)
+
+
 if __name__ == "__main__":
     unittest.main()
