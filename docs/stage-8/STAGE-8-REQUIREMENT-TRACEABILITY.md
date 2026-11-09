@@ -642,7 +642,7 @@ This overlay updates the evidence available after the historical #2950/#2929 sna
 ### Integration and release boundary
 
 - Current working branch at this overlay: `stage-5/xapp08-recovery-reentry-2026-11-08`.
-- It is 94 commits ahead and zero behind PR #31's head `82a39ffa2b54b8ce7cab5468affde0cbaf02db0e`; PR #31 remains open and draft. The recovery branch is already stacked on that integration candidate; do not create a duplicate branch or merge the PR's existing lineage into itself.
+- At recovery head `3c8eb6270160820978bad7c2931112a00bdc516b`, the branch compares as 113 commits ahead and zero behind PR #31's head `82a39ffa2b54b8ce7cab5468affde0cbaf02db0e`; PR #31 remains open and draft. The recovery branch is already stacked on that integration candidate; do not create a duplicate branch or merge the PR's existing lineage into itself.
 - Current recovery-reentry code has passing matching-head regression evidence but no new exact-head frozen-Windows artifact checkpoint yet. Do not call the present branch a release candidate, publish 1.2.0, or mark the frozen Master inventory complete.
 - Requirements that still call for actual-book inspection, physical hardware, human listening, installed-app navigation, display/DPI or a fresh packaged Windows artifact remain **RUNTIME ACCEPTANCE PENDING** or **OPEN**, even where their code regressions pass.
 
@@ -696,7 +696,7 @@ The Cross-Application Defect Closure & Integration Addendum supplied with this c
 | XAPP-05 | P0 | Profile assignment and routing code/tests exist; verify each saved character voice through preview and final output after project restart. |
 | XAPP-06 | P0 | #2970 recorded 1,433 passing tests for persisted legacy Qwen backend migration; verify migration against an existing user catalogue and restart. |
 | XAPP-07 | P0 | Backend selection and benchmark paths exist; real CustomVoice, VoiceDesign and Clone inference/device evidence, per-device timings and preview target remain pending. |
-| XAPP-08 | P0 | #2996 failed packaged acceptance at the owning-project summary assertion. Fix `e8885c0` and regression `d3a89ea` are on this branch; matching-head full tests and packaged acceptance remain pending, followed by actual-book listening. |
+| XAPP-08 | P0 | #3000 confirmed the persisted project/job/History result, narrator identity, M4B metadata and output ownership after the #2996 summary fix; it then failed because the acceptance harness navigated to Audiobooks without invoking the card's Open and Play controls. Test-first guard commit `2e5c370`; corrected packaged Open/Play path and guard `3c8eb62`; 1,438 tests passed in #3002. Exact-head packaged rerun and actual-book listening remain pending. |
 | XAPP-09 | P0 | Async catalogue and responsiveness regressions are present; verify target-PC responsiveness under concurrent scan, preview and generation workloads. |
 | XAPP-10 | P1 | Durable job state/control paths have automated coverage; verify truthful progress, cancellation and restart recovery in the installed app. |
 | XAPP-11 | P0 | Saved narrator/profile identity paths have automated coverage; verify profile assignment, reopen, audition and final narrator consistency on a real saved project. |
@@ -706,8 +706,21 @@ The Cross-Application Defect Closure & Integration Addendum supplied with this c
 | XAPP-15 | P0 | UI/backend contracts exist; complete the Addendum's full visible-control audit across all screens, including persistence and restart behavior. |
 | XAPP-16 | P1 | Dashboard/workflow active-project paths have tests; verify project identity and saved state across every cross-screen route in the packaged UI. |
 | XAPP-17 | P1 | Help & Guide source exists; verify search, navigation and functional parity against the final integrated package. |
-| XAPP-18 | P0 | PR #31 remains open/draft with no inline review threads. The recovery head `11d37c0` compares as 110 commits ahead and zero behind PR #31 head `82a39ff`; preserve this lineage and reconcile candidate dependencies before release. |
-| XAPP-19 | P1 | No current-head installer/portable pair exists after #2996 failed; verify same-SHA package parity, manifest and install/data-preservation gates. |
+| XAPP-18 | P0 | PR #31 remains open/draft with no inline review threads. Recovery head `3c8eb62` compares as 113 commits ahead and zero behind PR #31 head `82a39ff`; preserve this lineage and reconcile candidate dependencies before release. |
+| XAPP-19 | P1 | No installer/portable pair exists for current head `3c8eb62`; #3000 stopped before packaging after acceptance failure. Verify same-SHA package parity, manifest and install/data-preservation gates on the next passing artifact checkpoint. |
 | XAPP-20 | P0 | Full integrated user-journey set remains open until matching-head tests, packaged Windows gates and all required runtime evidence are recorded together. |
 
 **Global acceptance still pending:** user-PC saved-book analysis/generation, real listening, actual interruption/recovery, physical Qwen hardware and task-specific performance, target-PC responsiveness, supported display/DPI/multi-monitor behavior, complete accessibility/layout review, current-head installer/portable parity, and release gates. Do not mark Version 1.2.0 complete without the original Master Register's evidence requirements.
+
+
+## 9 November 2026 — GEN-07 packaged Audiobooks playback-flow correction
+
+**Source candidate:** `3c8eb6270160820978bad7c2931112a00bdc516b` on `stage-5/xapp08-recovery-reentry-2026-11-08`.
+
+Build #3000 passed the full 1,438-test regression job, frozen application verification and bundled voice/module checks. The packaged Sound Design/Music Library acceptance also passed the GEN-07 generation, durable job and History checks, owning-project snapshot, narrator identity, M4B metadata and output ownership. It then failed waiting for narrator-only playback because the harness navigated to Audiobooks and waited for audio to start without opening the generated-book card or pressing Play. The product's Audiobooks flow deliberately loads a selected book paused and requires its explicit Play control; the same real workflow was already exercised for the recovered-generation fixture.
+
+- Test-first guard commit: `2e5c3708d840e05f19216ab2e4b9b3a0d02a220d`. Build #3001 surfaced an incorrect test-source anchor in that guard (one contract-test error); it did not exercise or reveal a product regression.
+- Correction commit: `3c8eb6270160820978bad7c2931112a00bdc516b`. The fixture now locates the owning audiobook card, invokes Open, verifies the loaded paused media source belongs to the expected generated M4B, reacquires the live card after its render, clicks Play, and verifies actual playback remains on that same audio element. The contract test protects these UI actions and project/output identity assertions.
+- Build #3002 passed **1,438 tests** on the corrected source head; packaging was skipped because this was a normal fix commit.
+
+**Status:** the playback-flow correction is automated-test verified. A new `[artifact-checkpoint]` run must pass the entire packaged acceptance and Windows installer/portable pipeline before GEN-07 can advance. #3000 produced no installer or release artifacts. Actual saved-book listening, target-PC performance, physical Qwen device tests, and display/DPI acceptance remain pending.
