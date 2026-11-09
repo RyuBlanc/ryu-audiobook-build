@@ -776,3 +776,8 @@ Build #3012 attempt 1 stopped during dependency setup because the Kokoro voice-p
 ## 9 November 2026 — Build #3013 inventory boundary follow-up
 
 Build #3013 passed tests and froze successfully; packaged acceptance confirmed Production selection/recovery flows but still measured overlap between the final model card's Copy path and installation queue's Clear completed control (16×33 px) at 1920×1080. The 40px margin change did not move the controls, proving margin alone did not reserve the needed grid space. The model inventory now reserves 48px of bottom padding in its rendered grid box. Build #3014 must verify this and complete the remaining gates.
+
+
+## 9 November 2026 — Build #3014 regression-test correction
+
+Build #3014 stopped in the test job before packaging because the new Models Center padding contract referenced `adapter` without reading the adapter source in that test method (`NameError`). This is a test setup defect, not product evidence. The test now loads the adapter explicitly; the 1,443-test suite and packaged geometry check must rerun on the corrected head.
