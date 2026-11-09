@@ -174,6 +174,70 @@ class NarratorOnlyGenerationTests(unittest.TestCase):
                     project, {"characters": characters}, chapters
                 )
 
+    def test_narrator_only_save_rejects_a_project_with_a_valid_character_voice_profile(self):
+        narrator = SimpleNamespace(name="Saved Narrator")
+        character_voice = SimpleNamespace(name="Mira Voice")
+        project = SimpleNamespace(folder=__import__("pathlib").Path.cwd())
+        state = {
+            "characters": [{"name": "Mira", "voice_profile": "Mira Voice"}],
+            "narrator_only_generation": False,
+        }
+        bridge = SimpleNamespace(
+            _active_project=lambda: project,
+            _project_series_name=lambda _project, _state: "Test Series",
+            _narrator_series_default_read=lambda _project, _state, _series: {
+                "effective_profile_name": narrator.name,
+                "profile_available": True,
+            },
+            _effective_generation_character_rows=lambda _state, _series, strict=False: (
+                list(_state.get("characters") or []), []
+            ),
+            _now=lambda: "2026-11-09T01:20:00+00:00",
+        )
+        with (
+            patch.object(host, "load_state", return_value=state),
+            patch.object(host, "load_profiles", return_value=[narrator, character_voice]),
+            patch.object(host, "save_state") as save_state,
+        ):
+            with self.assertRaisesRegex(ValueError, "zero configured character voice profiles"):
+                host.PremiumV2Bridge._production_narrator_only_save(
+                    bridge, {"enabled": True}
+                )
+        save_state.assert_not_called()
+        self.assertFalse(state["narrator_only_generation"])
+
+    def test_narrator_only_save_ignores_stale_character_profile_references(self):
+        narrator = SimpleNamespace(name="Saved Narrator")
+        project = SimpleNamespace(folder=__import__("pathlib").Path.cwd())
+        state = {
+            "characters": [{"name": "Mira", "voice_profile": "Deleted Voice Profile"}],
+            "narrator_only_generation": False,
+        }
+        bridge = SimpleNamespace(
+            _active_project=lambda: project,
+            _project_series_name=lambda _project, _state: "Test Series",
+            _narrator_series_default_read=lambda _project, _state, _series: {
+                "effective_profile_name": narrator.name,
+                "profile_available": True,
+            },
+            _effective_generation_character_rows=lambda _state, _series, strict=False: (
+                list(_state.get("characters") or []), ["stale profile reference"]
+            ),
+            _now=lambda: "2026-11-09T01:20:00+00:00",
+        )
+        with (
+            patch.object(host, "load_state", return_value=state),
+            patch.object(host, "load_profiles", return_value=[narrator]),
+            patch.object(host, "save_state") as save_state,
+        ):
+            result = host.PremiumV2Bridge._production_narrator_only_save(
+                bridge, {"enabled": True}
+            )
+        self.assertTrue(result["saved"])
+        self.assertTrue(result["enabled"])
+        self.assertTrue(state["narrator_only_generation"])
+        save_state.assert_called_once()
+
     def test_narrator_is_still_required_in_narrator_only_mode(self):
         project = SimpleNamespace(title="Narrator-only book")
         harness = NarratorResolverHarness(None)
