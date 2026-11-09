@@ -9,6 +9,71 @@ from app.tts.qwen_character_runtime import _run
 
 
 class QwenRuntimeSafetyTests(unittest.TestCase):
+    def test_automatic_backend_uses_cpu_only_when_same_machine_verified_benchmark_is_faster(self):
+        import json
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.tts import qwen_accelerator as accelerator
+
+        hardware = {"gpu_name": "Test GPU", "processor": "Test CPU"}
+        def row(backend, seconds):
+            return {
+                "state": "completed", "measured_at": "2026-11-09T12:00:00Z",
+                "result": {
+                    "provider": "QwenCharacterProvider", "model_kind": "custom-0.6b",
+                    "workload_id": "qwen-customvoice-preview-30s-v1",
+                    "success": True, "backend_verified": True,
+                    "target_duration_met": True, "backend": backend,
+                    "seconds": seconds, "audio_seconds": 30.0, "hardware": hardware,
+                },
+            }
+
+        gpu = SimpleNamespace(backend="cuda", device="cuda:0", name="Test GPU", supported=True,
+                              memory_gb=8.0, reason="")
+        with TemporaryDirectory() as temporary:
+            path = Path(temporary) / "history.json"
+            path.write_text(json.dumps([row("cuda", 40.0), row("cpu", 30.0)]), encoding="utf-8")
+            with patch.object(accelerator, "best_accelerator", return_value=gpu), \
+                 patch("platform.processor", return_value="Test CPU"):
+                selected, reason = accelerator.automatic_accelerator("custom-0.6b", path)
+            self.assertEqual(selected.backend, "cpu")
+            self.assertIn("at least 5% faster", reason)
+
+            path.write_text(json.dumps([row("cuda", 40.0), row("cpu", 39.0)]), encoding="utf-8")
+            with patch.object(accelerator, "best_accelerator", return_value=gpu), \
+                 patch("platform.processor", return_value="Test CPU"):
+                selected, _reason = accelerator.automatic_accelerator("custom-0.6b", path)
+            self.assertEqual(selected.backend, "cuda")
+
+    def test_automatic_backend_ignores_unverified_or_other_model_benchmarks(self):
+        import json
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.tts import qwen_accelerator as accelerator
+
+        gpu = SimpleNamespace(backend="cuda", device="cuda:0", name="Test GPU", supported=True,
+                              memory_gb=8.0, reason="")
+        bad = {
+            "state": "completed", "result": {
+                "provider": "QwenCharacterProvider", "model_kind": "custom-1.7b",
+                "workload_id": "qwen-customvoice-preview-30s-v1", "success": True,
+                "backend_verified": False, "target_duration_met": True, "backend": "cpu",
+                "seconds": 1.0, "audio_seconds": 30.0,
+                "hardware": {"gpu_name": "Test GPU", "processor": "Test CPU"},
+            },
+        }
+        with TemporaryDirectory() as temporary:
+            path = Path(temporary) / "history.json"
+            path.write_text(json.dumps([bad]), encoding="utf-8")
+            with patch.object(accelerator, "best_accelerator", return_value=gpu), \
+                 patch("platform.processor", return_value="Test CPU"):
+                selected, _reason = accelerator.automatic_accelerator("custom-0.6b", path)
+        self.assertEqual(selected.backend, "cuda")
+
     def test_qwen_huggingface_cache_uses_configured_model_cache_root(self):
         from pathlib import Path
         from tempfile import TemporaryDirectory
@@ -689,3 +754,4 @@ xpu=False""",
 
 if __name__ == "__main__":
     unittest.main()
+

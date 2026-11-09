@@ -26,7 +26,7 @@ from app.tts.expression import (
     reference_style,
     voice_design_anchor_instruction,
 )
-from app.tts.qwen_accelerator import best_accelerator
+from app.tts.qwen_accelerator import automatic_accelerator, best_accelerator
 
 EXPRESSION_BANK_VERSION = "v8-emotion-range-anchor"
 
@@ -112,11 +112,9 @@ def _load_model(kind: str, backend: str, root: Path, low_memory: bool = False):
     if requested == "cpu":
         device = "cpu"
     elif requested in {"automatic", "auto"}:
-        device = (
-            selected.device
-            if selected.supported and selected.backend in {"cuda", "rocm", "xpu"}
-            else "cpu"
-        )
+        selected, selection_reason = automatic_accelerator(kind)
+        device = selected.device if selected.supported else "cpu"
+        print(json.dumps({"progress": selection_reason}), flush=True)
     elif requested == "cuda" and torch.cuda.is_available() and not getattr(torch.version, "hip", None):
         device = "cuda:0"
     elif requested == "rocm" and torch.cuda.is_available() and getattr(torch.version, "hip", None):
@@ -992,3 +990,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
