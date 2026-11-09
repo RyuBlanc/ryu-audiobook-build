@@ -779,6 +779,10 @@ class ProductionReadinessUiTests(unittest.TestCase):
             "active.output_format_supported !== true",
             "active.output_folder_ready !== true",
             "active.output_configured !== true",
+            "active.dialogue_index_ready !== true",
+            "active.dialogue_review_complete !== true",
+            "active.character_assignment_issue_count",
+            "active.pending_dialogue_count",
         ):
             self.assertIn(marker, helper)
 
@@ -805,11 +809,15 @@ class ProductionReadinessUiTests(unittest.TestCase):
             "const metadataComplete = project.metadata_complete === true;",
             "project.eligible_chapter_count ?? project.prepared_chapter_count ?? 0",
             "project.narrator_only_generation === true",
+            "project.configured_character_voice_profile_count",
+            "project.dialogue_index_ready === true",
+            "project.dialogue_review_complete === true",
+            "project.character_assignment_issue_count",
             "project.narrator_profile_available === true",
             "project.output_folder_ready === true",
             "project.output_format_supported === true",
             "{key:'import', ready:metadataComplete",
-            "const canGenerate = chaptersReady && metadataComplete && narratorReady && outputReady;",
+            "const canGenerate = chaptersReady && metadataComplete && narratorReady && outputReady && charactersReady;",
         ):
             self.assertIn(marker, flow)
         self.assertNotIn("{key:'import', ready:Boolean(project.source_exists)", flow)
