@@ -354,11 +354,13 @@ class GenerationRecoveryLaunchHarness:
         return self.narrator_profile if name == self.narrator_profile.name else None
 
     def _effective_generation_character_rows(self, _state, _series, *, strict=False):
-        # The project contains saved cast assignments. Narrator-only recovery
-        # must deliberately bypass their providers during the next generation.
+        # Character records may exist, but narrator-only eligibility
+        # requires zero configured saved character voice profiles.
         return (
-            [{"name": "Mira", "series": "Saved Series", "voice_profile": "Mira Voice"},
-             {"name": "Arun", "series": "Saved Series", "voice_profile": "Arun Voice"}],
+            [
+                {"name": "Mira", "series": "Saved Series", "voice_profile": ""},
+                {"name": "Arun", "series": "Saved Series", "voice_profile": ""},
+            ],
             [],
         )
 
@@ -442,8 +444,8 @@ class Stage53GenerationRecoveryLaunchTests(unittest.TestCase):
                 "chapter_bgm_strategy": "same",
                 "chapter_bgm_overrides": {},
                 "characters": [
-                    {"name": "Mira", "voice_profile": "Mira Voice"},
-                    {"name": "Arun", "voice_profile": "Arun Voice"},
+                    {"name": "Mira", "voice_profile": ""},
+                    {"name": "Arun", "voice_profile": ""},
                 ],
             }
             bridge = GenerationRecoveryLaunchHarness(project, original_job_id, narrator)
@@ -473,7 +475,7 @@ class Stage53GenerationRecoveryLaunchTests(unittest.TestCase):
             self.assertEqual(new_job["recovery_of_job_id"], original_job_id)
             self.assertEqual(new_job["result"]["generation_mode"], "narrator_only")
             self.assertIs(new_job["result"]["narrator_only"], True)
-            self.assertEqual(new_job["result"]["character_voice_profile_count"], 2)
+            self.assertEqual(new_job["result"]["character_voice_profile_count"], 0)
 
             provider = manager_factory.call_args.args[0]
             self.assertIs(provider.profile, narrator)
