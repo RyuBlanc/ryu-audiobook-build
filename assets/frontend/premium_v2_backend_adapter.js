@@ -9101,6 +9101,12 @@ function renderProductionMetadataGate(active) {
     return actions.join('');
   }
   function renderModelInventory() {
+    if (!document.getElementById('modelInstallDetailsStyle')) {
+      const style = document.createElement('style');
+      style.id = 'modelInstallDetailsStyle';
+      style.textContent = '.model-install-details[open]>.model-install-content{display:grid;gap:10px;padding-top:10px}';
+      document.head.appendChild(style);
+    }
     const rows = Array.isArray(window.ryuModelInventoryRows) ? window.ryuModelInventoryRows : [];
     const grid = $('modelGrid');
     const query = String($('modelInventorySearch')?.value || '').trim().toLowerCase();
@@ -9179,10 +9185,10 @@ function renderProductionMetadataGate(active) {
         const details = local && (model.file_inventory_available || pathRows.length)
           ? '<details class="model-install-details" data-model-details="' + esc(model.model_id) + '" style="border-top:1px solid var(--border,rgba(255,255,255,.12));padding-top:8px">' +
             '<summary style="cursor:pointer;font-weight:600">Installation details · actual paths, runtime and files</summary>' +
-            '<div style="display:grid;gap:10px;padding-top:10px">' + infoMarkup + pathRows.join('') +
+            '<div class="model-install-content">' + infoMarkup + pathRows.join('') +
             '<div data-model-file-list style="display:grid;gap:6px"><span class="muted">Expand to enumerate the actual installed files and their sizes.</span></div></div></details>'
           : '';
-        return '<article class="card model-card" data-model-id="' + esc(model.model_id) + '" style="display:flex;flex-direction:column;gap:12px;min-width:0;align-self:flex-start;height:fit-content;min-height:0">' +
+        return '<article class="card model-card" data-model-id="' + esc(model.model_id) + '" style="display:flex;flex-direction:column;gap:12px;min-width:0">' +
           '<div class="model-card-head" style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">' +
             '<div style="min-width:0"><div class="model-eyebrow">' + esc(String(model.provider || 'Local component').replace(/-/g,' ')) + '</div>' +
             '<h3 style="margin:6px 0 0;overflow-wrap:anywhere">' + esc(model.name) + '</h3></div>' +
