@@ -256,6 +256,18 @@ class NarratorOnlyGenerationTests(unittest.TestCase):
             "Adding a character voice profile returns production to multi-character speaker review.",
             adapter,
         )
+        self.assertIn(
+            "project.narrator_only_generation === true && characterVoiceCount === 0",
+            adapter,
+        )
+        self.assertIn(
+            "active.narrator_only_generation === true && configuredCharacterVoiceCount > 0",
+            adapter,
+        )
+        self.assertIn(
+            "Turn it off to use multi-character speaker review.",
+            adapter,
+        )
 
     def test_narrator_is_still_required_in_narrator_only_mode(self):
         project = SimpleNamespace(title="Narrator-only book")
