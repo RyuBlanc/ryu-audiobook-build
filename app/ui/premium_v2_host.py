@@ -862,12 +862,86 @@ class PremiumV2Bridge(QObject):
 
         character_voice_count = len(assigned_character_names)
         character_analysis_done = bool(state.get("character_analysis")) or bool(character_names)
+
+        # Production and Character Studio must derive cast readiness from the
+        # same resolvers: saved profile references are valid only when they map
+        # to an available Voice Studio profile, and dialogue counts come from
+        # the canonical revision-aware passage index used by generation.
+        character_assignment_issues: list[str] = []
+        effective_character_rows: list[dict[str, Any]] = []
+        try:
+            profile_catalogue = load_profiles()
+            effective_character_rows, character_assignment_issues = (
+                self._effective_generation_character_rows(
+                    state,
+                    self._project_series_name(project, state),
+                    available_profiles=profile_catalogue,
+                    strict=False,
+                )
+            )
+        except Exception:
+            log.exception("Could not resolve saved character voice assignments for Production readiness")
+            character_assignment_issues = ["Saved character voice profiles could not be verified."]
+
+        configured_character_rows = [
+            row for row in effective_character_rows
+            if isinstance(row, dict)
+            and str(row.get("name") or row.get("primary_name") or "").strip().casefold() != "narrator"
+            and str(row.get("voice_profile") or "").strip()
+        ]
+        configured_character_voice_profile_count = len(configured_character_rows)
+
+        dialogue_index_ready = False
+        dialogue_index_revision = ""
+        dialogue_passage_count = 0
+        assigned_dialogue_count = 0
+        pending_dialogue_count = 0
+        conflicting_dialogue_count = 0
+        unassigned_dialogue_count = 0
+        dialogue_index_issue_count = 0
+        try:
+            from app.chapters.passage_index import load_or_build_passage_index
+
+            dialogue_index = load_or_build_passage_index(
+                project.folder,
+                project.chapters,
+                suggested_passages=state.get("character_dialogue_suggestions") or [],
+            )
+            dialogue_counts = dialogue_index.get("counts") or {}
+            dialogue_index_revision = str(dialogue_index.get("index_revision") or "")
+            dialogue_passage_count = int(dialogue_counts.get("dialogue_passage_count") or 0)
+            assigned_dialogue_count = int(dialogue_counts.get("assigned_dialogue_count") or 0)
+            pending_dialogue_count = int(dialogue_counts.get("pending_dialogue_count") or 0)
+            conflicting_dialogue_count = int(dialogue_counts.get("conflicting_dialogue_count") or 0)
+            unassigned_dialogue_count = int(dialogue_counts.get("unassigned_dialogue_count") or 0)
+            dialogue_index_issue_count = int(dialogue_counts.get("index_issue_count") or 0)
+            dialogue_index_ready = bool(dialogue_index_revision)
+        except Exception:
+            # Readiness must fail closed if the canonical index cannot be
+            # verified. Generation resolves the same index and will also block.
+            log.exception("Could not resolve the canonical dialogue passage index for Production readiness")
+
+        narrator_only_requested = state.get("narrator_only_generation", False) is True
+        narrator_only_eligible = (
+            narrator_only_requested and configured_character_voice_profile_count == 0
+        )
+        character_cast_readiness_complete = (
+            dialogue_index_ready
+            and len(character_assignment_issues) == 0
+            and pending_dialogue_count == 0
+            and conflicting_dialogue_count == 0
+            and dialogue_index_issue_count == 0
+        )
         # Once analysis confirms that a book has no character speakers, there is
-        # no missing character assignment to penalize in the preparation score.
+        # no missing assignment to penalize. Otherwise keep the existing
+        # character roster ratio, but never score a stale/unreviewed dialogue
+        # index as fully prepared.
         character_voice_ratio = (
             len(assigned_character_names) / len(character_names)
             if character_names else (1.0 if character_analysis_done else 0.0)
         )
+        if not narrator_only_eligible and not character_cast_readiness_complete:
+            character_voice_ratio = 0.0
         # Resolve the effective narrator from the saved project override or the live
         # series default. A missing/deleted profile is not considered ready.
         narrator_selection = self._narrator_series_default_read(
@@ -999,6 +1073,24 @@ class PremiumV2Bridge(QObject):
             "audio_bitrate": audio_bitrate,
             "character_count": len(character_names),
             "character_voice_count": character_voice_count,
+            "configured_character_voice_profile_count": configured_character_voice_profile_count,
+            "character_assignment_issue_count": len(character_assignment_issues),
+            "dialogue_index_ready": dialogue_index_ready,
+            "dialogue_index_revision": dialogue_index_revision,
+            "dialogue_passage_count": dialogue_passage_count,
+            "assigned_dialogue_count": assigned_dialogue_count,
+            "pending_dialogue_count": pending_dialogue_count,
+            "conflicting_dialogue_count": conflicting_dialogue_count,
+            "unassigned_dialogue_count": unassigned_dialogue_count,
+            "dialogue_index_issue_count": dialogue_index_issue_count,
+            "dialogue_review_complete": (
+                dialogue_index_ready
+                and len(character_assignment_issues) == 0
+                and pending_dialogue_count == 0
+                and conflicting_dialogue_count == 0
+                and dialogue_index_issue_count == 0
+            ),
+            "narrator_only_eligible": narrator_only_eligible,
             "character_analysis_done": character_analysis_done,
             "prepared_chapter_count": prepared_chapters,
             "eligible_chapter_count": eligible_chapters,
