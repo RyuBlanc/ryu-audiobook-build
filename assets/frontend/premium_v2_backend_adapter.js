@@ -5804,6 +5804,10 @@ function renderProductionMetadataGate(active) {
       if (node && parent && node !== parent && node.parentElement !== parent) parent.appendChild(node);
     };
     move($('previewGenerate'),preview);
+    const previewDurationGroup = [...engineCard.querySelectorAll('.segmented')].find(group =>
+      [...group.querySelectorAll('button')].some(button => /^\s*(?:10|30|60|90)\s*s(?:ec(?:onds?)?)?\s*$/i.test(button.textContent.trim()))
+    );
+    move(previewDurationGroup,preview);
     move($('productionPreviewControls'),preview);
     move($('productionPreviewMonitor'),preview);
     move($('productionPreviewStatus'),preview);
