@@ -674,6 +674,49 @@ jobs:
             if ($cueFiles.Count -lt 1) { throw "Frozen package has no $kind book-cue audio." }
           }
           Write-Host "Bundled real starter audio verified: BGM=$($starterMusic.Count), with opening/page-turn/closing cue categories."
+
+          # The Qwen inference worker runs in a separate Python venv, outside
+          # the frozen EXE/PYZ. Verify that its physical source tree contains
+          # app.core and that Automatic can follow the GPU-selection path.
+          $corePathCandidates = @(
+            (Join-Path $exeDir 'app\core\paths.py'),
+            (Join-Path $exeDir '_internal\app\core\paths.py')
+          )
+          $corePathsFile = $corePathCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+          if (-not $corePathsFile) { throw 'Frozen package is missing physical app/core/paths.py required by the external Qwen runtime.' }
+          $coreDirectory = Split-Path -Parent $corePathsFile
+          $appDirectory = Split-Path -Parent $coreDirectory
+          $frozenPythonRoot = Split-Path -Parent $appDirectory
+          $qwenRuntimePython = Join-Path $env:RUNNER_TEMP 'ryu-qwen-python-bootstrap\runtime\Scripts\python.exe'
+          if (-not (Test-Path -LiteralPath $qwenRuntimePython -PathType Leaf)) {
+            throw "The isolated Qwen runtime Python is missing: $qwenRuntimePython"
+          }
+          $previousPythonPath = $env:PYTHONPATH
+          try {
+            $env:PYTHONPATH = $frozenPythonRoot
+            $qwenProbe = @'
+from pathlib import Path
+from app.core.paths import settings_root
+from app.tts import qwen_accelerator as accelerator
+accelerator.best_accelerator = lambda: accelerator.Accelerator(
+    "cuda", "cuda:0", "CI NVIDIA GPU", 8.0, True, "CI GPU import-path probe"
+)
+selected, _reason = accelerator.automatic_accelerator(
+    "custom-0.6b",
+    history_path=Path.home() / "Ryu Qwen Missing CI History.json",
+)
+assert selected.backend == "cuda" and selected.device == "cuda:0", selected
+print("External Qwen app.core import OK: " + str(settings_root()))
+print("External Qwen automatic GPU selection OK: " + selected.backend + " / " + selected.device)
+'@
+            $qwenOutput = & $qwenRuntimePython -B -c $qwenProbe 2>&1
+            $qwenExit = $LASTEXITCODE
+            $qwenOutput | Write-Host
+            if ($qwenExit -ne 0) { throw "External Qwen runtime import/GPU-selection smoke failed with exit code $qwenExit." }
+          } finally {
+            if ($previousPythonPath) { $env:PYTHONPATH = $previousPythonPath }
+            else { Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue }
+          }
           Write-Host 'Critical application modules were already exercised by the frozen EXE self-test.'
 
       - name: Run packaged Sound Design Music Library acceptance (including Stage 5.3 generation UI)
