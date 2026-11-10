@@ -87,3 +87,25 @@ For each failed or questionable item, record:
 8. Whether the issue repeats after restarting the app.
 
 **Do not label the app bug-free.** The Qwen 30-second preview under-60-second target was not met on the hosted CPU (268.184 seconds); NVIDIA/AMD/Intel accelerator checks remain deferred until the corresponding hardware is available. Record actual timings rather than estimating.
+
+
+## G. Production UI and notification repair checkpoint — 11 November 2026
+
+These checks were added after the earlier friend-acceptance checklist. They must be exercised on the packaged Windows candidate; source tests alone do not count as hands-on acceptance.
+
+- [ ] Import a book with a real cover and confirm the Ryu's Audiobook placeholder watermark is absent over the image.
+- [ ] Remove the cover and confirm the branded red/gold gradient placeholder and watermark return.
+- [ ] Start a full audiobook job and confirm the ring arc, displayed percentage, chapter, elapsed time and remaining-time estimate describe that same full-book job.
+- [ ] Start or inspect a chapter preview and confirm its progress does not change the full-book ring.
+- [ ] Confirm the Generation Engine order is chapter preview controls first, audiobook settings second, and full audiobook Generate/Pause actions last. No empty toolbar gap remains.
+- [ ] Resize the Production Studio card and enter long metadata, output paths and long readiness messages; confirm left, center and readiness content wrap without overlap.
+- [ ] Confirm Narrator-Only Generation is rendered as an on/off switch with an information hover. When enabled, it must route every passage, including dialogue, to the saved narrator only when no valid character voice profiles are configured. With any valid configured character profile, the switch must explain why it is unavailable.
+- [ ] Confirm pronunciation and Voice Only/BGM & cues controls still save and affect preview and final generation.
+- [ ] Click the top-right notification dot while a task is running. It must open recent notification cards, not Background Jobs/Task Manager.
+- [ ] Trigger several job updates; confirm progress does not create a repeated stack of duplicate notifications and notifications disappear within 30 seconds.
+- [ ] Verify a model from Models Center; detailed diagnostics should remain on the model card while the floating notification remains short.
+- [ ] Open Help & Guide and confirm the original seven-stage guide, task shortcuts, model guidance, recovery instructions, quality checklist and FAQs remain present. The guide must not display an unrelated sample project's readiness percentage or example badges.
+- [ ] Confirm Qwen Auto / 0.6B / 1.7B preference is visible and persists consistently across Voice Studio, Production and Performance Center.
+- [ ] When a real NVIDIA/AMD/Intel test PC is available, confirm Qwen reports a GPU active only after the isolated runtime self-test and a successful inference report that device. Explicit GPU selection must fail visibly and preserve the previous runtime if activation fails.
+
+**Evidence boundary:** the branch CI covers the static UI contracts and regression tests. The real Windows installer/portable build, actual book synthesis, cover rendering in WebEngine, notification timing and physical-GPU inference still require the checks above on the packaged application and appropriate hardware.
