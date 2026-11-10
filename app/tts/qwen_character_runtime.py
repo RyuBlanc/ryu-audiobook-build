@@ -283,6 +283,8 @@ def _install_runtime_packages(
                 f"AMD adapter {amd_candidate.name} is not listed in the official "
                 "Windows ROCm/PyTorch matrix; using CPU compatibility mode."
             )
+            if preferred_backend == "rocm":
+                raise RuntimeError(gpu_fallback_reason)
             install_plan.append(cpu_plan)
         else:
             if spec["rocm"] == "10.1.0":
@@ -962,31 +964,36 @@ def ensure_best_runtime_for_gpu(
                 "Finish active Qwen jobs and use Models → Repair to change the installed GPU runtime."
             )
 
-        candidates = gpu_runtime_candidates(refresh=True)
+        from app.tts.qwen_accelerator import detect_accelerators
+        detected = detect_accelerators(refresh=True)
+        detected_gpu = [
+            item for item in detected
+            if item.backend in {"cuda","rocm","xpu","cuda-candidate","rocm-candidate","xpu-candidate"}
+        ]
         if requested_backend:
-            active = next(
-                (item for item in detect_accelerators(refresh=True)
+            target = next(
+                (item for item in detected_gpu
                  if item.backend == requested_backend and item.supported),
                 None,
             )
-            candidate = next(
-                (item for item in candidates if item.backend == requested_backend + "-candidate"),
-                None,
-            )
-            if active is not None:
-                return active.backend
-            if candidate is None:
+            if target is None:
+                target = next(
+                    (item for item in detected_gpu
+                     if item.backend == requested_backend + "-candidate"),
+                    None,
+                )
+            if target is None:
                 raise RuntimeError(
                     f"The selected {requested_backend.upper()} backend is no longer detected "
                     "as an installable Qwen accelerator. Refresh Performance Center and choose Automatic."
                 )
-            active = candidate
+            active = target
         else:
-            if not candidates:
+            if not detected_gpu:
                 return None
             active = best_accelerator()
-            if active.supported and active.backend in {"cuda", "rocm", "xpu"}:
-                return active.backend
+            if active.backend not in {"cuda","rocm","xpu","cuda-candidate","rocm-candidate","xpu-candidate"}:
+                return None
 
         active_pids = _active_qwen_worker_pids()
         if active_pids:
@@ -1016,26 +1023,36 @@ def ensure_best_runtime_for_gpu(
             detail = verify_runtime(progress)
             installed = json.loads(MARKER.read_text(encoding="utf-8"))
             selected_backend = str(installed.get("accelerator") or "cpu").casefold()
-            from app.tts.qwen_accelerator import detect_accelerators
-            detect_accelerators(refresh=True)
-            refreshed = best_accelerator()
-            if (
-                selected_backend not in {"cuda", "rocm", "xpu"}
-                or not refreshed.supported
-                or refreshed.backend != selected_backend
-            ):
+            # The application GUI and the isolated Qwen worker can intentionally
+            # use different PyTorch installations. Validate the private worker
+            # environment against its own marker/self-test; never use the GUI's
+            # best_accelerator() result as evidence that Qwen CUDA/ROCm/XPU is active.
+            private_runtime_ok = _runtime_version_is_current()
+            if not private_runtime_ok:
                 raise RuntimeError(
-                    "GPU PyTorch installed but is not active. "
-                    f"Installed={selected_backend}; detected={refreshed.backend} "
-                    f"({refreshed.name}). {detail[-1200:]}"
+                    "The isolated Qwen PyTorch runtime failed its private self-test. "
+                    f"Installed={selected_backend}; {detail[-1200:]}"
                 )
+            if requested_backend and selected_backend != requested_backend:
+                raise RuntimeError(
+                    f"The explicitly selected {requested_backend.upper()} runtime did not activate; "
+                    f"the installer selected {selected_backend.upper()} instead."
+                )
+            if selected_backend not in {"cuda", "rocm", "xpu", "cpu"}:
+                raise RuntimeError(f"Qwen installed an unknown runtime backend: {selected_backend}.")
             shutil.rmtree(backup_venv, ignore_errors=True)
             backup_marker.unlink(missing_ok=True)
             if progress:
-                progress(
-                    f"Qwen GPU runtime active • {refreshed.name} • "
-                    f"{selected_backend.upper()} • {installed.get('torch', 'PyTorch')}"
-                )
+                if selected_backend in {"cuda", "rocm", "xpu"}:
+                    progress(
+                        f"Qwen private GPU runtime active • {active.name} • "
+                        f"{selected_backend.upper()} • {installed.get('torch', 'PyTorch')}"
+                    )
+                else:
+                    progress(
+                        "Qwen GPU runtime did not activate; the verified CPU compatibility runtime is active. "
+                        + detail[-700:]
+                    )
             return selected_backend
         except Exception as exc:
             if VENV_ROOT.exists():
