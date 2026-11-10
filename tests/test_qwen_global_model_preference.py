@@ -104,10 +104,11 @@ class QwenGlobalModelPreferenceTests(unittest.TestCase):
         self.assertEqual(provider.backend, "cpu")
         self.assertTrue(provider.low_memory)
 
-    def test_saved_profile_compute_backend_never_overrides_current_global_preference(self):
-        # Profiles can move between the user's CPU-only laptop and a GPU PC.
-        # Their portable voice identity must not carry a stale CPU/CUDA choice.
-        for saved_backend in ("cpu", "cuda", "rocm", "xpu"):
+    def test_saved_profile_backend_is_portable_and_current_global_preference_wins(self):
+        # A voice profile is portable across machines. Its voice identity is
+        # preserved, while compute policy comes from this installation's
+        # current global preference.
+        for saved_backend in ("automatic", "cpu", "cuda", "rocm", "xpu"):
             saved_profile = VoiceProfile(
                 "Saved Hero", "qwen-character", "Ryan",
                 model_id="custom-1.7b", qwen_mode="custom", backend=saved_backend,
