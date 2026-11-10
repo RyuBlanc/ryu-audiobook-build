@@ -6556,7 +6556,7 @@ function renderProductionMetadataGate(active) {
         const voiceCount = Math.max(0,Number(project?.configured_character_voice_profile_count ?? project?.character_voice_count ?? 0));
         const narratorReadyForOnly = project?.narrator_voice_configured === true && project?.narrator_profile_available === true;
         status.textContent = input.checked
-          ? (project?.narrator_only_generation_auto === true ? 'On · the saved narrator reads all narration and dialogue.' : 'On · saved for this book.')
+          ? (project?.narrator_only_generation_auto === true ? 'Automatically enabled because this book has no configured character voice profiles · the saved narrator reads all narration and dialogue.' : 'On · saved for this book.')
           : (project?.narrator_only_generation_user_opt_out === true
             ? 'Off by your choice · multi-character review applies.'
             : (voiceCount > 0
@@ -6578,7 +6578,7 @@ function renderProductionMetadataGate(active) {
         const voiceCount = Math.max(0,Number(project?.configured_character_voice_profile_count ?? project?.character_voice_count ?? 0));
         const narratorReadyForOnly = project?.narrator_voice_configured === true && project?.narrator_profile_available === true;
         status.textContent = savedValue
-          ? (project?.narrator_only_generation_auto === true ? 'On · the saved narrator reads all narration and dialogue.' : 'On · saved for this book.')
+          ? (project?.narrator_only_generation_auto === true ? 'Automatically enabled because this book has no configured character voice profiles · the saved narrator reads all narration and dialogue.' : 'On · saved for this book.')
           : (project?.narrator_only_generation_user_opt_out === true
             ? 'Off by your choice · multi-character review applies.'
             : (voiceCount > 0
