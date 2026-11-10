@@ -50,6 +50,12 @@ class InstallerWindowDisplayTests(unittest.TestCase):
         geometry = _load_geometry_helper()
         self.assertEqual(geometry((0, 0, 1366, 768)), (93, 23, 1180, 721))
 
+    def test_installer_uses_a_compact_near_edge_window_not_fullscreen(self):
+        source, _tree = _source_nodes()
+        self.assertIn("screen_width * 0.96", source)
+        self.assertIn("screen_height * 0.94", source)
+        self.assertIn("self.setMinimumSize(min(900, window_width), min(560, window_height))", source)
+
     def test_window_never_exceeds_small_available_screen(self):
         geometry = _load_geometry_helper()
         x, y, width, height = geometry((0, 0, 800, 600))
