@@ -112,12 +112,18 @@ class InstallerBrandingContractTests(unittest.TestCase):
         self.assertIn("handle.startSystemMove()", bridge)
         self.assertIn("QFileDialog.getExistingDirectory", bridge)
 
-    def test_logo_pipeline_clears_only_the_outer_neutral_halo(self):
+    def test_logo_pipeline_clears_only_the_outer_corner_pads(self):
         build_script = (ROOT / "build.py").read_text(encoding="utf-8")
         self.assertIn("def _remove_outer_neutral_logo_halo(image: Image.Image)", build_script)
-        self.assertIn("band = max(12, round(min(width, height) * 0.06))", build_script)
+        self.assertIn("corner = max(12, round(min(width, height) * 0.14))", build_script)
+        self.assertIn("draw.rectangle((0, 0, corner - 1, corner - 1), fill=255)", build_script)
+        self.assertIn("draw.rectangle((width - corner, 0, width - 1, corner - 1), fill=255)", build_script)
+        self.assertIn("draw.rectangle((0, height - corner, corner - 1, height - 1), fill=255)", build_script)
+        self.assertIn("draw.rectangle((width - corner, height - corner, width - 1, height - 1), fill=255)", build_script)
+        self.assertIn("halo = ImageChops.multiply(ImageChops.multiply(bright, neutral), corners)", build_script)
         self.assertIn("rgba = _remove_outer_neutral_logo_halo(rgba)", build_script)
         self.assertIn("ImageChops.subtract(rgba.getchannel(\"A\"), halo)", build_script)
+        self.assertNotIn("band = max(12, round(min(width, height) * 0.06))", build_script)
 
 
     def test_html_setup_bridge_runs_the_actual_windows_installer(self):
