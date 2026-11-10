@@ -215,7 +215,9 @@ def _create_or_repair_venv(progress=None) -> Path:
     return VENV_PYTHON
 
 
-def _install_runtime_packages(python: Path, progress=None) -> tuple[str, str, str]:
+def _install_runtime_packages(
+    python: Path, progress=None, preferred_backend: str | None = None
+) -> tuple[str, str, str]:
     """Install the best compatible Qwen runtime and return backend + installed package versions."""
     if progress:
         progress("Installing PyTorch for the local character engine…")
@@ -230,6 +232,17 @@ def _install_runtime_packages(python: Path, progress=None) -> tuple[str, str, st
     amd_candidate = next((item for item in adapters if item.backend == "rocm-candidate"), None)
     intel_candidate = next((item for item in adapters if item.backend == "xpu-candidate"), None)
     active = best_accelerator()
+    preferred_backend = str(preferred_backend or "").strip().casefold()
+    if preferred_backend not in {"cuda", "rocm", "xpu"}:
+        preferred_backend = ""
+    # Explicit selection must target the requested adapter family, not silently
+    # install a different GPU runtime or claim success with CPU compatibility.
+    if preferred_backend == "cuda" and not (_has_nvidia_gpu() or active.backend == "cuda"):
+        raise RuntimeError("NVIDIA CUDA was selected, but no NVIDIA adapter is currently detected.")
+    if preferred_backend == "rocm" and not (amd_candidate or active.backend == "rocm"):
+        raise RuntimeError("AMD ROCm was selected, but no supported AMD adapter is currently detected.")
+    if preferred_backend == "xpu" and not (intel_candidate or active.backend == "xpu"):
+        raise RuntimeError("Intel XPU was selected, but no supported Intel accelerator is currently detected.")
     cpu_plan = (
         "CPU",
         [
@@ -241,7 +254,7 @@ def _install_runtime_packages(python: Path, progress=None) -> tuple[str, str, st
     install_plan: list[tuple[str, list[str], str]] = []
     gpu_fallback_reason = ""
 
-    if _has_nvidia_gpu() or active.backend == "cuda":
+    if preferred_backend == "cuda" or (not preferred_backend and (_has_nvidia_gpu() or active.backend == "cuda")):
         install_plan.extend([
             (
                 "CUDA 12.8",
@@ -260,7 +273,7 @@ def _install_runtime_packages(python: Path, progress=None) -> tuple[str, str, st
                 "cuda",
             ),
         ])
-    elif amd_candidate is not None and os.name == "nt":
+    elif amd_candidate is not None and os.name == "nt" and preferred_backend in {"", "rocm"}:
         os_caption, display_version, cpu_name = windows_host_identity()
         spec = amd_windows_runtime_spec(
             amd_candidate.name, cpu_name, os_caption, display_version
@@ -291,7 +304,7 @@ def _install_runtime_packages(python: Path, progress=None) -> tuple[str, str, st
                 ]
                 label = "AMD ROCm 7.2.1 (legacy Windows 11 support)"
             install_plan.append((label, package_args, "rocm"))
-    elif intel_candidate is not None and os.name == "nt":
+    elif intel_candidate is not None and os.name == "nt" and preferred_backend in {"", "xpu"}:
         install_plan.append((
             "Intel XPU (Windows)",
             [
@@ -300,7 +313,7 @@ def _install_runtime_packages(python: Path, progress=None) -> tuple[str, str, st
             ],
             "xpu",
         ))
-    elif active.backend == "rocm" and sys.platform.startswith("linux"):
+    elif active.backend == "rocm" and sys.platform.startswith("linux") and preferred_backend in {"", "rocm"}:
         install_plan.append((
             "AMD ROCm",
             [
@@ -309,7 +322,7 @@ def _install_runtime_packages(python: Path, progress=None) -> tuple[str, str, st
             ],
             "rocm",
         ))
-    elif active.backend == "xpu":
+    elif active.backend == "xpu" and preferred_backend in {"", "xpu"}:
         install_plan.append((
             "Intel XPU",
             [
@@ -319,6 +332,8 @@ def _install_runtime_packages(python: Path, progress=None) -> tuple[str, str, st
             "xpu",
         ))
     else:
+        if preferred_backend:
+            raise RuntimeError(f"The selected {preferred_backend.upper()} runtime has no compatible installation route on this device.")
         install_plan.append(cpu_plan)
 
     # Auto mode always retains a validated CPU route after trying a detected
@@ -871,7 +886,9 @@ def _active_qwen_worker_pids() -> list[int]:
     return active
 
 
-def install_runtime(progress=None, force_repair: bool = False) -> None:
+def install_runtime(
+    progress=None, force_repair: bool = False, preferred_backend: str | None = None
+) -> None:
     RUNTIME_ROOT.mkdir(parents=True, exist_ok=True)
 
     if force_repair:
@@ -888,7 +905,9 @@ def install_runtime(progress=None, force_repair: bool = False) -> None:
 
     python = _install_portable_python(progress)
     python = _create_or_repair_venv(progress)
-    selected_backend, installed_torch, installed_torchaudio = _install_runtime_packages(python, progress)
+    selected_backend, installed_torch, installed_torchaudio = _install_runtime_packages(
+        python, progress, preferred_backend=preferred_backend
+    )
 
     MARKER.write_text(
         json.dumps(
@@ -908,7 +927,9 @@ def install_runtime(progress=None, force_repair: bool = False) -> None:
     )
 
 
-def ensure_best_runtime_for_gpu(progress=None) -> str | None:
+def ensure_best_runtime_for_gpu(
+    progress=None, preferred_backend: str | None = None
+) -> str | None:
     """Safely replace a CPU-only Qwen venv with the best verified GPU runtime.
 
     The existing CPU runtime is kept until the GPU venv passes its self-test.
@@ -924,16 +945,42 @@ def ensure_best_runtime_for_gpu(progress=None) -> str | None:
         except (OSError, ValueError, TypeError):
             return None
         current_backend = str(current.get("accelerator") or "cpu").casefold()
+        requested_backend = str(preferred_backend or "").strip().casefold()
+        if requested_backend not in {"cuda", "rocm", "xpu"}:
+            requested_backend = ""
         if current_backend in {"cuda", "rocm", "xpu"}:
-            return current_backend
+            if not requested_backend or requested_backend == current_backend:
+                return current_backend
+            raise RuntimeError(
+                f"Qwen is already running on {current_backend.upper()}. "
+                "Finish active Qwen jobs and use Models → Repair to change the installed GPU runtime."
+            )
 
         candidates = gpu_runtime_candidates(refresh=True)
-        if not candidates:
-            return None
-
-        active = best_accelerator()
-        if active.supported and active.backend in {"cuda", "rocm", "xpu"}:
-            return active.backend
+        if requested_backend:
+            active = next(
+                (item for item in detect_accelerators(refresh=True)
+                 if item.backend == requested_backend and item.supported),
+                None,
+            )
+            candidate = next(
+                (item for item in candidates if item.backend == requested_backend + "-candidate"),
+                None,
+            )
+            if active is not None:
+                return active.backend
+            if candidate is None:
+                raise RuntimeError(
+                    f"The selected {requested_backend.upper()} backend is no longer detected "
+                    "as an installable Qwen accelerator. Refresh Performance Center and choose Automatic."
+                )
+            active = candidate
+        else:
+            if not candidates:
+                return None
+            active = best_accelerator()
+            if active.supported and active.backend in {"cuda", "rocm", "xpu"}:
+                return active.backend
 
         active_pids = _active_qwen_worker_pids()
         if active_pids:
@@ -959,7 +1006,7 @@ def ensure_best_runtime_for_gpu(progress=None) -> str | None:
                     f"Supported GPU detected • upgrading Qwen from CPU to {active.name} "
                     f"({active.backend}) without changing model quality…"
                 )
-            install_runtime(progress, force_repair=False)
+            install_runtime(progress, force_repair=False, preferred_backend=requested_backend or None)
             detail = verify_runtime(progress)
             installed = json.loads(MARKER.read_text(encoding="utf-8"))
             selected_backend = str(installed.get("accelerator") or "cpu").casefold()
