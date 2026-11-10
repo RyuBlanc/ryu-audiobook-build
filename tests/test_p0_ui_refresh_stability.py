@@ -31,12 +31,42 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         monitor = adapter[start:end]
         self.assertIn("const originPage = document.querySelector('.page.active')?.id || ''", monitor)
         self.assertIn("const originVisible = isVisiblePage(originPage)", monitor)
-        self.assertIn("originVisible && originPage === 'generate'", monitor)
+        self.assertNotIn("originPage === 'generate'", monitor)
+        self.assertNotIn("$('genPercent')", monitor)
+        self.assertNotIn("$('genRing')", monitor)
         self.assertIn("originVisible && originPage === 'import' && job.type === 'import'", monitor)
         self.assertIn("originVisible && originPage === 'characters' && job.type === 'character-analysis'", monitor)
         self.assertIn("originVisible && originPage === 'voices' && job.type === 'voice-preview'", monitor)
-        self.assertNotIn("if ($('genPercent')) $('genPercent').textContent =", monitor)
         self.assertNotIn("if ($('importBar')) $('importBar').style.width =", monitor)
+
+    def test_generation_ring_uses_one_authoritative_percentage_and_real_active_state(self):
+        adapter = (
+            ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        start = adapter.index("const fullPercent =")
+        end = adapter.index("const chapter =", start)
+        production = adapter[start:end]
+        self.assertIn("ring.style.setProperty('--progress', fullPercent + '%')", production)
+        self.assertIn("setProductionStatus('genPercent', fullJob ? fullPercent + '%' ", production)
+        self.assertIn("ring.setAttribute('aria-valuenow', String(fullPercent))", production)
+        self.assertIn("ring.dataset.active =", production)
+        self.assertIn("conic-gradient(var(--red2,#d4375d) 0 var(--progress,0%)", adapter)
+        self.assertIn("ryuGenerationRingSpin", adapter)
+
+    def test_notification_button_opens_recent_notifications_not_background_jobs(self):
+        adapter = (
+            ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        start = adapter.index("document.addEventListener('click', event =>", adapter.index("function toggleRyuNotificationsPanel"))
+        end = adapter.index("document.addEventListener('keydown'", start)
+        handler = adapter[start:end]
+        self.assertIn("event.target.closest('#notifyBtn", handler)
+        self.assertIn("event.stopImmediatePropagation()", handler)
+        self.assertIn("toggleRyuNotificationsPanel()", handler)
+        self.assertNotIn("backgroundJobsModal", handler)
+        self.assertIn("window.toast =", adapter)
+        self.assertIn("window.showToast =", adapter)
+        self.assertIn("}, 30000)", adapter)
 
     def test_generic_notifications_do_not_mutate_other_workflows(self):
         adapter = (
