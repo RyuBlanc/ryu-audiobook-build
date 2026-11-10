@@ -491,9 +491,15 @@ def automatic_accelerator(model_kind: str, history_path=None) -> tuple[Accelerat
     if not selected.supported or selected.backend not in {"cuda", "rocm", "xpu"}:
         return selected, selected.reason
     try:
-        from app.core.paths import settings_root
-
-        path = Path(history_path) if history_path else settings_root() / "premium_v2_performance_history.json"
+        # This module is also imported by the standalone Qwen Python worker,
+        # which runs outside the frozen application and cannot read modules
+        # embedded only in PyInstaller's PYZ archive. Keep the default in sync
+        # with app.core.paths.settings_root() without importing the desktop app.
+        path = (
+            Path(history_path)
+            if history_path is not None
+            else Path.home() / "Ryu's Audiobook" / "Settings" / "premium_v2_performance_history.json"
+        )
         rows = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else []
         current_processor = str(platform.processor() or "").strip().casefold()
         latest: dict[str, tuple[str, float]] = {}
