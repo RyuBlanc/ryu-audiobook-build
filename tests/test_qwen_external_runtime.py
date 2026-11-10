@@ -53,13 +53,15 @@ class QwenExternalRuntimePackagingTests(unittest.TestCase):
                 patch.object(accelerator.platform, "processor", return_value="Test CPU"),
                 patch("builtins.__import__", side_effect=block_frozen_core),
             ):
-                selected, reason = accelerator.automatic_accelerator(
-                    "custom-0.6b",
-                    history_path=history,
-                )
-        self.assertEqual(selected.backend, "cuda")
-        self.assertEqual(selected.device, "cuda:0")
-        self.assertIn("Using supported CUDA accelerator", reason)
+                for model_kind in ("custom-0.6b", "design-1.7b", "base-0.6b"):
+                    with self.subTest(model_kind=model_kind):
+                        selected, reason = accelerator.automatic_accelerator(
+                            model_kind,
+                            history_path=history,
+                        )
+                        self.assertEqual(selected.backend, "cuda")
+                        self.assertEqual(selected.device, "cuda:0")
+                        self.assertIn("Using supported CUDA accelerator", reason)
 
     def test_cpu_is_selected_only_when_verified_same_machine_benchmark_is_at_least_five_percent_faster(self):
         from app.tts import qwen_accelerator as accelerator
