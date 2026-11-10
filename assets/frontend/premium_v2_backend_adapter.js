@@ -371,7 +371,7 @@
       }, 30000);
       const toasts = $('toasts');
       if (toasts) {
-        writeTextIfChanged(toasts, content);
+        writeTextIfChanged(toasts, text);
         toasts.classList.add('show');
         toasts.setAttribute('role', error ? 'alert' : 'status');
         if (ryuToastTimer) clearTimeout(ryuToastTimer);
