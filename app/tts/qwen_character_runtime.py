@@ -336,10 +336,10 @@ def _install_runtime_packages(
             raise RuntimeError(f"The selected {preferred_backend.upper()} runtime has no compatible installation route on this device.")
         install_plan.append(cpu_plan)
 
-    # Auto mode always retains a validated CPU route after trying a detected
-    # GPU runtime. This is an explicit compatibility fallback, never reported
-    # as GPU acceleration.
-    if install_plan and install_plan[-1][2] != "cpu":
+    # Automatic mode retains a validated CPU route as a compatibility
+    # fallback. An explicitly selected GPU must fail closed rather than quietly
+    # switching away from the user's requested accelerator.
+    if not preferred_backend and install_plan and install_plan[-1][2] != "cpu":
         install_plan.append(cpu_plan)
 
     install_error = ""
@@ -411,6 +411,12 @@ def _install_runtime_packages(
         or (selected_backend == "xpu" and "xpu=True" in normalized)
     )
     if not backend_ok and selected_backend != "cpu":
+        if preferred_backend:
+            raise RuntimeError(
+                f"The explicitly selected {preferred_backend.upper()} runtime did not activate in PyTorch. "
+                "No CPU fallback was installed; the previous runtime will be restored. "
+                + detail[-2500:]
+            )
         if selected_backend == "rocm":
             reason = "AMD ROCm packages installed but PyTorch did not activate HIP"
         elif selected_backend == "xpu":
