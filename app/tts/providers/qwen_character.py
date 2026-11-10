@@ -354,7 +354,15 @@ class QwenCharacterProvider(TTSProvider):
         )
         response = self._read_response(timeout=900.0, heartbeat="Loading Qwen model / character identity")
         if response.get("ready"):
-            self._record_execution_context(response)
+            # The worker's ready message now carries a real device only after
+            # model initialization; reject legacy/pending responses rather than
+            # reporting hardware that has not executed inference.
+            if not str(response.get("device") or "").strip() or str(response.get("device")).casefold() in {"pending", "unknown"}:
+                self.close()
+                raise RuntimeError(
+                    "Qwen worker reported ready without a verified compute device. "
+                    "Open Models → Repair Qwen3-TTS Runtime and retry."
+                )
             self._status(
                 f"Qwen engine ready • {response.get('kind', self.model_kind)} • "
                 f"{response.get('device', 'unknown device')}"
@@ -479,7 +487,8 @@ class QwenCharacterProvider(TTSProvider):
             self.close()
             raise
         if response:
-            self._record_execution_context(response)
+            if response.get("ok") is True:
+                self._record_execution_context(response)
             if response.get("device"):
                 self._status(
                     f"Qwen ready • {response.get('kind', self.model_kind)} • {response.get('device')}"
