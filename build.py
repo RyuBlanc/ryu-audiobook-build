@@ -446,6 +446,12 @@ args = [
     f"--add-data={ROOT / "app" / "tts" / "chatterbox_worker.py"};app/tts",
     f"--add-data={ROOT / "app" / "tts" / "expression.py"};app/tts",
     f"--add-data={ROOT / "app" / "tts" / "qwen_character_worker.py"};app/tts",
+    # Qwen runs in its own Python venv outside the frozen EXE. Its accelerator
+    # selector reads saved performance history through app.core.paths, so the
+    # complete core package must exist as physical .py files under _internal;
+    # collecting it only into PyInstaller's PYZ archive is not visible to that
+    # external interpreter.
+    f"--add-data={ROOT / "app" / "core"};app/core",
     *[
         f"--add-data={ROOT / (module.replace('.', '/') + '.py')};{module.rsplit('.', 1)[0].replace('.', '/')}"
         for module in required_modules
