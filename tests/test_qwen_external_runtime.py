@@ -28,6 +28,34 @@ class QwenExternalRuntimePackagingTests(unittest.TestCase):
         self.assertIn('Path.home() / "Ryu', selector)
         self.assertIn('Audiobook" / "Settings"', selector)
 
+    def test_worker_does_not_report_ready_with_pending_device(self):
+        source = (ROOT / "app" / "tts" / "qwen_character_worker.py").read_text(encoding="utf-8")
+        self.assertNotIn('"device": "pending"', source)
+        self.assertIn('"backend": _actual_backend(device)', source)
+        self.assertIn('"device": device', source)
+        self.assertIn('if active_task not in {"design", "design-preview"}:', source)
+
+    def test_voice_design_reports_ready_only_after_first_real_model_load(self):
+        source = (ROOT / "app" / "tts" / "qwen_character_worker.py").read_text(encoding="utf-8")
+        start = source.index('elif active_task == "design-preview" and model is None:')
+        end = source.index("if isinstance(batch_texts, list):", start)
+        section = source[start:end]
+        self.assertIn("load_model(args.kind)", section)
+        self.assertIn('"ready": True', section)
+        self.assertIn('"device": device', section)
+
+    def test_provider_marks_actual_device_only_after_successful_audio_response(self):
+        source = (ROOT / "app" / "tts" / "providers" / "qwen_character.py").read_text(encoding="utf-8")
+        start = source.index("def _start_worker(self)")
+        end = source.index("def _drain_stdout(", start)
+        startup = source[start:end]
+        self.assertNotIn("self._record_execution_context(response)", startup)
+        self.assertIn('response.get("device")', startup)
+        synth_start = source.index("def synthesize(")
+        synth = source[synth_start:]
+        self.assertIn('if response.get("ok") is True:', synth)
+        self.assertIn("self._record_execution_context(response)", synth)
+
     def test_supported_gpu_is_default_without_verified_same_machine_cpu_win(self):
         from app.tts import qwen_accelerator as accelerator
 
