@@ -71,6 +71,16 @@ class CurrentHelpGuideRequirements(unittest.TestCase):
         self.assertIn("zero valid character voice profiles are configured", self.original_guide)
         self.assertIn("unresolved dialogue must be reviewed or assigned", self.original_guide)
 
+    def test_original_help_uses_neutral_stage_labels_not_sample_project_readiness(self):
+        self.assertNotIn("6/7", self.original_guide)
+        self.assertNotIn("86%", self.original_guide)
+        self.assertNotIn("3 need review", self.original_guide)
+        self.assertNotIn("Ready ✓", self.original_guide)
+        self.assertNotIn("Current →", self.original_guide)
+        for label in ("Required input","Text review","Narrator","Cast review","Optional","Final render"):
+            self.assertIn(label, self.original_guide)
+        self.assertIn("Live readiness for the active project is shown in the production-flow strip above", self.original_guide)
+
     def test_original_qwen_help_documents_model_sizes_and_private_runtime_verification(self):
         self.assertIn("Auto (hardware-aware), 0.6B, or 1.7B", self.original_guide)
         self.assertIn("isolated Qwen runtime self-test", self.original_guide)
