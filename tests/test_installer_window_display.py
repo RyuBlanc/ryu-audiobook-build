@@ -48,12 +48,12 @@ class InstallerWindowDisplayTests(unittest.TestCase):
 
     def test_window_adapts_to_common_laptop_display(self):
         geometry = _load_geometry_helper()
-        self.assertEqual(geometry((0, 0, 1366, 768)), (93, 38, 1180, 691))
+        self.assertEqual(geometry((0, 0, 1366, 768)), (93, 23, 1180, 721))
 
     def test_window_never_exceeds_small_available_screen(self):
         geometry = _load_geometry_helper()
         x, y, width, height = geometry((0, 0, 800, 600))
-        self.assertEqual((x, y, width, height), (32, 30, 736, 540))
+        self.assertEqual((x, y, width, height), (16, 18, 768, 564))
         self.assertLessEqual(width, 800)
         self.assertLessEqual(height, 600)
 
@@ -63,8 +63,11 @@ class InstallerWindowDisplayTests(unittest.TestCase):
         self.assertIn('wizard.style.top = "50%"', script)
         self.assertIn("scale(", script)
         self.assertIn("overflow:hidden!important", script)
-        self.assertIn("viewportWidth - 24", script)
-        self.assertIn("viewportHeight - 24", script)
+        self.assertIn('body.style.padding = "8px"', script)
+        self.assertIn('wizard.style.minHeight = "0"', script)
+        self.assertIn('wizard.style.maxHeight = "100%"', script)
+        self.assertNotIn("wizard.style.transform", script)
+        self.assertNotIn("scale(", script)
 
     def test_fit_script_has_valid_javascript_syntax_when_node_is_available(self):
         node = shutil.which("node")
@@ -95,6 +98,24 @@ class InstallerWindowDisplayTests(unittest.TestCase):
         self.assertIn("Qt.CursorShape.SizeFDiagCursor", source)
         self.assertIn("QTimer.singleShot(60, self._fit_page_to_viewport)", source)
 
+
+    def test_html_keeps_all_installer_details_and_footer_inside_compact_frame(self):
+        html = (ROOT / "installer" / "ryu_installer.html").read_text(encoding="utf-8")
+        self.assertIn("height:min(720px,100%)", html)
+        self.assertIn("min-height:0;max-height:100%", html)
+        self.assertNotIn("min-height:620px", html)
+        self.assertIn(".sidebar{min-width:0;min-height:0;overflow-y:auto", html)
+        self.assertIn(".screens{flex:1 1 auto;min-height:0;position:relative;overflow:auto", html)
+        self.assertIn(".footer{min-height:68px;flex:0 0 auto", html)
+        self.assertIn("@media(max-height:700px)", html)
+        self.assertIn("@media(max-height:620px)", html)
+        self.assertNotIn(".sidebar{display:none}", html)
+        for control_id in ("cancel", "back", "next", "topMinimize", "topClose"):
+            self.assertIn(f'id="{control_id}"', html)
+        self.assertIn('id="quote"', html) if 'id="quote"' in html else self.assertIn(
+            "A new way to experience every story.", html
+        )
+        self.assertIn('id="versionLabel"', html)
 
     def test_browser_zoom_shortcuts_are_intercepted_by_native_window(self):
         source, _tree = _source_nodes()
