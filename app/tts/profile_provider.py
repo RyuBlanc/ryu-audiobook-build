@@ -37,15 +37,14 @@ def provider_from_profile(profile: VoiceProfile):
             mode, get_qwen_model_preference()
         )
         effective_model_kind = global_model_kind or profile.model_id or "auto"
-        # Legacy profiles may incorrectly store the provider ID ("qwen-character")
-        # in the compute-backend field. Never forward provider IDs or malformed
-        # values to the worker; use the global backend preference for Automatic.
-        profile_backend = normalize_qwen_backend_preference(profile.backend)
-        effective_backend = (
-            get_qwen_backend_preference()
-            if profile_backend == "automatic"
-            else profile_backend
-        )
+        # Compute hardware is a machine-wide runtime decision, not part of a
+        # portable voice identity. Old profiles can retain "cpu" or "cuda"
+        # from the PC on which they were saved; honoring that stale field would
+        # pin the same voice to CPU after the user installs a supported GPU
+        # runtime on another machine. Resolve the current global preference for
+        # every saved/new profile; an explicit global CPU setting is still
+        # respected, while Automatic re-probes the available accelerators.
+        effective_backend = get_qwen_backend_preference()
         return (
             QwenCharacterProvider(
                 voice_id=profile.voice_id,
