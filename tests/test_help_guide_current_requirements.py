@@ -64,6 +64,18 @@ class CurrentHelpGuideRequirements(unittest.TestCase):
         ):
             self.assertIn(topic, self.original_guide)
 
+    def test_original_help_explains_the_current_narrator_only_gate(self):
+        self.assertIn("Narrator-only audiobook generation (GEN-07)", self.guide)
+        self.assertIn("zero saved character voice-profile assignments", self.guide)
+        self.assertIn("normal cast-aware rules apply", self.guide)
+        self.assertIn("zero valid character voice profiles are configured", self.original_guide)
+        self.assertIn("unresolved dialogue must be reviewed or assigned", self.original_guide)
+
+    def test_original_qwen_help_documents_model_sizes_and_private_runtime_verification(self):
+        self.assertIn("Auto (hardware-aware), 0.6B, or 1.7B", self.original_guide)
+        self.assertIn("isolated Qwen runtime self-test", self.original_guide)
+        self.assertIn("explicit GPU selection must report failure", self.original_guide)
+
     def test_qwen_help_distinguishes_adapter_detection_from_verified_inference(self):
         self.assertIn("real inference reports that device", self.guide)
         self.assertIn("compute backend can be Automatic", self.guide)
