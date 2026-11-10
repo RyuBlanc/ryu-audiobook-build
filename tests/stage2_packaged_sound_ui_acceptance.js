@@ -3590,10 +3590,42 @@
       return document.querySelector("#generate")?.classList.contains("active") === true &&
         Boolean(document.querySelector("#startGenerate"));
     }, 20000);
-    await waitFor("Stage 5.4 job-control metadata gate", function () {
-      const button = document.querySelector("#startGenerate");
-      return Boolean(button && !button.disabled);
-    }, 20000);
+    try {
+      await waitFor("Stage 5.4 job-control metadata gate", function () {
+        const button = document.querySelector("#startGenerate");
+        return Boolean(button && !button.disabled);
+      }, 20000);
+    } catch (gateError) {
+      const [activeGate, narratorGate, readinessGate, gateJobs] = await Promise.all([
+        invoke("project.get_active", {}).catch(error => ({error:String(error)})),
+        invoke("voice.select.get", {}).catch(error => ({error:String(error)})),
+        invoke("production.readiness", {}).catch(error => ({error:String(error)})),
+        invoke("job.list", {include_hidden:true}).catch(error => ({error:String(error)}))
+      ]);
+      const gateButton = document.querySelector("#startGenerate");
+      const gateDiagnostic = {
+        active:activeGate,
+        narrator:narratorGate,
+        readiness:readinessGate,
+        metadataStatus:document.querySelector("#productionMetadataStatus")?.textContent?.trim() || null,
+        generationStatus:document.querySelector("#generateStatus")?.textContent?.trim() || null,
+        button:gateButton ? {
+          disabled:gateButton.disabled,
+          title:gateButton.title,
+          text:gateButton.textContent.trim(),
+          ariaDisabled:gateButton.getAttribute("aria-disabled")
+        } : null,
+        jobs:Array.isArray(gateJobs) ? gateJobs.map(job => ({
+          job_id:job.job_id,
+          type:job.type,
+          state:job.state,
+          project_folder:job.project_folder,
+          title:job.title
+        })) : gateJobs
+      };
+      throw new Error(String(gateError?.message || gateError) +
+        ". Stage 5.4 metadata gate diagnostic=" + JSON.stringify(gateDiagnostic));
+    }
 
     const jobsBeforeControlGeneration = await invoke("job.list", {include_hidden:true});
     const previousControlIds = new Set((Array.isArray(jobsBeforeControlGeneration) ? jobsBeforeControlGeneration : [])
