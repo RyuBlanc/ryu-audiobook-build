@@ -5782,6 +5782,7 @@ function renderProductionMetadataGate(active) {
 
   function ensureProductionEngineLayout() {
     const generateButton = $('startGenerate');
+    const originalActionToolbar = generateButton?.parentElement;
     const engineCard = generateButton?.closest('.card');
     if (!engineCard) return;
     const ensureSection = (id,title) => {
@@ -5829,6 +5830,11 @@ function renderProductionMetadataGate(active) {
     if (qwenControl && qwenControl.parentElement !== settings) move(qwenControl,settings);
     move(generateButton,actions);
     move($('pauseGenerate'),actions);
+    if (originalActionToolbar?.classList.contains('toolbar') &&
+        !originalActionToolbar.querySelector('button')) {
+      originalActionToolbar.hidden = true;
+      originalActionToolbar.setAttribute('aria-hidden','true');
+    }
   }
 
   async function refreshProductionSummary() {
