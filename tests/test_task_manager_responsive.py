@@ -14,9 +14,12 @@ class TaskManagerResponsiveStylesTests(unittest.TestCase):
 
         self.assertIn("#backgroundJobsModal .jobs-modal", helper)
         self.assertIn(".modal-back .jobs-modal", helper)
-        self.assertIn("width:min(780px,calc(100vw - 40px))!important", helper)
-        self.assertIn("max-width:calc(100vw - 40px)!important", helper)
+        self.assertIn("width:min(780px,100%)!important", helper)
+        self.assertNotIn("100vw", helper)
+        self.assertIn("max-width:100%!important", helper)
         self.assertIn("min-width:0!important", helper)
+        self.assertIn("margin-left:auto", helper)
+        self.assertIn("margin-right:auto", helper)
         self.assertIn("ensureTaskManagerResponsiveStyles();", source[:helper_start + len(helper) + 200])
 
     def test_task_manager_width_does_not_depend_on_opening_models_center(self):
