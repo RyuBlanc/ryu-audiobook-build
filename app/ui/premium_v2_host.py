@@ -8470,6 +8470,7 @@ class PremiumV2Bridge(QObject):
                    "effects": "ui/effects", "reduce_motion": "ui/reduce_motion",
                    "preview_seconds": "audio/preview_seconds", "bitrate": "production/bitrate",
                    "concurrency": "production/concurrency", "qwen_backend": "qwen/backend_preference",
+                   "qwen_model_size": "qwen/model_size_preference",
                    "qwen_low_memory": "qwen/low_memory_mode", "local_first": "privacy/local_first",
                    "output_folder": "paths/output_folder",
                    "player_rate": "player/playback_rate",
@@ -8517,9 +8518,18 @@ class PremiumV2Bridge(QObject):
                     raise ValueError("Choose Automatic, CPU, NVIDIA CUDA, AMD ROCm, or Intel XPU.")
                 if value in {"cuda", "rocm", "xpu"}:
                     from app.tts.qwen_accelerator import detect_accelerators
-                    active = detect_accelerators(refresh=True)
-                    if not any(item.backend == value and item.supported for item in active):
-                        raise ValueError(f"The {value.upper()} backend is not currently validated on this device.")
+                    detected = detect_accelerators(refresh=True)
+                    active = any(item.backend == value and item.supported for item in detected)
+                    candidate = any(item.backend == value + "-candidate" for item in detected)
+                    if not active and not candidate:
+                        raise ValueError(
+                            f"No compatible {value.upper()} adapter is currently detected. "
+                            "Refresh Performance Center and choose Automatic, or check the driver."
+                        )
+            if key == "qwen_model_size":
+                value = str(value or "auto").strip().casefold()
+                if value not in {"auto", "0.6b", "1.7b"}:
+                    raise ValueError("Qwen model size must be Automatic, 0.6B or 1.7B.")
             if key == "qwen_low_memory" and not isinstance(value, bool):
                 raise ValueError("Low-memory mode must be enabled or disabled.")
             if key == "player_rate":
@@ -11341,6 +11351,7 @@ class PremiumV2Bridge(QObject):
             ) or 256),
             "concurrency": max(1, min(3, int(self.settings.value("production/concurrency", 1) or 1))),
             "qwen_backend": str(self.settings.value("qwen/backend_preference", "automatic") or "automatic"),
+            "qwen_model_size": str(self.settings.value("qwen/model_size_preference", "auto") or "auto"),
             "qwen_low_memory": bool(self.settings.value("qwen/low_memory_mode", False, type=bool)),
         }
 
