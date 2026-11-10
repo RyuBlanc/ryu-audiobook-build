@@ -1133,45 +1133,100 @@
     }
 
     window.go("help");
-    await waitFor("Help & Guide page and topic cards", function () {
+    await waitFor("Help & Guide page", function () {
       const root = document.querySelector("#help");
-      return Boolean(root && root.classList.contains("active") &&
-        root.querySelector(".help-guide-shell") &&
-        root.querySelectorAll("[data-help-guide-card]").length >= 8);
+      if (!root || !root.classList.contains("active") || !root.textContent.trim()) return false;
+      const cards = root.querySelectorAll("[data-help-guide-card]");
+      const fallbackReady = root.querySelector(".help-guide-shell") && cards.length >= 8;
+      const preservedGuideReady =
+        /Learn Ryu's Audiobook/i.test(root.textContent) &&
+        /From book file to finished audiobook/i.test(root.textContent) &&
+        /Frequently asked questions/i.test(root.textContent);
+      return Boolean(fallbackReady || preservedGuideReady);
     }, 12000);
     const helpRoot = document.querySelector("#help");
     const helpCards = Array.from(helpRoot.querySelectorAll("[data-help-guide-card]"));
-    const limitationsCard = helpCards.find(card =>
-      /Known limitations/i.test(card.querySelector("summary")?.textContent || "")
+    const helpText = String(helpRoot.textContent || "");
+    const fallbackGuide = Boolean(
+      helpRoot.querySelector(".help-guide-shell") && helpCards.length >= 8
     );
-    must(limitationsCard &&
-      limitationsCard.textContent.includes("M4B") &&
-      limitationsCard.textContent.includes("After first paragraph") &&
-      limitationsCard.textContent.includes("GPU acceleration"),
-      "Help & Guide does not expose the current format, paragraph-offset and hardware limitations.");
-    const helpSearch = helpRoot.querySelector("#helpGuideSearch");
-    const helpNoResults = helpRoot.querySelector("#helpGuideNoResults");
-    must(helpSearch && helpNoResults, "Help & Guide search and empty-result controls are missing.");
-    helpSearch.value = "After first paragraph";
-    helpSearch.dispatchEvent(new Event("input", {bubbles:true}));
-    await waitFor("Help & Guide search results", function () {
-      const visible = helpCards.filter(card => !card.hidden);
-      return visible.length > 0 && visible.every(card =>
-        card.textContent.toLowerCase().includes("after first paragraph")
-      ) && helpNoResults.hidden;
-    }, 5000);
-    helpSearch.value = "no-such-ryu-guide-topic";
-    helpSearch.dispatchEvent(new Event("input", {bubbles:true}));
-    await waitFor("Help & Guide no-results state", () =>
-      helpNoResults.hidden === false && helpCards.every(card => card.hidden), 5000);
-    helpSearch.value = "";
-    helpSearch.dispatchEvent(new Event("input", {bubbles:true}));
-    helpRoot.querySelector("#helpGuideExpandAll")?.click();
-    must(helpCards.every(card => card.open), "Help & Guide Expand all did not open every topic.");
-    helpRoot.querySelector("#helpGuideCollapseAll")?.click();
-    must(helpCards.every(card => !card.open), "Help & Guide Collapse all did not close every topic.");
-    record("stage829_help_guide_search_empty_expand_collapse", true,
-      "The packaged Help & Guide displayed current limitations, searched real topic text, showed the no-results state and expanded/collapsed all topics.");
+
+    if (fallbackGuide) {
+      const limitationsCard = helpCards.find(card =>
+        /Known limitations/i.test(card.querySelector("summary")?.textContent || "")
+      );
+      must(limitationsCard &&
+        limitationsCard.textContent.includes("M4B") &&
+        limitationsCard.textContent.includes("After first paragraph") &&
+        limitationsCard.textContent.includes("GPU acceleration"),
+        "Help & Guide fallback does not expose the current format, paragraph-offset and hardware limitations.");
+      const helpSearch = helpRoot.querySelector("#helpGuideSearch");
+      const helpNoResults = helpRoot.querySelector("#helpGuideNoResults");
+      must(helpSearch && helpNoResults, "Help & Guide fallback search and empty-result controls are missing.");
+      helpSearch.value = "After first paragraph";
+      helpSearch.dispatchEvent(new Event("input", {bubbles:true}));
+      await waitFor("Help & Guide search results", function () {
+        const visible = helpCards.filter(card => !card.hidden);
+        return visible.length > 0 && visible.every(card =>
+          card.textContent.toLowerCase().includes("after first paragraph")
+        ) && helpNoResults.hidden;
+      }, 5000);
+      helpSearch.value = "no-such-ryu-guide-topic";
+      helpSearch.dispatchEvent(new Event("input", {bubbles:true}));
+      await waitFor("Help & Guide no-results state", () =>
+        helpNoResults.hidden === false && helpCards.every(card => card.hidden), 5000);
+      helpSearch.value = "";
+      helpSearch.dispatchEvent(new Event("input", {bubbles:true}));
+      helpRoot.querySelector("#helpGuideExpandAll")?.click();
+      must(helpCards.every(card => card.open), "Help & Guide Expand all did not open every topic.");
+      helpRoot.querySelector("#helpGuideCollapseAll")?.click();
+      must(helpCards.every(card => !card.open), "Help & Guide Collapse all did not close every topic.");
+      record("stage829_help_guide_search_empty_expand_collapse", true,
+        "The packaged fallback Help & Guide displayed current limitations, searched real topic text, showed the no-results state and expanded/collapsed all topics.");
+    } else {
+      // The approved Premium V2 page ships a richer, original seven-stage guide.
+      // renderHelpGuide intentionally preserves it rather than replacing it with
+      // the adapter fallback cards. Validate that complete in-page content in
+      // the frozen application instead of incorrectly requiring fallback-only
+      // selectors that do not exist on the preserved guide.
+      for (const topic of [
+        "Learn Ryu's Audiobook",
+        "From book file to finished audiobook",
+        "How to create an audiobook",
+        "Import Studio",
+        "Chapter Studio",
+        "Voice Studio",
+        "Character Studio",
+        "Pronunciation Studio",
+        "Sound Design",
+        "Production Studio",
+        "What every menu is for",
+        "Qwen3 Voice Studio",
+        "I want to…",
+        "Your first successful audiobook",
+        "Recovery flow",
+        "Quality checklist",
+        "Frequently asked questions"
+      ]) {
+        must(helpText.includes(topic), "The preserved Help & Guide is missing required topic: " + topic);
+      }
+      for (const requirement of [
+        "M4B",
+        "After first paragraph",
+        "GPU acceleration",
+        "Narrator-only audiobook generation (GEN-07)",
+        "zero valid character voice profiles are configured",
+        "isolated Qwen runtime self-test",
+        "explicit GPU selection must report failure"
+      ]) {
+        must(helpText.includes(requirement), "The preserved Help & Guide is missing current requirement: " + requirement);
+      }
+      for (const staleValue of ["6/7", "86%", "3 need review", "Ready ✓", "Current →"]) {
+        must(!helpText.includes(staleValue), "The preserved Help & Guide contains stale sample readiness: " + staleValue);
+      }
+      record("stage829_help_guide_preserved_seven_stage_content", true,
+        "The packaged application preserved the complete original seven-stage Help & Guide with current GEN-07, Qwen, M4B, paragraph-offset and hardware guidance and no stale sample readiness.");
+    }
 
     window.go('sound');
     await waitFor("Sound Design page", function () {
