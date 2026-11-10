@@ -12570,7 +12570,13 @@ function renderProductionMetadataGate(active) {
           } else if (action === 'verify') {
             const result = await call('models.verify', {model_id:operationId});
             await refreshModels();
-            message((result.status === 'Ready' ? 'Ready. ' : result.status === 'Installed' ? 'Files and dependencies are present; functional readiness is not yet confirmed. ' : 'Verification needs attention. ') + result.detail, !['Ready','Installed'].includes(result.status));
+            const displayName = String(model.name || operationId || 'Model');
+            const notice = result.status === 'Ready'
+              ? displayName + ' verified and ready.'
+              : result.status === 'Installed'
+                ? displayName + ' files and dependencies are verified; functional readiness is not yet confirmed. See its Models Center card for details.'
+                : displayName + ' verification needs attention. See its Models Center card for the diagnostic.';
+            message(notice, !['Ready','Installed'].includes(result.status));
             return;
           } else {
             const displayName = String(model.name || operationId);
