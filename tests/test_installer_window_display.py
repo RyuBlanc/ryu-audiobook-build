@@ -57,16 +57,16 @@ class InstallerWindowDisplayTests(unittest.TestCase):
         self.assertLessEqual(width, 800)
         self.assertLessEqual(height, 600)
 
-    def test_fit_script_centers_and_scales_wizard_without_page_scrollbars(self):
+    def test_fit_script_prevents_page_scrollbars_without_scaling_down_text(self):
         script = _load_fit_script()
-        self.assertIn('wizard.style.left = "50%"', script)
-        self.assertIn('wizard.style.top = "50%"', script)
-        self.assertIn("scale(", script)
+        self.assertIn("html.style.overflow = \"hidden\"", script)
+        self.assertIn("body.style.overflow = \"hidden\"", script)
         self.assertIn("overflow:hidden!important", script)
         self.assertIn('body.style.padding = "8px"', script)
         self.assertIn('wizard.style.minHeight = "0"', script)
         self.assertIn('wizard.style.maxHeight = "100%"', script)
-        self.assertNotIn("wizard.style.transform", script)
+        self.assertIn(".sidebar,.screens{scrollbar-width:none}", script)
+        self.assertNotIn("transform", script)
         self.assertNotIn("scale(", script)
 
     def test_fit_script_has_valid_javascript_syntax_when_node_is_available(self):
