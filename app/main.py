@@ -754,6 +754,7 @@ QPushButton:disabled, QToolButton:disabled {
 """
 
 def main() -> int:
+    _set_windows_app_user_model_id("RyuBlanc.RyuAudiobook")
     ensure_roots()
     configure_temporary_root()
     app = QApplication(sys.argv)
@@ -778,8 +779,8 @@ def main() -> int:
             )
             app.setOverrideCursor(QCursor(cursor_pixmap, 21, 13))
     app_icon = QIcon()
-    # Prefer the native-resolution, lossless PNG generated from the master
-    # artwork. SVG is only a fallback for an unbuilt source checkout.
+    # Prefer the generated multi-size Windows ICO for the shell. The PNG and
+    # SVG remain fallbacks for UI rendering and unbuilt source checkouts.
     for icon_name in ("ryu_audiobook_logo.ico", "ryu_audiobook_logo.png", "ryu_audiobook_logo.svg", "ryu_audiobook_logo.jpg"):
         icon_path = asset_path(icon_name)
         if icon_path.is_file():
