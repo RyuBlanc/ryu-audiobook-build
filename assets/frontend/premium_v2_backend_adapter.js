@@ -9743,9 +9743,15 @@ function renderProductionMetadataGate(active) {
   }
   function renderHelpGuide() {
     const root = document.getElementById('help');
-    if (!root || root.dataset.ryuHelpGuideRendered === 'true') return;
-    // Replace the abbreviated base prototype sample with the complete guide
-    // topics below, even when the page initially contains placeholder content.
+    if (!root || ['true','preserved-static-guide'].includes(root.dataset.ryuHelpGuideRendered)) return;
+    // The shipped base HTML contains the richer original Help & User Guide
+    // with all seven stages, task shortcuts, recovery steps and FAQs. Preserve
+    // that content; use the adapter guide below only as a safe fallback when a
+    // build genuinely has no static Help page content.
+    if (root.children.length && String(root.textContent || '').trim()) {
+      root.dataset.ryuHelpGuideRendered = 'preserved-static-guide';
+      return;
+    }
     root.dataset.ryuHelpGuideRendered = 'true';
 
     const topics = [
