@@ -44,6 +44,23 @@ class LogoCornerTransparencyTests(unittest.TestCase):
         for point in ((21, 21), (178, 21), (21, 178), (178, 178)):
             self.assertEqual(result.getpixel(point)[3], 0, f"Corner pad remained at {point}")
 
+    def test_white_square_matte_connected_to_all_edges_is_removed(self):
+        clean_logo = _load_logo_cleanup()
+        image = Image.new("RGBA", (200, 200), (248, 248, 248, 255))
+        draw = ImageDraw.Draw(image)
+        draw.rounded_rectangle((8, 8, 191, 191), radius=44, fill=(54, 3, 18, 255))
+        # Light book pages and gold/ivory artwork stay because they are
+        # enclosed by the red logo and do not connect to the outer matte.
+        draw.rectangle((80, 88, 120, 112), fill=(245, 238, 208, 255))
+        draw.rectangle((94, 76, 106, 84), fill=(252, 220, 142, 255))
+
+        result = clean_logo(image)
+        for point in ((100, 1), (1, 100), (198, 100), (100, 198)):
+            self.assertEqual(result.getpixel(point)[3], 0, f"White square matte remained at {point}")
+        self.assertEqual(result.getpixel((100, 100))[3], 255)
+        self.assertEqual(result.getpixel((100, 80))[3], 255)
+        self.assertEqual(result.getpixel((50, 50))[3], 255)
+
     def test_legitimate_center_art_and_edge_accents_are_preserved(self):
         clean_logo = _load_logo_cleanup()
         image = Image.new("RGBA", (200, 200), (0, 0, 0, 0))
@@ -57,11 +74,14 @@ class LogoCornerTransparencyTests(unittest.TestCase):
         self.assertEqual(result.getpixel((8, 100))[3], 255)
         self.assertEqual(result.getpixel((22, 22))[3], 255)
 
-    def test_corner_cleanup_is_limited_to_the_outer_fourteen_percent(self):
+    def test_cleanup_flood_fills_boundary_matte_and_legacy_corner_pads(self):
         source = BUILD_SOURCE.read_text(encoding="utf-8")
+        self.assertIn("ImageDraw.floodfill(connected_background", source)
+        self.assertIn("for x in range(width):", source)
+        self.assertIn("for y in range(height):", source)
         self.assertIn("corner = max(12, round(min(width, height) * 0.14))", source)
-        self.assertIn("corners = Image.new(\"L\", rgba.size, 0)", source)
-        self.assertNotIn("min(width, height) * 0.06", source)
+        self.assertIn("matte = connected_background.point", source)
+        self.assertIn("ImageChops.subtract(rgba.getchannel(\"A\"), matte)", source)
 
 
 if __name__ == "__main__":
