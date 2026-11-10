@@ -104,7 +104,24 @@ class QwenGlobalModelPreferenceTests(unittest.TestCase):
         self.assertEqual(provider.backend, "cpu")
         self.assertTrue(provider.low_memory)
 
-    def test_explicit_profile_backend_is_not_overridden_by_global_preference(self):
+    def test_saved_profile_compute_backend_never_overrides_current_global_preference(self):
+        # Profiles can move between the user's CPU-only laptop and a GPU PC.
+        # Their portable voice identity must not carry a stale CPU/CUDA choice.
+        for saved_backend in ("cpu", "cuda", "rocm", "xpu"):
+            saved_profile = VoiceProfile(
+                "Saved Hero", "qwen-character", "Ryan",
+                model_id="custom-1.7b", qwen_mode="custom", backend=saved_backend,
+            )
+            with (
+                self.subTest(saved_backend=saved_backend),
+                patch("app.tts.profile_provider.get_qwen_model_preference", return_value="1.7b"),
+                patch("app.tts.profile_provider.get_qwen_backend_preference", return_value="automatic"),
+                patch("app.tts.profile_provider.get_qwen_low_memory_mode", return_value=False),
+            ):
+                provider, _voice = provider_from_profile(saved_profile)
+                self.assertEqual(provider.backend, "automatic")
+
+    def test_explicit_global_cpu_preference_still_applies_to_saved_gpu_profile(self):
         saved_profile = VoiceProfile(
             "Saved Hero", "qwen-character", "Ryan",
             model_id="custom-1.7b", qwen_mode="custom", backend="cuda",
@@ -115,7 +132,7 @@ class QwenGlobalModelPreferenceTests(unittest.TestCase):
             patch("app.tts.profile_provider.get_qwen_low_memory_mode", return_value=False),
         ):
             provider, _voice = provider_from_profile(saved_profile)
-        self.assertEqual(provider.backend, "cuda")
+        self.assertEqual(provider.backend, "cpu")
 
     def test_existing_custom_profile_uses_global_override_at_provider_creation(self):
         saved_profile = VoiceProfile(
