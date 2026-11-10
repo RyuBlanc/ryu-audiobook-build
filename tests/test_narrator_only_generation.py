@@ -286,6 +286,41 @@ class NarratorOnlyGenerationTests(unittest.TestCase):
             )
 
 
+    def test_narrator_only_control_is_a_switch_with_hover_help_and_truthful_eligibility(self):
+        adapter = (
+            Path(__file__).resolve().parents[1]
+            / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        start = adapter.index("const row = document.createElement('div');", adapter.index("if (!narratorOnlyControl)"))
+        end = adapter.index("row.append(input,copy);", start) + len("row.append(input,copy);")
+        control = adapter[start:end]
+        self.assertIn("input.className = 'ryu-switch-input'", control)
+        self.assertIn("input.setAttribute('role','switch')", control)
+        self.assertIn("input.disabled = project?.narrator_only_eligible !== true", control)
+        self.assertIn("infoWrap.className = 'ryu-info-wrap'", control)
+        self.assertIn("info.className = 'ryu-info-trigger'", control)
+        self.assertIn("tooltip.className = 'ryu-info-tooltip'", control)
+        self.assertIn("voiceCount > 0", control)
+        self.assertIn("configured character voice profile(s) found", control)
+        self.assertIn("save an available narrator profile first", control)
+
+    def test_narrator_only_eligibility_requires_valid_narrator_and_zero_valid_cast_profiles(self):
+        host_source = (
+            Path(__file__).resolve().parents[1]
+            / "app" / "ui" / "premium_v2_host.py"
+        ).read_text(encoding="utf-8")
+        summary_start = host_source.index("def _project_summary(")
+        summary_end = host_source.index("\n    def ", summary_start + 8)
+        summary = host_source[summary_start:summary_end]
+        self.assertIn("narrator_only_eligible = narrator_ready and configured_character_voice_profile_count == 0", summary)
+        self.assertIn('"configured_character_voice_profile_count": configured_character_voice_profile_count', summary)
+        save_start = host_source.index("def _production_narrator_only_save(")
+        save_end = host_source.index("\n    def ", save_start + 8)
+        save = host_source[save_start:save_end]
+        self.assertIn("if enabled and not narrator_available:", save)
+        self.assertIn("if enabled and configured_profiles:", save)
+        self.assertIn("zero configured", save)
+
     def test_narrator_only_toggle_uses_live_project_identity_after_project_switch(self):
         adapter = (
             Path(__file__).resolve().parents[1]
