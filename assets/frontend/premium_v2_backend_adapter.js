@@ -299,17 +299,87 @@
     return data;
   };
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const message = (text, error = false) => {
-    // Global notifications must not overwrite a different workflow's status.
-    // Only surface inline validation on the page the user is currently viewing.
-    const activeValidation = document.querySelector('.page.active #validation');
-    if (error && activeValidation) writeTextIfChanged(activeValidation, text);
-    const toasts = $('toasts');
-    if (toasts) {
-      writeTextIfChanged(toasts, text);
-      toasts.classList.add('show');
+  const ryuNotificationHistory = [];
+  let ryuToastTimer = null, ryuToastLastText = '', ryuToastLastAt = 0;
+  function renderRyuNotificationsPanel() {
+    const panel = $('ryuNotificationsPanel');
+    if (!panel) return;
+    const recent = ryuNotificationHistory.filter(item => Date.now() - item.at <= 30000);
+    panel.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px">' +
+        '<strong>Notifications</strong><button type="button" data-close-ryu-notifications aria-label="Close notifications" style="border:0;background:transparent;color:inherit;font-size:18px;cursor:pointer">×</button></div>' +
+      (recent.length ? recent.slice().reverse().map(item =>
+        '<article style="background:rgba(23,29,40,.98);border:1px solid rgba(148,163,184,.18);border-left:4px solid ' +
+          (item.error ? '#d84d69' : '#36c77b') +
+          ';border-radius:12px;padding:10px 12px;margin-top:8px;box-shadow:0 8px 24px rgba(0,0,0,.22)">' +
+          '<div style="font-size:13px;line-height:1.45;overflow-wrap:anywhere">' + esc(item.text) + '</div>' +
+          '<small style="display:block;margin-top:5px;opacity:.68">' + esc(new Date(item.at).toLocaleTimeString()) + '</small></article>'
+      ).join('') : '<p class="muted" style="margin:8px 0">No recent notifications. New alerts remain visible for up to 30 seconds.</p>');
+  }
+  function toggleRyuNotificationsPanel(forceOpen) {
+    let panel = $('ryuNotificationsPanel');
+    if (!panel) {
+      panel = document.createElement('section');
+      panel.id = 'ryuNotificationsPanel';
+      panel.setAttribute('role', 'region');
+      panel.setAttribute('aria-label', 'Recent notifications');
+      panel.style.cssText = 'position:fixed;right:22px;bottom:78px;width:min(390px,calc(100vw - 32px));max-height:min(55vh,520px);overflow:auto;z-index:12000;padding:14px;border:1px solid rgba(148,163,184,.24);border-radius:16px;background:rgba(12,16,24,.98);color:#f4f6fa;box-shadow:0 18px 48px rgba(0,0,0,.42);display:none;box-sizing:border-box';
+      document.body.appendChild(panel);
+      panel.addEventListener('click', event => {
+        if (event.target.closest('[data-close-ryu-notifications]')) {
+          panel.style.display = 'none';
+          event.stopPropagation();
+        }
+      });
     }
-    if (error) console.error('[Ryu backend]', text);
+    const open = typeof forceOpen === 'boolean' ? forceOpen : panel.style.display === 'none';
+    panel.style.display = open ? 'block' : 'none';
+    if (open) renderRyuNotificationsPanel();
+    return open;
+  }
+  document.addEventListener('click', event => {
+    const button = event.target.closest('button[title="Notifications"],button[aria-label="Notifications"],button[data-action="notifications"]');
+    if (button) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      toggleRyuNotificationsPanel();
+      return;
+    }
+    const panel = $('ryuNotificationsPanel');
+    if (panel && panel.style.display !== 'none' && !event.target.closest('#ryuNotificationsPanel')) toggleRyuNotificationsPanel(false);
+  }, true);
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && $('ryuNotificationsPanel')?.style.display !== 'none') toggleRyuNotificationsPanel(false);
+  });
+  const message = (text, error = false) => {
+    const content = String(text ?? '').trim();
+    if (!content) return;
+    const activeValidation = document.querySelector('.page.active #validation');
+    if (error && activeValidation) writeTextIfChanged(activeValidation, content);
+    const now = Date.now();
+    const duplicate = content === ryuToastLastText && now - ryuToastLastAt < 30000;
+    if (!duplicate) {
+      ryuToastLastText = content;
+      ryuToastLastAt = now;
+      const entry = {text:content,error:Boolean(error),at:now};
+      ryuNotificationHistory.push(entry);
+      while (ryuNotificationHistory.length > 20) ryuNotificationHistory.shift();
+      setTimeout(() => {
+        const index = ryuNotificationHistory.indexOf(entry);
+        if (index >= 0) ryuNotificationHistory.splice(index, 1);
+        if ($('ryuNotificationsPanel')?.style.display !== 'none') renderRyuNotificationsPanel();
+      }, 30000);
+      const toasts = $('toasts');
+      if (toasts) {
+        writeTextIfChanged(toasts, content);
+        toasts.classList.add('show');
+        toasts.setAttribute('role', error ? 'alert' : 'status');
+        if (ryuToastTimer) clearTimeout(ryuToastTimer);
+        ryuToastTimer = setTimeout(() => { toasts.classList.remove('show'); ryuToastTimer = null; }, 30000);
+      }
+      if ($('ryuNotificationsPanel')?.style.display !== 'none') renderRyuNotificationsPanel();
+    }
+    if (error) console.error('[Ryu backend]', content);
   };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
   let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, profileEditOriginalName = '', activeJob = null, activeJobType = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, jobsRefreshRequested = false, chapterListEpoch = 0, chapterSelectionEpoch = 0, cueListEpoch = 0, cueSearchTimer = null, previewAudio = null, lastVoicePreviewPath = null, lastVoicePreviewProfileName = '', lastVoicePreviewChapterNumber = null, lastVoicePreviewChapterTitle = '', voicePreviewValid = false, voicePreviewEpoch = 0, previewVolume = 0.85, voiceAssignmentEpoch = 0, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8, productionFullJobId = null, productionPreviewJobId = null, productionJobSnapshots = {full:null,preview:null}, productionJobMonitors = {full:null,preview:null}, productionMonitorEpochs = {full:0,preview:0}, productionPreviewRequestProjectFolder = '', productionPreviewSelectionProjectFolder = '', productionPreviewSelectedChapter = null, productionPreviewSelectedChapterId = '', productionPreviewSelectedChapterSignature = '', productionPreviewRequestChapterNumber = 0, productionPreviewRequestChapterId = '';
@@ -2354,6 +2424,71 @@
     return true;
   }
 
+  function qwenModelSizeLabel(value) {
+    return ({auto:'Automatic (hardware-aware)','0.6b':'0.6B (lighter, lower memory)','1.7b':'1.7B (larger model)'})[String(value || 'auto').toLowerCase()] || 'Automatic (hardware-aware)';
+  }
+  function bindQwenModelSizeSelect(select) {
+    if (!select || select.dataset.qwenModelSizeBound === 'true') return;
+    select.dataset.qwenModelSizeBound = 'true';
+    select.addEventListener('change', async () => {
+      const requested = String(select.value || 'auto').toLowerCase();
+      select.disabled = true;
+      try {
+        const saved = await call('settings.save',{qwen_model_size:requested});
+        const effective = String(saved.qwen_model_size || requested);
+        document.querySelectorAll('[data-qwen-model-size]').forEach(peer => { peer.value = effective; });
+        message('Qwen model preference saved: ' + qwenModelSizeLabel(effective) + '. It applies to new Voice Studio previews and Production jobs.');
+      } catch (error) {
+        const current = await call('settings.get',{}).catch(() => ({qwen_model_size:'auto'}));
+        select.value = String(current.qwen_model_size || 'auto');
+        message(error?.message || String(error),true);
+      } finally {
+        select.disabled = false;
+      }
+    });
+  }
+  function ensureQwenModelSizeSelect(container,id,labelText,selected) {
+    if (!container) return null;
+    let select = $(id);
+    if (!select) {
+      const label = document.createElement('label');
+      label.id = id + 'Control';
+      label.style.cssText = 'display:grid;gap:5px;min-width:0;margin:10px 0';
+      label.textContent = labelText;
+      select = document.createElement('select');
+      select.id = id;
+      select.className = 'input';
+      select.dataset.qwenModelSize = 'true';
+      select.style.cssText = 'width:100%;max-width:100%;min-width:0';
+      select.innerHTML = '<option value="auto">Automatic (hardware-aware)</option><option value="0.6b">0.6B (lighter, lower memory)</option><option value="1.7b">1.7B (larger model)</option>';
+      label.appendChild(select);
+      container.appendChild(label);
+    }
+    select.value = String(selected || 'auto');
+    bindQwenModelSizeSelect(select);
+    return select;
+  }
+  async function syncQwenModelSizeControls(settingsValue) {
+    const settings = settingsValue || await call('settings.get',{});
+    const selected = String(settings.qwen_model_size || 'auto').toLowerCase();
+    document.querySelectorAll('#voices .provider[data-provider="customvoice"],#voices .provider[data-provider="voicedesign"],#voices .provider[data-provider="qwenclone"],#voices .provider[data-provider="offline"]').forEach(panel => {
+      const container = panel.querySelector('.form2') || panel;
+      const suffix = String(panel.dataset.provider || 'offline').replace(/[^a-z0-9]/gi,'');
+      ensureQwenModelSizeSelect(container,'voiceQwenModelSize' + suffix,'Qwen model size for new previews',selected);
+    });
+    const voicePreviewPanel = document.querySelector('#voices .panel[data-panel="4"]');
+    if (voicePreviewPanel) ensureQwenModelSizeSelect(voicePreviewPanel,'voiceQwenModelSizePreview','Qwen model size for new previews',selected);
+    const performanceGrid = $('performanceHardwareOptimization')?.querySelector('[data-qwen-settings-grid]');
+    if (performanceGrid) ensureQwenModelSizeSelect(performanceGrid,'performanceQwenModelSize','Qwen model size',selected);
+    const generateCard = $('startGenerate')?.closest('.card');
+    if (generateCard) {
+      const settingsArea = $('narratorOnlyGenerationControl')?.parentElement || $('startGenerate')?.parentElement || generateCard;
+      ensureQwenModelSizeSelect(settingsArea,'productionQwenModelSize','Qwen model size for new previews and generation',selected);
+    }
+    document.querySelectorAll('[data-qwen-model-size]').forEach(select => { select.value = selected; });
+    return settings;
+  }
+
   async function refreshVoices() {
     const requestToken = ++voiceListEpoch;
     // Load the lightweight persisted profile list first so Voice Studio can
@@ -2366,6 +2501,7 @@
     const loadedVoices = await call('voice.list');
     if (requestToken !== voiceListEpoch) return voices;
     voices = Array.isArray(loadedVoices) ? loadedVoices : [];
+    syncQwenModelSizeControls().catch(error => console.warn('[Ryu Qwen model preference]',error));
     const rows = voices.map(v => ({...v, label: v.name + ' · ' + v.provider}));
     renderSelect($('editCharacterVoice'), [{name:'',label:'Unassigned'}, ...rows], 'name', v => v.label || 'Unassigned');
     if ($('characterEditorModal')?.classList.contains('show') && $('editCharacterVoice')) $('editCharacterVoice').disabled = true;
@@ -5632,6 +5768,53 @@ function renderProductionMetadataGate(active) {
     };
   }
 
+  function ensureProductionEngineLayout() {
+    const generateButton = $('startGenerate');
+    const engineCard = generateButton?.closest('.card');
+    if (!engineCard) return;
+    const ensureSection = (id,title) => {
+      let section = $(id);
+      if (!section) {
+        section = document.createElement('section');
+        section.id = id;
+        section.className = 'ryu-production-section';
+        const heading = document.createElement('h4');
+        heading.textContent = title;
+        section.appendChild(heading);
+        engineCard.appendChild(section);
+      }
+      return section;
+    };
+    const preview = ensureSection('ryuProductionPreviewSection','Chapter preview');
+    const settings = ensureSection('ryuProductionOptionsSection','Audiobook settings');
+    const actions = ensureSection('ryuProductionActionsSection','Generate audiobook');
+    const move = (node,parent) => {
+      if (node && parent && node !== parent && node.parentElement !== parent) parent.appendChild(node);
+    };
+    move($('previewGenerate'),preview);
+    move($('productionPreviewControls'),preview);
+    move($('productionPreviewMonitor'),preview);
+    move($('productionPreviewStatus'),preview);
+    move($('narratorOnlyGenerationControl'),settings);
+    const pron = $('productionPronunciationToggle');
+    const pronGroup = pron?.closest('label') || pron?.parentElement;
+    if (pronGroup && engineCard.contains(pronGroup)) move(pronGroup,settings);
+    const audioLabel = [...engineCard.querySelectorAll('span,small,label,strong,div')].find(node =>
+      !node.children.length && String(node.textContent || '').trim().toLowerCase() === 'generation audio');
+    if (audioLabel) {
+      let candidate = audioLabel.parentElement;
+      while (candidate && candidate !== engineCard && candidate.parentElement !== engineCard) {
+        if (candidate.querySelectorAll('button').length >= 2 && candidate.textContent.length < 500) break;
+        candidate = candidate.parentElement;
+      }
+      if (candidate && candidate !== engineCard && candidate.textContent.length < 700) move(candidate,settings);
+    }
+    const qwenControl = $('productionQwenModelSizeControl');
+    if (qwenControl && qwenControl.parentElement !== settings) move(qwenControl,settings);
+    move(generateButton,actions);
+    move($('pauseGenerate'),actions);
+  }
+
   async function refreshProductionSummary() {
     const active = await call('project.get_active');
     if (!active || !active.folder) {
@@ -5653,6 +5836,7 @@ function renderProductionMetadataGate(active) {
       return null;
     }
     window.ryuPremiumActiveProject = active;
+    syncQwenModelSizeControls().catch(error => console.warn('[Ryu Qwen model preference]',error));
     const author = String(active.author || '').trim() || 'Author not set';
     const language = String(active.language || '').trim() || 'Language not set';
     const publisher = String(active.publisher || '').trim();
@@ -5760,6 +5944,25 @@ function renderProductionMetadataGate(active) {
         : 'Output destination is missing or its folder is not writable');
     setProductionStatus('productionOutputReady', outputStatus, outputReady ? 'ready' : 'warn');
     renderProductionMetadataGate(active);
+    [
+      'productionBookImported','productionChaptersReady','productionNarratorReady',
+      'productionCharacterVoices','productionPronunciationReady','productionOutputReady'
+    ].forEach(id => {
+      const value = $(id);
+      const row = value?.parentElement;
+      if (!row || row === value) return;
+      row.classList.add('ryu-readiness-row');
+      row.style.minWidth = '0';
+      row.style.maxWidth = '100%';
+      row.style.overflowWrap = 'anywhere';
+      [...row.children].forEach(child => {
+        child.style.minWidth = '0';
+        child.style.maxWidth = '100%';
+        child.style.whiteSpace = 'normal';
+        child.style.overflowWrap = 'anywhere';
+      });
+    });
+    ensureProductionEngineLayout();
     return active;
   }
 
@@ -6242,15 +6445,18 @@ function renderProductionMetadataGate(active) {
       const generateButton = $('startGenerate');
       const generateCard = generateButton?.closest('.card') || generateButton?.parentElement;
       if (generateCard) {
-        const row = document.createElement('label');
+        const row = document.createElement('div');
         row.id = 'narratorOnlyGenerationControl';
-        row.style.cssText = 'display:flex;align-items:flex-start;gap:10px;margin:12px 0;padding:12px;border:1px solid var(--border,rgba(128,128,128,.28));border-radius:10px;cursor:pointer';
+        row.style.cssText = 'display:flex;align-items:center;gap:12px;flex-wrap:wrap;min-width:0;margin:12px 0;padding:12px;border:1px solid var(--border,rgba(128,128,128,.28));border-radius:10px';
         const input = document.createElement('input');
         input.type = 'checkbox';
+        input.className = 'ryu-switch-input';
+        input.setAttribute('role','switch');
+        input.setAttribute('aria-label','Narrator-Only Generation');
         input.id = 'narratorOnlyGeneration';
         input.checked = project?.narrator_only_generation === true;
         input.disabled = project?.narrator_only_eligible !== true;
-        input.style.cssText = 'margin-top:3px;flex:0 0 auto';
+        input.style.cssText = 'flex:0 0 42px';
         input.addEventListener('change', () => {
           const requested = input.checked === true;
           input.disabled = true;
@@ -6305,22 +6511,32 @@ function renderProductionMetadataGate(active) {
         copy.style.cssText = 'display:grid;gap:3px;min-width:0';
         const title = document.createElement('strong');
         title.textContent = 'Narrator-Only Generation';
-        const description = document.createElement('small');
-        description.className = 'muted';
-        description.textContent = 'Automatically use the saved narrator for every passage, including dialogue, when this book has zero configured character voice profiles and an available narrator. Uncheck to review dialogue before generation; adding a character voice profile returns production to multi-character routing.';
+        const infoWrap = document.createElement('span');
+        infoWrap.className = 'ryu-info-wrap';
+        const info = document.createElement('button');
+        info.type = 'button';
+        info.className = 'ryu-info-trigger';
+        info.textContent = 'i';
+        info.setAttribute('aria-label','Narrator-only generation information');
+        info.title = 'Narrator-only generation information';
+        const tooltip = document.createElement('span');
+        tooltip.className = 'ryu-info-tooltip';
+        tooltip.textContent = 'Automatically use the saved narrator for every passage, including dialogue, when this book has zero configured character voice profiles and an available narrator. Uncheck to review dialogue before generation; adding a character voice profile returns production to multi-character routing.';
+        infoWrap.append(info,tooltip);
         const status = document.createElement('small');
         status.id = 'narratorOnlyGenerationStatus';
         status.className = 'muted';
+        status.style.cssText = 'flex:1 1 100%;min-width:0;line-height:1.4';
+        const voiceCount = Math.max(0,Number(project?.configured_character_voice_profile_count ?? project?.character_voice_count ?? 0));
+        const narratorReadyForOnly = project?.narrator_voice_configured === true && project?.narrator_profile_available === true;
         status.textContent = input.checked
-          ? (project?.narrator_only_generation_auto === true
-            ? 'Automatically enabled because this book has no configured character voice profiles. The saved narrator reads all narration and dialogue.'
-            : 'Saved for this book. The narrator reads all narration and dialogue.')
+          ? (project?.narrator_only_generation_auto === true ? 'On · the saved narrator reads all narration and dialogue.' : 'On · saved for this book.')
           : (project?.narrator_only_generation_user_opt_out === true
-            ? 'Off by your choice. Character assignments and speaker review will be used.'
-            : (project?.narrator_only_eligible === true
-              ? 'Available. This book has no configured character voice profiles.'
-              : 'Unavailable until this book has an available narrator and no configured character voice profiles.'));
-        copy.append(title,description,status);
+            ? 'Off by your choice · multi-character review applies.'
+            : (voiceCount > 0
+              ? 'Unavailable · ' + voiceCount + ' configured character voice profile(s) found. Remove those assignments to use narrator-only mode.'
+              : (!narratorReadyForOnly ? 'Unavailable · save an available narrator profile first.' : 'Off · available for this book.')));
+        copy.append(title,infoWrap,status);
         row.append(input,copy);
         generateButton?.parentElement?.insertBefore(row,generateButton);
         narratorOnlyControl = input;
@@ -6332,16 +6548,19 @@ function renderProductionMetadataGate(active) {
       }
       narratorOnlyControl.disabled = project?.narrator_only_eligible !== true;
       const status = $('narratorOnlyGenerationStatus');
-      if (status) status.textContent = savedValue
-        ? (project?.narrator_only_generation_auto === true
-          ? 'Automatically enabled because this book has no configured character voice profiles. The saved narrator reads all narration and dialogue.'
-          : 'Saved for this book. The narrator reads all narration and dialogue.')
-        : (project?.narrator_only_generation_user_opt_out === true
-          ? 'Off by your choice. Character assignments and speaker review will be used.'
-          : (project?.narrator_only_eligible === true
-            ? 'Available. This book has no configured character voice profiles.'
-            : 'Unavailable until this book has an available narrator and no configured character voice profiles.'));
+      if (status) {
+        const voiceCount = Math.max(0,Number(project?.configured_character_voice_profile_count ?? project?.character_voice_count ?? 0));
+        const narratorReadyForOnly = project?.narrator_voice_configured === true && project?.narrator_profile_available === true;
+        status.textContent = savedValue
+          ? (project?.narrator_only_generation_auto === true ? 'On · the saved narrator reads all narration and dialogue.' : 'On · saved for this book.')
+          : (project?.narrator_only_generation_user_opt_out === true
+            ? 'Off by your choice · multi-character review applies.'
+            : (voiceCount > 0
+              ? 'Unavailable · ' + voiceCount + ' configured character voice profile(s) found. Remove those assignments to use narrator-only mode.'
+              : (!narratorReadyForOnly ? 'Unavailable · save an available narrator profile first.' : 'Off · available for this book.')));
+      }
     }
+    ensureProductionEngineLayout();
     // Job-state refreshes must reuse the exact Production prerequisite
     // gate; polling must never re-enable generation after a blocker is found.
     if (fullStart) {
@@ -6904,7 +7123,9 @@ function renderProductionMetadataGate(active) {
         // A background job must never write progress into an unrelated screen.
         // Dedicated progress widgets are only updated while their owning screen
         // is visible; the shared Background Jobs and History views remain global.
-        if (originVisible && originPage === 'generate') {
+        const fullOwner = String(productionFullJobId || productionJobSnapshots.full?.job_id || '');
+        if (originVisible && originPage === 'generate' && job.type === 'audiobook-generation' &&
+            fullOwner && String(job.job_id || '') === fullOwner) {
           writeTextIfChanged($('genPercent'), Math.round(pct) + '%');
           writeCssVariableIfChanged($('genRing'), '--progress', pct + '%');
           writeTextIfChanged($('genStage'), job.stage || job.message || job.state);
@@ -7925,7 +8146,27 @@ function renderProductionMetadataGate(active) {
       '#voices{overflow-anchor:none!important}',
       '#voices .content,#voices .layout,#voiceWorkspace,#voiceWorkspace .panel{overflow-anchor:none!important}',
       '#voices #previewState{min-height:1.25em;white-space:nowrap;max-width:170px;overflow:hidden;text-overflow:ellipsis;flex:0 0 auto}',
-      '#voices #validation{min-height:3em;box-sizing:border-box;overflow-wrap:anywhere}'
+      '#voices #validation{min-height:3em;box-sizing:border-box;overflow-wrap:anywhere}',
+      '.book-cover.has-project-cover::before,.book-cover.has-project-cover::after,.project-cover.has-project-cover::before,.project-cover.has-project-cover::after,[data-project-cover].has-project-cover::before,[data-project-cover].has-project-cover::after{content:none!important;display:none!important;background:none!important;opacity:0!important}',
+      '#genRing{transition:background .28s linear,filter .28s ease;will-change:background}',
+      '#productionBookImported,#productionChaptersReady,#productionNarratorReady,#productionCharacterVoices,#productionPronunciationReady,#productionOutputReady{min-width:0;max-width:100%;overflow-wrap:anywhere;white-space:normal;line-height:1.45;word-break:normal}',
+      '.ryu-readiness-row{display:grid!important;grid-template-columns:minmax(88px,.85fr) minmax(0,1.15fr)!important;align-items:start!important;gap:10px!important;min-width:0!important;max-width:100%!important}',
+      '.ryu-readiness-row>*{min-width:0!important;max-width:100%!important;white-space:normal!important;overflow-wrap:anywhere!important}',
+      '@media(max-width:700px){.ryu-readiness-row{grid-template-columns:minmax(0,1fr)!important;gap:3px!important}}',
+      '.ryu-production-section{display:grid;gap:10px;min-width:0;padding:14px;margin-top:12px;border:1px solid var(--border,rgba(148,163,184,.18));border-radius:12px;background:rgba(7,10,16,.28);box-sizing:border-box}',
+      '.ryu-production-section>h4{margin:0;font-size:13px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted,#aeb6c5)}',
+      '.ryu-production-section>*{min-width:0;max-width:100%;box-sizing:border-box}',
+      '.ryu-production-section button,.ryu-production-section select,.ryu-production-section label{max-width:100%;overflow-wrap:anywhere}',
+      '#narratorOnlyGenerationControl{display:flex;align-items:center;gap:12px;min-width:0;flex-wrap:wrap}',
+      '.ryu-switch-input{appearance:none!important;-webkit-appearance:none!important;position:relative;width:42px;height:24px;flex:0 0 42px;margin:0;border:1px solid rgba(148,163,184,.42);border-radius:999px;background:#394252;cursor:pointer;transition:background .18s ease,border-color .18s ease}',
+      '.ryu-switch-input::before{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .18s ease}',
+      '.ryu-switch-input:checked{background:#c52b57;border-color:#e04b72}',
+      '.ryu-switch-input:checked::before{transform:translateX(18px)}',
+      '.ryu-switch-input:disabled{opacity:.45;cursor:not-allowed}',
+      '.ryu-info-wrap{position:relative;display:inline-flex;align-items:center;flex:0 0 auto}',
+      '.ryu-info-trigger{width:19px;height:19px;border-radius:50%;border:1px solid rgba(148,163,184,.65);background:transparent;color:inherit;font-size:12px;font-weight:700;cursor:help;padding:0}',
+      '.ryu-info-tooltip{position:absolute;left:50%;bottom:calc(100% + 9px);transform:translateX(-50%);width:min(300px,calc(100vw - 60px));padding:9px 11px;border:1px solid rgba(148,163,184,.28);border-radius:9px;background:#111722;color:#eef2f7;font-size:12px;line-height:1.45;box-shadow:0 10px 26px rgba(0,0,0,.35);opacity:0;visibility:hidden;pointer-events:none;transition:opacity .16s ease;z-index:30}',
+      '.ryu-info-wrap:hover .ryu-info-tooltip,.ryu-info-wrap:focus-within .ryu-info-tooltip{opacity:1;visibility:visible}'
     ].join('');
     document.head.appendChild(style);
   }
@@ -8762,16 +9003,23 @@ function renderProductionMetadataGate(active) {
       return;
     }
     const accelerators = Array.isArray(result.accelerators) ? result.accelerators : [];
-    const available = [...new Set(accelerators
-      .filter(item => item && item.supported === true && ['cuda', 'rocm', 'xpu'].includes(String(item.backend)))
-      .map(item => String(item.backend)))];
+    const backendNames = {cuda:'NVIDIA CUDA',rocm:'AMD ROCm',xpu:'Intel XPU'};
+    const activeBackends = [...new Set(accelerators.filter(item => item && item.supported === true &&
+      ['cuda','rocm','xpu'].includes(String(item.backend))).map(item => String(item.backend)))];
+    const candidateBackends = [...new Set(accelerators.filter(item => item && item.supported !== true &&
+      ['cuda-candidate','rocm-candidate','xpu-candidate'].includes(String(item.backend)))
+      .map(item => String(item.backend).replace('-candidate','')))];
     const options = [
       {value:'automatic', label:'Automatic — choose the best validated backend'},
       {value:'cpu', label:'CPU only'}
     ];
-    if (available.includes('cuda')) options.push({value:'cuda',label:'NVIDIA CUDA'});
-    if (available.includes('rocm')) options.push({value:'rocm',label:'AMD ROCm'});
-    if (available.includes('xpu')) options.push({value:'xpu',label:'Intel XPU'});
+    activeBackends.forEach(backend => options.push({value:backend,label:backendNames[backend] + ' · runtime active'}));
+    candidateBackends.forEach(backend => {
+      if (!activeBackends.includes(backend)) {
+        const device = accelerators.find(item => item.backend === backend + '-candidate');
+        options.push({value:backend,label:backendNames[backend] + ' · ' + (device?.name || 'adapter detected') + ' — runtime needs activation'});
+      }
+    });
     const selected = String(settings.qwen_backend || 'automatic').toLowerCase();
     if (!options.some(option => option.value === selected)) {
       options.push({value:selected,label:selected.toUpperCase() + ' — saved choice, currently unavailable'});
@@ -8788,7 +9036,7 @@ function renderProductionMetadataGate(active) {
         '<div><h3 style="margin:0">Hardware Optimization</h3>' +
         '<p class="muted" style="margin:4px 0 0">Hardware detection, validated runtime and actual model inference are reported separately.</p></div>' +
         '<span class="muted" style="font-size:12px">Last Qwen inference: ' + esc(actual) + '</span></div>' +
-      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:14px">' +
+      '<div data-qwen-settings-grid style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:14px">' +
         '<label>Preferred Qwen backend<select id="performanceQwenBackend" class="input" style="display:block;width:100%;margin-top:6px">' +
           options.map(option => '<option value="' + esc(option.value) + '"' + (option.value === selected ? ' selected' : '') + '>' + esc(option.label) + '</option>').join('') +
         '</select></label>' +
@@ -8806,6 +9054,7 @@ function renderProductionMetadataGate(active) {
       '</div>' +
       (!qwenModels.length ? '<p class="muted" style="margin:6px 0 0;font-size:12px">Install and verify a Qwen CustomVoice 0.6B or 1.7B model in Models Center to run this benchmark.</p>' : '') +
       '<div style="display:flex;justify-content:flex-end;margin-top:12px"><button type="button" class="' + esc($('runTtsBenchmark')?.className || $('runBenchmark')?.className || 'btn') + '" data-save-hardware-optimization>Save optimization settings</button></div>';
+    syncQwenModelSizeControls(settings).catch(error => console.warn('[Ryu Qwen model preference]',error));
     const low = panel.querySelector('#performanceQwenLowMemory');
     const concurrencySelect = panel.querySelector('#performanceHeavyConcurrency');
     low?.addEventListener('change', () => {
@@ -8846,6 +9095,7 @@ function renderProductionMetadataGate(active) {
       const maxConcurrent = lowMemoryEnabled ? 1 : Number(concurrencySelect?.value || 1);
       await call('settings.save', {
         qwen_backend: backend,
+        qwen_model_size: panel.querySelector('#performanceQwenModelSize')?.value || settings.qwen_model_size || 'auto',
         qwen_low_memory: lowMemoryEnabled,
         concurrency: maxConcurrent
       });
@@ -9468,6 +9718,10 @@ function renderProductionMetadataGate(active) {
   function renderHelpGuide() {
     const root = document.getElementById('help');
     if (!root || root.dataset.ryuHelpGuideRendered === 'true') return;
+    if (root.children.length && String(root.textContent || '').trim()) {
+      root.dataset.ryuHelpGuideRendered = 'preserved-static-guide';
+      return;
+    }
     root.dataset.ryuHelpGuideRendered = 'true';
 
     const topics = [
@@ -11534,7 +11788,7 @@ function renderProductionMetadataGate(active) {
           if (job.state !== 'completed') throw new Error(job.message || ('Job ' + job.state + '.'));
           return job;
         }
-        if (attempt % 5 === 0) message((job.title || job.type || 'Task') + ' · ' + Math.round(Number(job.progress || 0)) + '% · ' + (job.stage || job.state));
+        // Continuous progress belongs in the job row/progress widget, not a new global toast.
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
       throw new Error('The task is still running. Check Generation History for its latest state.');
