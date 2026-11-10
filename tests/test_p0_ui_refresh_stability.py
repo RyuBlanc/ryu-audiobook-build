@@ -68,6 +68,18 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         self.assertIn("window.showToast =", adapter)
         self.assertIn("}, 30000)", adapter)
 
+    def test_model_verification_keeps_long_diagnostic_inline_and_toast_compact(self):
+        adapter = (
+            ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        start = adapter.index("const result = await call('models.verify'")
+        end = adapter.index("return;", start)
+        handler = adapter[start:end]
+        self.assertIn("await refreshModels()", handler)
+        self.assertIn("See its Models Center card for details.", handler)
+        self.assertNotIn("+ result.detail", handler)
+        self.assertIn("}, 30000)", adapter)
+
     def test_generic_notifications_do_not_mutate_other_workflows(self):
         adapter = (
             ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
