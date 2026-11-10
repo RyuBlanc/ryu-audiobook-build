@@ -3,6 +3,30 @@
   window.__ryuPremiumAdapterReady = false;
   window.__ryuPremiumAdapterFailure = '';
   const $ = id => document.getElementById(id);
+
+  // Background Jobs is a shared shell dialog, so its responsive bounds must
+  // exist from the first screen. Do not wait for Models Center to render before
+  // injecting this rule: users can open Task Manager on a fresh 600px-wide
+  // window before ever visiting Models.
+  function ensureTaskManagerResponsiveStyles() {
+    if ($('ryuTaskManagerResponsiveStyles')) return;
+    const style = document.createElement('style');
+    style.id = 'ryuTaskManagerResponsiveStyles';
+    style.textContent = [
+      '#backgroundJobsModal .jobs-modal,',
+      '.modal-back .jobs-modal {',
+      'box-sizing:border-box!important;',
+      'width:min(780px,calc(100vw - 40px))!important;',
+      'min-width:0!important;',
+      'max-width:calc(100vw - 40px)!important;',
+      'margin-left:auto;',
+      'margin-right:auto;',
+      '}'
+    ].join('\\n');
+    (document.head || document.documentElement).appendChild(style);
+  }
+  ensureTaskManagerResponsiveStyles();
+
   let narratorOnlySavePromise = Promise.resolve();
 
   // Job polling runs every 1.5 seconds. Avoid writing the same values back to
