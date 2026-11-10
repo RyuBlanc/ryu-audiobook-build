@@ -364,6 +364,40 @@ class ProductionPreviewParitySourceContracts(unittest.TestCase):
         self.assertIn("projectBaseName.slice(0,Math.max(12,100-suffix.length))+suffix", download)
         self.assertIn("suggested_name:suggestedName", download)
 
+    def test_production_engine_orders_preview_settings_and_full_book_actions(self):
+        helper_start = self.adapter_source.index("function ensureProductionEngineLayout()")
+        helper_end = self.adapter_source.index("\n  async function refreshProductionSummary()", helper_start)
+        helper = self.adapter_source[helper_start:helper_end]
+        for required in (
+            "ryuProductionPreviewSection",
+            "ryuProductionOptionsSection",
+            "ryuProductionActionsSection",
+            "move($('previewGenerate'),preview)",
+            "move(previewDurationGroup,preview)",
+            "move($('productionPreviewControls'),preview)",
+            "move($('productionPreviewMonitor'),preview)",
+            "move($('narratorOnlyGenerationControl'),settings)",
+            "move(generateButton,actions)",
+            "move($('pauseGenerate'),actions)",
+        ):
+            self.assertIn(required, helper)
+        self.assertLess(helper.index("ryuProductionPreviewSection"), helper.index("ryuProductionOptionsSection"))
+        self.assertLess(helper.index("ryuProductionOptionsSection"), helper.index("ryuProductionActionsSection"))
+        monitor_start = self.adapter_source.index("function ensureProductionPreviewMonitorUi()")
+        monitor_end = self.adapter_source.index("\n  function monitorProductionJob(", monitor_start)
+        monitor = self.adapter_source[monitor_start:monitor_end]
+        self.assertIn("ensureProductionEngineLayout();", monitor)
+
+    def test_real_cover_removes_placeholder_watermark_but_empty_cover_keeps_gradient_branding(self):
+        start = self.adapter_source.index("function applyProjectCover(element, path)")
+        end = self.adapter_source.index("\n  function ", start + 1)
+        apply_cover = self.adapter_source[start:end]
+        self.assertIn("element.classList.add('has-project-cover')", apply_cover)
+        self.assertIn("element.classList.remove('has-project-cover')", apply_cover)
+        self.assertIn(".has-project-cover::after{content:none!important", self.adapter_source)
+        self.assertIn(".has-project-cover::before", self.adapter_source)
+        self.assertNotIn(".book-cover::after{content:none!important", self.adapter_source)
+
     def test_preview_and_final_generation_consume_the_effective_saved_voice_configuration(self):
         self.assertIn('"_production_preview": True', self.host_source)
         self.assertIn("self._narrator_series_default_read(project, state, series)", self.host_source)
