@@ -281,8 +281,11 @@ class QwenCharacterProvider(TTSProvider):
         # Check for a supported GPU after the runtime is ready as well. The old
         # order skipped this upgrade when a newly verified CPU runtime was not
         # marked ready at entry, leaving Automatic on CPU until a later session.
-        if automatic_backend:
-            ensure_best_runtime_for_gpu(self._status)
+        if self.backend != "cpu":
+            ensure_best_runtime_for_gpu(
+                self._status,
+                preferred_backend=None if automatic_backend else self.backend,
+            )
         if not model_installed(self.model_kind):
             phase = {"design": "VoiceDesign", "design-preview": "VoiceDesign", "clone": "Voice Clone (Base)"}.get(
                 self.qwen_mode, "CustomVoice"
