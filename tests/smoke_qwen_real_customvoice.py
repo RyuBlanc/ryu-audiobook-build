@@ -83,6 +83,11 @@ def main() -> None:
         patch.object(qwen_provider_module, "runtime_python", return_value=Path(sys.executable)),
         patch.object(qwen_provider_module, "runtime_environment", return_value=env),
         patch.object(qwen_provider_module, "model_installed", side_effect=lambda kind: runtime.model_installed(kind)),
+        # The saved record below deliberately contains the old CPU backend.
+        # A portable profile must follow this machine's current Automatic
+        # preference and select an active GPU where one is available.
+        patch("app.tts.profile_provider.get_qwen_backend_preference", return_value="automatic"),
+        patch("app.tts.providers.qwen_character.ensure_best_runtime_for_gpu", return_value="test-runtime"),
         patch("app.tts.voice_profile.voices_root", return_value=OUTPUT_ROOT / "saved-profiles"),
         patch("app.tts.voice_profile.builtin_voice_profiles", return_value=[]),
     ):
@@ -93,7 +98,7 @@ def main() -> None:
                 provider="qwen-character",
                 voice_id="Ryan",
                 model_id=kind,
-                backend="cpu",
+                backend="cpu",  # stale per-profile value must not pin this run to CPU
                 language="English",
                 notes="Real Qwen CustomVoice model acceptance.",
                 authorized=True,
@@ -106,6 +111,11 @@ def main() -> None:
             if reloaded is None or reloaded.model_id != kind or reloaded.voice_id != "Ryan":
                 raise RuntimeError(f"CustomVoice profile failed save/reload for {kind}.")
             engine, voice = provider_from_profile(reloaded)
+            if engine.backend != "automatic":
+                raise RuntimeError(
+                    f"Saved {kind} profile retained stale backend {engine.backend!r}; "
+                    "the current global Automatic preference must control hardware."
+                )
             output = OUTPUT_ROOT / f"{kind}-customvoice.wav"
             try:
                 engine.synthesize(
@@ -120,10 +130,18 @@ def main() -> None:
             duration = _valid_wav(output)
             if output.stat().st_size < 1024:
                 raise RuntimeError(f"Qwen CustomVoice produced an unexpectedly small WAV for {kind}.")
+            actual_backend = engine.execution_backend
+            actual_device = str(engine.last_execution_context.get("device") or "unverified")
+            if not engine.execution_backend_verified or actual_backend not in {"cpu", "cuda", "rocm", "xpu"}:
+                raise RuntimeError(
+                    f"Qwen {kind} generated audio without verified execution-device telemetry: "
+                    f"{engine.last_execution_context!r}"
+                )
             print(
                 f"REAL_QWEN_CUSTOMVOICE=PASS model={MODEL_IDS[kind]} kind={kind} "
                 f"duration={duration:.3f}s bytes={output.stat().st_size} "
-                f"saved_profile_reload=true decoded_audio=true"
+                f"saved_profile_reload=true decoded_audio=true "
+                f"actual_backend={actual_backend} actual_device={actual_device}"
             )
 
     print("REAL_QWEN_CUSTOMVOICE_BOTH_SIZES=PASS")
