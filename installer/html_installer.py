@@ -418,7 +418,7 @@ class InstallerWindow(QMainWindow):
             if available is not None else (0, 0, 1180, 760)
         )
         window_x, window_y, window_width, window_height = _installer_window_geometry(screen_bounds)
-        self.setMinimumSize(min(960, window_width), min(680, window_height))
+        self.setMinimumSize(min(900, window_width), min(560, window_height))
         self.resize(window_width, window_height)
         self.setStyleSheet("QMainWindow{background:" + BACKGROUND + ";}")
         self.web = QWebEngineView(self)
@@ -487,10 +487,23 @@ class InstallerWindow(QMainWindow):
             return
         QTimer.singleShot(100, self._probe_startup_smoke_bridge)
 
+    @staticmethod
+    def _resize_edges_at(x: int, y: int, width: int, height: int, margin: int = 9) -> Qt.Edge:
+        edges = Qt.Edge(0)
+        if x <= margin:
+            edges |= Qt.Edge.LeftEdge
+        elif x >= width - margin:
+            edges |= Qt.Edge.RightEdge
+        if y <= margin:
+            edges |= Qt.Edge.TopEdge
+        elif y >= height - margin:
+            edges |= Qt.Edge.BottomEdge
+        return edges
+
     def eventFilter(self, obj, event):
         # WebEngine sends mouse events to Chromium child widgets, not reliably
         # to QWebEngineView itself. Filter at QApplication level (installed in
-        # main()) and begin native movement only in the empty top strip.
+        # main()) for window dragging and native resize gestures.
         if isinstance(obj, QWidget) and obj.window() is self:
             event_type = event.type()
             if event_type == QEvent.Type.Wheel:
@@ -506,8 +519,15 @@ class InstallerWindow(QMainWindow):
                     and event.key() in zoom_keys
                 ):
                     return True
-            if event_type == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+            elif event_type == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
                 point = self.mapFromGlobal(event.globalPosition().toPoint())
+                edges = self._resize_edges_at(point.x(), point.y(), self.width(), self.height())
+                if edges:
+                    handle = self.windowHandle()
+                    if handle is not None:
+                        handle.startSystemResize(edges)
+                    self._drag_offset = None
+                    return True
                 in_drag_strip = 0 <= point.y() <= 46 and 285 <= point.x() < self.width() - 112
                 if in_drag_strip:
                     handle = self.windowHandle()
@@ -516,12 +536,32 @@ class InstallerWindow(QMainWindow):
                         return True
                     self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
                     return True
-            elif event_type == QEvent.Type.MouseMove and self._drag_offset is not None:
-                if event.buttons() & Qt.MouseButton.LeftButton:
+            elif event_type == QEvent.Type.MouseMove:
+                point = self.mapFromGlobal(event.globalPosition().toPoint())
+                edges = self._resize_edges_at(point.x(), point.y(), self.width(), self.height())
+                if edges and self._drag_offset is None:
+                    left = bool(edges & Qt.Edge.LeftEdge)
+                    right = bool(edges & Qt.Edge.RightEdge)
+                    top = bool(edges & Qt.Edge.TopEdge)
+                    bottom = bool(edges & Qt.Edge.BottomEdge)
+                    if (left and top) or (right and bottom):
+                        cursor = Qt.CursorShape.SizeFDiagCursor
+                    elif (right and top) or (left and bottom):
+                        cursor = Qt.CursorShape.SizeBDiagCursor
+                    elif left or right:
+                        cursor = Qt.CursorShape.SizeHorCursor
+                    else:
+                        cursor = Qt.CursorShape.SizeVerCursor
+                    self.setCursor(cursor)
+                    return True
+                elif self._drag_offset is not None and event.buttons() & Qt.MouseButton.LeftButton:
                     self.move(event.globalPosition().toPoint() - self._drag_offset)
                     return True
+                elif not edges:
+                    self.unsetCursor()
             elif event_type == QEvent.Type.MouseButtonRelease:
                 self._drag_offset = None
+                self.unsetCursor()
         return super().eventFilter(obj, event)
 
     def closeEvent(self, event) -> None:
