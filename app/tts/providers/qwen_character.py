@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+from datetime import datetime, timezone
 from pathlib import Path
 import queue
 import subprocess
@@ -27,6 +29,8 @@ from ..qwen_character_runtime import (
     unregister_qwen_worker,
 )
 from ..expression import DEFAULT_VOICE_DESIGN_ANCHOR_TEXT, classify_expression
+from ..qwen_model_preference import normalize_qwen_backend_preference
+from app.core.paths import settings_root
 
 
 class QwenCharacterProvider(TTSProvider):
@@ -68,11 +72,17 @@ class QwenCharacterProvider(TTSProvider):
         qwen_anchor_text: str = "",
         qwen_profile_id: str = "",
         long_form_model_kind: str | None = None,
+        low_memory: bool = False,
     ):
         self.voice_id = voice_id
         self.language = language or "English"
         self.instruct = instruct or ""
-        self.backend = backend
+        # This field is a compute backend, not a provider identifier.
+        # Normalize legacy/malformed values so no path can send "qwen-character"
+        # to the worker's strict backend validator.
+        self.backend = normalize_qwen_backend_preference(backend)
+        self.low_memory = bool(low_memory)
+        self.last_execution_context: dict = {}
         self.qwen_mode = (qwen_mode or "custom").casefold()
         self.qwen_seed = qwen_seed
         self.qwen_anchor_path = qwen_anchor_path
@@ -179,6 +189,8 @@ class QwenCharacterProvider(TTSProvider):
                 self.language,
                 self.qwen_mode,
                 self.model_kind,
+                str(self.backend or "automatic"),
+                str(self.low_memory),
                 (
                     self.long_form_model_kind or best_long_form_clone_kind()
                     if self.qwen_mode == "design"
@@ -205,21 +217,72 @@ class QwenCharacterProvider(TTSProvider):
             except Exception:
                 pass
 
+    @property
+    def execution_backend(self) -> str:
+        return str(self.last_execution_context.get("backend") or "unverified")
+
+    @property
+    def execution_backend_verified(self) -> bool:
+        return self.last_execution_context.get("verified_inference") is True
+
+    @property
+    def execution_providers(self) -> tuple[str, ...]:
+        return tuple(self.last_execution_context.get("execution_providers") or ())
+
+    def _record_execution_context(self, response: dict) -> None:
+        if not isinstance(response, dict) or response.get("ok") is not True:
+            return
+        device = str(response.get("device") or "").strip()
+        kind = str(response.get("kind") or self.model_kind).strip()
+        if not device or device.casefold() in {"pending", "unknown"}:
+            return
+        reported_backend = str(response.get("backend") or "").strip().casefold()
+        backend = (
+            reported_backend if reported_backend in {"cuda", "rocm", "xpu", "cpu"}
+            else "cuda" if device.casefold().startswith("cuda")
+            else "xpu" if device.casefold().startswith("xpu")
+            else "cpu" if device.casefold() == "cpu"
+            else "other"
+        )
+        record = {
+            "device": device,
+            "backend": backend,
+            "model_kind": kind,
+            "task": str(response.get("task") or self.qwen_mode),
+            "measured_at": datetime.now(timezone.utc).isoformat(),
+            "source": "qwen-worker-response",
+            "verified_inference": True,
+        }
+        self.last_execution_context = record
+        try:
+            path = settings_root() / "qwen_last_inference.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_name(path.name + ".tmp")
+            temporary.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            temporary.replace(path)
+        except Exception as exc:
+            self._status(f"Could not persist last Qwen inference telemetry: {exc}")
+
     def _start_worker(self) -> None:
         if self._worker is not None and self._worker.poll() is None:
             return
         self._ensure_model_kind()
-        if str(self.backend or "automatic").casefold() in {"automatic", "auto"} and runtime_ready():
-            ensure_best_runtime_for_gpu(self._status)
+        automatic_backend = self.backend == "automatic"
         if not runtime_ready():
             try:
                 verify_runtime()
             except Exception as exc:
                 raise RuntimeError(f"Qwen3-TTS runtime is not healthy: {exc}") from exc
+        if not runtime_ready():
             raise RuntimeError(
                 "Offline Character Voices are not installed. Open Models and choose "
                 "Install / Repair Qwen Voice Studio first."
             )
+        # Check for a supported GPU after the runtime is ready as well. The old
+        # order skipped this upgrade when a newly verified CPU runtime was not
+        # marked ready at entry, leaving Automatic on CPU until a later session.
+        if automatic_backend:
+            ensure_best_runtime_for_gpu(self._status)
         if not model_installed(self.model_kind):
             phase = {"design": "VoiceDesign", "design-preview": "VoiceDesign", "clone": "Voice Clone (Base)"}.get(
                 self.qwen_mode, "CustomVoice"
@@ -254,6 +317,8 @@ class QwenCharacterProvider(TTSProvider):
             "--models-root", str(RUNTIME_ROOT),
             "--clone-kind", clone_kind or best_clone_kind(),
         ]
+        if self.low_memory:
+            command.append("--low-memory")
         if self.qwen_anchor_path:
             command.extend(["--anchor-path", str(self.qwen_anchor_path.resolve())])
         if self.qwen_anchor_text:
@@ -289,6 +354,15 @@ class QwenCharacterProvider(TTSProvider):
         )
         response = self._read_response(timeout=900.0, heartbeat="Loading Qwen model / character identity")
         if response.get("ready"):
+            # The worker's ready message now carries a real device only after
+            # model initialization; reject legacy/pending responses rather than
+            # reporting hardware that has not executed inference.
+            if not str(response.get("device") or "").strip() or str(response.get("device")).casefold() in {"pending", "unknown"}:
+                self.close()
+                raise RuntimeError(
+                    "Qwen worker reported ready without a verified compute device. "
+                    "Open Models → Repair Qwen3-TTS Runtime and retry."
+                )
             self._status(
                 f"Qwen engine ready • {response.get('kind', self.model_kind)} • "
                 f"{response.get('device', 'unknown device')}"
@@ -413,6 +487,8 @@ class QwenCharacterProvider(TTSProvider):
             self.close()
             raise
         if response:
+            if response.get("ok") is True:
+                self._record_execution_context(response)
             if response.get("device"):
                 self._status(
                     f"Qwen ready • {response.get('kind', self.model_kind)} • {response.get('device')}"
@@ -484,6 +560,7 @@ class QwenCharacterProvider(TTSProvider):
             self.close()
             raise
 
+        self._record_execution_context(response)
         if not response.get("ok"):
             # Batch memory pressure should not kill the whole audiobook. The
             # caller can retry these same items one at a time.

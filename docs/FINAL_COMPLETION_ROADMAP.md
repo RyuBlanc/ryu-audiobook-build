@@ -1,7 +1,7 @@
 # Ryu's Audiobook — Final Completion Roadmap
 
 **Repository:** `RyuBlanc/ryu-audiobook-build`  
-**Working branch:** `fix/import-qa-speaker-hover-hardware`  
+**Working branch:** `stage-7/step-6-safe-auto-fallback` (Stage 8 continuation)  
 **Canonical UI reference:** `docs/prototypes/Ryus_Audiobook_Voice_Studio_Fixed_All_Steps.html`  
 **Behavioral acceptance checklist:** `docs/DRAGON_STUDIO_ACCEPTANCE_CHECKLIST.md`  
 **Implementation specification:** `docs/UI_UX_IMPLEMENTATION_SPEC.md`
@@ -41,6 +41,7 @@ Use the supplied Voice Studio HTML as the canonical visual language for every sc
 - [ ] Models Center: actual install/repair status, progress, cancel, integrity and local storage information.
 - [ ] Performance Center: actual hardware detection, backend availability, safe model recommendation and benchmark results.
 - [ ] Settings: local paths, privacy/offline behavior, theme, default bitrate and cleanup/uninstall-related options where supported.
+- [ ] Help & Guide: update task-based, user-friendly instructions to match the latest accepted requirements and actual Version 1.2.0 behavior, including workflows, settings/storage, voice/model setup, sound design, generation controls/recovery, playback, and troubleshooting. Verify every instruction against the current app; clearly label unsupported or deferred features and keep screenshots/links current.
 - [ ] Responsive/full-screen: no clipped controls, inaccessible menus, overlapping panels, or navigation that requires restarting the app.
 - [ ] Every visible control is connected to real behavior; no prototype-only success states or placeholder actions.
 
@@ -82,3 +83,49 @@ A candidate is release-ready only when:
 4. Short-book, empty-chapter, custom-voice, cast-assignment, preview-duration and long-book-resume scenarios pass.
 5. The exact installer commit passes CI and launches successfully on Windows.
 6. Any known limitation is documented; no unsupported feature is advertised as working.
+
+
+---
+
+## Stage 8 — Version 1.2.0 current execution status
+
+**Status date:** 7 November 2026  
+**Working branch:** `stage-7/step-6-safe-auto-fallback`  
+**Current candidate checkpoint before this update:** `a21e14694d672ab23fd4c2651490ca9d27499e51`  
+**Last packaged baseline:** Build #2677, commit `e71c16b980c0dd1a669028761a9152ae246a6b0a`  
+**Last verified full regression run:** Build #2680 — 1,258 tests passed, but its Windows build job was skipped.  
+**Release:** Version 1.2.0 has not been published.
+
+The Stage 8 controlling requirements and evidence matrix are in `docs/stage-8/STAGE-8-REQUIREMENT-TRACEABILITY.md`. The Sound Design defect and test record is in `docs/stage-8/STAGE-8-2-8-SOUND-DESIGN-DEFECT-RECORD.md`. These records supersede the older branch/status snapshots above; historical build records remain for traceability.
+
+### Approved six-step order
+
+1. **8.2.7 — CI stabilization:** reconcile branch/PR dependencies, inspect failed/skipped jobs, stabilize regression gates and package the exact candidate.
+2. **8.2.8 — Sound Design completion:** Same BGM / Chapter-Based behavior, no layering/fallback, cues, Music Library, full-book mix preview and final-audio parity.
+3. **8.2.9 — Frontend/backend parity:** every visible action must have a real backend behavior; update the in-app Help & Guide to the accepted Version 1.2.0 behavior.
+4. **8.2.10 — Generation reliability:** chapter/full-book preview, metadata, progress, elapsed/ETA, pause/cancel/retry/recovery, preview/final parity and output integrity.
+5. **8.2.11 — Windows release validation:** exact-commit installer and portable package, first launch, runtime, model/storage, responsiveness and real audio acceptance.
+6. **8.2.12 — Final acceptance/release:** requirement-by-requirement sign-off, documented exceptions only, final artifacts/hashes, then and only then Version 1.2.0 release.
+
+### Current implementation and evidence
+
+- **8.2.7:** the current candidate commit uses the workflow's `[artifact-checkpoint]` trigger. The workflow definition allows this branch/marker to run the Windows build job. The GitHub connector currently exposes no push-triggered run/check result for the latest candidate; therefore matching-head CI and packaging are still UNVERIFIED. Do not infer success from Build #2680.
+- **8.2.8:** test-first source fixes now cover Chapter-Based auto-mode fallback, explicit chapter-track validation, Same BGM one-track behavior, legacy ambience suppression, voice-preview single-track behavior, full-book preview saved-audio selection, disposable-copy safety and cancellation cleanup. Thirteen regression tests have been added. Matching-head execution and real Windows listening remain pending. The short Production chapter preview still cannot demonstrate the After first paragraph offset because it lacks saved paragraph timing; the saved full-book mix preview uses the boundary-aware path.
+- **8.2.9:** static adapter audit found 108 direct backend command names and 132 host handler keys, with zero missing direct command names. The legacy Settings folder button now navigates to Settings > Storage; stale source-less Character Studio prototype rows are hidden; the obsolete click blocker that prevented real Character Studio actions was removed. The in-app Help & Guide now contains searchable, expandable task-based sections for all major screens, current workflows, storage, Qwen setup, recovery and known limitations. Static checks are recorded; runtime Windows verification remains pending.
+- **8.2.10:** Production chapter preview source/contract coverage verifies selected saved-chapter identity, saved narrator/character/pronunciation/Sound Design state, independent preview/full-generation monitors, real progress and measured duration, playback, Save As scope validation, and stale project/chapter switching protection. Existing regression coverage includes generation pause/resume/cancel, atomic resume state, completed-chunk reuse, empty chapters and M4B packaging/progress. Six new History/Jobs tests cover retry/recovery lineage, invalid states, duplicate active jobs and newer-generation ownership. Matching-head CI and packaged runtime/audio verification remain pending. The short Production preview's After first paragraph BGM offset remains a documented limitation; full-book mix preview uses saved paragraph timing boundaries.
+- **Responsive acceptance:** the full aspect-ratio, portrait, window-state, split-screen, multi-monitor and 100/125/150/200% scaling matrix is now recorded in the Stage 8 traceability document. It has not yet been manually executed.
+- **PR dependencies:** no PR was blindly merged. PR #15/#18/#19/#20/#26/#4 have been compared against the working branch; see the traceability document for the current lineage/equivalence decisions.
+
+### Remaining release blockers
+
+- Matching-head full regression run and Windows installer/portable build, with logs and artifact hashes.
+- Manual packaged Windows checks for all navigation destinations and critical controls; no flicker, black flashes, stuck UI, crash or lost edits.
+- Real audio checks for Same BGM, Chapter-Based explicit track, No BGM, Voice Only, Opening/Next Chapter/Closing cues, levels, offsets/fades and full-book mix preview.
+- Actual chapter-specific preview selection, playback, download, project/chapter switching and full-book generation parity.
+- Real voice/profile/character assignment and narrator fallback checks.
+- Hardware acceptance on the target NVIDIA 4 GB and 8 GB systems, plus AMD/Intel/CPU paths where supported; record actual preview time and benchmark evidence.
+- M4B validation, long-book resume, import/edit/recovery, Library delete/restore and History/Jobs consistency.
+- Package-size/download-speed investigation without deleting required offline assets. The last packaged artifacts were approximately 885 MB installer and 1.37 GB portable.
+- Complete responsive matrix execution and final Help & Guide review against the packaged app.
+
+**Release gate:** no Version 1.2.0 tag, public release or “complete” claim until every applicable requirement has passing evidence, the exact candidate commit has a successful Windows package, and the packaged application passes real runtime/audio acceptance. Any exception must be explicitly recorded and approved.

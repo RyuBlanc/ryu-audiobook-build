@@ -20,6 +20,11 @@ class _BridgeHarness:
     def _active_project(self): return self.project
     def _now(self): return "2026-10-22T00:00:00+00:00"
     def _sound_catalog(self, _payload): return getattr(self, "catalog", [])
+    def _invalidate_catalog_scan(self, _kind): pass
+    def _queue_catalog_scan(self, kind):
+        if kind == "sound":
+            self.catalog = host.PremiumV2Bridge._build_sound_catalog(self)
+        return "test-catalog-scan"
     def _sound_chapter_bgm_get(self, payload): return host.PremiumV2Bridge._sound_chapter_bgm_get(self, payload)
 
 class SoundDesignCatalogueTests(unittest.TestCase):
@@ -185,7 +190,7 @@ class SoundDesignCatalogueTests(unittest.TestCase):
         track.with_name(track.name + ".license.json").write_text(json.dumps({
             "title": "A Custom Cue", "license_note": "CC0", "duration_seconds": 1.0,
             "category": "fantasy"}), encoding="utf-8")
-        rows = host.PremiumV2Bridge._sound_catalog(self.bridge_a, {})
+        rows = host.PremiumV2Bridge._build_sound_catalog(self.bridge_a)
         row = next(item for item in rows if item["path"] == str(track.resolve()))
         self.assertEqual(row["title"], "A Custom Cue"); self.assertEqual(row["licensing"], "CC0")
         self.assertEqual(row["duration_seconds"], 1.0)
@@ -201,7 +206,8 @@ class SoundDesignCatalogueTests(unittest.TestCase):
         imported_path = Path(result["imported"][0]["path"])
         metadata = json.loads(imported_path.with_name(imported_path.name + ".license.json").read_text(encoding="utf-8"))
         self.assertEqual(metadata["category"], "romance")
-        row = next(item for item in host.PremiumV2Bridge._sound_catalog(self.bridge_a, {}) if item["path"] == str(imported_path.resolve()))
+        rows = host.PremiumV2Bridge._build_sound_catalog(self.bridge_a)
+        row = next(item for item in rows if item["path"] == str(imported_path.resolve()))
         self.assertEqual(row["category"], "romance")
 
     def test_final_output_cannot_overwrite_selected_sound_asset(self):
@@ -348,7 +354,7 @@ class SoundDesignCatalogueTests(unittest.TestCase):
         }), encoding="utf-8")
 
         with patch.object(host.sys, "_MEIPASS", str(frozen_root), create=True):
-            rows = host.PremiumV2Bridge._sound_catalog(self.bridge_a, {})
+            rows = host.PremiumV2Bridge._build_sound_catalog(self.bridge_a)
 
         starter_rows = [row for row in rows if row["title"] == "Starter Theme"]
         self.assertEqual(len(starter_rows), 1)
@@ -362,7 +368,7 @@ class SoundDesignCatalogueTests(unittest.TestCase):
 
     def test_roleless_assets_in_canonical_cue_folders_remain_cues(self):
         cue = _valid_wav(self.app_root / "Audio Library" / "cues" / "opening" / "legacy-opening.wav")
-        rows = host.PremiumV2Bridge._sound_catalog(self.bridge_a, {})
+        rows = host.PremiumV2Bridge._build_sound_catalog(self.bridge_a)
         row = next(item for item in rows if item["path"] == str(cue.resolve()))
         self.assertEqual(row["role"], "cue")
 
@@ -370,7 +376,7 @@ class SoundDesignCatalogueTests(unittest.TestCase):
         corrupt = _valid_wav(self.app_root / "Audio Library" / "music" / "calm" / "bad-sidecar.wav")
         corrupt.with_name(corrupt.name + ".license.json").write_text("{not-json", encoding="utf-8")
         valid = _valid_wav(self.app_root / "Audio Library" / "music" / "romance" / "valid-track.wav")
-        rows = host.PremiumV2Bridge._sound_catalog(self.bridge_a, {})
+        rows = host.PremiumV2Bridge._build_sound_catalog(self.bridge_a)
         paths = {row["path"] for row in rows}
         self.assertNotIn(str(corrupt.resolve()), paths)
         self.assertIn(str(valid.resolve()), paths)

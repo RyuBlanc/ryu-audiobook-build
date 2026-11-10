@@ -1,0 +1,1159 @@
+# RYU'S AUDIOBOOK — MASTER REQUIREMENTS
+## ADDITIONAL REQUIREMENTS & UI FUNCTIONAL CONTINUATION
+### Append-only continuation to the existing Master Bug & Change Register — Version 1.2.0
+
+**Purpose**
+
+This document contains additional requirements previously requested for Ryu's Audiobook that need to be retained alongside the existing Master Bug & Change Register.
+
+These requirements continue from the relevant existing sections. They must not replace, duplicate, weaken, renumber or remove the existing master requirements.
+
+All existing implementation and completed-stage work must be preserved.
+
+---
+
+# 1. GLOBAL UI, NAVIGATION AND RESPONSIVE BEHAVIOUR
+
+**Continues from Section 2 — Global UI, Design and Stability (UI-01 to UI-07).**
+
+## 1.1 Application-wide navigation
+
+Preserve and verify:
+
+- Persistent left sidebar with grouped navigation.
+- Visible crimson active-page indicator.
+- Expandable and collapsible sidebar.
+- Understandable icons and tooltips when collapsed.
+- Narrow-window sidebar that converts into a drawer.
+- Drawer must close after selecting a destination.
+- Current-project indicator near the bottom, showing book title, cover and actual autosave status.
+- System destinations visually separated from project-workflow destinations.
+- Navigation must not reload the entire application or discard unsaved data.
+
+## 1.2 Top navigation bar
+
+Display actual application information:
+
+- Current page.
+- Current project name.
+- Global search.
+- Background Jobs indicator.
+- Theme switch.
+- Notifications.
+- Settings shortcut.
+
+Global search must support projects, authors, chapters, characters, voices and generation jobs.
+
+The Background Jobs indicator must communicate active jobs, generation activity and items requiring attention.
+
+## 1.3 Project workflow tracker
+
+Preserve the eight-step workflow:
+
+1. Import.
+2. Chapters.
+3. Narrator.
+4. Characters.
+5. Pronunciation.
+6. Sound Design.
+7. Generate.
+8. Listen and Export.
+
+Each stage must show its actual state:
+
+- Completed.
+- Current.
+- Warning.
+- Not started.
+- Blocked.
+
+Selecting a stage must open its actual screen. The tracker must not force users into a wizard or falsely indicate completion.
+
+## 1.4 Complete responsive acceptance matrix
+
+Extend the existing UI-06 requirement with the complete previously requested testing matrix.
+
+| Area | Required coverage |
+|---|---|
+| Aspect ratios | 4:3, 5:4, 3:2, 16:10, 16:9, 21:9, 32:9, Portrait |
+| Window states | Minimized, maximized, restored |
+| Window sizes | Full screen, normal, half screen, quarter screen |
+| Monitor configurations | Single, extended, mixed-resolution |
+| Display scaling | 100%, 125%, 150%, 200% |
+| Other conditions | Compact windows, scrolling, collapsed sidebar, menus and dialogs |
+
+All important controls, tables, editors, popups and dialogs must remain accessible.
+
+The 41-viewport acceptance suite must also remain part of the relevant Stage 8 validation.
+
+## 1.5 Accessibility
+
+Additional acceptance requirements:
+
+- Keyboard-accessible buttons, inputs, menus and dialogs.
+- Clearly visible keyboard focus.
+- Correct tab-navigation order.
+- Proper input labels and tooltips.
+- Colour must not be the only indication of status.
+- Disabled and destructive controls must be distinguishable.
+- Progress and status must be accessible.
+- No essential action must depend exclusively on hovering.
+
+---
+
+# 2. DASHBOARD, LIBRARY AND CONTINUE PROJECT
+
+**Continues from Sections 10, 11 and 17 — Library, Audiobooks and Project Lifecycle.**
+
+## 2.1 Dashboard
+
+The dashboard must contain real backend-connected information:
+
+- Total projects.
+- Active projects.
+- Completed audiobooks.
+- Projects requiring attention.
+- Chapters requiring review.
+- Active background jobs.
+- Storage status.
+- Recent projects.
+
+### Continue Project
+
+Display:
+
+- Actual book cover.
+- Book title.
+- Author.
+- Selected narrator.
+- Chapter count.
+- Character assignment count.
+- Preparation progress.
+- Last edited chapter.
+
+Clicking Continue Project must restore the project's latest working state, including its last selected screen and chapter where available.
+
+### Active Generation
+
+Show:
+
+- Actual project.
+- Current chapter.
+- Processing stage.
+- Overall percentage.
+- Elapsed time.
+- Reliable remaining-time estimate.
+- View Job action.
+- Pause/Resume action where supported.
+
+### Recent Problems
+
+Display recoverable problems such as:
+
+- Missing character voice.
+- Empty chapter.
+- Failed chapter.
+- Missing model.
+- Invalid output folder.
+
+Each problem must provide an appropriate corrective action.
+
+## 2.2 Library
+
+Additional functionality:
+
+- Search by title, author, series, narrator, language and tags.
+- Filters for All, Active, Completed, Generating, Needs Attention, Failed and No Generated Audio.
+- Sorting by recently opened, recently imported, title, author, progress and status.
+- Grid and compact-list views.
+- Create and reopen projects.
+- Continue Project and Review Project actions.
+- Listen to completed audiobooks.
+- Open project folder.
+- Duplicate and archive where supported.
+- Clear project status badges for running, queued, paused, failed and completed jobs.
+
+Deletion must clearly communicate which files will be removed: project folder, original source, generated audiobook and temporary files.
+
+Never silently delete original source files outside the managed project directory.
+
+---
+
+# 3. IMPORT STUDIO AND CHAPTER STUDIO
+
+**Continues from Section 16 — Import Studio and Chapter Studio (IMP-01 to IMP-05).**
+
+## 3.1 Import Studio
+
+Additional functional requirements:
+
+1. Support Browse Files and drag-and-drop import.
+2. Validate file type, size and readability.
+3. Detect empty, corrupted, duplicate and password-protected inputs where applicable.
+4. Preserve the original imported source.
+5. Extract text and metadata without blocking the UI thread.
+6. Detect source language.
+7. Show meaningful extraction progress stages.
+8. Allow cancellation and retry.
+9. Provide an extracted-text preview.
+10. Generate an import report.
+
+The import result should display:
+
+- Source filename and format.
+- Detected title and author.
+- Series where available.
+- Language.
+- Word count.
+- Detected chapter count.
+- Estimated narration duration.
+- Cover preview.
+- Extracted-text preview.
+- Extraction warnings.
+
+### Text extraction completeness validation
+
+The system must detect silent text truncation, missing pages or sections and discrepancies in imported word/chapter coverage.
+
+A successful import cannot simply mean that a project folder was created.
+
+Long-running import, extraction and analysis operations must appear in Background Jobs.
+
+## 3.2 Chapter Studio
+
+### Three-panel workspace
+
+- Left: Chapter Navigator.
+- Centre: Chapter Editor.
+- Right: Chapter Insights.
+- Bottom: Autosave and save state.
+
+### Chapter Navigator
+
+Provide:
+
+- Search Chapters.
+- Search Book Text.
+- Filters.
+- Chapter status.
+- Chapter ordering.
+
+Preserve actual statuses: Ready, Empty, Needs Review, Voice Review, Generated, Failed and Skipped.
+
+### Text-selection toolbar
+
+Selecting a passage should provide relevant actions:
+
+- Assign Speaker.
+- Add Pronunciation.
+- Split Chapter at Selection.
+- Mark Selection for Review.
+
+### Chapter Insights
+
+Display:
+
+- Word count.
+- Estimated audio duration.
+- Dialogue percentage.
+- Characters identified.
+- Speaker-confidence warnings.
+- Pronunciation status.
+- Chapter-generation status.
+
+### Re-detection protection
+
+When using Re-detect Chapters:
+
+- Explain what will change.
+- Preserve manual edits.
+- Request confirmation before replacing existing manual work.
+- Preserve valid chapter data and ordering.
+
+### Empty chapter handling
+
+Allow the user to edit, remove, skip, exclude or retain an intentional empty separator where supported.
+
+An empty chapter must not unexpectedly terminate an otherwise valid audiobook generation job.
+
+---
+
+# 4. VOICE STUDIO — COMPLETE FOUR-STEP FUNCTIONALITY
+
+**Continues from Section 3 — Voice Studio (VS-01 to VS-08).**
+
+## 4.1 Four-step workflow
+
+### Step 1 — Voice Library
+
+Browse, search, filter and select real supported voices.
+
+### Step 2 — Configure
+
+Configure provider-specific settings and verify model/runtime readiness.
+
+### Step 3 — Voice Profile
+
+Create, edit, save, load, draft and manage voice profiles.
+
+### Step 4 — Preview & Assign
+
+Generate actual audio, listen, validate the selected voice and perform the intended assignment.
+
+Both Guided Mode and Show All Steps must work.
+
+Back and Continue must preserve the current working selection and configuration.
+
+## 4.2 Provider availability
+
+Account for:
+
+- Offline Neural.
+- Windows SAPI.
+- Qwen CustomVoice.
+- Qwen VoiceDesign.
+- Qwen Voice Clone.
+- Authorized custom voice reference.
+- Edge TTS.
+- ElevenLabs.
+
+Only genuinely connected and supported providers must be selectable.
+
+## 4.3 Complete profile persistence
+
+Preserve applicable values:
+
+- Provider and voice IDs.
+- Model and runtime.
+- Language.
+- Design prompt.
+- Seed.
+- Reference-audio path.
+- Reference transcript.
+- Permission acknowledgement.
+- Provider-specific configuration.
+
+Provide separate actions:
+
+- Save Profile Only.
+- Save and Use as Narrator.
+- Assign to Character.
+
+These actions must never trigger unexpected narrator or character changes.
+
+## 4.4 Preview input options
+
+Support:
+
+- Current Chapter.
+- Selected Passage.
+- Custom Text.
+
+Preview controls must include internal Play, Pause, Stop and Cancel, elapsed time, playback progress and volume.
+
+Changing the provider, voice, model, text or relevant settings must invalidate the previous preview.
+
+An old preview must never be presented as validation of a newly selected voice.
+
+---
+
+# 5. CHARACTER STUDIO — ADDITIONAL NARRATOR REQUIREMENTS
+
+**Continues from Section 4 — Character Studio (CS-01 to CS-08).**
+
+Preserve the previously introduced Stage 3 addendum and its requirements CS-09 to CS-12.
+
+## CS-09 — Automatic Narrator Identification and Assignment
+
+Identify the difference between character dialogue and narration.
+
+Recognise quotation formats including:
+
+- "..."
+- “...”
+- ‘...’
+- 「...」
+- 『...』
+
+Also identify unquoted dialogue through AI analysis and existing manual assignments.
+
+Classification rules:
+
+| Identified content | Required result |
+|---|---|
+| Identified character dialogue | Assign to that character |
+| Unidentified quoted dialogue | Needs Speaker Review |
+| Identified non-dialogue prose | Narrator |
+| Ambiguous text | Review Required |
+
+Non-dialogue prose must automatically be assigned to the reserved Narrator role.
+
+Unidentified quoted dialogue must never silently become Narrator dialogue under the normal character-assignment workflow.
+
+Manual assignments must take precedence over automatic identification.
+
+Store the exact passage, chapter, text positions and assignment provenance.
+
+Reanalysis must not duplicate or overwrite confirmed assignments.
+
+## CS-10 — Series-Level Default Narrator Voice
+
+Add narrator voice selection to Create Series.
+
+Requirements:
+
+- Load saved Voice Studio profiles.
+- Select by profile name, provider and model.
+- Preview the narrator voice.
+- Save the default narrator profile for that series.
+- Show it in series details.
+- Allow changing it later.
+- New projects inherit the current series default.
+
+## CS-11 — Project-Level Narrator Override
+
+A project can inherit the series narrator or independently select its own narrator.
+
+Provide:
+
+- Project-level narrator selection.
+- Save project-specific override.
+- Reset to Series Default.
+- Correct inheritance when a series narrator changes.
+- Protection for projects with their own overrides.
+- Clear indication of whether the effective voice comes from Series Default or Project Override.
+
+Changing one project's narrator must not change another project's independent override.
+
+## CS-12 — Narrator Preview and Production Routing
+
+Provide an actual narrator preview using selected narration text and the effective project narrator profile.
+
+Normal production routing:
+
+| Text type | Voice routing |
+|---|---|
+| Confirmed narration | Effective project narrator |
+| Confirmed character dialogue | Assigned character voice |
+| Unidentified quoted dialogue | Needs Speaker Review |
+
+Narrator and character voice profiles must remain independent.
+
+Production readiness must detect unavailable narrator profiles and unresolved dialogue assignments before generation under the normal multi-character workflow.
+
+---
+
+# 6. PRONUNCIATION STUDIO — ADDITIONAL DICTIONARY BEHAVIOUR
+
+**Continues from Section 5 — Pronunciation Studio (PS-01 to PS-11).**
+
+Additional requirements:
+
+- Separate Current Book Dictionary and Global Dictionary scopes.
+- Allow moving an entry between book-specific and global scope.
+- Book-specific pronunciation must take precedence over a matching global entry.
+- Provide supported pronunciation handling methods, such as automatic, Japanese phonetic, English phonetic and custom/IPA where the selected provider supports them.
+- Explain unsupported phoneme formats rather than implying universal compatibility.
+- Protect common English words from unnecessary AI suggestions.
+- Prioritise proper names, unusual vocabulary, Japanese names and fantasy terminology.
+- Support accepting, editing and rejecting AI recommendations.
+- Support importing and exporting dictionaries where the existing backend permits.
+- Retain test results against actual saved voice profiles.
+- Mark affected generated audio for regeneration when a pronunciation change invalidates previous output.
+
+Changing a pronunciation entry must produce the correct spoken result in both preview and final generation, not simply change the dictionary row.
+
+---
+
+# 7. SOUND DESIGN — ADDITIONAL FUNCTIONALITY
+
+**Continues from Sections 6 and 7 — Sound Design and Music Library (SD-01 to SD-15, MUS-01 to MUS-09).**
+
+The existing Version 1 BGM rules remain unchanged.
+
+## 7.1 Sound presets
+
+Support:
+
+- Save sound configuration as a preset.
+- Apply a saved preset.
+- Delete a saved preset.
+- Preserve preset values after restart.
+- Apply a preset even when its track is hidden by the active music filter.
+
+The system must retrieve the correct track rather than silently applying an empty or substituted one.
+
+## 7.2 More complete sound catalogue information
+
+Each actual sound asset should display, where available:
+
+- Track name.
+- Duration.
+- Mood.
+- Genre.
+- Intensity.
+- Source or asset pack.
+- Licensing/authorization information.
+- Preview.
+- Assignment action.
+
+Additional catalogue filtering should include mood, scene, intensity, narrative context, duration and locally imported content.
+
+## 7.3 Book Mix Preview
+
+Required flow:
+
+1. Obtain successfully generated narration chunks.
+2. Reuse existing narration audio.
+3. Apply saved BGM, cue, fade, volume and ducking settings.
+4. Use disposable chapter copies for rendering.
+5. Produce a playable local mix preview.
+6. Leave original narration chunks and project data unchanged.
+7. Avoid unnecessary narration re-synthesis.
+
+Require valid narration for all chapters included in the mix preview.
+
+Account for cue durations when calculating subsequent audio offsets. Handle BGM shorter or longer than narration correctly.
+
+## 7.4 Sound asset validation
+
+Additional requirements:
+
+- Import authorised local BGM and effects.
+- Preserve source, duration and licensing metadata.
+- Identify missing sound assets.
+- Calculate loudness and true peak where supported.
+- Support safe removal of unused assets.
+- Confirm destructive cleanup.
+- Never silently substitute an unassigned sound.
+
+The newer master controls in case of conflict: Scene Transition must not re-enter the fixed cue-assignment interface, and simultaneous/layered BGM remains deferred beyond Version 1.
+
+---
+
+# 8. PRODUCTION STUDIO — ADDITIONAL GENERATION AND OUTPUT FUNCTIONALITY
+
+**Continues from Sections 8–10 and 18 — Production Studio and Generation (PROD-01 to PROD-15, GEN-01 to GEN-06).**
+
+## 8.1 Full readiness preflight
+
+Validate:
+
+- Source text availability.
+- Valid chapter content.
+- Empty chapters and exclusions.
+- Narrator readiness.
+- Character speaker assignments or approved narrator-only mode.
+- Required model and runtime availability.
+- Pronunciation review state.
+- Sound asset availability.
+- Output-folder write permission.
+- Sufficient free storage.
+
+A warning should provide a direct corrective action.
+
+Optional warnings should not unnecessarily block otherwise valid generation.
+
+## 8.2 Selected-chapter generation
+
+Preserve an explicit Generate Selected Chapters workflow, distinct from:
+
+- Generate Preview.
+- Generate Full Audiobook.
+
+The user must be able to generate selected chapters without affecting the remaining chapters or the project's saved structure.
+
+## 8.3 Progress and failure reporting
+
+Display:
+
+- Overall percentage.
+- Completed chapters.
+- Remaining chapters.
+- Failed chapters.
+- Current processing stage.
+- Elapsed time.
+- ETA where reliable.
+- Generation speed where measurable.
+
+The completion indicator must not reach 100% until final output validation is complete.
+
+A failure must identify the affected chapter, failed stage, plain-language cause, suggested corrective action and retry option. Technical details should be expandable.
+
+## 8.4 Provider failure containment
+
+When an online provider becomes unavailable:
+
+- Identify the failed chapter and processing stage.
+- Stop unnecessary subsequent requests to the unavailable provider.
+- Preserve successfully generated chapters.
+- Avoid indefinitely retrying an unavailable provider.
+- Allow recovery when service becomes available.
+
+## 8.5 Final audiobook quality and bitrate
+
+Additional acceptance details:
+
+- AAC bitrate selection from 128 to 320 kbps.
+- Default bitrate of 256 kbps unless changed.
+- Actual codec verification.
+- Actual bitrate verification.
+- Channel layout validation.
+- Measured audio duration.
+- Stream metadata validation.
+- Accurate chapter timing.
+- No empty, missing or corrupt audio segments.
+
+Use actual media-probe results rather than trusting the application's displayed settings.
+
+---
+
+# 9. NEW REQUIREMENT — NARRATOR-ONLY AUDIOBOOK GENERATION
+
+**GEN-07 — Narrator-Only Audiobook Generation When No Character Profile Has Been Added [P0].**
+
+This is an additional explicit production requirement.
+
+The user must be able to generate a complete audiobook using only the selected narrator voice when no character voice profiles have been added to the active project.
+
+The absence of character profiles must not unnecessarily prevent audiobook generation.
+
+## 9.1 Activation condition
+
+When the active project contains zero configured character voice profiles and has a valid narrator profile:
+
+- Allow narrator-only audiobook generation.
+- Do not require the user to create character profiles merely to make generation possible.
+- Automatically use Narrator-Only Mode.
+- Clearly communicate the selected production mode before generation.
+
+## 9.2 Narrator-only voice routing
+
+In Narrator-Only Mode:
+
+- Use the effective selected narrator profile for the entire book.
+- Read narration using the narrator voice.
+- Read character dialogue using the same narrator voice.
+- Do not require separate character voice profiles.
+- Do not create dummy character profiles or artificial character assignments.
+- Preserve the original text and dialogue formatting.
+- Preserve the selected narrator's voice identity throughout all chapters.
+
+The purpose is to let users produce a complete audiobook with one narrator without having to configure a separate voice for every character.
+
+## 9.3 Production Studio UI
+
+Show a clear status:
+
+**Narrator-Only Generation**
+
+Display:
+
+- Selected narrator name.
+- Provider.
+- Model.
+- Narrator readiness.
+- Character profiles configured: 0.
+- Effective production mode: Narrator Only.
+
+Show an informative message:
+
+" No character voice profiles have been added to this project. The complete audiobook will be narrated using your selected narrator voice."
+
+The Character Voices readiness item must not be displayed as a blocking failure when Narrator-Only Mode is valid.
+
+It should instead show that character profiles are not configured and narrator-only production is permitted.
+
+## 9.4 Generation readiness rules
+
+Narrator-only generation is permitted when:
+
+1. The project has valid source text.
+2. Required chapters are available.
+3. The effective narrator profile exists.
+4. The narrator provider, model and runtime are available.
+5. Required output settings and storage are valid.
+6. No other mandatory generation blocker exists.
+7. No character voice profiles have been added to the active project.
+
+A missing or unavailable narrator must still block generation.
+
+The lack of character profiles alone must never block generation.
+
+## 9.5 Behaviour when character profiles are added later
+
+When one or more character voice profiles are subsequently added:
+
+- Use the normal narrator and character voice-routing workflow.
+- Preserve all existing character assignments.
+- Route confirmed character dialogue to its assigned character voice.
+- Route narration to the effective narrator voice.
+- Identify missing character assignments through normal readiness checks.
+- Do not silently substitute narrator-only routing for a configured multi-character project.
+
+Narrator-only generation must be available because no character profiles have been configured, not because the system failed to load an existing character profile.
+
+## 9.6 Preview and final-generation consistency
+
+Apply the same narrator-only mode to:
+
+- Voice previews using the narrator.
+- Selected-chapter previews.
+- Selected-chapter generation.
+- Full audiobook generation.
+- Resumed generation.
+- Final assembly.
+
+The actual voice used must match the narrator displayed in Production Studio.
+
+## 9.7 Persistence, caching and recovery
+
+- Store the effective generation mode in the job's settings snapshot.
+- Preserve narrator-only routing through application restart.
+- Preserve it during pause/resume and recovery.
+- Include the effective narrator profile in generation/cache signatures.
+- Invalidate incompatible cached audio if the effective voice or routing configuration changes.
+- Do not incorrectly reuse audio generated under a previous character-routing configuration.
+
+## 9.8 Acceptance criteria
+
+- A project with no character profiles and a valid narrator can generate a full audiobook.
+- All dialogue and narration use the selected narrator voice in Narrator-Only Mode.
+- No artificial character profiles are created.
+- Production readiness does not block generation merely because character profiles are absent.
+- The narrator identity remains consistent across chapters.
+- Preview and final generation use the same narrator routing.
+- Restarting the application preserves the correct configuration.
+- Adding character profiles later activates the normal multi-character workflow.
+- Missing or unavailable narrator profiles correctly prevent generation.
+
+**Important:** Narrator-only generation is an intentional production mode. It must not be represented as successful AI character identification or as individually assigned character voices.
+
+---
+
+# 10. AUDIOBOOK PLAYER, HISTORY AND BACKGROUND JOBS
+
+**Continues from Sections 11–13 — Audiobooks, History and Background Jobs (AB-01 to AB-07, HIS-01 to HIS-03, JOB-01 to JOB-05).**
+
+## 10.1 Audiobook Player
+
+Additional requirements:
+
+- Display actual audiobook title, author, narrator and current chapter.
+- Display elapsed time, total duration and playback progress.
+- Keep the selected chapter highlighted.
+- Provide Open Output Folder.
+- Provide Return to Project.
+- Keep playback inside Ryu's Audiobook.
+- Allow the mini-player to minimise, close and restore without losing the playback session.
+- Synchronise full-player and mini-player playback.
+- Include bookmarking and sleep-timer functionality where supported.
+
+## 10.2 Generation History
+
+Additional requirements:
+
+- Search real history.
+- Filter actual records.
+- View operation logs.
+- Open relevant projects and outputs.
+- Export diagnostic information.
+- Provide useful Retry and Resume actions.
+
+Deleting a history entry must never delete the original project or completed audiobook output.
+
+History must remain independent of the current Background Jobs queue.
+
+## 10.3 Background Jobs
+
+Additional job lifecycle details:
+
+- Actual job IDs and project/chapter references.
+- Priority.
+- Queue time.
+- Start and finish timestamps.
+- Current processing phase.
+- Structured failure details.
+- Retry policy.
+- Dependency handling.
+- Checkpoint data.
+- Output references.
+
+Preserve the states:
+
+- queued
+- running
+- pause_requested
+- paused
+- cancel_requested
+- cancelled
+- retrying
+- failed
+- completed
+
+The top-bar job count must update automatically from actual backend events.
+
+Demonstration timers must not remain the final job-management implementation.
+
+---
+
+# 11. MODELS CENTER — ADDITIONAL DETAILED REQUIREMENTS
+
+**Continues from Section 14 — Models Center (MOD-01 to MOD-05).**
+
+## 11.1 Exact model-file information
+
+Every model needs an expandable Installation Details section.
+
+Display:
+
+- Exact model directory.
+- Exact runtime directory.
+- Individual downloaded files.
+- Individual file sizes.
+- Total model size.
+- Version.
+- Dependencies.
+- Checksum where a trusted reference exists.
+- Installation drive.
+- Last verification time.
+- Profiles referencing the model.
+- Active jobs using it.
+
+Provide functional Open Folder and Copy Path actions.
+
+Shared runtimes must be distinguishable from individual model weights.
+
+## 11.2 External storage and model migration
+
+Support a proper Location Unavailable status.
+
+A disconnected external drive must not be reported as though every model on it has been deleted.
+
+Additional storage controls:
+
+- Select Model Storage Folder.
+- Select Model Cache Folder.
+- Select Temporary Audio Folder.
+- Validate destination.
+- Verify available space and write permission.
+- Safely move existing model files.
+- Verify moved files.
+- Update registry locations.
+- Recover or restore the original location after migration failure.
+
+## 11.3 Complete model installation and removal
+
+Extend model lifecycle functionality to cover:
+
+- Pause and resume supported downloads.
+- Cancel without leaving a corrupt installation.
+- Verify model and runtime.
+- Repair partial installations.
+- Uninstall individual models.
+- Protect shared dependencies.
+- Prevent removal of models used by active jobs.
+- Safely handle Windows file locks.
+- Reinstall and recover.
+- Preserve unrelated profiles, user references and projects.
+
+Uninstallation must be based on verified file ownership, not simply deleting an assumed model folder.
+
+Maintain an installation/uninstallation audit trail.
+
+---
+
+# 12. PERFORMANCE CENTER AND QWEN HARDWARE OPTIMIZATION
+
+**Continues from Section 15 — Performance Center and Benchmarking (PERF-01 to PERF-05).**
+
+## 12.1 Hardware detection
+
+Preserve acceptance across:
+
+- NVIDIA GPUs.
+- AMD GPUs.
+- Intel GPUs.
+- Integrated graphics.
+- CPU-only environments.
+- Multiple-GPU configurations.
+
+Identify dedicated and shared memory correctly.
+
+Supported compute backends must only appear when the actual model and runtime support them.
+
+## 12.2 Automatic compute-device selection
+
+Provide persisted choices:
+
+| Setting | Behaviour |
+|---|---|
+| Automatic | Select the best validated configuration |
+| CPU Only | Force CPU execution |
+| NVIDIA CUDA | Use compatible NVIDIA runtime |
+| AMD ROCm | Use compatible AMD runtime |
+| Intel XPU | Use compatible Intel runtime |
+| DirectML | Use only where genuinely supported |
+
+Automatic selection should consider actual benchmark performance, available GPU memory, active background jobs and compatibility.
+
+Do not choose GPU solely because one exists.
+
+The device must not unexpectedly change halfway through a generation job. Any permitted fallback must be reported and recoverable.
+
+## 12.3 Qwen 0.6B / 1.7B preference
+
+Preserve the previously requested setting:
+
+- Automatic.
+- 0.6B.
+- 1.7B.
+
+The setting must affect actual CustomVoice/Clone and applicable Base model selection.
+
+VoiceDesign must continue using its required 1.7B design model.
+
+Changing the preference must not silently change a character's saved voice identity.
+
+## 12.4 Low-Memory Mode
+
+Additional controls:
+
+- Low-memory mode.
+- Maximum concurrent heavy jobs.
+- CPU-only operation.
+- GPU-memory safety.
+- Safe model reuse.
+- Cache reuse.
+- Unload idle models where safe.
+- Temporary-audio cleanup.
+
+These settings must affect the actual inference workflow.
+
+## 12.5 Preserve restored chunking limits
+
+Retain established long-form chunking limits:
+
+- Approximately 2,400 tokens maximum per chunk.
+- Approximately 10 sentences maximum per chunk.
+
+These are upper limits subject to sentence, voice identity, provider and memory constraints.
+
+Do not combine different character or emotion segments simply to improve throughput.
+
+Preview batching must remain more conservative than long-form batching.
+
+## 12.6 Additional Performance Center actions
+
+### Clear Model Cache
+
+- Actual cache path.
+- Actual cache size.
+- Eligible files.
+- Protection for active/loaded model data.
+- Confirmation before cleanup.
+
+### Clear Temporary Audio
+
+- Temporary file count and size.
+- Protection for saved previews.
+- Protection for final production output and active checkpoints.
+
+### Export Diagnostics
+
+Include actual hardware, runtimes, model status, benchmark results, errors and fallback history.
+
+Credentials and sensitive user data must be redacted.
+
+## 12.7 Better benchmark records
+
+Retain separate cold-start and warm-inference measurements.
+
+Benchmark history should support:
+
+- View details.
+- Compare results.
+- Repeat benchmark.
+- Export benchmark report.
+- Clear eligible history with confirmation.
+
+PC comparisons must only use comparable models, workloads and configurations.
+
+The existing under-60-second preview target remains unchanged.
+
+---
+
+# 13. SETTINGS, DATA PERSISTENCE AND LOCAL-FIRST BEHAVIOUR
+
+**Continues from Sections 2, 14, 17 and 19.**
+
+## 13.1 Appearance settings
+
+Preserve:
+
+- Dark theme.
+- Light theme.
+- High Glass and Normal Smooth Blur.
+- Interface density.
+- Interface scale.
+- Reduced Motion.
+- Existing Premium V2 visual language.
+- Crimson and gold brand identity.
+
+Changes must survive application restart.
+
+## 13.2 Storage settings
+
+Provide configuration for:
+
+- Project folder.
+- Audio assets folder.
+- Model folder.
+- Cache folder.
+- Temporary audio folder.
+- Output folder.
+- Automatic project backup.
+
+## 13.3 Speech and production settings
+
+Additional persisted controls:
+
+- Default narrator provider.
+- Pronunciation language detection.
+- Character AI confidence threshold.
+- Authorized reference-audio requirement.
+- Default output format and bitrate.
+- Generation checkpoint interval.
+- Readiness blocking.
+- Warning fallback.
+- Maximum concurrent jobs.
+- Retry count.
+- Preview audio device.
+- Preview duration.
+- Loudness target.
+- Imported-audio normalization.
+
+Distinguish global defaults from project-specific overrides.
+
+Changing one setting must not reset unrelated preferences.
+
+## 13.4 Privacy and connectivity
+
+Preserve local-first operation.
+
+Clearly indicate:
+
+- Which providers operate offline.
+- Which providers need internet access.
+- Which providers require credentials.
+- Which features need voice-reference permission.
+- Network/provider status.
+
+Store credentials securely rather than in project files or frontend HTML.
+
+## 13.5 Diagnostics and About
+
+Include:
+
+- Export Logs.
+- Workflow Integrity Check.
+- Database Integrity Check.
+- Model Integrity Check.
+- Export Diagnostic Bundle.
+- Application version.
+- Build identifier.
+- Runtime versions.
+- Update log.
+
+Preserve the previously requested Settings → About → View Build Update Log functionality.
+
+---
+
+# 14. INSTALLER AND WINDOWS APPLICATION ACCEPTANCE
+
+**Continues from Sections 19 and 21 — Packaging and Release Acceptance.**
+
+Additional requirements:
+
+- First application launch must work without developer tools installed.
+- Validate installer and portable application independently.
+- Both artifacts must come from the same accepted commit.
+- Verify actual bundled runtime dependencies and frontend assets.
+- Test local project access in both packages.
+- Test playback from actual local output files.
+- Validate model, cache and output folder paths.
+- Test installation, upgrade and uninstallation.
+- Preserve user projects and generated audiobooks during upgrade or removal.
+- Ensure temporary-file cleanup never deletes user books.
+- Test compact-window use in the packaged application.
+- Verify actual product version and build identity.
+
+These must be tested in the frozen Windows application, not inferred from source-level tests.
+
+---
+
+# 15. REQUIREMENT CONFLICT AND SCOPE PRESERVATION RULES
+
+The following newer instructions take precedence over conflicting older specifications:
+
+| Earlier specification | Controlling instruction |
+|---|---|
+| Scene Transition as a fixed cue assignment | New master removes it from fixed Book Cue Assignments |
+| Book-default BGM fallback for chapter assignments | New master prohibits silent default fallback |
+| Multiple simultaneous BGM layers | Deferred until after Version 1 |
+| Review Terms and Voice Test Matrix | Removed from Pronunciation Studio |
+| New Chapter Merge UI simply to fill a perceived gap | Do not introduce an unapproved control |
+| Different preview and final sound configurations | Must use consistent saved configurations |
+
+The older specifications remain useful for recovering missing functionality, but the newer master controls when instructions conflict.
+
+---
+
+# 16. FINAL CONTINUATION MAPPING
+
+| Existing master section | Additional continuation |
+|---|---|
+| Section 2 — UI | Full responsive matrix, global shell, workflow tracker, accessibility and viewport checks |
+| Sections 10–11 — Library / Audiobooks | Continue Project, advanced search/filter/sort and recovery |
+| Section 16 — Import / Chapters | Drag-and-drop, extraction validation, chapter insights and re-detection protection |
+| Section 3 — Voice Studio | Four-step workflow, provider configuration, profile actions and preview-source selection |
+| Section 4 — Character Studio | CS-09 to CS-12 narrator assignment and series/project narrator management |
+| Section 5 — Pronunciation | Book/global precedence, phonetic handling, dictionary transfer and false-positive protection |
+| Sections 6–7 — Sound Design | Presets, complete Book Mix Preview, sound metadata and asset validation |
+| Sections 8–10 — Production | Provider outage containment, detailed readiness, selected-chapter generation and output validation |
+| Sections 11–13 — Player / Jobs / History | Complete UI states, job lifecycle details, logs and safe history deletion |
+| Section 14 — Models | Model file ownership, exact paths, storage migration and safe uninstallation |
+| Section 15 — Performance | Hardware detection, automatic optimization, Qwen model preference and resource management |
+| Sections 2, 14, 19 — Settings / Packaging | Complete persisted preferences, local-first controls, diagnostics and frozen Windows acceptance |
+| Section 18 — Generation | GEN-07 Narrator-only audiobook generation when no Character Profiles have been added |
+
+---
+
+# 17. FINAL PRESERVATION INSTRUCTIONS
+
+1. This document is an append-only continuation of the existing Master Bug & Change Register.
+2. Do not remove or rewrite existing requirements.
+3. Do not duplicate requirements already completely covered by the master.
+4. Preserve all previously completed stages and accepted implementation.
+5. Do not introduce a new development stage merely for these additions.
+6. Reconcile every additional requirement against the actual application before implementation.
+7. Preserve the approved Premium V2 Dragon Studio visual design.
+8. Ensure all visible controls perform actual backend operations.
+9. Verify persistence, navigation, restart, preview, generation and playback.
+10. Do not treat a source-level test or successful CI build as proof of actual Windows runtime acceptance.
+11. Keep unsupported capabilities explicitly documented.
+12. Update the requirement register and continuation checkpoint with implementation and acceptance evidence.
+
+**ADDITIONAL PRODUCTION RULE — NARRATOR-ONLY GENERATION**
+
+A complete audiobook must be generatable with one narrator voice when no character voice profiles have been added to the active project.
+
+The absence of character profiles must not unnecessarily block audiobook generation.
+
+All content, including dialogue, must be narrated using the effective narrator profile in this intentional production mode.
+
+When character profiles are added, the normal narrator/character voice-routing workflow applies.
+
+Never create artificial character profiles, falsely claim character-specific voice assignments, or substitute voices silently.
+
+**END OF ADDITIONAL REQUIREMENTS & UI FUNCTIONAL CONTINUATION**

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import re
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from dataclasses import dataclass
 from functools import lru_cache
 import subprocess
@@ -475,6 +478,83 @@ def best_accelerator() -> Accelerator:
         "No supported Qwen GPU backend detected",
     )
 
+
+def automatic_accelerator(model_kind: str, history_path=None) -> tuple[Accelerator, str]:
+    """Choose a supported GPU by default, or a measured faster CPU for this model.
+
+    CPU wins only when successful, device-verified 30-second preview benchmarks
+    exist for both backends on this same machine and model, and CPU is at least
+    5% faster. Missing, stale-schema, or mismatched evidence keeps the safe GPU
+    default (or CPU when no supported GPU exists).
+    """
+    selected = best_accelerator()
+    if not selected.supported or selected.backend not in {"cuda", "rocm", "xpu"}:
+        return selected, selected.reason
+    try:
+        # This module is also imported by the standalone Qwen Python worker,
+        # which runs outside the frozen application and cannot read modules
+        # embedded only in PyInstaller's PYZ archive. Keep the default in sync
+        # with app.core.paths.settings_root() without importing the desktop app.
+        path = (
+            Path(history_path)
+            if history_path is not None
+            else Path.home() / "Ryu's Audiobook" / "Settings" / "premium_v2_performance_history.json"
+        )
+        rows = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else []
+        current_processor = str(platform.processor() or "").strip().casefold()
+        latest: dict[str, tuple[str, float]] = {}
+        for row in rows if isinstance(rows, list) else []:
+            result = row.get("result") if isinstance(row, dict) else None
+            if not isinstance(result, dict) or row.get("state") != "completed":
+                continue
+            hardware = result.get("hardware") or {}
+            if not isinstance(hardware, dict):
+                continue
+            if (result.get("provider") != "QwenCharacterProvider"
+                    or result.get("model_kind") != model_kind
+                    or result.get("workload_id") != "qwen-customvoice-preview-30s-v1"
+                    or result.get("success") is not True
+                    or result.get("backend_verified") is not True
+                    or not result.get("target_duration_met")):
+                continue
+            if str(hardware.get("gpu_name") or "").strip().casefold() != selected.name.strip().casefold():
+                continue
+            measured_processor = str(hardware.get("processor") or "").strip().casefold()
+            if not current_processor or not measured_processor or current_processor != measured_processor:
+                continue
+            backend = str(result.get("backend") or "").casefold()
+            if backend not in {"cpu", selected.backend}:
+                continue
+            try:
+                seconds = float(result["seconds"])
+                audio_seconds = float(result["audio_seconds"])
+                if seconds <= 0 or audio_seconds < 27 or audio_seconds > 33:
+                    continue
+                rtf = seconds / audio_seconds
+            except (KeyError, TypeError, ValueError, ZeroDivisionError):
+                continue
+            measured_at = str(row.get("measured_at") or "")
+            try:
+                measured_time = datetime.fromisoformat(measured_at.replace("Z", "+00:00"))
+                if measured_time.tzinfo is None:
+                    measured_time = measured_time.replace(tzinfo=timezone.utc)
+                if datetime.now(timezone.utc) - measured_time > timedelta(days=30):
+                    continue
+            except ValueError:
+                continue
+            previous = latest.get(backend)
+            if previous is None or measured_at > previous[0]:
+                latest[backend] = (measured_at, rtf)
+        cpu = latest.get("cpu")
+        gpu = latest.get(selected.backend)
+        if cpu and gpu and cpu[1] <= gpu[1] * 0.95:
+            return Accelerator("cpu", "cpu", "CPU", 0.0, True,
+                               f"Measured CPU preview {cpu[1]:.3f}× RTF vs {selected.backend} {gpu[1]:.3f}× RTF"), \
+                f"CPU selected from verified {model_kind} benchmarks on this machine (at least 5% faster)."
+    except (OSError, ValueError, TypeError):
+        pass
+    return selected, f"Using supported {selected.backend.upper()} accelerator; no verified same-machine benchmark proves CPU is faster."
+
 def accelerator_report() -> str:
     devices = detect_accelerators()
     if not devices:
@@ -492,3 +572,4 @@ def model_selection_memory_gb() -> float:
     if device.backend in {"cuda", "xpu", "rocm"}:
         return device.memory_gb
     return 0.0
+

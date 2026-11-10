@@ -21,6 +21,9 @@ class AudiobookAIRuntimeFallbackTests(unittest.TestCase):
             models_root = Path(temporary)
             ai_root = models_root / "audiobook-ai"
             ai_root.mkdir()
+            runtime_root = models_root / "Provider Runtime"
+            runtime_ai_root = runtime_root / "audiobook-ai"
+            runtime_ai_root.mkdir(parents=True)
             model = ai_root / "Qwen3-4B-Q4_K_M.gguf"
             model.write_bytes(b"existing local model")
             download_urls = []
@@ -34,6 +37,7 @@ class AudiobookAIRuntimeFallbackTests(unittest.TestCase):
 
             with (
                 patch.object(model_runtime, "models_root", return_value=models_root),
+                patch.object(model_runtime, "runtimes_root", return_value=runtime_root),
                 patch.object(model_runtime, "detect_nvidia_vram_gb", return_value=8.0),
                 patch.object(model_runtime, "download", side_effect=fake_download),
             ):
@@ -44,9 +48,9 @@ class AudiobookAIRuntimeFallbackTests(unittest.TestCase):
                 download_urls,
                 [model_runtime.LLAMA_CUDA12_URL, model_runtime.LLAMA_CPU_URL],
             )
-            self.assertTrue((ai_root / "llama-server.exe").is_file())
-            self.assertGreater((ai_root / "llama-server.exe").stat().st_size, 1024)
-            self.assertEqual((ai_root / "ggml-base.dll").read_bytes(), b"cpu-runtime-dll")
+            self.assertTrue((runtime_ai_root / "llama-server.exe").is_file())
+            self.assertGreater((runtime_ai_root / "llama-server.exe").stat().st_size, 1024)
+            self.assertEqual((runtime_ai_root / "ggml-base.dll").read_bytes(), b"cpu-runtime-dll")
             self.assertFalse(list(ai_root.glob("*.part")))
             self.assertTrue(any("retrying with the CPU runtime" in line for line in progress))
             self.assertTrue(any("CPU fallback runtime installed" in line for line in progress))
@@ -56,6 +60,9 @@ class AudiobookAIRuntimeFallbackTests(unittest.TestCase):
             models_root = Path(temporary)
             ai_root = models_root / "audiobook-ai"
             ai_root.mkdir()
+            runtime_root = models_root / "Provider Runtime"
+            runtime_ai_root = runtime_root / "audiobook-ai"
+            runtime_ai_root.mkdir(parents=True)
             model = ai_root / "Qwen3-4B-Q4_K_M.gguf"
             model.write_bytes(b"existing local model")
             download_urls = []
@@ -71,6 +78,7 @@ class AudiobookAIRuntimeFallbackTests(unittest.TestCase):
 
             with (
                 patch.object(model_runtime, "models_root", return_value=models_root),
+                patch.object(model_runtime, "runtimes_root", return_value=runtime_root),
                 patch.object(model_runtime, "detect_nvidia_vram_gb", return_value=8.0),
                 patch.object(model_runtime, "download", side_effect=fake_download),
             ):
@@ -81,15 +89,18 @@ class AudiobookAIRuntimeFallbackTests(unittest.TestCase):
                 download_urls,
                 [model_runtime.LLAMA_CUDA12_URL, model_runtime.LLAMA_CPU_URL],
             )
-            self.assertTrue((ai_root / "llama-server.exe").is_file())
-            self.assertGreater((ai_root / "llama-server.exe").stat().st_size, 1024)
-            self.assertEqual((ai_root / "ggml-base.dll").read_bytes(), b"cpu-runtime-dll")
+            self.assertTrue((runtime_ai_root / "llama-server.exe").is_file())
+            self.assertGreater((runtime_ai_root / "llama-server.exe").stat().st_size, 1024)
+            self.assertEqual((runtime_ai_root / "ggml-base.dll").read_bytes(), b"cpu-runtime-dll")
 
     def test_cpu_only_machine_uses_cpu_runtime_without_trying_cuda(self):
         with tempfile.TemporaryDirectory() as temporary:
             models_root = Path(temporary)
             ai_root = models_root / "audiobook-ai"
             ai_root.mkdir()
+            runtime_root = models_root / "Provider Runtime"
+            runtime_ai_root = runtime_root / "audiobook-ai"
+            runtime_ai_root.mkdir(parents=True)
             (ai_root / "Qwen3-1.7B-Q5_K_M.gguf").write_bytes(b"existing local model")
             download_urls = []
 
@@ -99,13 +110,14 @@ class AudiobookAIRuntimeFallbackTests(unittest.TestCase):
 
             with (
                 patch.object(model_runtime, "models_root", return_value=models_root),
+                patch.object(model_runtime, "runtimes_root", return_value=runtime_root),
                 patch.object(model_runtime, "detect_nvidia_vram_gb", return_value=0.0),
                 patch.object(model_runtime, "download", side_effect=fake_download),
             ):
                 model_runtime.install_runtime()
 
             self.assertEqual(download_urls, [model_runtime.LLAMA_CPU_URL])
-            self.assertTrue((ai_root / "llama-server.exe").is_file())
+            self.assertTrue((runtime_ai_root / "llama-server.exe").is_file())
 
 
 if __name__ == "__main__":

@@ -289,5 +289,93 @@ class SoundDesignPreviewConfigurationTests(unittest.TestCase):
             self.assertEqual(ending.read_bytes(),ending_before)
 
 
+
+    def test_after_first_paragraph_uses_measured_preview_audio_boundary_after_opening_cue(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            app_root = root / "app"
+            (app_root / "Previews").mkdir(parents=True)
+            source = root / "preview.wav"
+            source.write_bytes(b"narration" * 256)
+            track = self._asset(root, "chapter-one.wav")
+            opening_cue = self._asset(root, "opening-cue.wav")
+            state = {
+                "_preview_chapter_number": 1,
+                "_preview_chapter_index": 1,
+                "_preview_chapter_is_first": True,
+                "_preview_chapter_title": "Opening",
+                "_preview_first_paragraph_offset_ms": 3500,
+                "background_audio_mode": "manual",
+                "background_audio_enabled": True,
+                "chapter_bgm_strategy": "chapter-based",
+                "chapter_bgm_overrides": {
+                    "1": {
+                        "rule": "custom", "path": str(track), "volume": 0.25,
+                        "start_offset": "after_first_paragraph",
+                    }
+                },
+                "chapter_transition_sound": True,
+                "opening_cue_path": str(opening_cue),
+                "sound_cue_volume": 0.2,
+            }
+            calls = []
+
+            def fake_scale(_source, destination, _volume, _bitrate):
+                Path(destination).write_bytes(b"leveled cue")
+                return Path(destination)
+
+            def fake_concat(_first, _second, output, _bitrate):
+                Path(output).write_bytes(b"opening cue plus narration")
+                return Path(output)
+
+            def fake_mix(src, music, output, volume, **kwargs):
+                calls.append(kwargs)
+                Path(output).write_bytes(b"mixed chapter" * 256)
+                return Path(output)
+
+            with patch.object(premium_v2_host, "app_root", return_value=app_root), \
+                 patch("app.audio.library.validate_saved_audio_paths"), \
+                 patch("app.audio.assembler._resolve_cue_audio", return_value=opening_cue), \
+                 patch("app.audio.assembler._scale_audio_gain", side_effect=fake_scale), \
+                 patch("app.audio.assembler._concat_audio_files", side_effect=fake_concat), \
+                 patch("app.audio.assembler._duration_ms", side_effect=[10_000, 2_000, 12_000]), \
+                 patch("app.audio.assembler._mix_chapter_bgm", side_effect=fake_mix):
+                result = premium_v2_host.PremiumV2Bridge._render_sound_design_preview(
+                    SimpleNamespace(), source, "after-paragraph", state
+                )
+
+            self.assertTrue(result.is_file())
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0]["start_offset_ms"], 5500)
+
+    def test_after_first_paragraph_fails_closed_when_preview_has_no_exact_boundary(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            app_root = root / "app"
+            (app_root / "Previews").mkdir(parents=True)
+            source = root / "preview.wav"
+            source.write_bytes(b"narration" * 256)
+            track = self._asset(root, "chapter-one.wav")
+            state = {
+                "_preview_chapter_number": 1,
+                "background_audio_mode": "manual",
+                "background_audio_enabled": True,
+                "chapter_bgm_strategy": "chapter-based",
+                "chapter_bgm_overrides": {
+                    "1": {
+                        "rule": "custom", "path": str(track), "volume": 0.25,
+                        "start_offset": "after_first_paragraph",
+                    }
+                },
+                "chapter_transition_sound": False,
+            }
+            with patch.object(premium_v2_host, "app_root", return_value=app_root), \
+                 patch("app.audio.library.validate_saved_audio_paths"), \
+                 patch("app.audio.assembler._duration_ms", return_value=10_000):
+                with self.assertRaisesRegex(ValueError, "exact audio boundary"):
+                    premium_v2_host.PremiumV2Bridge._render_sound_design_preview(
+                        SimpleNamespace(), source, "missing-paragraph-boundary", state
+                    )
+
 if __name__ == "__main__":
     unittest.main()

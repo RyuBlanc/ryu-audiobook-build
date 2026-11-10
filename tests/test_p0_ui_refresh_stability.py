@@ -95,7 +95,7 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
             "openProjectWithPreservedDraft(candidate.folder)",
         ):
             self.assertIn(route, adapter)
-        self.assertEqual(adapter.count("call('project.open'"), 1)
+        self.assertEqual(adapter.count("call('project.open'"), 2)
 
     def test_project_open_does_not_start_a_racing_fire_and_forget_active_refresh(self):
         adapter = (
@@ -251,16 +251,87 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         end = adapter.index("async function monitorJob(", start)
         refresh = adapter[start:end]
         signature_start = refresh.index("const signature = jobs.map")
-        signature_end = refresh.index("if (box.dataset.backendJobsSignature !== signature)", signature_start)
-        signature = refresh[signature_start:signature_end]
+        integrity_start = refresh.index("const renderedRows =", signature_start)
+        signature = refresh[signature_start:integrity_start]
 
         self.assertIn("j.job_id, j.state, j.type, j.title, Boolean(j.recoverable)", signature)
         self.assertNotIn("Boolean(j.message)", signature)
         self.assertNotIn("Boolean(j.error?.message)", signature)
+        self.assertIn("const backendDomMatches =", refresh)
+        self.assertIn("if (box.dataset.backendJobsSignature !== signature || !backendDomMatches)", refresh)
+        self.assertIn("const rowsHaveViewActions = renderedRows.every(row =>", refresh)
+        self.assertIn("rowStructureValid && rowsHaveViewActions", refresh)
+        self.assertIn("button.dataset.jobView = id", refresh)
+        self.assertIn("!box.querySelector('.job-row:not([data-backend-job])')", refresh)
         self.assertIn("if (box && panelVisible)", refresh)
         self.assertIn("writeTextIfChanged(messageNode, j.message || '')", refresh)
         self.assertIn("writeTextIfChanged(errorNode, j.error?.message || '')", refresh)
         self.assertIn("writeStyleIfChanged(progress, 'width', pct + '%')", refresh)
+
+    def test_task_manager_prototype_renderer_and_timer_are_removed_from_reference_html(self):
+        html = (
+            ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html"
+        ).read_text(encoding="utf-8")
+        adapter = (
+            ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("function renderJobs(){let show=jobs.filter", html)
+        self.assertNotIn("setInterval(()=>{const r=jobs.find(j=>j.state==='running')", html)
+        self.assertNotIn("render-17", html)
+        self.assertIn("document.getElementById('openUpdateLog')", html)
+        self.assertIn("button.id === 'closeBackgroundJobs'", adapter)
+        self.assertIn("button.id === 'openJobHistory'", adapter)
+
+    def test_task_manager_backend_rows_survive_the_old_prototype_timer_window(self):
+        packaged = (
+            ROOT / "tests" / "stage2_packaged_sound_ui_acceptance.js"
+        ).read_text(encoding="utf-8")
+        runner = (
+            ROOT / "tests" / "packaged_sound_ui_acceptance.py"
+        ).read_text(encoding="utf-8")
+        marker = "stage6_task_manager_backend_dom_stays_stable_after_delayed_refresh"
+        self.assertIn("await sleep(4500);", packaged)
+        self.assertIn(marker, packaged)
+        self.assertIn(marker, runner)
+
+    def test_overlapping_job_refresh_preserves_filter_change_for_follow_up_render(self):
+        adapter = (
+            ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        start = adapter.index("async function refreshJobs()")
+        end = adapter.index("async function refreshJobsImpl()", start)
+        refresh = adapter[start:end]
+        self.assertIn("jobsRefreshRequested = true;", refresh)
+        self.assertIn("if (jobsRefreshPromise) return jobsRefreshPromise;", refresh)
+        self.assertIn("while (jobsRefreshRequested)", refresh)
+        self.assertIn("jobsRefreshRequested = false;", refresh)
+        self.assertIn("latestJobs = await refreshJobsImpl();", refresh)
+
+    def test_task_manager_acceptance_waits_for_complete_actionable_dom(self):
+        packaged_path = ROOT / "tests" / "stage2_packaged_sound_ui_acceptance.js"
+        runner_path = ROOT / "tests" / "packaged_sound_ui_acceptance.py"
+        adapter_path = ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        for fixture in (packaged_path, runner_path, adapter_path):
+            self.assertTrue(fixture.is_file(), f"Required Task Manager acceptance fixture is missing: {fixture}")
+
+        packaged = packaged_path.read_text(encoding="utf-8")
+        runner = runner_path.read_text(encoding="utf-8")
+
+        # The frozen-app acceptance owns behavioural verification: it compares
+        # native job IDs to rendered rows, opens the selected job's real details,
+        # and deliberately removes/stales View actions to prove in-place repair.
+        required_runtime_contracts = (
+            "const stage6TaskRowsMatchNativeJobs = () =>",
+            "renders every native job with its View action",
+            "stage6_task_manager_repairs_missing_view_action_in_place",
+            "stage6_task_manager_repairs_mismatched_view_action_in_place",
+        )
+        for contract in required_runtime_contracts:
+            with self.subTest(contract=contract):
+                self.assertIn(contract, packaged)
+        for contract in required_runtime_contracts[2:]:
+            with self.subTest(required_runner_check=contract):
+                self.assertIn(contract, runner)
 
 
 if __name__ == "__main__":

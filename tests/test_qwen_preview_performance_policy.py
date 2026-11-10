@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import unittest
+import ast
+from pathlib import Path
 from unittest.mock import patch
 
 from app.tts.preview import _preview_units
@@ -9,6 +11,36 @@ from app.tts.providers.qwen_character import QwenCharacterProvider
 
 
 class QwenPreviewPerformancePolicyTests(unittest.TestCase):
+    def test_qwen_benchmark_registers_progress_callback_after_provider_construction(self):
+        host_path = Path(__file__).resolve().parents[1] / "app/ui/premium_v2_host.py"
+        module = ast.parse(host_path.read_text(encoding="utf-8"))
+        worker = next(
+            node for node in ast.walk(module)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == "_performance_qwen_benchmark_worker"
+        )
+        constructor = next(
+            node for node in ast.walk(worker)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "QwenCharacterProvider"
+        )
+        self.assertNotIn("status_callback", {keyword.arg for keyword in constructor.keywords})
+        self.assertTrue(
+            any(
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "getattr"
+                and len(node.args) >= 2
+                and isinstance(node.args[0], ast.Name)
+                and node.args[0].id == "provider"
+                and isinstance(node.args[1], ast.Constant)
+                and node.args[1].value == "set_status_callback"
+                for node in ast.walk(worker)
+            ),
+            "The benchmark must use the provider's optional progress setter safely.",
+        )
+
     def _provider(self, mode: str = "design-preview") -> QwenCharacterProvider:
         return QwenCharacterProvider(
             voice_id="test narrator",

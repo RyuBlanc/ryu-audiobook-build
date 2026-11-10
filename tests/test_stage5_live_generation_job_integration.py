@@ -43,6 +43,10 @@ class LiveProductionGenerationHarness:
     """Production bridge callbacks with real persistent job/history implementations."""
 
     _production_generate_book = host.PremiumV2Bridge._production_generate_book
+    _effective_generation_character_rows = host.PremiumV2Bridge._effective_generation_character_rows
+    _character_series_for_voice_assignment = staticmethod(
+        host.PremiumV2Bridge._character_series_for_voice_assignment
+    )
     _generation_progress = host.PremiumV2Bridge._generation_progress
     _new_job = host.PremiumV2Bridge._new_job
     _job_update = host.PremiumV2Bridge._job_update

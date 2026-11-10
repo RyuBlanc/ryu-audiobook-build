@@ -19,8 +19,9 @@ from PySide6.QtWidgets import (
     QInputDialog, QComboBox
 )
 
-from app.core.paths import models_root, ensure_roots
+from app.core.paths import app_root, models_root, ensure_roots, runtimes_root, model_cache_root, temporary_root
 from app.tts.chatterbox_runtime import install_runtime, runtime_status, RUNTIME_DIR as CHATTERBOX_RUNTIME_DIR
+from app.core.storage_migration import inventory_storage_root, safe_cleanup, cleanup_migrated_source, read_migration_journal
 from app.tts.model_registry import BUILTIN_CATALOG, installed_models, mark_installed
 from app.tts.providers.piper import PiperProvider
 from app.tts.providers.kokoro import (
@@ -352,7 +353,9 @@ class UninstallComponentWorker(QThread):
                 mark_installed("kokoro", False)
 
             elif component_id == "chatterbox-runtime":
-                self._remove_path(CHATTERBOX_RUNTIME_DIR, root)
+                # Chatterbox's isolated Python environment belongs to
+                # Provider Runtime, not the selected Models weights directory.
+                self._remove_path(CHATTERBOX_RUNTIME_DIR, runtimes_root())
                 mark_installed("chatterbox", False)
                 mark_installed("chatterbox-multilingual", False)
 
@@ -360,7 +363,10 @@ class UninstallComponentWorker(QThread):
                 kind = component_id.split(":", 1)[1]
                 if kind not in QWEN_MODEL_DIRS:
                     raise RuntimeError("Unknown Qwen model selection.")
-                self._remove_path(QWEN_MODEL_DIRS[kind], QWEN_RUNTIME_ROOT)
+                # Qwen model weights live under Models; only the isolated
+                # Python environment belongs to Provider Runtime. Validate the
+                # uninstall against the model-weight root, not the runtime root.
+                self._remove_path(QWEN_MODEL_DIRS[kind], models_root() / "qwen3-tts")
 
             elif component_id == "qwen-runtime":
                 # Preserve downloaded model folders, Hugging Face cache and
@@ -412,6 +418,26 @@ class ModelsPage(QWidget):
         )
         intro.setWordWrap(True)
         layout.addWidget(intro)
+
+        storage_group = QGroupBox("Storage locations & maintenance")
+        storage_layout = QVBoxLayout(storage_group)
+        self.storage_summary = QLabel()
+        self.storage_summary.setWordWrap(True)
+        self.storage_summary.setObjectName("muted")
+        storage_layout.addWidget(self.storage_summary)
+        storage_actions = QHBoxLayout()
+        inspect_storage = QPushButton("Inspect files & checksums")
+        inspect_storage.clicked.connect(self.inspect_storage_inventory)
+        storage_actions.addWidget(inspect_storage)
+        cleanup_storage = QPushButton("Preview temporary cleanup")
+        cleanup_storage.clicked.connect(self.preview_temporary_cleanup)
+        storage_actions.addWidget(cleanup_storage)
+        source_cleanup = QPushButton("Review old source copies")
+        source_cleanup.clicked.connect(self.review_migrated_source_cleanup)
+        storage_actions.addWidget(source_cleanup)
+        storage_layout.addLayout(storage_actions)
+        layout.addWidget(storage_group)
+        self.refresh_storage_summary()
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -564,8 +590,178 @@ class ModelsPage(QWidget):
             message += " All models required by this selection are installed."
         self.qwen_model_preference_status.setText(message)
 
+    def refresh_storage_summary(self) -> None:
+        roots = (
+            ("Model weights", models_root()),
+            ("Provider runtimes", runtimes_root()),
+            ("Model cache / downloads", model_cache_root()),
+            ("Temporary / staging", temporary_root()),
+        )
+        lines = []
+        for label, root in roots:
+            info = inventory_storage_root(root, include_hashes=False)
+            if not info["available"]:
+                lines.append(f"{label}: Location unavailable — {info.get('error', 'drive disconnected')}\n{root}")
+            else:
+                gib = 1024 ** 3
+                lines.append(f"{label}: {info['file_count']:,} files · {info['total_bytes'] / gib:.2f} GB\n{info['path']}")
+        journal_root = app_root() / "Settings" / "Storage Migrations"
+        if journal_root.is_dir():
+            for journal_path in sorted(journal_root.glob("ryu-storage-migration-*.json")):
+                try:
+                    journal = read_migration_journal(journal_path)
+                except Exception:
+                    lines.append(f"Migration journal needs inspection: {journal_path}")
+                    continue
+                state = str(journal.get("state", ""))
+                if state == "recovery_required":
+                    lines.append(f"Storage recovery required: {journal.get('source')} → {journal.get('destination')}")
+                elif state == "rollback_required":
+                    lines.append(f"Storage rollback needs attention: {journal.get('error', 'settings restore failed')}")
+                elif state == "recovered_source_restored":
+                    lines.append(f"Interrupted migration safely recovered to: {journal.get('source')}")
+        self.storage_summary.setText("\n\n".join(lines))
+
+    def inspect_storage_inventory(self) -> None:
+        roots = (
+            ("Model weights", models_root()),
+            ("Provider runtimes", runtimes_root()),
+            ("Model cache / downloads", model_cache_root()),
+            ("Temporary / staging", temporary_root()),
+        )
+        lines = []
+        for label, root in roots:
+            info = inventory_storage_root(root, include_hashes=True)
+            lines.append(f"[{label}]\nPath: {info['path']}")
+            if not info["available"]:
+                lines.append(f"Status: {info.get('error', 'Location unavailable')}\n")
+                continue
+            lines.append(f"Files: {info['file_count']} · Total: {info['total_bytes']:,} bytes")
+            for item in info["files"]:
+                lines.append(f"  {item['relative_path']} · {item['size_bytes']:,} bytes · SHA-256 {item['sha256']}")
+            lines.append("")
+        QInputDialog.getMultiLineText(
+            self, "Storage inventory and SHA-256 checksums",
+            "Read-only inventory. No files are changed.", "\n".join(lines)
+        )
+
+    def review_migrated_source_cleanup(self) -> None:
+        if self._active_operation is not None:
+            QMessageBox.warning(self, "Storage In Use", "Wait for the active Models Center operation to finish before cleaning an old source copy.")
+            return
+        app = QApplication.instance()
+        if app is not None:
+            running = [
+                value for widget in app.allWidgets()
+                for value in getattr(widget, "__dict__", {}).values()
+                if isinstance(value, QThread) and value.isRunning()
+            ]
+            if running:
+                QMessageBox.warning(
+                    self, "Storage In Use",
+                    "Old source cleanup is blocked while downloads, inference, previews, repairs or generation are active."
+                )
+                return
+        journal_root = app_root() / "Settings" / "Storage Migrations"
+        candidates = []
+        if journal_root.is_dir():
+            for path in journal_root.glob("ryu-storage-migration-*.json"):
+                try:
+                    journal = read_migration_journal(path)
+                    if journal.get("state") == "complete_source_retained":
+                        candidates.append((path, journal))
+                except Exception:
+                    continue
+        if not candidates:
+            QMessageBox.information(self, "Migrated Source Copies", "No completed migration source copies are waiting for cleanup.")
+            return
+        labels = [
+            f"{journal.get('source')}  →  {journal.get('destination')}"
+            for _path, journal in candidates
+        ]
+        selected, ok = QInputDialog.getItem(
+            self, "Review Migrated Source Copies",
+            "Select one old source copy. It is retained until you explicitly confirm deletion:",
+            labels, 0, False,
+        )
+        if not ok:
+            return
+        index = labels.index(selected)
+        journal_path, journal = candidates[index]
+        source = Path(str(journal.get("source", "")))
+        destination = Path(str(journal.get("destination", "")))
+        answer = QMessageBox.question(
+            self, "Confirm Old Source Cleanup",
+            f"Delete the retained source copy?\n\nSource: {source}\nVerified destination: {destination}\n\n"
+            "Before deletion, Ryu will recheck file count, sizes, relative paths and every SHA-256 hash. "
+            "If any check fails, the source will be preserved.",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        protected = (models_root(), runtimes_root(), model_cache_root(), temporary_root())
+        try:
+            result = cleanup_migrated_source(journal_path, protected_roots=protected)
+        except Exception as exc:
+            QMessageBox.warning(self, "Source Copy Retained", str(exc))
+            return
+        QMessageBox.information(
+            self, "Old Source Copy Removed",
+            f"Verified {result['verified_files']} files against the active destination.\n"
+            f"Removed: {result['source']}",
+        )
+        self.refresh_storage_summary()
+
+    def preview_temporary_cleanup(self) -> None:
+        if self._active_operation is not None:
+            QMessageBox.warning(self, "Storage In Use", f"Cannot clean temporary data while {self._active_operation} is running.")
+            return
+        app = QApplication.instance()
+        if app is not None:
+            running = [
+                value for widget in app.allWidgets()
+                for value in getattr(widget, "__dict__", {}).values()
+                if isinstance(value, QThread) and value.isRunning()
+            ]
+            running.extend(
+                thread for widget in app.allWidgets()
+                for thread in widget.findChildren(QThread)
+                if thread.isRunning()
+            )
+            if running:
+                QMessageBox.warning(
+                    self, "Storage In Use",
+                    "Temporary cleanup is blocked while a background task is active. "
+                    "Wait for downloads, inference, previews, repairs or generation to finish."
+                )
+                return
+        temp_root = temporary_root()
+        preview = safe_cleanup(
+            temporary_roots=(temp_root,), dry_run=True,
+            protected_paths=(models_root(), runtimes_root(), model_cache_root()),
+        )
+        if not preview["candidate_count"]:
+            QMessageBox.information(self, "Temporary Cleanup", "No eligible app-owned temporary folders were found. Unknown folders and all model, runtime and cache roots are preserved.")
+            return
+        gib = 1024 ** 3
+        answer = QMessageBox.question(
+            self, "Confirm Temporary Cleanup",
+            f"Eligible app-owned temporary entries: {preview['candidate_count']}\n"
+            f"Estimated reclaimable size: {preview['candidate_bytes'] / gib:.2f} GB\n\n"
+            "Only the explicit staging/downloads/temporary/tmp allowlist is eligible. "
+            "Model weights, provider runtimes, model cache, projects, source books, exports and voice data are protected. Continue?"
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        result = safe_cleanup(
+            temporary_roots=(temp_root,), dry_run=False,
+            protected_paths=(models_root(), runtimes_root(), model_cache_root()),
+        )
+        QMessageBox.information(self, "Temporary Cleanup Complete", f"Removed {len(result['removed'])} eligible entries.")
+        self.refresh_storage_summary()
+
     @stable_view_refresh
     def refresh(self) -> None:
+        self.refresh_storage_summary()
         selected = self.list.currentItem()
         selected_label = selected.text() if selected else None
         selected_id = selected.data(Qt.ItemDataRole.UserRole) if selected else None

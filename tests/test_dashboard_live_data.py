@@ -155,6 +155,9 @@ class DashboardLiveDataTests(unittest.TestCase):
                 "narrator": "Amy",
                 "voice_profile": "Amy",
                 "output_path": str(output),
+                "generation_mode": "narrator_only",
+                "narrator_only_generation": True,
+                "character_voice_profile_count": 0,
                 "character_analysis": {"dialogue_total": 0, "unassigned_dialogue": 0},
                 "characters": [],
                 "voice_cast": {},
@@ -167,6 +170,9 @@ class DashboardLiveDataTests(unittest.TestCase):
             self.assertTrue(summary["character_analysis_done"])
             self.assertEqual(summary["character_count"], 0)
             self.assertEqual(summary["character_voice_count"], 0)
+            self.assertEqual(summary["generation_mode"], "narrator_only")
+            self.assertTrue(summary["narrator_only_generation"])
+            self.assertEqual(summary["character_voice_profile_count"], 0)
             self.assertEqual(summary["prepared_percent"], 90)
 
     def test_player_position_saves_to_correct_project_without_changing_modified_time(self):
@@ -383,8 +389,8 @@ class DashboardLiveDataTests(unittest.TestCase):
         self.assertIn("playerAudio.currentTime = duration *", adapter)
         self.assertIn("persistPlayerPosition(false, false, audioFolder, audio)", adapter)
         self.assertIn("call('player.position.save'", adapter)
-        self.assertIn("call('settings.save', {player_rate:rate})", adapter)
-        self.assertIn("call('settings.save', {player_volume:playerVolume})", adapter)
+        self.assertIn("return savePlayerPreferences({player_rate:rate})", adapter)
+        self.assertIn("return savePlayerPreferences({player_volume:playerVolume})", adapter)
         self.assertIn('"player.position.save": self._player_position_save', host)
         self.assertIn("def _parse_audio_chapter_metadata", host)
         self.assertIn("data-play-project-folder", adapter)

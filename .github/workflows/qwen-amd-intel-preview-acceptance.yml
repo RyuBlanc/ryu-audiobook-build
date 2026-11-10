@@ -1,16 +1,17 @@
 name: Qwen AMD and Intel 30-second Preview Acceptance
 
 on:
-  # Run real accelerator acceptance automatically when the Qwen performance
-  # path changes. This targets the dedicated self-hosted AMD/Intel runner;
-  # hosted CPU smoke is diagnostic only and cannot prove GPU performance.
+  # Run real accelerator acceptance automatically when the Stage 7 Qwen
+  # performance path changes. Hosted CPU smoke cannot prove GPU performance.
   push:
     branches:
-      - stage-3/restart-from-stage2-closeout-1794
+      - 'stage-7/**'
+      - 'stage-5/**'
     paths:
       - app/tts/preview.py
       - app/tts/providers/qwen_character.py
       - app/tts/qwen_character_worker.py
+      - app/tts/qwen_accelerator.py
       - tests/smoke_qwen_amd_intel_preview.py
       - .github/workflows/qwen-amd-intel-preview-acceptance.yml
   workflow_dispatch:
@@ -49,8 +50,8 @@ jobs:
       - name: Download official Qwen VoiceDesign model
         shell: pwsh
         env:
-          HF_HOME: ${{ runner.temp }}\ryu-qwen-hf
-          RYU_QWEN_MODEL_ROOT: ${{ runner.temp }}\ryu-qwen-models
+          HF_HOME: ${{ runner.temp }}\\ryu-qwen-hf
+          RYU_QWEN_MODEL_ROOT: ${{ runner.temp }}\\ryu-qwen-models
         run: |
           python -c "import os; from huggingface_hub import snapshot_download; snapshot_download(repo_id='Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign', local_dir=os.path.join(os.environ['RYU_QWEN_MODEL_ROOT'],'design-1.7b'), allow_patterns=['*.json','*.safetensors','*.txt','*.model','*.npz','*.bin','tokenizer*','vocab*'])"
 
@@ -58,9 +59,9 @@ jobs:
         shell: pwsh
         env:
           PYTHONPATH: ${{ github.workspace }}
-          HF_HOME: ${{ runner.temp }}\ryu-qwen-hf
-          RYU_QWEN_MODEL_ROOT: ${{ runner.temp }}\ryu-qwen-models
-          RYU_QWEN_GPU_OUTPUT: ${{ github.workspace }}\qwen-non-nvidia-acceptance
+          HF_HOME: ${{ runner.temp }}\\ryu-qwen-hf
+          RYU_QWEN_MODEL_ROOT: ${{ runner.temp }}\\ryu-qwen-models
+          RYU_QWEN_GPU_OUTPUT: ${{ github.workspace }}\\qwen-non-nvidia-acceptance
           RYU_QWEN_EXPECT_BACKEND: ${{ inputs.backend || '' }}
           PYTHONWARNINGS: ignore
         run: python -B tests/smoke_qwen_amd_intel_preview.py
@@ -69,7 +70,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Ryu-Stage3-Qwen-${{ inputs.backend || 'auto-detected' }}-Preview-${{ github.run_number }}
+          name: Ryu-Stage7-Qwen-${{ inputs.backend || 'auto-detected' }}-Preview-${{ github.run_number }}
           path: qwen-non-nvidia-acceptance/
           if-no-files-found: warn
           retention-days: 30

@@ -344,22 +344,27 @@ def validate_saved_audio_paths(state):
   return
 
  fields=[]
- if audio_mode=="manual":
-  if chapter_based:
-   for chapter,override in overrides.items():
-    if not isinstance(override,dict) or str(override.get("rule") or "").casefold()!="custom":
-     continue
-    raw=override.get("path")
-    if not raw:
-     raise ValueError(f"Chapter {chapter} uses custom BGM but no track is saved. Reassign it in Sound Design.")
-    fields.append((raw,"custom BGM for chapter "+str(chapter),None,"music"))
-  else:
-   book_path=state.get("background_audio_path") or state.get("background_audio_preferred_path")
-   if book_path:
-    fields.append((book_path,"book background music",None,"music"))
-   ambience=state.get("ambience_audio_path")
-   if ambience:
-    fields.append((ambience,"book ambience",None,"music"))
+ # Chapter-Based assignments are authoritative regardless of a legacy
+ # auto/manual source-mode value. Validate only explicitly selected chapter
+ # tracks; never validate or fall back to the stale automatic/book-default path.
+ if chapter_based:
+  for chapter,override in overrides.items():
+   if not isinstance(override,dict) or str(override.get("rule") or "").casefold()!="custom":
+    continue
+   raw=override.get("path")
+   if not raw:
+    raise ValueError(f"Chapter {chapter} uses custom BGM but no track is saved. Reassign it in Sound Design.")
+   fields.append((raw,"custom BGM for chapter "+str(chapter),None,"music"))
+ elif audio_mode=="manual":
+  # A legacy ambience bed is an alternate book-level track, never a second
+  # simultaneous layer. Prefer the explicit book-default path when present.
+  book_path=(
+   state.get("background_audio_path")
+   or state.get("background_audio_preferred_path")
+   or state.get("ambience_audio_path")
+  )
+  if book_path:
+   fields.append((book_path,"book background music",None,"music"))
  elif audio_mode=="auto":
   auto_path=state.get("auto_music_track_path")
   if auto_path:

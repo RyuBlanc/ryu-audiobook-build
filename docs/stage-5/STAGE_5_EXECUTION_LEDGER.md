@@ -765,3 +765,107 @@ These failures remain historical attempts and are not represented as successful.
 - **Step 5.3 remains ACTIVE** until the exact implementation candidate receives the Windows artifact-checkpoint run and package acceptance is inspected. Manual installed-app operation with an actual selected production TTS profile and real generated audiobook listening is not claimed as completed by the deterministic local-provider regression.
 - GEN-05, chaptered M4B assembly/metadata/cover/full-stream validation, remains Stage 5.4. The integration tests' assembler stub must not be misreported as actual M4B output validation.
 - Stage 5.1 and Stage 5.2 remain closed; no completed preview or metadata work was reopened.
+
+
+## 34. Stage 5.5 M4B finalization and Audiobooks integration — 4 November 2026
+
+### Handoff and scope alignment
+
+- Stage 5.5 begins from the accepted Stage 5.4 documentation closeout commit `c300e2039d469b54a11a759fdba8d045393ed4b5`; the accepted Stage 5.4 application code baseline remains `8132097b6028a17d44ddc2f03c8f514d4cd88598`.
+- Working branch: `stage-5/step-5-m4b-library-integration`.
+- The Stage 5.4 closeout explicitly leaves final M4B metadata/chapter-marker validation and Audiobooks handoff for Stage 5.5. Older Stage 5 register/ledger wording that placed GEN-05 in Step 5.4 predates that closeout; this section follows the accepted Stage 5.4 exit decision without rewriting historical entries.
+- This branch preserves the Stage 5.4 branch and its uploaded installer/portable/hash artifacts unchanged.
+
+### Implementation and regression checkpoint
+
+- Source candidate: `9234cd4a9da632050dbfac873975fd05051bd343`.
+- Matching successful regression workflow: [Build Windows App #2250](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41763886592).
+- Tests job passed **1,138 tests in 52.028 seconds**; frontend JavaScript syntax and isolated native Qt lifecycle checks passed.
+- Final output test passed with actual FFmpeg-created M4B tags, ISO language stream marker, two chapter markers, attached MJPEG cover, image decode and complete AAC audio decode.
+- This was a regression-only run; the Windows Build job was skipped by the artifact-checkpoint policy. Do not describe #2250 as packaged acceptance or as creating installer artifacts.
+
+### Source changes retained on the Stage 5.5 branch
+
+- Final FFmpeg M4B creation uses the known-good `+faststart` mux path to preserve the attached cover image and chapter stream.
+- Mutagen writes standard MP4 metadata atoms and iTunes freeform narrator/publisher/series/series-number fields in-place after the final cover-bearing file is assembled; no extra FFmpeg remux is used for metadata.
+- The final validator reads the saved tags back, checks audio stream language, chapter titles and contiguous timing, attached MJPEG cover disposition and image decoding, full audio decode and minimum bitrate.
+- The existing Premium V2 Audiobooks page and `player.get_active` bridge are reused. Packaged acceptance opens the finished M4B, plays it, seeks the second embedded chapter and checks project-scoped listening-position persistence.
+
+### Candidate run failures and reconciliation
+
+| Run | Failure / finding | Correction |
+|---|---|---|
+| #2238 | Double-escaped validator patterns caused multiple test errors | Fixed expression escaping in later candidates. |
+| #2239 | Coverless mocked preview paths reached the final tag inspector; custom tags were also lost through FFmpeg remux | Scope final-book inspection to cover-bearing outputs and revise metadata persistence. |
+| #2240–#2241 | Audio language not found as a global metadata tag | Write and verify ISO-639-2 language code on the audio stream. |
+| #2242–#2246 | `+use_metadata_tags` candidates emitted no MJPEG cover stream in the resulting file | Restore `+faststart`; validate the attached image stream by disposition and image decode. |
+| #2247 | Cover stream restored but custom narrator tag dropped by standard MP4 muxer | Write custom MP4 metadata atoms in-place with Mutagen. |
+| #2248 | Mutagen path tried to tag mock preview outputs and test expected stream-level cover labels | Restrict tag writer to final cover-bearing output and validate attached picture disposition. |
+| #2249 | Test used `re` without importing it | Add import; exact-head #2250 passed. |
+
+All earlier failed candidates are retained as failed history. No failed candidate is presented as acceptance evidence.
+
+### Requirement/acceptance status
+
+- GEN-05: **REGRESSION PASSED** — final M4B tags, chapter timing/count, language, cover, audio decode and bitrate are verified by the #2250 suite. **Frozen Windows acceptance pending.**
+- PROD-04 final-output metadata/cover reflection: regression-side output verification passed; **frozen Windows output and Audiobooks handoff pending**.
+- Existing Premium V2 Audiobooks page/backend player bridge are retained; **actual frozen Windows play/seek/position persistence pending**.
+- GEN-01 through GEN-04 and PROD-14 remain accepted under Stage 5.4 #2235; they are not reopened by this Stage 5.5 branch.
+
+### Next checkpoint
+
+- Trigger an exact-head `[artifact-checkpoint]` run from the tested #2250 source.
+- Verify both `stage55_final_m4b_embedded_chapters` and `stage55_audiobooks_real_playback_chapter_seek_and_position` markers in the frozen Windows acceptance log.
+- Preserve Stage 5.4 baseline and do not tag/publish a version as part of this step.
+
+
+## 35. Stage 5.5 Audiobooks browser playback compatibility — 4 November 2026
+
+### #2251 failure analysis
+
+- Artifact workflow: [Build Windows App #2251](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41764283352), source commit `759f682a3bcb9dadb7b4dc8423911cf08be3e186`.
+- Tests job: SUCCESS. Windows application preparation/freeze: SUCCESS. Frozen EXE verification: SUCCESS. Bundled offline assets/critical modules: SUCCESS.
+- Packaged acceptance passed `stage54_packaged_real_multi_chapter_full_generation`: two eligible chapters were synthesized in saved order, one empty and one excluded chapter were skipped, GenerationManager completed, History retained the same job ID, and the M4B output remained associated with the owning project.
+- Packaged acceptance passed `stage55_final_m4b_embedded_chapters`: two actual embedded M4B chapter markers were read from the finished source, with titles and valid ordered timing.
+- The sole failing acceptance was `waitForRealPlayback`: the finished AAC M4B was supplied directly to HTMLAudioElement by `player.get_active`; the packaged Qt WebEngine could not decode/play that AAC file. No play/seek/position-persistence result was achieved on #2251.
+- Installer creation, portable build and SHA-256 uploads were correctly skipped after the acceptance failure. #2251 is not a Stage 5.5 artifact checkpoint.
+
+### Corrective implementation
+
+- Source commit: `5d620525e98668fede228cd19b3836078346152f`.
+- New `app/audio/playback.py` detects an ISO BMFF source, creates a source-specific cached MP3 playback derivative with FFmpeg, validates duration parity and full decode, and leaves the original M4B bytes unchanged.
+- New generations create this derivative in the GenerationManager completion callback before marking the project/job completed. This preserves the original M4B as the deliverable and avoids running a potentially long conversion on the GUI thread.
+- Existing M4B projects without a saved derivative can prepare it lazily on first open. Cache validity is tied to source path, size and nanosecond mtime; replaced output files cannot reuse a stale derivative.
+- `_player_get_active` returns both the original M4B identity and the browser-compatible playback URL. It continues to read chapter titles/timing from the original M4B, so seeking remains tied to the embedded chapter map, not the derivative's metadata.
+- Packaged acceptance now checks `stage55_browser_compatible_playback_source`, waits for real playback using the derivative path, then seeks by the original M4B's second chapter marker and verifies project-scoped listening position persistence.
+
+### Regression evidence
+
+- [Build Windows App #2252](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41769708812) — SUCCESS on exact source `5d620525e98668fede228cd19b3836078346152f`.
+- **1,141 tests passed in 54.048 seconds.** Frontend JavaScript syntax and isolated native Qt lifecycle checks passed.
+- New tests passed:
+  - Real M4B to MP3 playback conversion preserves the original M4B bytes.
+  - Playback derivative is non-empty, duration-matched, fully decodable and reused from cache.
+  - Browser-supported source formats are returned unchanged.
+  - Invalid M4B/ISO BMFF input is rejected.
+- #2252 is regression-only; the Windows Build job was skipped by the test-only checkpoint policy. It did not produce installer/portable/manifest artifacts.
+
+### Remaining exit gate
+
+- Trigger an exact-head `[artifact-checkpoint]` run from the #2252-tested source.
+- Inspect all three Stage 5.5 markers: embedded M4B chapters, browser-compatible playback source, and real Audiobooks playback + chapter seek + persisted listening position.
+- Preserve the #2251 passed Stage 5.4 full-generation ownership checks.
+- Installer, portable package and SHA-256 manifest uploads must pass. Public release publishing remains disabled.
+- Stage 6 does not start until this packaged checkpoint is green and the artifacts are present.
+
+
+## 36. Stage 5.5 final frozen-Windows acceptance and artifact checkpoint — 4 November 2026
+
+- Final exact-head run: [Build Windows App #2253](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41770098774), run ID `41770098774`, commit `5315a75b1b0324796d884bdbc49a7a5eb0116a28`; conclusion SUCCESS.
+- Tests: **1,141 passed in 54.553 seconds**. Installer JS syntax, app freeze, frozen EXE verification, bundled voice assets and critical-module checks all passed.
+- Packaged acceptance passed all Stage 5.5 markers: `stage55_final_m4b_embedded_chapters`, `stage55_browser_compatible_playback_source`, and `stage55_audiobooks_real_playback_chapter_seek_and_position`.
+- The same frozen acceptance re-passed Stage 5.4 full multi-chapter generation, saved narrator, chapter order/skip counts, job/History ownership, Background Jobs Retry/Recover controls, real pause/resume/cancel, retry ownership, live Dashboard readiness, library opening, restart interruption and actual recover-to-completion.
+- Packaging gates: Inno Setup, core installer payload, functional HTML installer, logo transparency/hash generation, Microsoft Defender scan, installer upload, SHA-256 manifest upload and portable app upload all SUCCESS. Publish verified installer release was SKIPPED by design (not a failure).
+- Uploaded artifacts: installer ID `13295407817`; manifest ID `13295567412`; portable ID `13295113479`. All were non-expired at checkpoint creation; expiry 4 December 2026.
+- **Stage 5.5 exit decision: CLOSED / COMPLETE.** No outstanding Stage 5.5 automated acceptance or release-artifact gate remains. User-device perceptual listening remains optional manual confirmation, not a blocker claimed as CI evidence.
+- Stage 6 may start from this exact-head stable artifact checkpoint. Preserve #2253 artifacts and Stage 5.4 accepted branch unchanged.

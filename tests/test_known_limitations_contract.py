@@ -24,7 +24,7 @@ class KnownLimitationsContractTests(unittest.TestCase):
             "Review status is persisted in `chapters.json`",
             "Automatic per-line AI speaker suggestions remain prototype-only",
             "Manual source-backed dialogue speaker assignments are persisted",
-            "Custom project-library and audio-assets root selection is not implemented",
+            "Settings > Storage",
             "Per-model actions",
         ):
             with self.subTest(phrase=phrase):
@@ -32,7 +32,8 @@ class KnownLimitationsContractTests(unittest.TestCase):
 
     def test_documented_capability_gaps_match_source(self):
         self.assertIn('"project.create": False', self.host)
-        self.assertIn('"performance.info": False', self.host)
+        self.assertIn('"performance.info": self._performance_info', self.host)
+        self.assertIn('"performance.info": True', self.host)
         self.assertIn('"diagnostics.export_logs": self._diagnostics_export_logs', self.host)
         self.assertIn('"diagnostics.export_logs": True', self.host)
         self.assertIn("call('diagnostics.export_logs')", self.adapter)
@@ -42,11 +43,18 @@ class KnownLimitationsContractTests(unittest.TestCase):
         self.assertIn("call('chapter.review'", self.adapter)
         for phrase in (
             "Automatic per-line AI speaker suggestions remain prototype-only",
-            "Custom project-library and audio-assets root selection is not implemented",
             "Manual source-backed dialogue speaker assignments are persisted",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, self.adapter)
+        self.assertIn(
+            "Manage supported project, audio asset and model storage locations in Settings > Storage.",
+            self.adapter,
+        )
+        self.assertNotIn(
+            "Custom project-library and audio-assets root selection is not implemented",
+            self.adapter,
+        )
 
         # These older disconnected-feature warnings must stay removed now that
         # actual provider-specific backend commands have been connected.

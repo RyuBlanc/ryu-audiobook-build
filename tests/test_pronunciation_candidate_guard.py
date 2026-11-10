@@ -4,6 +4,7 @@ import unittest
 from app.ai.robust import _fallback_pronunciations, _safe_merge
 from app.tts.pronunciation_suggester import (
     is_likely_character_name_candidate,
+    is_pronunciation_override_candidate,
     suggest_names_from_text,
     suggest_pronunciation,
 )
@@ -87,6 +88,44 @@ class PronunciationCandidateGuardTests(unittest.TestCase):
         self.assertNotIn("Jin", rules)
         self.assertIn("Rias", rules)
 
+    def test_pronunciation_overrides_reject_english_words_even_when_mislabeled_foreign(self):
+        for value in ("Oh", "The", "Any", "The Silver Knight", "Silver-Haired"):
+            with self.subTest(value=value):
+                self.assertFalse(is_pronunciation_override_candidate(
+                    value, source_language="Japanese"
+                ))
+        self.assertFalse(is_pronunciation_override_candidate(
+            "Hinata", source_language="Auto-detect"
+        ))
+        self.assertFalse(is_pronunciation_override_candidate(
+            "Mira", source_language="English"
+        ))
+        self.assertTrue(is_pronunciation_override_candidate(
+            "Hinata", source_language="Japanese"
+        ))
+        self.assertTrue(is_pronunciation_override_candidate(
+            "銀時", source_language="Auto-detect"
+        ))
+        self.assertTrue(is_pronunciation_override_candidate(
+            "Hope", source_language="Japanese", known_names={"Hope"}
+        ))
+        self.assertFalse(is_pronunciation_override_candidate(
+            "Hope", source_language="English", known_names={"Hope"}
+        ))
+
+    def test_character_filter_rejects_explicit_prose_and_preserves_confirmed_alias(self):
+        from app.chapters.characters import Character, is_likely_character_name, merge_character_analysis_record
+        self.assertFalse(is_likely_character_name("Hearing", explicit=True))
+        self.assertFalse(is_likely_character_name("Silver-Haired", trusted=True))
+        self.assertTrue(is_likely_character_name("Captain Mira", explicit=True))
+        merged = merge_character_analysis_record(
+            Character(name="Mira", role="Lead", aliases=["Oh", "Any", "Miri"]),
+            {"name": "Mira", "aliases": ["Captain Mira"], "voice_profile": "Saved Voice"},
+        )
+        self.assertIn("Captain Mira", merged["aliases"])
+        self.assertNotIn("Oh", merged["aliases"])
+        self.assertNotIn("Any", merged["aliases"])
+
     def test_unknown_latin_pronunciation_is_not_transliterated_as_japanese_by_default(self):
         self.assertEqual(suggest_pronunciation("John Smith"), "John Smith")
         self.assertEqual(suggest_pronunciation("Himejima Hanezu"), "Himejima Hanezu")
@@ -119,6 +158,13 @@ class PronunciationCandidateGuardTests(unittest.TestCase):
         self.assertTrue(result["suggestions"][0]["review_required"])
 
 
+    def test_installed_pronunciation_worker_uses_saved_aliases_and_shared_candidate_gate(self):
+        from pathlib import Path
+        source = (Path(__file__).resolve().parents[1] / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn("trusted=character_trusted", source)
+        self.assertIn("is_pronunciation_override_candidate(", source)
+        self.assertIn("known_pronunciation_names", source)
+
     def test_analyzer_supports_lightweight_project_harness_and_marks_drafts_ai_disabled(self):
         from types import SimpleNamespace
         from unittest.mock import Mock, patch
@@ -145,6 +191,19 @@ class PronunciationCandidateGuardTests(unittest.TestCase):
         list_mock.assert_called_once_with({})
 
 
+
+    def test_safe_merge_requires_non_english_pronunciation_evidence_even_for_known_cast(self):
+        out = {"characters": [], "pronunciation": [], "dialogue": [], "scenes": [], "continuity_notes": []}
+        data = {
+            "characters": [{"name": "Mira", "confidence": 0.99}],
+            "pronunciation": [
+                {"written": "Mira", "spoken": "Mee-rah", "source_language": "English", "script": "Latin", "confidence": 0.99},
+                {"written": "Mira", "spoken": "Mee-rah", "source_language": "Auto-detect", "script": "Latin", "confidence": 0.99},
+            ],
+        }
+        _safe_merge(None, out, data, set(), source_text="Mira spoke to the group.")
+        self.assertIn("Mira", {row["name"] for row in out["characters"]})
+        self.assertEqual(out["pronunciation"], [])
 
 if __name__ == "__main__":
     unittest.main()

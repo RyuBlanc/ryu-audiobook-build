@@ -2,6 +2,12 @@
   const config = window.__RYU_SOUND_UI_ACCEPTANCE_CONFIG__ || {};
   const checks = {};
   const errors = [];
+  const stage8ResponsiveDestinations = [
+    "dashboard", "library", "import", "chapters", "voices",
+    "characters", "pronunciation", "sound", "generate", "player",
+    "history", "models", "performance", "settings", "help"
+  ];
+
   const pauseLabel = "Pause selected track";
   const NativeAudio = window.Audio;
   window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__ = [];
@@ -293,6 +299,75 @@
       record("production_metadata_application_restart", true,
         "Book metadata, project-local cover and the selected Voice Studio narrator profile were reloaded by a new frozen-app process.");
 
+      // AB-06: prove the position survives an actual frozen-app process restart.
+      const stage6RestartFixture = (config.audiobook_library_fixtures || [])[0];
+      must(stage6RestartFixture && stage6RestartFixture.folder,
+        "The Stage 6 audiobook fixture is unavailable to the restarted process.");
+      const [stage6PersistedPlayer,stage6PersistedSettings] = await Promise.all([
+        invoke("player.get_active", {folder:stage6RestartFixture.folder}),
+        invoke("settings.get", {})
+      ]);
+      must(Math.abs(Number(stage6PersistedPlayer.playback_position_seconds) - 1.25) < 0.35,
+        "The audiobook playback position was not retained in project state after the app restarted.");
+      must(Math.abs(Number(stage6PersistedPlayer.playback_rate) - 1.25) < 0.01 &&
+        Math.abs(Number(stage6PersistedPlayer.playback_volume) - 0.42) < 0.01 &&
+        Math.abs(Number(stage6PersistedSettings.player_rate) - 1.25) < 0.01 &&
+        Math.abs(Number(stage6PersistedSettings.player_volume) - 0.42) < 0.01,
+        "Global player settings did not survive restart: " +
+          JSON.stringify({player:stage6PersistedPlayer,settings:stage6PersistedSettings}));
+      window.go("player");
+      await waitFor("Audiobooks page restored in the second process", () =>
+        document.querySelector("#player")?.classList.contains("active") === true, 12000);
+      const stage6RestartCard = Array.from(document.querySelectorAll("#backendAudiobookLibrary .audiobook-library-card"))
+        .find(card => String(card.dataset.projectFolder || "") === String(stage6RestartFixture.folder || ""));
+      must(stage6RestartCard, "The previously selected audiobook is missing after process restart.");
+      stage6RestartCard.querySelector("[data-open-project-folder]").click();
+      await waitFor("actual decoded audio restores the saved position", () => {
+        const audio = latestAcceptanceAudio();
+        return Boolean(audio && String(audio.dataset.projectFolder || "") === String(stage6RestartFixture.folder || "") &&
+          audio.readyState >= 1 && Math.abs(Number(audio.currentTime) - 1.25) < 0.35);
+      }, 18000);
+      const stage6RestoredAudio = latestAcceptanceAudio();
+      const stage6RestoreDiagnostics = {
+        expectedVolume:Number(stage6PersistedPlayer.playback_volume),
+        actualVolume:Number(stage6RestoredAudio.volume),
+        expectedRate:Number(stage6PersistedPlayer.playback_rate),
+        actualRate:Number(stage6RestoredAudio.playbackRate)
+      };
+      must(Math.abs(stage6RestoreDiagnostics.actualVolume-stage6RestoreDiagnostics.expectedVolume) < 0.02 &&
+        Math.abs(stage6RestoreDiagnostics.actualRate-stage6RestoreDiagnostics.expectedRate) < 0.02,
+        "The restored player did not apply saved volume/rate to real audio: " + JSON.stringify(stage6RestoreDiagnostics));
+      record("stage6_playback_position_restored_after_process_restart", true,
+        "A second frozen-app process restored the correct audiobook and sought real decoded audio to its saved timestamp.");
+
+      // The mini-player remains the same media session after restart and navigation.
+      await stage6RestoredAudio.play();
+      window.go("dashboard");
+      const stage6RestoredMini = document.querySelector("#miniPlayer");
+      await waitFor("restored mini-player is available after navigation", () =>
+        Boolean(stage6RestoredMini && !stage6RestoredMini.classList.contains("hidden") &&
+          stage6RestoredMini.getClientRects().length), 8000);
+      const stage6RestoredMiniPlay = stage6RestoredMini.querySelector("#miniPlay");
+      must(stage6RestoredMiniPlay, "The restored mini-player has no Play/Pause control.");
+      const stage6RestartAudioCount = (window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__ || []).length;
+      stage6RestoredMiniPlay.click();
+      await waitFor("restored mini-player pauses the same audio object", () =>
+        stage6RestoredAudio.paused && stage6RestoredMiniPlay.textContent.trim() === "▶", 5000);
+      stage6RestoredMiniPlay.click();
+      await waitFor("restored mini-player resumes the same audio object", () =>
+        !stage6RestoredAudio.paused && stage6RestoredMiniPlay.textContent.trim() !== "▶", 5000);
+      must(latestAcceptanceAudio() === stage6RestoredAudio &&
+        (window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__ || []).length === stage6RestartAudioCount,
+        "The mini-player created a duplicate playback instance after process restart.");
+      document.querySelector("#hideMini")?.click();
+      await waitFor("restored mini-player close hides the dock", () =>
+        stage6RestoredMini.classList.contains("hidden"), 5000);
+      must(!stage6RestoredAudio.paused && latestAcceptanceAudio() === stage6RestoredAudio,
+        "Closing the restored mini-player interrupted playback.");
+      stage6RestoredAudio.pause();
+      record("stage6_mini_player_navigation_and_close_after_restart", true,
+        "After restart, mini-player Play/Pause controlled the restored media object and closing its dock did not stop playback.");
+
       const catalogue = await invoke("sound.catalog", {});
       const saved = await invoke("sound.chapter_bgm.get", {});
       const cues = await invoke("sound.cues.get", {});
@@ -424,7 +499,614 @@
         "The recovered M4B is not attached to the original recovered project.");
       record("stage54_real_restart_recovery", true,
         "A real paused job survived process termination as interrupted, was recovered through the installed Background Jobs button/native bridge, reused its project checkpoints, and completed with the same project/History/output identity.");
+
+      // Step 7: compare the completed production operation across its owning project,
+      // History, Background Jobs, Audiobooks card and actual Full Player media source.
+      const stage7Folder = String(config.recovery_project_folder || "");
+      const stage7Output = String(config.recovery_output_path || "");
+      const stage7Player = await invoke("player.get_active", {folder:stage7Folder});
+      const stage7Path = value => String(value || "").replace(/\\/g,"/").toLowerCase();
+      must(stage7Folder && stage7Output &&
+        stage7Path(stage7Player.output_path) === stage7Path(stage7Output),
+        "Audiobooks player lookup returned a different project output from Production.");
+      const stage7Jobs = await invoke("job.list", {include_hidden:true});
+      const stage7Job = Array.isArray(stage7Jobs)
+        ? stage7Jobs.find(row => String(row.job_id || "") === String(recoveredJobId)) : null;
+      must(stage7Job && String(stage7Job.state || "").toLowerCase() === "completed" &&
+        String(stage7Job.project_folder || "") === stage7Folder &&
+        stage7Path(stage7Job.output_path) === stage7Path(stage7Output) &&
+        String(recoveredHistoryRow.project_folder || "") === stage7Folder &&
+        stage7Path(recoveredHistoryRow.output_path) === stage7Path(stage7Output),
+        "Production, Background Jobs and History do not share the recovered project's job/output identity.");
+      must(String(stage7Player.title || "") === String(recoveredProject.title || "") &&
+        String(stage7Player.narrator || "") === String(recoveredProject.narrator || ""),
+        "Audiobooks title or narrator differs from the recovered Production project.");
+      window.go("player");
+      await waitFor("Audiobooks page opens for recovered project", () =>
+        Boolean(document.querySelector("#player")?.classList.contains("active") &&
+          document.querySelector("#backendAudiobookLibrary")), 12000);
+      let stage7Card = null;
+      await waitFor("recovered production output appears in Audiobooks", () => {
+        stage7Card = Array.from(document.querySelectorAll("#backendAudiobookLibrary .audiobook-library-card"))
+          .find(card => String(card.dataset.projectFolder || "") === stage7Folder) || null;
+        return Boolean(stage7Card);
+      }, 12000);
+      must(stage7Card.querySelector("[data-open-project-folder]") &&
+        stage7Card.querySelector("[data-play-project-folder]"),
+        "Recovered Audiobooks card is missing Open or Play.");
+      stage7Card.querySelector("[data-open-project-folder]").click();
+      await waitFor("Full Player opens recovered project without autoplay", () => {
+        const audio = latestAcceptanceAudio();
+        return Boolean(audio && String(audio.dataset.projectFolder || "") === stage7Folder &&
+          audio.readyState >= 1 && audio.paused);
+      }, 18000);
+      const stage7Audio = latestAcceptanceAudio();
+      must(audioUsesPath(stage7Audio, stage7Player.playback_output_path || stage7Player.file_url),
+        "Full Player loaded media from a different project/output.");
+      // Opening a card re-renders the library because selection identity changes.
+      // Never click the detached pre-refresh card: reacquire the live row by project.
+      stage7Card = Array.from(document.querySelectorAll("#backendAudiobookLibrary .audiobook-library-card"))
+        .find(card => String(card.dataset.projectFolder || "") === stage7Folder) || null;
+      must(stage7Card && stage7Card.isConnected,
+        "The recovered audiobook card was not present in the live library after Open.");
+      const stage7Rows = Array.from(document.querySelectorAll("#player [data-audiobook-chapter-start]"));
+      const stage7Chapters = Array.isArray(stage7Player.chapters) ? stage7Player.chapters : [];
+      must(stage7Rows.length === stage7Chapters.length && stage7Rows.every((row,index) =>
+        Math.abs(Number(row.dataset.audiobookChapterStart)-Number(stage7Chapters[index].start_seconds)) < 0.05 &&
+        Math.abs(Number(row.dataset.audiobookChapterEnd)-Number(stage7Chapters[index].end_seconds)) < 0.05),
+        "Full Player chapters differ from the recovered M4B embedded chapter intervals.");
+      const stage7LivePlay = stage7Card.querySelector("[data-play-project-folder]");
+      must(stage7LivePlay && stage7LivePlay.isConnected &&
+        String(stage7LivePlay.dataset.playProjectFolder || "") === stage7Folder,
+        "The live recovered audiobook Play control is missing or belongs to another project.");
+      stage7LivePlay.click();
+      await waitFor("Audiobooks Play starts the recovered M4B", () =>
+        !stage7Audio.paused && stage7Audio.readyState >= 2 && stage7Audio.currentTime > 0.05, 12000);
+      must(latestAcceptanceAudio() === stage7Audio &&
+        audioUsesPath(stage7Audio,stage7Player.playback_output_path || stage7Player.file_url),
+        "Audiobooks Play switched to stale or different-project audio.");
+      window.go("dashboard");
+      await waitFor("Mini-Player preserves recovered-project playback across navigation", () => {
+        const mini = document.querySelector("#miniPlayer");
+        return Boolean(mini && !mini.classList.contains("hidden") && mini.getClientRects().length &&
+          latestAcceptanceAudio() === stage7Audio);
+      }, 8000);
+      stage7Audio.pause();
+      record("stage6_cross_module_production_audiobooks_player_job_history_identity", true,
+        "Production, Background Jobs, History, Audiobooks, embedded chapters, Full Player and Mini-Player all retained the same recovered project/output identity.");
+
+      // HIS-01 to HIS-03: query real durable History, filter it, and open details.
+      must(recoveredHistoryRow && recoveredHistoryRow.completed_at,
+        "The recovered History record does not expose its completion timestamp.");
+      const stage6HistoryDate = new Date(recoveredHistoryRow.completed_at);
+      const stage6HistoryDay = stage6HistoryDate.getFullYear() + "-" +
+        String(stage6HistoryDate.getMonth()+1).padStart(2,"0") + "-" +
+        String(stage6HistoryDate.getDate()).padStart(2,"0");
+      window.go("history");
+      await waitFor("History controls mount in the frozen application", () =>
+        Boolean(document.querySelector("#historySearchFilter") &&
+          document.querySelector("#historyFromDate") && document.querySelector("#historyToDate")), 12000);
+      const stage6HistorySearch = document.querySelector("#historySearchFilter");
+      const stage6HistoryFrom = document.querySelector("#historyFromDate");
+      const stage6HistoryTo = document.querySelector("#historyToDate");
+      stage6HistorySearch.value = String(recoveredJobId);
+      stage6HistoryFrom.value = stage6HistoryDay;
+      stage6HistoryTo.value = stage6HistoryDay;
+      const stage6CompletedHistoryFilter = Array.from(document.querySelectorAll("#historyFilters button"))
+        .find(button => button.textContent.trim().toLowerCase() === "completed");
+      must(stage6CompletedHistoryFilter, "History is missing the Completed status filter.");
+      stage6CompletedHistoryFilter.click();
+      stage6HistorySearch.dispatchEvent(new Event("input",{bubbles:true}));
+      stage6HistoryFrom.dispatchEvent(new Event("change",{bubbles:true}));
+      stage6HistoryTo.dispatchEvent(new Event("change",{bubbles:true}));
+      await waitFor("History applies exact job search, Completed status and inclusive date range", () => {
+        const rows = Array.from(document.querySelectorAll("#history [data-backend-history]"));
+        return rows.length === 1 && String(rows[0].dataset.historyJob || "") === String(recoveredJobId);
+      }, 12000);
+      const stage6HistoryView = document.querySelector('#history [data-history-job="' + String(recoveredJobId) + '"]');
+      must(stage6HistoryView, "The filtered History row has no View action.");
+      stage6HistoryView.click();
+      await waitFor("History View opens actual job details", () =>
+        Boolean(document.querySelector("#jobDetailsModal.show [data-job-detail-field='job-id']")), 8000);
+      must(document.querySelector("#jobDetailsModal [data-job-detail-field='job-id']").textContent.trim() ===
+        String(recoveredJobId), "History View opened a different job's details.");
+      document.querySelector("#jobDetailsModal [data-job-detail-close]")?.click();
+      record("stage6_history_real_search_date_status_and_details", true,
+        "History displayed the recovered generation job, applied exact search/status/date filters, and opened its matching details.");
+
+      // JOB-01 to JOB-05: verify the visible Task Manager against native job.list.
+      window.go("dashboard");
+      const stage6JobsButton = document.querySelector("#backgroundJobsButton");
+      must(stage6JobsButton && jobsModal, "Task Manager is unavailable after History acceptance.");
+      if (!jobsModal.classList.contains("show")) stage6JobsButton.click();
+      await waitFor("Task Manager modal opens", () => jobsModal.classList.contains("show"), 8000);
+      const stage6TaskSource = await invoke("job.list", {include_hidden:false});
+      must(Array.isArray(stage6TaskSource) && stage6TaskSource.length > 0,
+        "Task Manager acceptance has no real job.list records.");
+      const stage6TaskSourceIds = stage6TaskSource.map(row => String(row.job_id || "")).sort();
+      must(stage6TaskSourceIds.every(Boolean) && new Set(stage6TaskSourceIds).size === stage6TaskSourceIds.length,
+        "Task Manager native job.list returned a blank or duplicate job identity.");
+      const stage6TaskAll = jobsModal.querySelector('[data-job-filter="all"]');
+      const stage6TaskActive = jobsModal.querySelector('[data-job-filter="active"]');
+      const stage6TaskCompleted = jobsModal.querySelector('[data-job-filter="completed"]');
+      must(stage6TaskAll && stage6TaskActive && stage6TaskCompleted,
+        "Task Manager is missing All, Active or Completed filters.");
+      const stage6TaskRowsMatchNativeJobs = () => {
+        const rows = Array.from(document.querySelectorAll("#backgroundJobsList [data-backend-job]"));
+        const renderedIds = rows.map(row => String(row.dataset.backendJob || "")).sort();
+        const sourceIds = stage6TaskSource.map(row => String(row.job_id || "")).sort();
+        return rows.length === stage6TaskSource.length &&
+          JSON.stringify(renderedIds) === JSON.stringify(sourceIds) &&
+          rows.every(row => {
+            const id = String(row.dataset.backendJob || "");
+            const button = row.querySelector("[data-job-view]");
+            return row.children.length === 3 &&
+              row.children[0].classList.contains("job-type-icon") &&
+              row.children[1].classList.contains("job-main") &&
+              row.children[2].classList.contains("job-actions") &&
+              Boolean(button && button.dataset.jobView === id);
+          }) &&
+          !document.querySelector("#backgroundJobsList .job-row:not([data-backend-job])");
+      };
+      stage6TaskAll.click();
+      await waitFor("Task Manager All filter renders every native job with its View action",
+        stage6TaskRowsMatchNativeJobs, 12000);
+      const stage6AllRows = Array.from(document.querySelectorAll("#backgroundJobsList [data-backend-job]"));
+      must(stage6AllRows.length === stage6TaskSource.length,
+        "Task Manager All filter does not match native job.list identities.");
+      must(stage6AllRows.every(row =>
+        row.children.length === 3 &&
+        row.children[0].classList.contains("job-type-icon") &&
+        row.children[1].classList.contains("job-main") &&
+        row.children[2].classList.contains("job-actions") &&
+        row.querySelector("[data-job-view]")),
+        "Task Manager rows do not use the complete responsive actions layout.");
+      const expectedRunningCount = stage6TaskSource.filter(row =>
+        ["running","pause_requested","cancel_requested","retrying"].includes(row.state)).length;
+      const expectedQueuedCount = stage6TaskSource.filter(row => row.state === "queued").length;
+      const expectedCompletedCount = stage6TaskSource.filter(row => row.state === "completed").length;
+      must(Number(document.querySelector("#jobsRunningCount").textContent) === expectedRunningCount &&
+        Number(document.querySelector("#jobsQueuedCount").textContent) === expectedQueuedCount &&
+        Number(document.querySelector("#jobsCompletedCount").textContent) === expectedCompletedCount,
+        "Task Manager summary counts do not match native job.list.");
+      stage6TaskCompleted.click();
+      await waitFor("Task Manager Completed filter", () => {
+        const rows = Array.from(document.querySelectorAll("#backgroundJobsList [data-backend-job]"));
+        return rows.length === expectedCompletedCount && rows.every(row => {
+          const job = stage6TaskSource.find(item => String(item.job_id) === String(row.dataset.backendJob));
+          return Boolean(job && job.state === "completed");
+        });
+      }, 8000);
+      stage6TaskActive.click();
+      await waitFor("Task Manager Active filter", () => {
+        const expected = stage6TaskSource.filter(row => !["completed","failed","cancelled"].includes(row.state));
+        const rows = Array.from(document.querySelectorAll("#backgroundJobsList [data-backend-job]"));
+        return rows.length === expected.length && rows.every(row => {
+          const job = stage6TaskSource.find(item => String(item.job_id) === String(row.dataset.backendJob));
+          return Boolean(job && !["completed","failed","cancelled"].includes(job.state));
+        });
+      }, 8000);
+      stage6TaskAll.click();
+      let stage6TaskRow = null;
+      await waitFor("Task Manager All filter restores current rows and actionable View controls", () => {
+        if (!stage6TaskRowsMatchNativeJobs()) return false;
+        stage6TaskRow = Array.from(document.querySelectorAll("#backgroundJobsList [data-backend-job]"))
+          .find(row => Boolean(row.querySelector("[data-job-view]"))) || null;
+        return Boolean(stage6TaskRow);
+      }, 12000);
+      const stage6TaskJob = stage6TaskSource.find(item =>
+        String(item.job_id) === String(stage6TaskRow?.dataset.backendJob));
+      must(stage6TaskJob && stage6TaskRow.querySelector("[data-job-view]"),
+        "A Task Manager job row is missing its View action after the live All-filter refresh completed.");
+      stage6TaskRow.querySelector("[data-job-view]").click();
+      await waitFor("Task Manager View opens actual job details", () =>
+        Boolean(document.querySelector("#jobDetailsModal.show [data-job-detail-field='job-id']")), 8000);
+      must(document.querySelector("#jobDetailsModal [data-job-detail-field='job-id']").textContent.trim() ===
+        String(stage6TaskJob.job_id), "Task Manager View opened a different job's details.");
+      document.querySelector("#jobDetailsModal [data-job-detail-close]")?.click();
+
+      // Exercise the adapter's in-place integrity repair against the real
+      // frozen-app DOM. Keep the original row reference so a full-list rebuild
+      // cannot satisfy this contract accidentally.
+      const stage6TaskRepairRow = stage6TaskRow;
+      const stage6TaskRepairId = String(stage6TaskRepairRow?.dataset.backendJob || "");
+      must(stage6TaskRepairRow && stage6TaskRepairId,
+        "Task Manager repair acceptance could not identify its native job row.");
+      const stage6OriginalView = stage6TaskRepairRow.querySelector("[data-job-view]");
+      must(stage6OriginalView && stage6OriginalView.dataset.jobView === stage6TaskRepairId,
+        "Task Manager repair fixture did not start with an identity-matched View action.");
+      stage6OriginalView.remove();
+      // Let the normal live 1.5-second backend poll repair the row. Clicking a
+      // filter is deliberately avoided because filter changes invalidate the
+      // row signature and request a full-list render.
+      await waitFor("Task Manager repairs a missing View action in place", () => {
+        const repaired = stage6TaskRepairRow.querySelector("[data-job-view]");
+        return Boolean(stage6TaskRepairRow.isConnected && repaired &&
+          repaired.dataset.jobView === stage6TaskRepairId);
+      }, 10000);
+      must(Array.from(document.querySelectorAll("#backgroundJobsList [data-backend-job]"))
+        .find(row => String(row.dataset.backendJob || "") === stage6TaskRepairId) === stage6TaskRepairRow,
+        "Task Manager replaced the native row instead of repairing its missing View action in place.");
+      record("stage6_task_manager_repairs_missing_view_action_in_place", true,
+        "Removing a live row's View button caused the next real backend refresh to restore the identity-matched action without replacing the row.");
+
+      const stage6RepairedView = stage6TaskRepairRow.querySelector("[data-job-view]");
+      stage6RepairedView.dataset.jobView = "stale-" + stage6TaskRepairId;
+      // Keep the same native filter and allow the next ordinary poll to repair.
+      await waitFor("Task Manager repairs a mismatched View action in place", () => {
+        const repaired = stage6TaskRepairRow.querySelector("[data-job-view]");
+        return Boolean(stage6TaskRepairRow.isConnected && repaired &&
+          repaired.dataset.jobView === stage6TaskRepairId);
+      }, 10000);
+      must(Array.from(document.querySelectorAll("#backgroundJobsList [data-backend-job]"))
+        .find(row => String(row.dataset.backendJob || "") === stage6TaskRepairId) === stage6TaskRepairRow,
+        "Task Manager replaced the native row instead of repairing its mismatched View action in place.");
+      record("stage6_task_manager_repairs_mismatched_view_action_in_place", true,
+        "A stale View-button job ID was corrected to the owning backend job ID without replacing the native row.");
+
+      await sleep(4500);
+      await waitFor("Task Manager backend rows remain owned after the former prototype timer window",
+        stage6TaskRowsMatchNativeJobs, 12000);
+      must(Array.from(document.querySelectorAll("#backgroundJobsList [data-backend-job]")).every(row =>
+        Boolean(row.querySelector("[data-job-view]")) &&
+        row.querySelector("[data-job-view]").dataset.jobView === row.dataset.backendJob),
+        "A delayed refresh replaced a live Task Manager row or removed its actionable View button.");
+      record("stage6_task_manager_backend_dom_stays_stable_after_delayed_refresh", true,
+        "After more than the former four-second prototype timer interval, backend job identities and actionable View controls remained intact.");
       jobsModal.classList.remove("show");
+      record("stage6_task_manager_real_records_filters_details_and_counts", true,
+        "Task Manager All/Active/Completed views, row layout, summary counts and operation details matched native jobs.");
+
+      // UI-06 / Step 8: emulate every requested CSS viewport against the actual
+      // Premium V2 DOM and stylesheet, including the Audiobooks, History,
+      // mini-player, Task Manager and operation-details components.
+      const stage6ResponsiveCss = Array.from(document.querySelectorAll("style"))
+        .map(style => style.textContent || "").join("\n");
+      const stage6ResponsiveApp = document.querySelector("#app")?.outerHTML || "";
+      const stage6ResponsiveJobs = jobsModal?.outerHTML || "";
+      const stage6ResponsiveDetails = document.querySelector("#jobDetailsModal")?.outerHTML || "";
+      const stage6ResponsiveSoundCount = (stage6ResponsiveApp.match(/id="sound"/g) || []).length;
+      must(stage6ResponsiveCss.length > 10000 &&
+        stage6ResponsiveApp.includes('id="sound"') &&
+        stage6ResponsiveApp.includes('id="soundTrackGrid"') &&
+        stage6ResponsiveSoundCount === 1 &&
+        stage6ResponsiveApp.includes('id="player"') &&
+        stage6ResponsiveApp.includes('id="history"') &&
+        stage6ResponsiveApp.includes('id="miniPlayer"') &&
+        stage6ResponsiveJobs.includes('id="backgroundJobsList"') &&
+        stage6ResponsiveDetails.includes('id="jobDetailsModal"'),
+        "The responsive viewport fixture could not clone all required live Premium V2 surfaces.");
+      const stage6ResponsiveFrame = document.createElement("iframe");
+      stage6ResponsiveFrame.setAttribute("aria-hidden","true");
+      stage6ResponsiveFrame.width = 1920;
+      stage6ResponsiveFrame.height = 1080;
+      stage6ResponsiveFrame.setAttribute("width","1920");
+      stage6ResponsiveFrame.setAttribute("height","1080");
+      Object.assign(stage6ResponsiveFrame.style,{
+        position:"fixed",left:"-20000px",top:"-20000px",
+        display:"block",minWidth:"0",minHeight:"0",
+        width:"1920px",height:"1080px",border:"0",opacity:"0",
+        pointerEvents:"none",zIndex:"-1"
+      });
+      document.body.appendChild(stage6ResponsiveFrame);
+      const stage6ResponsiveTheme = document.documentElement.dataset.theme || "dark";
+      const stage6ResponsiveEffects = document.documentElement.dataset.effects || "high";
+      const stage6ResponsiveStyle = stage6ResponsiveCss.replace(/<\/style/gi,"<\\/style");
+      stage6ResponsiveFrame.srcdoc = '<!doctype html><html data-theme="' + stage6ResponsiveTheme +
+        '" data-effects="' + stage6ResponsiveEffects + '"><head><meta charset="utf-8">' +
+        '<meta name="viewport" content="width=device-width, initial-scale=1">' +
+        '<style>' + stage6ResponsiveStyle + '</style></head><body>' +
+        stage6ResponsiveApp + stage6ResponsiveJobs + stage6ResponsiveDetails + '</body></html>';
+      await waitFor("responsive CSS fixture loads",() => {
+        const frameDoc = stage6ResponsiveFrame.contentDocument;
+        return Boolean(frameDoc && frameDoc.readyState === "complete" &&
+          frameDoc.querySelector("#player") && frameDoc.querySelector("#history") &&
+          frameDoc.querySelector("#miniPlayer") && frameDoc.querySelector("#backgroundJobsList"));
+      },15000);
+      const stage6ResponsiveDoc = stage6ResponsiveFrame.contentDocument;
+      stage6ResponsiveDoc.body.style.margin = "0";
+      const stage6ResponsiveAppRoot = stage6ResponsiveDoc.querySelector("#app");
+      const stage6ResponsivePlayer = stage6ResponsiveDoc.querySelector("#player");
+      const stage6ResponsiveHistory = stage6ResponsiveDoc.querySelector("#history");
+      for (const page of stage6ResponsiveDoc.querySelectorAll(".page")) page.classList.remove("active");
+      stage6ResponsivePlayer.classList.add("active");
+      stage6ResponsiveHistory.classList.add("active");
+      stage6ResponsiveDoc.querySelector("#miniPlayer")?.classList.remove("hidden");
+      stage6ResponsiveDoc.querySelector("#backgroundJobsModal")?.classList.add("show");
+      stage6ResponsiveDoc.querySelector("#jobDetailsModal")?.classList.add("show");
+      stage6ResponsiveAppRoot.style.width = "100%";
+      const stage6ResponsiveLibrary = stage6ResponsiveDoc.querySelector("#player .audiobook-library-grid") ||
+        (() => {
+          const shelf = stage6ResponsiveDoc.createElement("div");
+          shelf.className = "audiobook-library-grid";
+          stage6ResponsivePlayer.insertBefore(shelf,stage6ResponsivePlayer.querySelector(".player-grid"));
+          return shelf;
+        })();
+      if (!stage6ResponsiveLibrary.querySelector(".audiobook-library-card")) {
+        stage6ResponsiveLibrary.innerHTML =
+          '<article class="audiobook-library-card"><div class="audiobook-card-cover"></div>' +
+          '<div class="audiobook-card-content"><h3 class="audiobook-card-title">Responsive audiobook acceptance</h3>' +
+          '<div class="audiobook-card-status-row"><span class="badge">Completed M4B</span></div>' +
+          '<div class="audiobook-card-actions"><button class="btn small secondary">Open</button>' +
+          '<button class="btn small">Play</button></div></div></article>';
+      }
+      const stage6ResponsiveJobList = stage6ResponsiveDoc.querySelector("#backgroundJobsList");
+      stage6ResponsiveJobList.innerHTML =
+        '<article class="job-row" data-backend-job="responsive-job">' +
+          '<div class="job-type-icon" aria-hidden="true">♪</div>' +
+          '<div class="job-main"><h3>Responsive generation job</h3>' +
+          '<p>Chapter 3 · Audio rendering</p><div class="job-meta">Test Project · Chapter 3 · 00:32</div>' +
+          '<div class="job-progress-line"><div class="progress"><i style="width:72%"></i></div>' +
+          '<small class="job-state-running">running · 72%</small></div></div>' +
+          '<div class="job-actions"><button class="btn small secondary">View</button>' +
+          '<button class="btn small danger">Cancel</button></div></article>';
+      const stage6ResponsiveViewports = [
+        ["1920x1080",1920,1080],["1366x768",1366,768],["1280x720",1280,720],
+        ["800x600",800,600],["1024x768",1024,768],["1280x960",1280,960],
+        ["1400x1050",1400,1050],["1600x1200",1600,1200],["2048x1536",2048,1536],
+        ["1280x1024",1280,1024],["1600x1280",1600,1280],
+        ["1280x800",1280,800],["1440x900",1440,900],["1680x1050",1680,1050],
+        ["1920x1200",1920,1200],["2560x1600",2560,1600],["3840x2400",3840,2400],
+        ["1024x576",1024,576],["1600x900",1600,900],["2560x1440",2560,1440],
+        ["3840x2160",3840,2160],["5120x2880",5120,2880],["7680x4320",7680,4320],
+        ["2560x1080",2560,1080],["3440x1440",3440,1440],["3840x1600",3840,1600],
+        ["5120x2160",5120,2160],["3840x1080",3840,1080],["5120x1440",5120,1440],
+        ["7680x2160",7680,2160],["960x640",960,640],["1440x960",1440,960],
+        ["2160x1440",2160,1440],["2880x1920",2880,1920],
+        ["600x800",600,800],["768x1024",768,1024],["800x1280",800,1280],
+        ["900x1440",900,1440],["1080x1920",1080,1920],["1440x2560",1440,2560],
+        ["2160x3840",2160,3840]
+      ];
+
+      const stage6CheckResponsiveViewport = async (label,width,height) => {
+        // Change both the iframe browsing-context attributes and its CSS size.
+        // Wait for the real iframe viewport resize; a synthetic resize event
+        // cannot change innerWidth or innerHeight.
+        stage6ResponsiveFrame.width = width;
+        stage6ResponsiveFrame.height = height;
+        stage6ResponsiveFrame.setAttribute("width",String(width));
+        stage6ResponsiveFrame.setAttribute("height",String(height));
+        stage6ResponsiveFrame.style.width = width + "px";
+        stage6ResponsiveFrame.style.height = height + "px";
+        stage6ResponsiveAppRoot.style.minHeight = height + "px";
+        await waitFor("iframe viewport reaches " + label,() =>
+          stage6ResponsiveFrame.contentWindow.innerWidth === width &&
+          stage6ResponsiveFrame.contentWindow.innerHeight === height,5000);
+        // Wait for Chromium's CSS viewport/media-query state as well as
+        // window.innerWidth. The latter can update before responsive styles
+        // have been recalculated for a resized srcdoc iframe.
+        await waitFor("responsive CSS breakpoint reaches " + label,() => {
+          const frameWindow = stage6ResponsiveFrame.contentWindow;
+          if (!frameWindow) return false;
+          return frameWindow.matchMedia("(max-width: 800px)").matches === (width <= 800) &&
+            frameWindow.matchMedia("(max-width: 1250px)").matches === (width <= 1250);
+        },5000);
+        const d = stage6ResponsiveDoc;
+        const actualWidth = stage6ResponsiveFrame.contentWindow.innerWidth;
+        const actualHeight = stage6ResponsiveFrame.contentWindow.innerHeight;
+        must(actualWidth === width && actualHeight === height,
+          "Responsive emulation did not reach requested viewport " + label +
+            ": got " + actualWidth + "x" + actualHeight);
+        const shell = d.querySelector(".app");
+        const workspace = d.querySelector(".workspace");
+        const topbar = d.querySelector(".topbar");
+        const playerPage = d.querySelector("#player.page");
+        const playerGrid = d.querySelector("#player .player-grid");
+        const historyRow = d.querySelector("#history .history-row");
+        const mini = d.querySelector("#miniPlayer");
+        const jobsPanel = d.querySelector("#backgroundJobsModal .jobs-modal");
+        const jobRow = d.querySelector("#backgroundJobsList .job-row");
+        const libraryCard = d.querySelector("#player .audiobook-library-card");
+        const detailsPanel = d.querySelector("#jobDetailsModal .modal");
+        const rects = [
+          ["application-shell",shell],["workspace",workspace],["topbar",topbar],["player-page",playerPage],
+          ["player-grid",playerGrid],["history-row",historyRow],["mini-player",mini],
+          ["Task Manager",jobsPanel],["job-row",jobRow],["audiobook-card",libraryCard],
+          ["job-details",detailsPanel]
+        ];
+        for (const [name,element] of rects) {
+          must(element, "Responsive fixture is missing " + name + " at " + label + ".");
+          const r = element.getBoundingClientRect();
+          must(r.width <= width + 2 && r.left >= -2 && r.right <= width + 2,
+            name + " exceeds the viewport at " + label + ": " +
+              JSON.stringify({left:r.left,right:r.right,width:r.width,viewport:width}));
+        }
+        must(getComputedStyle(workspace).minWidth === "0px",
+          "The shared workspace grid item retained its automatic minimum width at " + label + ".");
+        const shellStyle = getComputedStyle(shell);
+        if (width <= 800) {
+          must(shellStyle.display === "block",
+            "The mobile application shell did not switch to its single-column layout at " + label + ".");
+        } else {
+          must(shellStyle.gridTemplateColumns.split(" ").length === 2,
+            "The desktop/tablet application shell lost its bounded sidebar/workspace grid at " + label + ".");
+        }
+        const playerColumns = getComputedStyle(playerGrid).gridTemplateColumns.trim().split(/\s+/).length;
+        const historyColumns = getComputedStyle(historyRow).gridTemplateColumns.trim().split(/\s+/).length;
+        const jobColumns = getComputedStyle(jobRow).gridTemplateColumns.trim().split(/\s+/).length;
+        must(playerColumns === (width <= 1250 ? 1 : 3),
+          "Audiobooks player grid breakpoint mismatch at " + label + ": " + playerColumns + " columns.");
+        must(historyColumns === (width <= 800 ? 2 : 4),
+          "History row breakpoint mismatch at " + label + ": " + historyColumns + " columns.");
+        must(jobColumns === (width <= 800 ? 2 : 3),
+          "Task Manager row breakpoint mismatch at " + label + ": " + jobColumns + " columns.");
+        must(getComputedStyle(mini).position === "fixed",
+          "Mini-player stopped using its viewport-pinned layout at " + label + ".");
+
+        // Exercise every approved destination as the active page at every
+        // requested viewport, not just the shared shell and the player pages.
+        const pageContainers = Array.from(d.querySelectorAll(".page"));
+        for (const destination of stage8ResponsiveDestinations) {
+          const page = d.getElementById(destination);
+          must(page && page.classList.contains("page"),
+            "Responsive fixture is missing destination " + destination + ".");
+          for (const candidate of pageContainers) candidate.classList.remove("active");
+          page.classList.add("active");
+          const workspaceRect = workspace.getBoundingClientRect();
+          const availablePageWidth = workspaceRect.width;
+          const pageRect = page.getBoundingClientRect();
+          must(page.getClientRects().length > 0 && pageRect.width <= availablePageWidth + 2 &&
+            pageRect.left >= workspaceRect.left - 2 && pageRect.right <= workspaceRect.right + 2 &&
+            pageRect.left >= -2 && pageRect.right <= width + 2,
+            destination + " page container exceeds the responsive workspace at " + label + ": " +
+              JSON.stringify({
+                workspaceLeft:workspaceRect.left,workspaceRight:workspaceRect.right,
+                workspaceWidth:workspaceRect.width,
+                pageLeft:pageRect.left,pageRight:pageRect.right,pageWidth:pageRect.width
+              }));
+          if (destination === "library" && label === "900x1440") {
+            const characterZone = page.querySelector("#characterLibraryZone");
+            const characterToolbar = characterZone?.querySelector(".character-library-toolbar");
+            const toolbarRect = characterToolbar?.getBoundingClientRect();
+            const toolbarOverflow = characterToolbar
+              ? characterToolbar.scrollWidth > characterToolbar.clientWidth + 2 ||
+                Array.from(characterToolbar.children).some(child => {
+                  const rect = child.getBoundingClientRect();
+                  return rect.left < toolbarRect.left - 2 || rect.right > toolbarRect.right + 2;
+                })
+              : true;
+            must(Boolean(characterToolbar) && !toolbarOverflow,
+              "Character Library toolbar overflows at 900x1440: " +
+                JSON.stringify({
+                  zone: characterZone ? {
+                    width:characterZone.clientWidth,scrollWidth:characterZone.scrollWidth
+                  } : null,
+                  toolbar: characterToolbar ? {
+                    left:Math.round(toolbarRect.left),right:Math.round(toolbarRect.right),
+                    width:characterToolbar.clientWidth,scrollWidth:characterToolbar.scrollWidth,
+                    gridColumns:getComputedStyle(characterToolbar).gridTemplateColumns,
+                    children:Array.from(characterToolbar.children).map(child=>{
+                      const rect=child.getBoundingClientRect();
+                      return {className:String(child.className||""),left:Math.round(rect.left),
+                        right:Math.round(rect.right),width:Math.round(rect.width),
+                        scrollWidth:child.scrollWidth,clientWidth:child.clientWidth};
+                    })
+                  } : null
+                }));
+            record("stage8_library_toolbar_900x1440_no_overflow",true,
+              JSON.stringify({width:characterToolbar.clientWidth,scrollWidth:characterToolbar.scrollWidth}));
+          }
+          const pageOverflow = page.scrollWidth > availablePageWidth + 2;
+          const overflowElements = pageOverflow ? Array.from(page.querySelectorAll("*")).map(element => {
+            const rect = element.getBoundingClientRect();
+            const style = getComputedStyle(element);
+            const rightOverflow = Math.max(0, rect.right - pageRect.right);
+            const internalOverflow = (!["auto","scroll"].includes(style.overflowX) &&
+              !["hidden","clip"].includes(style.overflowX))
+              ? Math.max(0, element.scrollWidth - element.clientWidth) : 0;
+            return {
+              tag: element.tagName.toLowerCase(), id: element.id || "",
+              className: String(element.className || "").slice(0,120),
+              left: Math.round(rect.left), right: Math.round(rect.right),
+              width: Math.round(rect.width), clientWidth: element.clientWidth,
+              scrollWidth: element.scrollWidth, rightOverflow: Math.round(rightOverflow),
+              internalOverflow, display: style.display, minWidth: style.minWidth,
+              gridColumns: style.gridTemplateColumns, overflowX: style.overflowX
+            };
+          }).filter(item => item.width > 0 && (item.rightOverflow > 1 || item.internalOverflow > 2))
+            .sort((a,b) => Math.max(b.rightOverflow,b.internalOverflow) - Math.max(a.rightOverflow,a.internalOverflow))
+            .slice(0,12) : [];
+          must(!pageOverflow,
+            destination + " page has horizontal overflow at " + label + ": " +
+              JSON.stringify({scrollWidth:page.scrollWidth,available:availablePageWidth,overflowElements}));
+          const visibleControls = Array.from(page.querySelectorAll(
+            'button,a[href],input,select,textarea,[role="button"],[role="link"]'))
+            .map(element => ({element,rect:element.getBoundingClientRect(),style:getComputedStyle(element)}))
+            .filter(item => item.rect.width > 1 && item.rect.height > 1 &&
+              item.style.display !== "none" && item.style.visibility !== "hidden" &&
+              Number(item.style.opacity || 1) > 0 && !item.element.closest('[aria-hidden="true"]') &&
+              !item.element.closest("details:not([open])"));
+          if (destination === "models") {
+            const overflowingCardControls = visibleControls.flatMap(item => {
+              const card = item.element.closest(".model-card");
+              if (!card) return [];
+              const controlRect = item.element.getBoundingClientRect();
+              const cardRect = card.getBoundingClientRect();
+              const outside = controlRect.left < cardRect.left - 2 ||
+                controlRect.right > cardRect.right + 2 ||
+                controlRect.top < cardRect.top - 2 || controlRect.bottom > cardRect.bottom + 2;
+              return outside ? [{model:card.dataset.modelId,
+                control:item.element.getAttribute("aria-label") || item.element.textContent.trim().slice(0,48),
+                controlRect:{left:Math.round(controlRect.left),top:Math.round(controlRect.top),right:Math.round(controlRect.right),bottom:Math.round(controlRect.bottom)},
+                cardRect:{left:Math.round(cardRect.left),top:Math.round(cardRect.top),right:Math.round(cardRect.right),bottom:Math.round(cardRect.bottom)},
+                position:getComputedStyle(item.element).position}] : [];
+            });
+            must(overflowingCardControls.length === 0,
+              "Models Center controls escape their owning cards at " + label + ": " +
+                JSON.stringify(overflowingCardControls.slice(0,8)));
+          }
+          const overlappingControls = [];
+          for (let leftIndex = 0; leftIndex < visibleControls.length; leftIndex += 1) {
+            const left = visibleControls[leftIndex];
+            for (let rightIndex = leftIndex + 1; rightIndex < visibleControls.length; rightIndex += 1) {
+              const right = visibleControls[rightIndex];
+              if (left.element.contains(right.element) || right.element.contains(left.element)) continue;
+              const overlapWidth = Math.min(left.rect.right,right.rect.right) -
+                Math.max(left.rect.left,right.rect.left);
+              const overlapHeight = Math.min(left.rect.bottom,right.rect.bottom) -
+                Math.max(left.rect.top,right.rect.top);
+              if (overlapWidth > 3 && overlapHeight > 3) {
+                overlappingControls.push({
+                  left:left.element.id || left.element.getAttribute("aria-label") || left.element.textContent.trim().slice(0,48),
+                  right:right.element.id || right.element.getAttribute("aria-label") || right.element.textContent.trim().slice(0,48),
+                  leftRect:{left:Math.round(left.rect.left),top:Math.round(left.rect.top),right:Math.round(left.rect.right),bottom:Math.round(left.rect.bottom)},
+                  rightRect:{left:Math.round(right.rect.left),top:Math.round(right.rect.top),right:Math.round(right.rect.right),bottom:Math.round(right.rect.bottom)},
+                  leftModelCard:left.element.closest(".model-card")?.getAttribute("data-model-id") || null,
+                  rightModelCard:right.element.closest(".model-card")?.getAttribute("data-model-id") || null,
+                  leftCardRect:(() => {const r=left.element.closest(".model-card")?.getBoundingClientRect();return r?{left:Math.round(r.left),top:Math.round(r.top),right:Math.round(r.right),bottom:Math.round(r.bottom)}:null})(),
+                  rightCardRect:(() => {const r=right.element.closest(".model-card")?.getBoundingClientRect();return r?{left:Math.round(r.left),top:Math.round(r.top),right:Math.round(r.right),bottom:Math.round(r.bottom)}:null})(),
+                  modelGridRect:(() => {const r=d.querySelector("#modelGrid")?.getBoundingClientRect();return r?{left:Math.round(r.left),top:Math.round(r.top),right:Math.round(r.right),bottom:Math.round(r.bottom)}:null})(),
+                  overlapWidth:Math.round(overlapWidth),overlapHeight:Math.round(overlapHeight)
+                });
+                if (overlappingControls.length >= 8) break;
+              }
+            }
+            if (overlappingControls.length >= 8) break;
+          }
+          must(overlappingControls.length === 0,
+            destination + " page has overlapping independent controls at " + label + ": " +
+              JSON.stringify(overlappingControls));
+          if (label === "1280x720") {
+            record("stage8_no_overlapping_controls_" + destination,
+              overlappingControls.length === 0,JSON.stringify(overlappingControls));
+          }
+          if (label === "1280x720" && destination === "generate") {
+            record("stage8_generate_page_1280x720_no_horizontal_overflow",
+              page.scrollWidth <= availablePageWidth + 2,
+              JSON.stringify({scrollWidth:page.scrollWidth,available:availablePageWidth}));
+          }
+        }
+        for (const candidate of pageContainers) candidate.classList.remove("active");
+        playerPage.classList.add("active");
+        historyRow.closest("#history")?.classList.add("active");
+      };
+      for (const viewport of stage6ResponsiveViewports) {
+        await stage6CheckResponsiveViewport(viewport[0],viewport[1],viewport[2]);
+      }
+      record("stage6_responsive_shared_shell_bounds_41_resolutions",true,
+        "At all 41 viewports, the two-column application shell, top bar and workspace stayed within the viewport, with min-width:0 applied to the workspace.");
+      record("stage6_responsive_viewport_matrix_41_resolutions",true,
+        "All 41 requested aspect-ratio resolutions were emulated against the actual Premium V2 stylesheet, all 15 active page containers, player, library, mini-player, History, Task Manager and job-details DOM.");
+
+      // Window-size and effective CSS viewport emulation. These are browser
+      // viewport checks, not assertions about physical monitor topology or OS DPI.
+      const stage6WindowViewports = [
+        ["restored-window",1366,768],["half-screen",960,1080],["quarter-screen",960,540],
+        ["ultrawide-window",3440,1440],["maximized-window",1920,1080],["portrait-window",800,1280]
+      ];
+      for (const viewport of stage6WindowViewports) {
+        await stage6CheckResponsiveViewport(viewport[0],viewport[1],viewport[2]);
+      }
+      const stage6ScaleViewports = [
+        ["100%",1920,1080],["125%",1536,864],["150%",1280,720],["200%",960,540]
+      ];
+      for (const viewport of stage6ScaleViewports) {
+        await stage6CheckResponsiveViewport("effective viewport at " + viewport[0],viewport[1],viewport[2]);
+      }
+      record("stage6_responsive_window_and_scale_emulation",true,
+        "Restored, half-screen, quarter-screen, maximized, ultrawide and portrait viewport cases plus effective 100/125/150/200% scale sizes passed CSS emulation. Physical minimized/mixed-monitor/extended-monitor/DPI verification remains a separate OS-level check.");
+      stage6ResponsiveFrame.remove();
+
       publish("passed");
       return;
     }
@@ -435,6 +1117,62 @@
     record("active_project", true, "The packaged app loaded a three-chapter project with real saved narration fixtures.");
 
     must(typeof window.go === "function", "The Premium V2 navigation function is unavailable.");
+    for (const destination of stage8ResponsiveDestinations) {
+      const navigationButton = document.querySelector(
+        'button.nav-btn[data-page="' + destination + '"]'
+      );
+      must(navigationButton, "The sidebar navigation button is missing: " + destination);
+      navigationButton.click();
+      await waitFor("Packaged sidebar destination " + destination, function () {
+        const page = document.getElementById(destination);
+        return Boolean(page && page.classList.contains("active") &&
+          !page.classList.contains("hidden") && page.getClientRects().length > 0);
+      }, 12000);
+      record("stage829_sidebar_destination_" + destination, true,
+        "The packaged sidebar action opened the real " + destination + " page container.");
+    }
+
+    window.go("help");
+    await waitFor("Help & Guide page and topic cards", function () {
+      const root = document.querySelector("#help");
+      return Boolean(root && root.classList.contains("active") &&
+        root.querySelector(".help-guide-shell") &&
+        root.querySelectorAll("[data-help-guide-card]").length >= 8);
+    }, 12000);
+    const helpRoot = document.querySelector("#help");
+    const helpCards = Array.from(helpRoot.querySelectorAll("[data-help-guide-card]"));
+    const limitationsCard = helpCards.find(card =>
+      /Known limitations/i.test(card.querySelector("summary")?.textContent || "")
+    );
+    must(limitationsCard &&
+      limitationsCard.textContent.includes("M4B") &&
+      limitationsCard.textContent.includes("After first paragraph") &&
+      limitationsCard.textContent.includes("GPU acceleration"),
+      "Help & Guide does not expose the current format, paragraph-offset and hardware limitations.");
+    const helpSearch = helpRoot.querySelector("#helpGuideSearch");
+    const helpNoResults = helpRoot.querySelector("#helpGuideNoResults");
+    must(helpSearch && helpNoResults, "Help & Guide search and empty-result controls are missing.");
+    helpSearch.value = "After first paragraph";
+    helpSearch.dispatchEvent(new Event("input", {bubbles:true}));
+    await waitFor("Help & Guide search results", function () {
+      const visible = helpCards.filter(card => !card.hidden);
+      return visible.length > 0 && visible.every(card =>
+        card.textContent.toLowerCase().includes("after first paragraph")
+      ) && helpNoResults.hidden;
+    }, 5000);
+    helpSearch.value = "no-such-ryu-guide-topic";
+    helpSearch.dispatchEvent(new Event("input", {bubbles:true}));
+    await waitFor("Help & Guide no-results state", () =>
+      helpNoResults.hidden === false && helpCards.every(card => card.hidden), 5000);
+    helpSearch.value = "";
+    helpSearch.dispatchEvent(new Event("input", {bubbles:true}));
+    helpRoot.querySelector("#helpGuideExpandAll")?.click();
+    must(helpCards.every(card => card.open), "Help & Guide Expand all did not open every topic.");
+    helpRoot.querySelector("#helpGuideCollapseAll")?.click();
+    must(helpCards.every(card => !card.open), "Help & Guide Collapse all did not close every topic.");
+    record("stage829_help_guide_search_empty_expand_collapse", true,
+      "The packaged Help & Guide displayed current limitations, searched real topic text, showed the no-results state and expanded/collapsed all topics.");
+
     window.go('sound');
     await waitFor("Sound Design page", function () {
       const page = document.querySelector("#sound");
@@ -1206,8 +1944,15 @@
     await waitFor("successful cue-save retry status", function () {
       return document.querySelector("#cueSaveState")?.textContent.includes("All cue changes saved");
     }, 8000);
+    await waitFor("cue save debounce and in-flight persistence settle", function () {
+      return document.querySelector("#saveCueChanges")?.disabled === true &&
+        document.querySelector("#cueSaveState")?.textContent.includes("All cue changes saved");
+    }, 12000);
+    const cueStateAfterRetry = await invoke("sound.cues.get", {});
+    must(String(cueStateAfterRetry.opening?.path || "") === String(cueBeta.path),
+      "The explicit cue retry did not persist the new Opening slot.");
     record("cue_save_failure_retains_retryable_changes", true,
-      "An injected auto-save failure kept the old backend assignment, retained the visible draft and retry button through a catalogue refresh, then an explicit retry succeeded.");
+      "An injected auto-save failure retained the old assignment and retryable draft through catalogue refresh, then persisted the new slot on explicit retry.");
 
     document.querySelector("#clearAllCues").click();
     await waitFor("Clear All staged state", function () {
@@ -1229,6 +1974,11 @@
     await waitForCuePath("closing", cueAlpha.path);
     record("cue_clear_all_explicit_and_persisted", true,
       "Clear All remained staged until explicit save, cleared all three slots, and the required final assignments were restored.");
+    const cueStateBeforeMix = await invoke("sound.cues.get", {});
+    must(String(cueStateBeforeMix.opening?.path || "") === String(cueBeta.path) &&
+      String(cueStateBeforeMix.chapter?.path || "") === String(cueBeta.path) &&
+      String(cueStateBeforeMix.closing?.path || "") === String(cueAlpha.path),
+      "The mixer started before all three cue assignments had reached durable project state.");
 
     const mixTab = document.querySelector('#sound .sound-tabs [data-sound-tab="mix"]');
     must(mixTab, "Mix & Production Sync tab is missing.");
@@ -1577,6 +2327,18 @@
     }, 15000);
     record("production_mode_toggles_share_sound_manifest", true,
       "Production Studio Voice Only and Use BGM controls persisted through the same Sound Design state.");
+    await waitFor("all Sound Design preview jobs have reached terminal state before Stage 5.4", async function () {
+      const jobs = await invoke("job.list", {include_hidden:true});
+      return Array.isArray(jobs) && jobs.every(job =>
+        job.type !== "sound-design-preview" ||
+        !["queued","running","pause_requested","paused","cancel_requested","retrying"].includes(String(job.state || "")));
+    }, 30000);
+    const durableMixStateBeforeStage54 = await invoke("sound.chapter_bgm.get", {});
+    must(durableMixStateBeforeStage54.bgm_enabled === true &&
+      durableMixStateBeforeStage54.background_audio_mode === "manual" &&
+      String(durableMixStateBeforeStage54.overrides?.["1"]?.path || "") === String(alpha.path) &&
+      String(durableMixStateBeforeStage54.overrides?.["2"]?.path || "") === String(beta.path),
+      "The Sound Design project did not return to its durable Chapter-Based state before Stage 5.4 job-control acceptance.");
 
     const productionPronunciationToggle = document.querySelector("#productionPronunciationToggle");
     must(productionPronunciationToggle,
@@ -1634,6 +2396,21 @@
         const active = await invoke("project.get_active", {});
         return String(active?.folder || "") === String(folder);
       }, 20000);
+      const expectedChapters = await invoke("chapter.list", {});
+      await waitFor(label + " chapter records hydrated in the UI", function () {
+        const active = window.ryuPremiumActiveProject;
+        const visible = window.ryuPremiumChapters;
+        return String(active?.folder || "") === String(folder) &&
+          Array.isArray(visible) && Array.isArray(expectedChapters) &&
+          visible.length === expectedChapters.length &&
+          expectedChapters.every(expected => {
+            const actual = visible.find(chapter => Number(chapter.number) === Number(expected.number));
+            return Boolean(actual) &&
+              String(actual.chapter_id || actual.id || "") === String(expected.chapter_id || expected.id || "") &&
+              String(actual.title || "") === String(expected.title || "") &&
+              String(actual.text || "") === String(expected.text || "");
+          });
+      }, 20000);
     }
     await openProjectFromDashboard(config.secondary_project_folder, "Secondary");
     await waitFor("Secondary project active", async function () {
@@ -1683,42 +2460,68 @@
     must(chosenPreviewChapter && String(chosenPreviewChapter.text || "").trim(),
       "The Production Preview acceptance chapter has no saved narration text.");
     const chosenPreviewChapterId = String(chosenPreviewChapter.chapter_id || chosenPreviewChapter.id || "");
-    const productionChapterPicker = document.querySelector("#productionPreviewChapterSelect");
     await waitFor("Production Preview saved chapter options loaded", function () {
-      const options = Array.from(productionChapterPicker?.options || []);
+      const options = Array.from(document.querySelector("#productionPreviewChapterSelect")?.options || []);
       return options.length === savedPreviewChapters.length &&
         savedPreviewChapters.every(chapter => options.some(option =>
           option.value === String(chapter.number) &&
           option.textContent.includes(String(chapter.title || ""))));
     }, 12000);
     async function selectProductionPreviewChapter(number, expectedTitle) {
-      const optionFor = chapterNumber => Array.from(productionChapterPicker.options || [])
+      const pickerFor = () => document.querySelector("#productionPreviewChapterSelect");
+      const optionFor = chapterNumber => Array.from(pickerFor()?.options || [])
         .find(option => option.value === String(chapterNumber));
       const waitForSelection = async chapterNumber => {
-        const expectedOption = optionFor(chapterNumber);
         const expectedChapter = savedPreviewChapters.find(item => Number(item.number) === Number(chapterNumber));
-        await waitFor("Production-owned Chapter " + chapterNumber + " selection", function () {
-          const optionText = productionChapterPicker.selectedOptions?.[0]?.textContent || "";
-          const statusText = document.querySelector("#productionPreviewStatus")?.textContent || "";
-          return productionChapterPicker.value === String(chapterNumber) &&
-            Boolean(expectedOption && expectedOption.selected) &&
-            optionText.includes("Chapter " + chapterNumber) &&
-            (!expectedChapter?.title || optionText.includes(String(expectedChapter.title))) &&
-            statusText.includes("Chapter " + chapterNumber + " selected.");
-        }, 10000);
+        try {
+          await waitFor("Production-owned Chapter " + chapterNumber + " selection", function () {
+            // Resolve both the selector and option on every poll. Chapter/project
+            // refreshes can replace the entire selector node; retaining either DOM
+            // reference would observe a detached control and report a false timeout.
+            const picker = pickerFor();
+            if (!picker) return false;
+            const expectedOption = optionFor(chapterNumber);
+            const optionText = picker.selectedOptions?.[0]?.textContent || "";
+            const statusText = document.querySelector("#productionPreviewStatus")?.textContent || "";
+            return picker.value === String(chapterNumber) &&
+              Boolean(expectedOption && expectedOption.selected) &&
+              optionText.includes("Chapter " + chapterNumber) &&
+              (!expectedChapter?.title || optionText.includes(String(expectedChapter.title))) &&
+              statusText.includes("Chapter " + chapterNumber) &&
+              (statusText.includes("selected.") || statusText.includes("Preview ready"));
+          }, 10000);
+        } catch (error) {
+          const picker = pickerFor();
+          throw new Error(String(error?.message || error) + ". Production chapter selector diagnostic=" + JSON.stringify({
+            value:picker?.value || null,
+            disabled:picker?.disabled ?? null,
+            selectedText:picker?.selectedOptions?.[0]?.textContent || null,
+            options:Array.from(picker?.options || []).map(option => ({
+              value:option.value,text:option.textContent,selected:option.selected
+            })),
+            status:document.querySelector("#productionPreviewStatus")?.textContent || null,
+            expectedChapter:expectedChapter || null
+          }));
+        }
       };
       // If Chapter 2 is already auto-selected, a change to the same value is
       // intentionally a no-op in the production UI. Select another saved
       // chapter first so the target selection event is genuinely fired.
-      if (Number(productionChapterPicker.value) === Number(number)) {
+      const currentPicker = pickerFor();
+      must(currentPicker, "Production Preview chapter selector was replaced or removed.");
+      if (Number(currentPicker.value) === Number(number)) {
         const alternate = savedPreviewChapters.find(item => Number(item.number) !== Number(number));
         must(alternate, "Production Preview needs at least two saved chapters to exercise chapter selection.");
-        productionChapterPicker.value = String(alternate.number);
-        productionChapterPicker.dispatchEvent(new Event("change", {bubbles:true}));
+        const picker = pickerFor();
+        must(picker, "Production Preview chapter selector was replaced or removed.");
+        picker.value = String(alternate.number);
+        picker.dispatchEvent(new Event("change", {bubbles:true}));
         await waitForSelection(Number(alternate.number));
       }
-      productionChapterPicker.value = String(number);
-      productionChapterPicker.dispatchEvent(new Event("change", {bubbles:true}));
+      const picker = pickerFor();
+      must(picker, "Production Preview chapter selector was replaced or removed.");
+      picker.value = String(number);
+      picker.dispatchEvent(new Event("change", {bubbles:true}));
       await waitForSelection(Number(number));
       const selectedOption = optionFor(number);
       must(selectedOption && (!expectedTitle || selectedOption.textContent.includes(expectedTitle)),
@@ -1830,6 +2633,21 @@
     const productionPlaybackUrl = String(productionPreviewResult.file_url || "").toLowerCase();
     const productionPlaybackPath = String(productionPreviewResult.playback_output_path || "");
     const initialPreviewSeconds = Number(productionPreviewResult.actual_duration_seconds || 0);
+    const previewOwnerFolder = String(productionPreviewJob.project_folder || "");
+    const previewOwnerChapterId = String(productionPreviewJob.current_chapter_id || "");
+    must(previewOwnerFolder === String((await invoke("project.get_active", {})).folder || "") &&
+      (!chosenPreviewChapterId || previewOwnerChapterId === String(chosenPreviewChapterId)) &&
+      String(completedProductionPreview.project_folder || "") === previewOwnerFolder &&
+      String(completedProductionPreview.current_chapter_id || "") === previewOwnerChapterId &&
+      Boolean(productionPreviewPath),
+      "Completed Production Preview changed project/chapter ownership or lost its registered output: " +
+        JSON.stringify({
+          started:productionPreviewJob,
+          completed:completedProductionPreview,
+          expectedChapterId:chosenPreviewChapterId
+        }));
+    record("stage6_chapter_preview_owner_project_and_stable_chapter_identity", true,
+      "The real completed Production Preview retained its originating project folder, stable Chapter Studio identity and registered preview output.");
     must(Number(productionPreviewResult.requested_duration_seconds || 0) === 10 &&
       initialPreviewSeconds >= 5 && initialPreviewSeconds <= 15 &&
       productionPreviewPath.toLowerCase().endsWith(".m4a") &&
@@ -2122,6 +2940,627 @@
       "The completed two-chapter output and empty/excluded counts were not visible on its owning project summary.");
     record("stage54_packaged_real_multi_chapter_full_generation", true,
       "The frozen Windows app synthesized two eligible chapters in saved order with the saved bundled Offline Neural narrator, skipped one empty and one excluded chapter, completed one GenerationManager job, persisted its identical History job ID, and associated the M4B output only with its owning project.");
+
+    // Stage 5.5 GEN-05 / Audiobooks handoff: inspect the finished file itself,
+    // not project.json fallback chapter names, then play and seek the embedded M4B.
+    const finalM4b = await invoke("player.get_active", {
+      folder:String(config.full_generation_project_folder || "")
+    });
+    const finalM4bChapters = Array.isArray(finalM4b.chapters) ? finalM4b.chapters : [];
+    must(normalizeOutputPath(finalM4b.output_path) === expectedGenerationOutput &&
+      String(finalM4b.format || "").toLowerCase() === ".m4b" &&
+      finalM4bChapters.length === 2 &&
+      finalM4bChapters.every(chapter =>
+        String(chapter.title || "").trim() &&
+        Number.isFinite(Number(chapter.start_seconds)) &&
+        Number.isFinite(Number(chapter.end_seconds)) &&
+        Number(chapter.end_seconds) > Number(chapter.start_seconds)),
+      "The finished M4B did not return its actual timed chapter-marker table to the Audiobooks player: " +
+        JSON.stringify({format:finalM4b.format,output_path:finalM4b.output_path,chapters:finalM4bChapters}));
+    must(Math.abs(Number(finalM4bChapters[0].start_seconds)) <= 0.15 &&
+      Number(finalM4bChapters[1].start_seconds) > Number(finalM4bChapters[0].start_seconds) &&
+      Math.abs(Number(finalM4bChapters[1].start_seconds) - Number(finalM4bChapters[0].end_seconds)) <= 1.5,
+      "The embedded chapter markers are not ordered at contiguous chapter boundaries: " +
+        JSON.stringify(finalM4bChapters));
+    record("stage55_final_m4b_embedded_chapters", true,
+      "The backend read two actual embedded M4B chapter markers with titles and valid ordered start/end timing from the completed output file.");
+
+    window.go("player");
+    await waitFor("Stage 5.5 Audiobooks page activation", function () {
+      const page = document.querySelector("#player");
+      return Boolean(page && page.classList.contains("active"));
+    }, 15000);
+    let finishedBookButton = null;
+    await waitFor("completed M4B appears in Premium V2 Audiobooks library", function () {
+      finishedBookButton = Array.from(document.querySelectorAll("#player [data-play-project-folder]"))
+        .find(button => String(button.dataset.playProjectFolder || "") === String(config.full_generation_project_folder || ""));
+      return Boolean(finishedBookButton);
+    }, 20000);
+    finishedBookButton.click();
+    must(normalizeOutputPath(finalM4b.playback_output_path) &&
+      String(finalM4b.playback_format || "").toLowerCase() === "mp3" &&
+      String(finalM4b.source_file_url || "").toLowerCase().includes(
+        String(config.full_generation_output_path || "").split(/[\\/]/).pop().toLowerCase()
+      ),
+      "Audiobooks did not return a browser-compatible playback copy linked to the authoritative M4B: " +
+        JSON.stringify({output_path:finalM4b.output_path,source_file_url:finalM4b.source_file_url,
+          playback_output_path:finalM4b.playback_output_path,playback_format:finalM4b.playback_format}));
+    record("stage55_browser_compatible_playback_source", true,
+      "The original chaptered AAC M4B remains the library asset; the player received a cached MP3 decoded from that exact source for Qt WebEngine compatibility.");
+    const finishedM4bAudio = await waitForRealPlayback(
+      "real completed M4B audio through the Audiobooks player",
+      finalM4b.playback_output_path
+    );
+    await waitFor("Audiobooks renders actual embedded chapter rows", function () {
+      const rows = Array.from(document.querySelectorAll("#player [data-audiobook-chapter-start]"));
+      return rows.length === 2 && rows.every(row => row.getAttribute("aria-disabled") !== "true");
+    }, 15000);
+    const embeddedChapterRows = Array.from(document.querySelectorAll("#player [data-audiobook-chapter-start]"));
+    const expectedSecondStart = Number(finalM4bChapters[1].start_seconds);
+    embeddedChapterRows[1].click();
+    await waitFor("Audiobooks chapter navigation seeks to second embedded chapter", function () {
+      return Number.isFinite(Number(finishedM4bAudio.currentTime)) &&
+        Math.abs(Number(finishedM4bAudio.currentTime) - expectedSecondStart) <= 1.25;
+    }, 10000);
+    finishedM4bAudio.pause();
+    await waitFor("Audiobooks stores project-scoped listening position", async function () {
+      const refreshed = await invoke("player.get_active", {
+        folder:String(config.full_generation_project_folder || "")
+      });
+      return Number(refreshed.playback_position_seconds || 0) >= expectedSecondStart - 0.15;
+    }, 15000);
+
+    // Stage 6 Step 3 — verify full-player stage6Controls and embedded chapter playback.
+    const stage6PlayerPage=document.querySelector("#player"), stage6MainPlay=document.querySelector("#mainPlay"),
+      stage6Timeline=document.querySelector("#playerTimeline"), stage6TimeLabels=document.querySelector("#currentTime")?.parentElement?.querySelectorAll("span"),
+      stage6Volume=stage6PlayerPage?.querySelector(".player-grid .toolbar input.range"),
+      stage6SpeedButtons=Array.from(stage6PlayerPage?.querySelectorAll(".player-grid .toolbar .segmented button")||[]),
+      stage6Controls=Array.from(stage6PlayerPage?.querySelectorAll(".player-controls button")||[]);
+    must(stage6MainPlay&&stage6Timeline&&stage6TimeLabels?.length>=2&&stage6Volume&&stage6SpeedButtons.length>=2&&stage6Controls.length>=5,
+      "Stage 6 AB-03 stage6Controls missing from full player.");
+    const stage6ActualDuration=Number(finishedM4bAudio.duration);
+    must(Number.isFinite(stage6ActualDuration)&&stage6ActualDuration>0,"Actual decoded audio duration unavailable.");
+    const stage6FmtTime=seconds=>{const n=Math.max(0,Math.floor(Number(seconds)||0)),h=Math.floor(n/3600),m=Math.floor(n%3600/60),s=n%60;
+      return h?h+":"+String(m).padStart(2,"0")+":"+String(s).padStart(2,"0"):m+":"+String(s).padStart(2,"0");};
+    must(stage6TimeLabels[1].textContent.trim()===stage6FmtTime(stage6ActualDuration),"Total-time label differs from actual duration.");
+    record("stage6_player_seek_and_time_display",true,"Time display uses the actual decoded audio duration.");
+    if (finishedM4bAudio.paused) {
+      stage6MainPlay.click();
+      await waitFor("selected audiobook is playing before Pause/Resume acceptance",()=>
+        !finishedM4bAudio.paused,5000);
+    }
+    const stage6BeforeAudioCount=(window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__||[]).length;
+    stage6MainPlay.click();
+    await waitFor("Pause affects actual audio",()=>finishedM4bAudio.paused&&stage6MainPlay.textContent.trim()==="▶",5000);
+    stage6MainPlay.click();
+    await waitFor("Play resumes same audio",()=>!finishedM4bAudio.paused&&stage6MainPlay.textContent.trim()!=="▶",5000);
+    must((window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__||[]).length===stage6BeforeAudioCount,"Play/Pause created duplicate audio.");
+    record("stage6_player_full_controls_actual_audio",true,"Play/Pause control toggled the actual decoded media element.");
+    window.go("dashboard");
+    const stage6MiniDock=document.querySelector("#miniPlayer");
+    await waitFor("mini-player becomes visible outside the Audiobooks page",()=>
+      Boolean(stage6MiniDock&&!stage6MiniDock.classList.contains("hidden")&&stage6MiniDock.getClientRects().length),5000);
+    const stage6MiniPlay=stage6MiniDock.querySelector("#miniPlay");
+    must(stage6MiniPlay,"Persistent mini-player Play/Pause button is missing.");
+    stage6MiniPlay.click();
+    await waitFor("visible mini-player pauses the selected audio",()=>finishedM4bAudio.paused&&
+      stage6MainPlay.textContent.trim()==="▶"&&stage6MiniPlay.textContent.trim()==="▶",5000);
+    stage6MiniPlay.click();
+    await waitFor("visible mini-player resumes the same audio",()=>!finishedM4bAudio.paused&&
+      stage6MainPlay.textContent.trim()!=="▶"&&stage6MiniPlay.textContent.trim()!=="▶",5000);
+    must((window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__||[]).length===stage6BeforeAudioCount,
+      "Mini-player Play/Pause created a second Audio element.");
+    record("stage6_mini_player_shares_full_player_audio_session",true,
+      "The visible Dashboard mini-player and full-player controls operate the same real Audio object and synchronize their icons.");
+    window.go("player");
+    await waitFor("Audiobooks page returns after mini-player acceptance",()=>
+      document.querySelector("#player")?.classList.contains("active")===true,5000);
+
+    stage6Timeline.value="10"; stage6Timeline.dispatchEvent(new Event("input",{bubbles:true}));
+    await waitFor("seek slider changes real currentTime",()=>Math.abs(finishedM4bAudio.currentTime-stage6ActualDuration*0.1)<1,5000);
+    await waitFor("elapsed label follows the actual seek position",()=>
+      stage6TimeLabels[0].textContent.trim()===stage6FmtTime(finishedM4bAudio.currentTime),5000);
+    stage6Volume.value="0"; stage6Volume.dispatchEvent(new Event("input",{bubbles:true}));
+    must(Math.abs(finishedM4bAudio.volume)<0.01,"Volume slider does not support 0%.");
+    stage6Volume.value="100"; stage6Volume.dispatchEvent(new Event("input",{bubbles:true}));
+    must(Math.abs(finishedM4bAudio.volume-1)<0.01,"Volume slider does not support 100%.");
+    stage6Volume.value="37"; stage6Volume.dispatchEvent(new Event("input",{bubbles:true}));
+    stage6Volume.dispatchEvent(new Event("change",{bubbles:true}));
+    must(Math.abs(finishedM4bAudio.volume-0.37)<0.02,"Volume control did not update actual media.");
+    let stage6SavedPreferences=null;
+    await waitFor("player volume preference persists",async()=>{
+      const [settings,player]=await Promise.all([
+        invoke("settings.get",{}),
+        invoke("player.get_active",{folder:String(config.full_generation_project_folder||"")})
+      ]);
+      stage6SavedPreferences={settings,player};
+      return Math.abs(Number(settings.player_volume)-0.37)<0.02&&
+        Math.abs(Number(player.playback_volume)-0.37)<0.02;
+    },8000);
+    const stage6Rate=stage6SpeedButtons.find(b=>Math.abs(Number(b.textContent.replace("×","").trim())-1.25)<0.01);
+    must(stage6Rate,"No 1.25× speed option."); stage6Rate.click();
+    must(Math.abs(finishedM4bAudio.playbackRate-1.25)<0.01&&stage6Rate.classList.contains("active"),"Rate not applied to real media.");
+    await waitFor("player playback speed preference persists",async()=>{
+      const [settings,player]=await Promise.all([
+        invoke("settings.get",{}),
+        invoke("player.get_active",{folder:String(config.full_generation_project_folder||"")})
+      ]);
+      stage6SavedPreferences={settings,player};
+      return Math.abs(Number(settings.player_rate)-1.25)<0.01&&
+        Math.abs(Number(player.playback_rate)-1.25)<0.01;
+    },8000);
+    record("stage6_player_volume_and_rate_affect_audio",true,"Volume and playback speed modify actual audio and both preferences persist.");
+    finishedM4bAudio.currentTime=5; stage6Controls[0].click();
+    await waitFor("rewind clamps to start",()=>finishedM4bAudio.currentTime<=0.15,5000);
+    finishedM4bAudio.currentTime=Math.max(0,stage6ActualDuration-2); stage6Controls[4].click();
+    await waitFor("forward clamps to end",()=>Math.abs(finishedM4bAudio.currentTime-stage6ActualDuration)<=0.15,5000);
+    record("stage6_player_15_second_seek_clamps",true,"15-second skip stage6Controls clamp to actual audio boundaries.");
+    const stage6ChapterRows=Array.from(document.querySelectorAll("#player [data-audiobook-chapter-start]"));
+    must(stage6ChapterRows.length===finalM4bChapters.length&&stage6ChapterRows.every((row,i)=>
+      Math.abs(Number(row.dataset.audiobookChapterStart)-Number(finalM4bChapters[i].start_seconds))<0.001&&
+      Math.abs(Number(row.dataset.audiobookChapterEnd)-Number(finalM4bChapters[i].end_seconds))<0.001),
+      "Chapter intervals differ from embedded M4B marker table.");
+    must(stage6ChapterRows.every((row,i)=>{
+      const timeLabel=row.querySelector('[data-audiobook-chapter-time="true"]');
+      return Boolean(timeLabel) &&
+        timeLabel.textContent.includes(stage6FmtTime(finalM4bChapters[i].start_seconds)) &&
+        timeLabel.textContent.includes(stage6FmtTime(finalM4bChapters[i].end_seconds));
+    }),"Visible chapter timestamps do not match the embedded M4B start/end markers.");
+    record("stage6_chapter_embedded_timestamps_visible",true,
+      "Each chapter row visibly displays its embedded M4B start and end timestamp.");
+    const stage6ActiveRow=()=>stage6ChapterRows.find(row=>row.classList.contains("active")&&row.getAttribute("aria-current")==="true"&&row.getAttribute("aria-pressed")==="true");
+    const stage6Heading=()=>document.querySelector("#player .player-grid > .card:nth-child(2) h2")?.textContent.trim()||"";
+    finishedM4bAudio.pause(); finishedM4bAudio.currentTime=Number(finalM4bChapters[0].start_seconds);
+    await waitFor("chapter one highlighted from playhead",()=>stage6ActiveRow()===stage6ChapterRows[0],5000);
+    stage6ChapterRows[1].click();
+    await waitFor("chapter selection seeks and starts real audio",()=>!finishedM4bAudio.paused&&
+      Math.abs(finishedM4bAudio.currentTime-Number(finalM4bChapters[1].start_seconds))<1&&stage6ActiveRow()===stage6ChapterRows[1]&&
+      stage6Heading().includes(String(finalM4bChapters[1].title)),8000);
+    record("stage6_chapter_select_seeks_to_embedded_marker",true,"Selecting chapter seeks and starts actual playback at embedded time.");
+    finishedM4bAudio.pause(); finishedM4bAudio.currentTime=Number(finalM4bChapters[0].start_seconds);
+    await waitFor("chapter highlight follows seek",()=>stage6ActiveRow()===stage6ChapterRows[0]&&stage6Heading().includes(String(finalM4bChapters[0].title)),5000);
+    record("stage6_chapter_playhead_highlight_tracks_boundaries",true,"Current chapter row and stage6Heading track embedded marker interval.");
+    const stage6FirstStart=Number(finalM4bChapters[0].start_seconds);
+    const stage6SecondStart=Number(finalM4bChapters[1].start_seconds);
+    const stage6ApproachGap=Math.min(0.8,Math.max(0.15,(stage6SecondStart-stage6FirstStart)/2));
+    finishedM4bAudio.currentTime=Math.max(stage6FirstStart,stage6SecondStart-stage6ApproachGap);
+    await waitFor("first chapter active before continuous boundary crossing",()=>stage6ActiveRow()===stage6ChapterRows[0],5000);
+    await finishedM4bAudio.play();
+    await waitFor("continuous playback crosses into next embedded chapter",()=>!finishedM4bAudio.paused&&
+      finishedM4bAudio.currentTime>=stage6SecondStart&&stage6ActiveRow()===stage6ChapterRows[1]&&
+      stage6Heading().includes(String(finalM4bChapters[1].title)),10000);
+    record("stage6_chapter_continuous_playback_updates_active_row",true,
+      "While real audio played across the embedded boundary, the active chapter row and heading moved to the next chapter.");
+    finishedM4bAudio.pause();
+
+    stage6ChapterRows[1].dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true}));
+    await waitFor("keyboard Enter selects and plays embedded chapter",()=>!finishedM4bAudio.paused&&
+      Math.abs(finishedM4bAudio.currentTime-Number(finalM4bChapters[1].start_seconds))<1&&
+      stage6ActiveRow()===stage6ChapterRows[1],8000);
+    record("stage6_chapter_keyboard_activation_starts_audio",true,
+      "Keyboard Enter starts actual audio at the selected embedded chapter marker.");
+    finishedM4bAudio.pause();
+    finishedM4bAudio.currentTime=Number(finalM4bChapters[0].start_seconds);
+    await waitFor("first chapter active before Space activation",()=>stage6ActiveRow()===stage6ChapterRows[0],5000);
+    stage6ChapterRows[1].dispatchEvent(new KeyboardEvent("keydown",{key:" ",bubbles:true}));
+    await waitFor("keyboard Space selects and plays embedded chapter",()=>!finishedM4bAudio.paused&&
+      Math.abs(finishedM4bAudio.currentTime-Number(finalM4bChapters[1].start_seconds))<1&&
+      stage6ActiveRow()===stage6ChapterRows[1],8000);
+    record("stage6_chapter_space_activation_starts_audio",true,
+      "Keyboard Space starts actual audio at the selected embedded chapter marker.");
+    finishedM4bAudio.pause();
+    stage6Controls[3].click();
+    await waitFor("Next Chapter",()=>Math.abs(finishedM4bAudio.currentTime-Number(finalM4bChapters[1].start_seconds))<1,5000);
+    stage6Controls[1].click();
+    await waitFor("Previous Chapter",()=>Math.abs(finishedM4bAudio.currentTime-Number(finalM4bChapters[0].start_seconds))<1,5000);
+    stage6Controls[1].click();
+    await waitFor("Previous at first chapter remains at the first marker",()=>
+      Math.abs(finishedM4bAudio.currentTime-Number(finalM4bChapters[0].start_seconds))<1,5000);
+    stage6Controls[3].click();
+    await waitFor("Next moves to the last embedded chapter",()=>
+      Math.abs(finishedM4bAudio.currentTime-Number(finalM4bChapters[1].start_seconds))<1,5000);
+    stage6Controls[3].click();
+    await waitFor("Next at last chapter remains within the final marker",()=>
+      finishedM4bAudio.currentTime>=Number(finalM4bChapters[1].start_seconds)-0.15,5000);
+    stage6Controls[1].click();
+    await waitFor("Previous returns to first chapter boundary",()=>
+      Math.abs(finishedM4bAudio.currentTime-Number(finalM4bChapters[0].start_seconds))<1,5000);
+    record("stage6_previous_next_chapter_navigation",true,
+      "Previous/Next navigate actual embedded chapter order and remain within first/last chapter boundaries.");
+    const stage6OtherBook=Array.from(document.querySelectorAll("#player [data-open-project-folder]"))
+      .find(b=>String(b.dataset.openProjectFolder||"")!==String(config.full_generation_project_folder||""));
+    must(stage6OtherBook,"Second completed book unavailable for stale-event test.");
+    const stage6StaleAudio=finishedM4bAudio; stage6OtherBook.click();
+    await waitFor("book switch renders replacement chapter data",()=>latestAcceptanceAudio()!==stage6StaleAudio&&
+      document.querySelectorAll("#player [data-audiobook-chapter-start]").length===1,15000);
+    const stage6NewHeading=stage6Heading(),stage6NewTime=document.querySelector("#currentTime")?.textContent||"";
+    stage6StaleAudio.currentTime=Math.min(Number(stage6StaleAudio.duration)||0,0.5); stage6StaleAudio.dispatchEvent(new Event("timeupdate"));
+    must(stage6Heading()===stage6NewHeading&&(document.querySelector("#currentTime")?.textContent||"")===stage6NewTime,
+      "Stale old-player event mutated the new book UI.");
+    record("stage6_switching_book_clears_previous_chapter_selection",true,"Switch clears old chapters and stale audio events cannot mutate new player.");
+    latestAcceptanceAudio()?.pause(); stage6StaleAudio.pause();
+
+    record("stage55_audiobooks_real_playback_chapter_seek_and_position", true,
+      "The real finished M4B played in Premium V2, chapter navigation sought to its embedded second marker, and the owning project's playback position was persisted.");
+
+    // GEN-07 / XAPP-08 frozen Windows acceptance: the narrator-only flag must
+    // be explicitly saved for a book with zero configured character voice
+    // profiles, then drive a real full-book GenerationManager job and M4B.
+    await openProjectFromDashboard(
+      config.narrator_only_project_folder,
+      "GEN-07 narrator-only full-book acceptance"
+    );
+    await waitFor("GEN-07 narrator-only project activation", async function () {
+      const active = await invoke("project.get_active", {});
+      return String(active.folder || "") === String(config.narrator_only_project_folder || "");
+    }, 20000);
+    const narratorOnlySavedVoice = await invoke("voice.select", {
+      profile_name:narratorProfileName, backend:"automatic"
+    });
+    must(narratorOnlySavedVoice && narratorOnlySavedVoice.saved === true &&
+      String(narratorOnlySavedVoice.name || "") === narratorProfileName,
+      "GEN-07 narrator-only project could not persist the saved narrator profile.");
+    // Project-opening is an asynchronous native settings change. The active
+    // project lookup can update its cache before QSettings has flushed to disk;
+    // force a read-after-write of the same native setting before the
+    // ownership-bound narrator-only save. This validates UI selection and
+    // avoids racing a stale QSettings snapshot.
+    const narratorOnlyActiveForSave = await invoke("project.get_active", {});
+    must(String(narratorOnlyActiveForSave.folder || "") ===
+      String(config.narrator_only_project_folder || ""),
+      "GEN-07 native active-project identity did not settle before narrator-only save.");
+    const narratorOnlyInitialProject = await invoke("project.get_active", {});
+    must(Number(narratorOnlyInitialProject.configured_character_voice_profile_count || 0) === 0 &&
+      Number(narratorOnlyInitialProject.character_count || 0) === 0 &&
+      narratorOnlyInitialProject.narrator_only_generation === true,
+      "GEN-07 fixture must automatically select narrator-only with zero configured character voice profiles and an available narrator.");
+
+    window.go("generate");
+    await waitFor("GEN-07 narrator-only Production controls", function () {
+      return document.querySelector("#generate")?.classList.contains("active") === true &&
+        Boolean(document.querySelector("#narratorOnlyGeneration")) &&
+        Boolean(document.querySelector("#startGenerate"));
+    }, 20000);
+    const narratorOnlyControl = document.querySelector("#narratorOnlyGeneration");
+    must(narratorOnlyControl.checked === true,
+      "GEN-07 narrator-only must automatically be selected for a new book with zero configured character voice profiles and an available narrator.");
+    await waitFor("GEN-07 per-book narrator-only opt-in persisted", async function () {
+      const active = await invoke("project.get_active", {});
+      return active.narrator_only_generation === true &&
+        Number(active.configured_character_voice_profile_count || 0) === 0;
+    }, 20000);
+    must(document.querySelector("#narratorOnlyGenerationStatus")?.textContent.includes("Automatically enabled because this book has no configured character voice profiles"),
+      "Production did not clearly report automatic narrator-only mode for this book.");
+
+    // Re-enter Production so all live readiness indicators are rebuilt from
+    // the saved project state, not the checkbox's transient DOM value.
+    window.go("dashboard");
+    await waitFor("GEN-07 Dashboard project identity", async function () {
+      const active = await invoke("project.get_active", {});
+      return String(active.folder || "") === String(config.narrator_only_project_folder || "");
+    }, 15000);
+    window.go("generate");
+    await waitFor("GEN-07 narrator-only start gate", function () {
+      const button = document.querySelector("#startGenerate");
+      const characterStatus = document.querySelector("#productionCharacterVoices")?.textContent || "";
+      return Boolean(button && !button.disabled &&
+        characterStatus.includes("0 configured character voice profiles"));
+    }, 20000);
+
+    const narratorOnlyJobsBefore = await invoke("job.list", {include_hidden:true});
+    const priorNarratorOnlyIds = new Set(
+      (Array.isArray(narratorOnlyJobsBefore) ? narratorOnlyJobsBefore : [])
+        .filter(job => job.type === "audiobook-generation" &&
+          String(job.project_folder || "") === String(config.narrator_only_project_folder || ""))
+        .map(job => String(job.job_id || ""))
+    );
+    document.querySelector("#startGenerate").click();
+    let narratorOnlyJobId = "";
+    await waitFor("real GEN-07 narrator-only full-generation job start", async function () {
+      const jobs = await invoke("job.list", {include_hidden:true});
+      const job = Array.isArray(jobs) ? jobs.find(item =>
+        item.type === "audiobook-generation" &&
+        String(item.project_folder || "") === String(config.narrator_only_project_folder || "") &&
+        !priorNarratorOnlyIds.has(String(item.job_id || "")) &&
+        Boolean(item.job_id)) : null;
+      if (!job) return false;
+      narratorOnlyJobId = String(job.job_id);
+      return true;
+    }, 30000);
+    let narratorOnlyJob = null;
+    await waitFor("real GEN-07 narrator-only full-book completion", async function () {
+      const jobs = await invoke("job.list", {include_hidden:true});
+      narratorOnlyJob = Array.isArray(jobs)
+        ? jobs.find(item => String(item.job_id || "") === narratorOnlyJobId) : null;
+      if (!narratorOnlyJob) return false;
+      const state = String(narratorOnlyJob.state || "").toLowerCase();
+      if (state === "failed" || state === "cancelled") {
+        throw new Error("GEN-07 narrator-only generation ended " + state + ": " +
+          String(narratorOnlyJob.error?.message || narratorOnlyJob.message || ""));
+      }
+      return state === "completed";
+    }, 360000);
+
+    const narratorOnlyHistory = await invoke("history.list", {});
+    const narratorOnlyHistoryRow = Array.isArray(narratorOnlyHistory)
+      ? narratorOnlyHistory.find(item => String(item.job_id || "") === narratorOnlyJobId) : null;
+    const narratorOnlyCompletedProject = await invoke("project.get_active", {});
+    const narratorOnlyExpectedOutput = normalizeOutputPath(config.narrator_only_output_path);
+    must(narratorOnlyJob &&
+      narratorOnlyJob.state === "completed" &&
+      normalizeOutputPath(narratorOnlyJob.output_path) === narratorOnlyExpectedOutput &&
+      narratorOnlyJob.result?.generation_mode === "narrator_only" &&
+      narratorOnlyJob.result?.narrator_only === true &&
+      Number(narratorOnlyJob.result?.character_voice_profile_count) === 0 &&
+      String(narratorOnlyJob.result?.voice_profile || narratorOnlyJob.result?.narrator || "") === narratorProfileName,
+      "GEN-07 narrator-only job did not preserve the saved narrator-only mode/identity in its durable result: " +
+        JSON.stringify(narratorOnlyJob));
+    must(narratorOnlyHistoryRow &&
+      narratorOnlyHistoryRow.state === "completed" &&
+      String(narratorOnlyHistoryRow.project_folder || "") === String(config.narrator_only_project_folder || "") &&
+      normalizeOutputPath(narratorOnlyHistoryRow.output_path) === narratorOnlyExpectedOutput,
+      "GEN-07 narrator-only generation did not retain the same project/job/output identity in History.");
+    must(narratorOnlyCompletedProject.completed === true &&
+      narratorOnlyCompletedProject.narrator_only_generation === true &&
+      narratorOnlyCompletedProject.generation_mode === "narrator_only" &&
+      Number(narratorOnlyCompletedProject.character_voice_profile_count) === 0 &&
+      normalizeOutputPath(narratorOnlyCompletedProject.output_path) === narratorOnlyExpectedOutput,
+      "GEN-07 narrator-only mode or completed output was not persisted to the owning project.");
+
+    const narratorOnlyPlayer = await invoke("player.get_active", {
+      folder:String(config.narrator_only_project_folder || "")
+    });
+    must(normalizeOutputPath(narratorOnlyPlayer.output_path) === narratorOnlyExpectedOutput &&
+      String(narratorOnlyPlayer.format || "").toLowerCase() === ".m4b" &&
+      Array.isArray(narratorOnlyPlayer.chapters) && narratorOnlyPlayer.chapters.length === 1 &&
+      String(narratorOnlyPlayer.narrator || "") === narratorProfileName,
+      "GEN-07 narrator-only M4B output, embedded chapter or saved narrator identity failed validation: " +
+        JSON.stringify(narratorOnlyPlayer));
+    window.go("player");
+    await waitFor("GEN-07 Audiobooks page activation", () =>
+      Boolean(document.querySelector("#player")?.classList.contains("active")), 15000);
+    let narratorOnlyCard = null;
+    await waitFor("GEN-07 narrator-only audiobook card", () => {
+      narratorOnlyCard = Array.from(document.querySelectorAll(
+        "#backendAudiobookLibrary .audiobook-library-card"
+      )).find(card => String(card.dataset.projectFolder || "") ===
+        String(config.narrator_only_project_folder || "")) || null;
+      return Boolean(narratorOnlyCard);
+    }, 20000);
+    must(narratorOnlyCard.querySelector("[data-open-project-folder]") &&
+      narratorOnlyCard.querySelector("[data-play-project-folder]"),
+      "GEN-07 narrator-only Audiobooks card is missing Open or Play.");
+    narratorOnlyCard.querySelector("[data-open-project-folder]").click();
+    await waitFor("GEN-07 narrator-only M4B loaded without autoplay", () => {
+      const audio = latestAcceptanceAudio();
+      return Boolean(audio && String(audio.dataset.projectFolder || "") ===
+        String(config.narrator_only_project_folder || "") && audio.readyState >= 1 && audio.paused);
+    }, 18000);
+    const narratorOnlyLoadedAudio = latestAcceptanceAudio();
+    must(audioUsesPath(narratorOnlyLoadedAudio, narratorOnlyPlayer.playback_output_path),
+      "GEN-07 Open loaded audio from a different project or output.");
+    narratorOnlyCard = Array.from(document.querySelectorAll(
+      "#backendAudiobookLibrary .audiobook-library-card"
+    )).find(card => String(card.dataset.projectFolder || "") ===
+      String(config.narrator_only_project_folder || "")) || null;
+    must(narratorOnlyCard && narratorOnlyCard.isConnected,
+      "GEN-07 narrator-only audiobook card was detached after Open.");
+    narratorOnlyCard.querySelector("[data-play-project-folder]").click();
+    const narratorOnlyAudio = await waitForRealPlayback(
+      "real narrator-only M4B audio in the Premium V2 Audiobooks player",
+      narratorOnlyPlayer.playback_output_path
+    );
+    must(narratorOnlyAudio === narratorOnlyLoadedAudio,
+      "GEN-07 Play switched away from the loaded narrator-only book.");
+    narratorOnlyAudio.pause();
+    record("xapp08_packaged_narrator_only_full_book_generation", true,
+      "The frozen app explicitly saved narrator-only for a zero-character-profile book, generated an actual dialogue-containing M4B using the saved narrator, persisted narrator-only mode/profile count in project/job/History, and opened the real output in Audiobooks playback.");
+
+    // Stage 6 AB-01: verify multiple compact cards against real completed M4B outputs,
+    // then exercise Open (load paused), Play (actual audio), and switching book identity.
+    const libraryFixtures = Array.isArray(config.audiobook_library_fixtures) ? config.audiobook_library_fixtures : [];
+    must(libraryFixtures.length >= 2, "Stage 6 Audiobooks Library requires two completed M4B fixtures.");
+    window.go("player");
+    await waitFor("Stage 6 Premium V2 Audiobooks library page", function () {
+      return document.querySelector("#player")?.classList.contains("active") === true;
+    }, 15000);
+    await waitFor("Stage 6 multiple completed audiobook cards", function () {
+      const cards = Array.from(document.querySelectorAll("#backendAudiobookLibrary .audiobook-library-card"));
+      return libraryFixtures.every(fixture => cards.some(card =>
+        String(card.dataset.projectFolder || "") === String(fixture.folder || "")));
+    }, 20000);
+    const libraryCards = Array.from(document.querySelectorAll("#backendAudiobookLibrary .audiobook-library-card"));
+    for (const fixture of libraryFixtures) {
+      const card = libraryCards.find(item =>
+        String(item.dataset.projectFolder || "") === String(fixture.folder || ""));
+      must(card, "A completed audiobook card is missing for " + fixture.title + ".");
+      const status = card.querySelector("[data-audiobook-status]");
+      const cover = card.querySelector(".audiobook-card-cover");
+      const openButton = card.querySelector("[data-open-project-folder]");
+      const playButton = card.querySelector("[data-play-project-folder]");
+      must(card.querySelector(".audiobook-card-title")?.textContent.trim() === fixture.title &&
+        status?.dataset.status === "completed" && status.textContent.trim() === "Completed" &&
+        cover && Boolean(cover.style.backgroundImage) &&
+        cover.style.backgroundImage.includes(fixture.cover_file_name) &&
+        openButton && playButton,
+        "Audiobook card title, actual status, cover association or Open/Play actions are incorrect: " +
+          JSON.stringify({title:fixture.title,status:status?.textContent,cover:cover?.style.backgroundImage}));
+    }
+    record("stage6_audiobooks_compact_multiple_real_output_cards", true,
+      "Multiple compact Premium V2 audiobook cards show each fixture's own cover, title, backend completion status and separate Open/Play actions.");
+
+    const firstFixture = libraryFixtures[0];
+    const firstCard = libraryCards.find(item =>
+      String(item.dataset.projectFolder || "") === String(firstFixture.folder || ""));
+    const existingAudioBeforeOpen = latestAcceptanceAudio();
+    const existingAudioFolder = String(existingAudioBeforeOpen?.dataset?.projectFolder || "");
+    const sameBookAlreadyLoaded = Boolean(existingAudioBeforeOpen?.src &&
+      existingAudioFolder === String(firstFixture.folder || ""));
+    const audioCountBeforeOpen = (window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__ || []).length;
+    must(firstCard, "First completed audiobook card is unavailable for the Open-action test.");
+    firstCard.querySelector("[data-open-project-folder]").click();
+    await waitFor("Stage 6 Open loads the selected audiobook without autoplay", function () {
+      const audio = latestAcceptanceAudio();
+      const audioCount = (window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__ || []).length;
+      const sameAudioReused = sameBookAlreadyLoaded && audio === existingAudioBeforeOpen;
+      const newAudioLoaded = !sameBookAlreadyLoaded && audio && audio !== existingAudioBeforeOpen && audioCount > audioCountBeforeOpen;
+      const title = document.querySelector("#player .player-grid > .card:first-child h2");
+      return Boolean(audio && (sameAudioReused || newAudioLoaded) && audio.readyState >= 1 && audio.paused &&
+        title && title.textContent.trim() === firstFixture.title);
+    }, 20000).catch(error => {
+      const audio = latestAcceptanceAudio();
+      const title = document.querySelector("#player .player-grid > .card:first-child h2")?.textContent.trim() || "";
+      const audioCount = (window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__ || []).length;
+      throw new Error("Open-state diagnostics: " + JSON.stringify({
+        expectedFolder:firstFixture.folder, existingAudioFolder, sameBookAlreadyLoaded,
+        audioCountBeforeOpen, audioCount, latestAudioFolder:String(audio?.dataset?.projectFolder || ""),
+        readyState:audio?.readyState ?? null, paused:audio?.paused ?? null,
+        mediaErrorCode:audio?.error?.code ?? null, source:audio?.currentSrc || audio?.src || "", title
+      }) + "; " + (error?.message || String(error)));
+    });
+    const firstOpenedAudio = latestAcceptanceAudio();
+    must(String(firstOpenedAudio?.dataset?.projectFolder || "") === String(firstFixture.folder || "") && firstOpenedAudio.paused,
+      "Open did not leave the selected project's own audio session loaded and paused.");
+    const firstOpenedData = await invoke("player.get_active", {folder:firstFixture.folder});
+    must(normalizeOutputPath(firstOpenedData.output_path) === normalizeOutputPath(firstFixture.output_path) &&
+      String(firstOpenedData.title || "") === firstFixture.title &&
+      String(firstOpenedData.author || "") === firstFixture.author &&
+      String(firstOpenedData.narrator || "") === firstFixture.narrator &&
+      String(firstOpenedData.playback_format || "").toLowerCase() === "mp3" &&
+      String(firstOpenedData.format || "").toLowerCase() === ".m4b" &&
+      Array.isArray(firstOpenedData.chapters) && firstOpenedData.chapters.length === 1 &&
+      String(firstOpenedData.chapters[0].title || "") === firstFixture.chapter_title &&
+      normalizeOutputPath(firstOpenedData.cover_path).endsWith(normalizeOutputPath(firstFixture.cover_file_name)),
+      "Open mapped the selected book to the wrong output, metadata, cover, narrator or embedded chapter: " +
+        JSON.stringify(firstOpenedData));
+    must(String(firstOpenedAudio.src || "").toLowerCase().endsWith(".mp3"),
+      "Open did not attach the browser-compatible playback derivative for the selected M4B.");
+    record("stage6_audiobooks_open_loads_correct_book_paused", true,
+      "Open selected the exact project and authoritative M4B output, resolved its checked MP3 playback derivative, retained cover/title/author/narrator/chapter association, and remained paused.");
+
+    const refreshedFirstCard = Array.from(document.querySelectorAll("#backendAudiobookLibrary .audiobook-library-card"))
+      .find(card => String(card.dataset.projectFolder || "") === String(firstFixture.folder || ""));
+    must(refreshedFirstCard, "The first audiobook card disappeared after Open refreshed the selected-card state.");
+    refreshedFirstCard.querySelector("[data-play-project-folder]").click();
+    await waitFor("Stage 6 Play starts actual audiobook audio", function () {
+      return Boolean(firstOpenedAudio.readyState >= 2 && firstOpenedAudio.currentTime > 0.05 &&
+        !firstOpenedAudio.paused && !firstOpenedAudio.error);
+    }, 20000);
+    firstOpenedAudio.pause();
+    record("stage6_audiobooks_play_action_starts_real_audio", true,
+      "The card's Play action started the selected book's actual decoded local audio; it was not a decorative or metadata-only control.");
+
+    const secondFixture = libraryFixtures[1];
+    const secondCard = Array.from(document.querySelectorAll("#backendAudiobookLibrary .audiobook-library-card"))
+      .find(item => String(item.dataset.projectFolder || "") === String(secondFixture.folder || ""));
+    must(secondCard, "The second audiobook card disappeared after selecting the first book.");
+    const audioCountBeforeSwitch = (window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__ || []).length;
+    secondCard.querySelector("[data-open-project-folder]").click();
+    await waitFor("Stage 6 switching to the second audiobook", function () {
+      const audio = latestAcceptanceAudio();
+      const title = document.querySelector("#player .player-grid > .card:first-child h2");
+      return Boolean((window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__ || []).length > audioCountBeforeSwitch &&
+        audio && audio.readyState >= 1 && audio.paused &&
+        title && title.textContent.trim() === secondFixture.title);
+    }, 20000);
+    const secondOpenedData = await invoke("player.get_active", {folder:secondFixture.folder});
+    must(firstOpenedAudio.paused &&
+      normalizeOutputPath(secondOpenedData.output_path) === normalizeOutputPath(secondFixture.output_path) &&
+      String(secondOpenedData.title || "") === secondFixture.title &&
+      String(secondOpenedData.author || "") === secondFixture.author &&
+      String(secondOpenedData.narrator || "") === secondFixture.narrator,
+      "Switching audiobook left stale audio or cross-associated metadata/output.");
+    record("stage6_audiobooks_switch_preserves_project_output_identity", true,
+      "Switching books paused the previous audio and loaded the second book's own M4B, cover and metadata without leaking the first project's identity.");
+
+    // AB-06: persist a measured position from real decoded audio before process exit.
+    const stage6PositionCard = Array.from(document.querySelectorAll("#backendAudiobookLibrary .audiobook-library-card"))
+      .find(card => String(card.dataset.projectFolder || "") === String(firstFixture.folder || ""));
+    must(stage6PositionCard, "The first audiobook card is unavailable for playback-position acceptance.");
+    stage6PositionCard.querySelector("[data-open-project-folder]").click();
+    await waitFor("Stage 6 position fixture opens paused", () => {
+      const audio = latestAcceptanceAudio();
+      return Boolean(audio && String(audio.dataset.projectFolder || "") === String(firstFixture.folder || "") &&
+        audio.readyState >= 1 && audio.paused);
+    }, 15000);
+    const stage6PositionAudio = latestAcceptanceAudio();
+    const stage6SpeedButton = Array.from(document.querySelectorAll("#player .player-grid .toolbar .segmented button"))
+      .find(button => button.textContent.trim() === "1.25×");
+    must(stage6SpeedButton, "The player speed control does not expose 1.25×.");
+    stage6SpeedButton.click();
+    const stage6VolumeControl = document.querySelector("#player .player-grid .toolbar input.range");
+    must(stage6VolumeControl, "The player volume control is unavailable.");
+    stage6VolumeControl.value = "42";
+    stage6VolumeControl.dispatchEvent(new Event("input",{bubbles:true}));
+    stage6VolumeControl.dispatchEvent(new Event("change",{bubbles:true}));
+    await waitFor("actual player controls persist 1.25× and 42% preferences", async () => {
+      const [settings, player] = await Promise.all([
+        invoke("settings.get", {}),
+        invoke("player.get_active", {folder:firstFixture.folder})
+      ]);
+      return Math.abs(Number(settings.player_rate)-1.25) < 0.01 &&
+        Math.abs(Number(settings.player_volume)-0.42) < 0.01 &&
+        Math.abs(Number(player.playback_rate)-1.25) < 0.01 &&
+        Math.abs(Number(player.playback_volume)-0.42) < 0.01 &&
+        Math.abs(Number(stage6PositionAudio.playbackRate)-1.25) < 0.01 &&
+        Math.abs(Number(stage6PositionAudio.volume)-0.42) < 0.02;
+    }, 12000);
+    record("stage6_player_volume_rate_persisted_before_restart", true,
+      "Real player speed and volume controls saved 1.25× and 42%; native Settings and player read-back acknowledged them.");
+
+    const stage6TargetPosition = 1.25;
+    must(Number(stage6PositionAudio.duration) > stage6TargetPosition + 1,
+      "The Stage 6 playback-position fixture is too short for a reliable restart assertion.");
+    stage6PositionAudio.currentTime = stage6TargetPosition;
+    await stage6PositionAudio.play();
+    await waitFor("position fixture has actually started", () => !stage6PositionAudio.paused, 5000);
+    stage6PositionAudio.pause();
+    let stage6SavedPlayer = null;
+    await waitFor("pause saves playback position to project state", async () => {
+      stage6SavedPlayer = await invoke("player.get_active", {folder:firstFixture.folder});
+      return Math.abs(Number(stage6SavedPlayer.playback_position_seconds) - stage6TargetPosition) < 0.35;
+    }, 12000);
+    record("stage6_playback_position_persisted_before_process_restart", true,
+      "Pause on the real decoded audiobook persisted its measured timestamp to the selected audiobook's own project state.");
+
+    // AB-05: the mini-player must operate the same Audio object and close only its dock.
+    await stage6PositionAudio.play();
+    window.go("dashboard");
+    const stage6PositionMini = document.querySelector("#miniPlayer");
+    await waitFor("mini-player appears after navigation", () =>
+      Boolean(stage6PositionMini && !stage6PositionMini.classList.contains("hidden") &&
+        stage6PositionMini.getClientRects().length), 8000);
+    const stage6PositionMiniPlay = stage6PositionMini.querySelector("#miniPlay");
+    must(stage6PositionMiniPlay, "The persistent mini-player Play/Pause control is missing.");
+    const stage6AudioCount = (window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__ || []).length;
+    stage6PositionMiniPlay.click();
+    await waitFor("mini-player pauses the same audiobook", () =>
+      stage6PositionAudio.paused && stage6PositionMiniPlay.textContent.trim() === "▶", 5000);
+    stage6PositionMiniPlay.click();
+    await waitFor("mini-player resumes the same audiobook", () =>
+      !stage6PositionAudio.paused && stage6PositionMiniPlay.textContent.trim() !== "▶", 5000);
+    must(latestAcceptanceAudio() === stage6PositionAudio &&
+      (window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__ || []).length === stage6AudioCount,
+      "Mini-player created a duplicate audio session or changed audiobook identity.");
+    document.querySelector("#hideMini")?.click();
+    await waitFor("manual mini-player close hides only the dock", () =>
+      stage6PositionMini.classList.contains("hidden"), 5000);
+    must(!stage6PositionAudio.paused && latestAcceptanceAudio() === stage6PositionAudio,
+      "Closing the mini-player stopped playback or replaced the active audiobook.");
+    record("stage6_mini_player_close_preserves_active_session", true,
+      "Closing the mini-player hid the dock but preserved the active audiobook and its media session.");
+    stage6PositionAudio.currentTime = stage6TargetPosition;
+    stage6PositionAudio.pause();
+    await waitFor("position is durably saved before process exit", async () => {
+      stage6SavedPlayer = await invoke("player.get_active", {folder:firstFixture.folder});
+      return Math.abs(Number(stage6SavedPlayer.playback_position_seconds) - stage6TargetPosition) < 0.35;
+    }, 12000);
+
+    window.go("dashboard");
+    await waitFor("Dashboard restored after Stage 5.5 Audiobooks acceptance", function () {
+      const page = document.querySelector("#dashboard");
+      return Boolean(page && page.classList.contains("active"));
+    }, 15000);
     await openProjectFromDashboard(config.project_folder, "Primary");
     await waitFor("Primary preview project restored after full-generation acceptance", async function () {
       const active = await invoke("project.get_active", {});
@@ -2151,33 +3590,102 @@
       return document.querySelector("#generate")?.classList.contains("active") === true &&
         Boolean(document.querySelector("#startGenerate"));
     }, 20000);
-    await waitFor("Stage 5.4 job-control metadata gate", function () {
-      const button = document.querySelector("#startGenerate");
-      return Boolean(button && !button.disabled);
-    }, 20000);
+    try {
+      await waitFor("Stage 5.4 job-control metadata gate", function () {
+        const button = document.querySelector("#startGenerate");
+        return Boolean(button && !button.disabled);
+      }, 20000);
+    } catch (gateError) {
+      const [activeGate, narratorGate, readinessGate, gateJobs] = await Promise.all([
+        invoke("project.get_active", {}).catch(error => ({error:String(error)})),
+        invoke("voice.select.get", {}).catch(error => ({error:String(error)})),
+        invoke("production.readiness", {}).catch(error => ({error:String(error)})),
+        invoke("job.list", {include_hidden:true}).catch(error => ({error:String(error)}))
+      ]);
+      const gateButton = document.querySelector("#startGenerate");
+      const gateDiagnostic = {
+        active:activeGate,
+        narrator:narratorGate,
+        readiness:readinessGate,
+        metadataStatus:document.querySelector("#productionMetadataStatus")?.textContent?.trim() || null,
+        generationStatus:document.querySelector("#generateStatus")?.textContent?.trim() || null,
+        button:gateButton ? {
+          disabled:gateButton.disabled,
+          title:gateButton.title,
+          text:gateButton.textContent.trim(),
+          ariaDisabled:gateButton.getAttribute("aria-disabled")
+        } : null,
+        jobs:Array.isArray(gateJobs) ? gateJobs.map(job => ({
+          job_id:job.job_id,
+          type:job.type,
+          state:job.state,
+          project_folder:job.project_folder,
+          title:job.title
+        })) : gateJobs
+      };
+      throw new Error(String(gateError?.message || gateError) +
+        ". Stage 5.4 metadata gate diagnostic=" + JSON.stringify(gateDiagnostic));
+    }
 
     const jobsBeforeControlGeneration = await invoke("job.list", {include_hidden:true});
     const previousControlIds = new Set((Array.isArray(jobsBeforeControlGeneration) ? jobsBeforeControlGeneration : [])
       .filter(job => job.type === "audiobook-generation" &&
         String(job.project_folder || "") === String(config.control_project_folder || ""))
       .map(job => String(job.job_id || "")));
-    document.querySelector("#startGenerate").click();
+    const controlGenerateButton = document.querySelector("#startGenerate");
+    const controlPreflight = {
+      project: await invoke("project.get_active", {}),
+      narrator: await invoke("voice.select.get", {}).catch(error => ({error:String(error)})),
+      readiness: await invoke("production.readiness", {}).catch(error => ({error:String(error)})),
+      button: controlGenerateButton ? {
+        disabled: controlGenerateButton.disabled,
+        title: controlGenerateButton.title,
+        text: controlGenerateButton.textContent.trim(),
+        ariaDisabled: controlGenerateButton.getAttribute("aria-disabled")
+      } : null
+    };
+    let controlStartResponse = null;
+    if (!controlGenerateButton) throw new Error("Stage 5.4 Start button disappeared before the real generation click.");
+    controlGenerateButton.click();
     let controlJobId = "";
     const readJob = async jobId => {
       const rows = await invoke("job.list", {include_hidden:true});
       return Array.isArray(rows) ? rows.find(item => String(item.job_id || "") === String(jobId || "")) : null;
     };
-    await waitFor("real Stage 5.4 control generation start", async function () {
-      const rows = await invoke("job.list", {include_hidden:true});
-      const job = Array.isArray(rows) ? rows.find(item =>
-        item.type === "audiobook-generation" &&
-        String(item.project_folder || "") === String(config.control_project_folder || "") &&
-        !previousControlIds.has(String(item.job_id || "")) &&
-        Boolean(item.job_id)) : null;
-      if (!job) return false;
-      controlJobId = String(job.job_id);
-      return true;
-    }, 30000);
+    try {
+      await waitFor("real Stage 5.4 control generation start", async function () {
+        const rows = await invoke("job.list", {include_hidden:true});
+        const job = Array.isArray(rows) ? rows.find(item =>
+          item.type === "audiobook-generation" &&
+          String(item.project_folder || "") === String(config.control_project_folder || "") &&
+          !previousControlIds.has(String(item.job_id || "")) &&
+          Boolean(item.job_id)) : null;
+        if (!job) return false;
+        controlJobId = String(job.job_id);
+        return true;
+      }, 30000);
+    } catch (startError) {
+      const activeAfterClick = await invoke("project.get_active", {}).catch(error => ({error:String(error)}));
+      const jobsAfterClick = await invoke("job.list", {include_hidden:true}).catch(error => ({error:String(error)}));
+      const generateStatus = document.querySelector("#generateStatus");
+      const statusText = document.querySelector("#generationStatus");
+      const diagnostic = {
+        preflight: controlPreflight,
+        activeAfterClick,
+        startResponse: controlStartResponse,
+        generateStatus: generateStatus ? generateStatus.textContent.trim() : null,
+        generationStatus: statusText ? statusText.textContent.trim() : null,
+        button: controlGenerateButton ? {
+          disabled: controlGenerateButton.disabled,
+          title: controlGenerateButton.title,
+          text: controlGenerateButton.textContent.trim(),
+          ariaDisabled: controlGenerateButton.getAttribute("aria-disabled")
+        } : null,
+        jobsAfterClick
+      };
+      throw new Error(String(startError?.message || startError) +
+        ". Stage 5.4 start diagnostic=" + JSON.stringify(diagnostic));
+    }
 
     const jobsButton = document.querySelector("#backgroundJobsButton");
     const jobsModal = document.querySelector("#backgroundJobsModal");

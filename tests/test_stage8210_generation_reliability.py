@@ -44,7 +44,8 @@ class Stage8210GenerationReliabilityTests(unittest.TestCase):
     def test_cancelled_or_failed_attempt_does_not_attach_stale_output_to_job(self):
         source = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         self.assertIn('output_path=str(actual) if valid and status != "cancelled"', source)
-        self.assertIn("and not summary.packaging_failed and not summary.chapters_failed else None", source)
+        self.assertIn("and not summary.packaging_failed and not summary.chapters_failed", source)
+        self.assertIn("and summary.chapters_completed == summary.chapters_total else None", source)
 
     def test_running_jobs_estimate_eta_only_after_progress_is_meaningful(self):
         source = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")

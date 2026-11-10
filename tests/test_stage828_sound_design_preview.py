@@ -652,5 +652,315 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
             })
 
 
+    def test_production_chapter_preview_applies_measured_first_paragraph_boundary(self):
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.ui.premium_v2_host import PremiumV2Bridge
+
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "chapter-preview.wav"
+            track = root / "chapter-music.wav"
+            source.write_bytes(b"narration" * 256)
+            track.write_bytes(b"music" * 256)
+            captured = {}
+
+            def mix_chapter(_source, _track, output, _volume, **kwargs):
+                captured["offset_ms"] = kwargs["start_offset_ms"]
+                Path(output).write_bytes(b"mixed audio" * 256)
+                return Path(output)
+
+            bridge = SimpleNamespace(_preview_cancel_events={})
+            state = {
+                "background_audio_mode": "manual",
+                "background_audio_enabled": True,
+                "background_audio_volume": 0.25,
+                "chapter_bgm_strategy": "custom",
+                "chapter_bgm_overrides": {
+                    "1": {
+                        "rule": "custom",
+                        "path": str(track),
+                        "volume": 0.25,
+                        "start_offset": "after_first_paragraph",
+                        "end_behavior": "continue_to_transition",
+                    }
+                },
+                "_preview_chapter_number": 1,
+                "_preview_chapter_index": 1,
+                "_preview_chapter_is_first": True,
+                "_preview_chapter_is_last": True,
+                "_preview_chapter_title": "Opening",
+                "_preview_chapter_text": "First paragraph.\n\nSecond paragraph.",
+                "_preview_first_paragraph_offset_ms": 4200,
+            }
+            with (
+                patch("app.ui.premium_v2_host.app_root", return_value=root),
+                patch("app.audio.library.validate_saved_audio_paths"),
+                patch("app.audio.assembler._duration_ms", return_value=20_000),
+                patch("app.audio.assembler._mix_chapter_bgm", side_effect=mix_chapter),
+            ):
+                output = PremiumV2Bridge._render_sound_design_preview(
+                    bridge, source, "paragraph-boundary-preview", state
+                )
+
+            self.assertTrue(output.is_file())
+            self.assertGreater(output.stat().st_size, 1024)
+            self.assertEqual(captured["offset_ms"], 4200)
+            self.assertEqual(
+                state["_preview_sound_configuration"]["bgm_enabled"], True
+            )
+
+    def test_production_chapter_preview_fails_closed_without_measured_paragraph_boundary(self):
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.ui.premium_v2_host import PremiumV2Bridge
+
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "chapter-preview.wav"
+            track = root / "chapter-music.wav"
+            source.write_bytes(b"narration" * 256)
+            track.write_bytes(b"music" * 256)
+            bridge = SimpleNamespace(_preview_cancel_events={})
+            state = {
+                "background_audio_mode": "manual",
+                "background_audio_enabled": True,
+                "chapter_bgm_strategy": "custom",
+                "chapter_bgm_overrides": {
+                    "1": {
+                        "rule": "custom", "path": str(track),
+                        "start_offset": "after_first_paragraph",
+                    }
+                },
+                "_preview_chapter_number": 1,
+                "_preview_chapter_index": 1,
+                "_preview_chapter_title": "Opening",
+                "_preview_first_paragraph_offset_ms": None,
+            }
+            with (
+                patch("app.ui.premium_v2_host.app_root", return_value=root),
+                patch("app.audio.library.validate_saved_audio_paths"),
+                patch("app.audio.assembler._duration_ms", return_value=20_000),
+                patch("app.audio.assembler._mix_chapter_bgm") as mixer,
+            ):
+                with self.assertRaisesRegex(ValueError, "could not verify an exact audio boundary"):
+                    PremiumV2Bridge._render_sound_design_preview(
+                        bridge, source, "missing-paragraph-boundary", state
+                    )
+            mixer.assert_not_called()
+
+    def test_production_chapter_preview_rejects_paragraph_boundary_after_preview_end(self):
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.ui.premium_v2_host import PremiumV2Bridge
+
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "chapter-preview.wav"
+            track = root / "chapter-music.wav"
+            source.write_bytes(b"narration" * 256)
+            track.write_bytes(b"music" * 256)
+            bridge = SimpleNamespace(_preview_cancel_events={})
+            state = {
+                "background_audio_mode": "manual",
+                "background_audio_enabled": True,
+                "chapter_bgm_strategy": "custom",
+                "chapter_bgm_overrides": {
+                    "1": {
+                        "rule": "custom", "path": str(track),
+                        "start_offset": "after_first_paragraph",
+                    }
+                },
+                "_preview_chapter_number": 1,
+                "_preview_chapter_index": 1,
+                "_preview_chapter_title": "Opening",
+                "_preview_first_paragraph_offset_ms": 20_000,
+            }
+            with (
+                patch("app.ui.premium_v2_host.app_root", return_value=root),
+                patch("app.audio.library.validate_saved_audio_paths"),
+                patch("app.audio.assembler._duration_ms", return_value=20_000),
+                patch("app.audio.assembler._mix_chapter_bgm") as mixer,
+            ):
+                with self.assertRaisesRegex(ValueError, "ends before the first-paragraph boundary"):
+                    PremiumV2Bridge._render_sound_design_preview(
+                        bridge, source, "late-paragraph-boundary", state
+                    )
+            mixer.assert_not_called()
+
+
+    def test_production_preview_can_force_exact_paragraph_boundaries_in_tts_units(self):
+        from app.tts.preview import _preview_units
+
+        class PreviewProvider:
+            recommended_preview_chunk_chars = 1200
+            recommended_preview_chunk_sentences = 12
+
+            def split_for_cast(self, text, voice, dialogue_assignments=None):
+                return [(text, voice)]
+
+        text = (
+            "The first paragraph has a complete first sentence. "
+            "It has a second sentence too.\n\n"
+            "The second paragraph should not be merged into the first preview unit."
+        )
+        units = _preview_units(
+            text, PreviewProvider(), "Narrator", None, max_chars=1200,
+            preserve_paragraph_boundaries=True,
+        )
+
+        self.assertEqual(len(units), 2)
+        self.assertTrue(units[0][0].endswith("\n\n"))
+        self.assertTrue(units[1][0].startswith("The second paragraph"))
+
+
+    def test_preview_boundary_preservation_is_scoped_to_selected_chapter_based_assignment(self):
+        from app.ui.premium_v2_host import _preview_requires_paragraph_boundary
+
+        base = {
+            "_include_sound_design_preview": True,
+            "_preview_chapter_number": 2,
+            "_preview_chapter_id": "chapter-two",
+            "chapter_bgm_strategy": "custom",
+            "chapter_bgm_overrides": {
+                "chapter-two": {"rule": "custom", "start_offset": "after_first_paragraph"},
+                "1": {"rule": "custom", "start_offset": "immediate"},
+            },
+        }
+        self.assertTrue(_preview_requires_paragraph_boundary(base))
+
+        no_bgm = {**base, "chapter_bgm_overrides": {"chapter-two": {"rule": "none"}}}
+        self.assertFalse(_preview_requires_paragraph_boundary(no_bgm))
+        same_bgm = {**base, "chapter_bgm_strategy": "same"}
+        self.assertFalse(_preview_requires_paragraph_boundary(same_bgm))
+        voice_only = {
+            **base,
+            "background_audio_mode": "off",
+            "background_audio_enabled": False,
+        }
+        self.assertFalse(_preview_requires_paragraph_boundary(voice_only))
+        no_sound_preview = {**base, "_include_sound_design_preview": False}
+        self.assertFalse(_preview_requires_paragraph_boundary(no_sound_preview))
+        legacy_number_fallback = {
+            **base,
+            "_preview_chapter_id": "missing-id",
+            "chapter_bgm_overrides": {
+                "2": {"rule": "custom", "start_offset": "after_first_paragraph"}
+            },
+        }
+        self.assertTrue(_preview_requires_paragraph_boundary(legacy_number_fallback))
+
+
+    def test_full_book_mix_preview_audio_matches_final_assembly_for_saved_chapter_bgm(self):
+        import json
+        import math
+        import struct
+        import subprocess
+        import wave
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from app.audio.assembler import assemble_m4b, ffmpeg_path
+        from app.ui.full_book_preview import _render_full_book_preview
+
+        def write_tone(path, frequency, seconds):
+            sample_rate = 24000
+            frames = int(sample_rate * seconds)
+            samples = b"".join(
+                struct.pack("<h", int(9000 * math.sin(2 * math.pi * frequency * index / sample_rate)))
+                for index in range(frames)
+            )
+            with wave.open(str(path), "wb") as output:
+                output.setnchannels(1)
+                output.setsampwidth(2)
+                output.setframerate(sample_rate)
+                output.writeframes(samples)
+
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            chapter_dir = root / "001_Opening"
+            chunk_dir = chapter_dir / "chunks"
+            chunk_dir.mkdir(parents=True)
+            first_chunk = chunk_dir / "00001.wav"
+            second_chunk = chunk_dir / "00002.wav"
+            music = root / "chapter-music.wav"
+            write_tone(first_chunk, 330, 1.0)
+            write_tone(second_chunk, 440, 1.0)
+            write_tone(music, 220, 3.0)
+            (chapter_dir / "narration.json").write_text(
+                json.dumps({"narration_text":"First paragraph ends here.\n\nSecond paragraph follows."}),
+                encoding="utf-8",
+            )
+            (chapter_dir / "chunk_manifest.json").write_text(json.dumps({"chunks":[
+                {"file":first_chunk.name,"text":"First paragraph ends here.\n\n"},
+                {"file":second_chunk.name,"text":"Second paragraph follows."},
+            ]}), encoding="utf-8")
+            music.with_name(music.name + ".license.json").write_text(
+                json.dumps({"role":"music","category":"calm"}), encoding="utf-8"
+            )
+            overrides = {
+                "1": {
+                    "rule":"custom", "path":str(music), "volume":0.30,
+                    "start_offset":"after_first_paragraph", "end_behavior":"stop_immediately",
+                }
+            }
+            state = {
+                "background_audio_mode":"manual", "background_audio_enabled":True,
+                "background_audio_volume":0.30, "narration_audio_volume":1.0,
+                "sound_cue_volume":0.25, "background_audio_fade_in":0.0,
+                "background_audio_fade_out":0.0, "chapter_transition_sound":False,
+                "chapter_bgm_strategy":"custom", "chapter_bgm_overrides":overrides,
+                "audio_bitrate":128, "narration_speed":1.0,
+            }
+            metadata = {
+                "title":"Parity Book", "author":"Author", "narrator":"Narrator",
+                "publisher":"Publisher", "language":"en", "genre":"Audiobook",
+            }
+            preview_output = root / "preview.m4b"
+            final_output = root / "final.m4b"
+
+            class Host:
+                def __init__(self):
+                    self.updates = []
+
+                def _job_update(self, job_id, **changes):
+                    self.updates.append((job_id, changes))
+
+            host = Host()
+            _render_full_book_preview(
+                host, "preview-job", object(), [chapter_dir], ["Opening"],
+                preview_output, "Parity Book", "Author", metadata, 128, state,
+            )
+            self.assertEqual(host.updates[-1][1]["state"], "completed")
+            self.assertTrue(preview_output.is_file())
+
+            assemble_m4b(
+                [chapter_dir], final_output, "Parity Book", "Author", None, ["Opening"],
+                metadata=metadata, bitrate=128, narration_speed=1.0,
+                background_audio_path=None, background_audio_volume=0.30,
+                narration_volume=1.0, cue_audio_volume=0.25,
+                background_audio_fade_in=0.0, background_audio_fade_out=0.0,
+                ambience_audio_path=None, ambience_audio_volume=0.10,
+                background_audio_mode="manual", auto_music_style="auto",
+                auto_music_variation=None, chapter_transition_sound=False,
+                story_effects_enabled=False, story_effect_volume=0.22,
+                sound_cue_style="classic-book", opening_cue_path=None,
+                page_turn_cue_path=None, ending_cue_path=None,
+                chapter_bgm_overrides=overrides, chapter_bgm_strategy="custom",
+            )
+
+            def decode(path):
+                result = subprocess.run(
+                    [ffmpeg_path(), "-v", "error", "-i", str(path), "-vn",
+                     "-ac", "1", "-ar", "24000", "-f", "s16le", "-"],
+                    capture_output=True, check=True,
+                )
+                return result.stdout
+
+            self.assertEqual(decode(preview_output), decode(final_output))
+
+
 if __name__ == "__main__":
     unittest.main()

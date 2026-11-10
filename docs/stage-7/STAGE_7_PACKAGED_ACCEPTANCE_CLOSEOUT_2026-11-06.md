@@ -1,0 +1,121 @@
+# Stage 7 — Packaged Acceptance Closeout Candidate
+
+**Audit date:** 6 November 2026  
+**Working branch:** `stage-7/step-6-safe-auto-fallback`  
+**Candidate source head before this checkpoint record:** `7fba1b24718cbfaa775619b629cf584adc1bed0e`  
+**Latest packaged feature checkpoint:** #2625, commit `544f0153d276d78c8f12d815e2ccbcf69c6ee049`
+
+## Purpose
+
+Record the exact latest Stage 7 candidate, its new Qwen hardware workflow wiring, and the remaining matching-head package and physical-device gates. This document does not claim Stage 7 completion.
+
+## Previous packaged checkpoint
+
+Run #2625 passed on commit `544f0153d276d78c8f12d815e2ccbcf69c6ee049`:
+
+- Windows regression job passed.
+- Windows application build/package job passed.
+- Frozen-app and packaged Sound Design/Music Library acceptance passed, including Production Preview chapter selection.
+- Installer, portable package, SHA-256 manifest, and Defender evidence were uploaded.
+- Bundled Piper benchmark artifact reported 12.852 seconds of generated audio in 3.813 seconds, RTF 0.297x, using ONNX CPUExecutionProvider on the hosted Windows runner. This is a CPU benchmark, not GPU proof.
+
+Run: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42231677314
+
+## Qwen accelerator workflow correction
+
+The Stage 7 audit found both accelerator acceptance workflows were not correctly integrated with the active Stage 7 branch:
+
+- AMD/Intel workflow was still scoped to the Stage 3 branch.
+- NVIDIA workflow was manual-only.
+
+Both workflows have been corrected to run on relevant Qwen path changes under `stage-7/**`, while retaining manual dispatch.
+
+- AMD/Intel workflow commit: `12a1e37db4583d2c241b85d2c93517707a078b9f`; test CI #2626 passed.
+  - CI: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42236126629
+  - Real AMD/Intel hardware run #9 remains queued: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42236126768
+- NVIDIA workflow commit: `7fba1b24718cbfaa775619b629cf584adc1bed0e`; test CI #2627 passed.
+  - CI: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42236144051
+  - Real NVIDIA hardware run #1 remains queued: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42236144535
+
+Both #2626 and #2627 ran the full regression suite: **1,258 tests passed** on each. Their Windows build jobs were skipped because these were ordinary workflow-wiring commits, not artifact-checkpoint commits. The real hardware jobs are queued; no accelerator timing or hardware pass is claimed until those jobs execute and upload evidence.
+
+## Required matching-head checkpoint
+
+This record is committed with an `[artifact-checkpoint]` message so the Windows build workflow runs both jobs against the same new HEAD:
+
+1. Full Windows regression suite.
+2. Frozen Windows application verification and packaged feature acceptance.
+3. Installer and portable application packaging.
+4. SHA-256 manifest, Defender scan, and artifact upload.
+
+Do not reuse #2625 package artifacts as matching-head acceptance for the later workflow commits.
+
+## Remaining Stage 7 acceptance
+
+1. **Steps 1–3 — Model inventory, storage and lifecycle:** retain existing implementation and passing regression evidence; complete matching-head packaged acceptance and actual installed-Windows checks for individual Piper/Kokoro/Qwen removal, shared Chatterbox/Qwen runtime removal, preserved model weights, voice profiles, projects and user assets.
+2. **Step 2 — Storage:** verify configurable roots, file inventory, migration, interrupted recovery, disconnected-drive handling and safe cleanup in the installed application. CI-only evidence is not a manual installed-app pass.
+3. **Step 4 — Hardware detection:** automated runtime-policy regression is green. Physical NVIDIA, AMD discrete/APU/iGPU and Intel Arc/Core Ultra validation remains device-dependent and must be recorded only for devices actually tested.
+4. **Step 5 — Performance Center:** verify persistent benchmark history, repeat/export, resource snapshots, PC-to-PC comparison/import, and truthful active backend/device reporting in the packaged app. Hardware scan must not be presented as a synthesis benchmark.
+5. **Step 6 — Optimization/Qwen:** run real warmed 30-second Qwen 1.7B VoiceDesign acceptance on supported NVIDIA, AMD ROCm and Intel XPU hardware. Require actual successful inference, correct backend telemetry, audio artifact and measured time. Target is under 60 seconds without reducing voice quality. CPU fallback must be labelled CPU and must not count as GPU acceptance.
+6. **Step 7 — Integration/release:** verify cross-module integration, Premium V2 UI behavior and no regressions to accepted Stage 1–6 workflows; update all execution records and the master register; run final installer/portable acceptance on the exact release commit.
+
+## Acceptance rule
+
+A green source regression run, a hosted CPU benchmark, a queued self-hosted job, or an earlier packaged checkpoint is not a substitute for the exact evidence required above.
+
+**Status: IN PROGRESS — 1,258-test regression is green; Qwen hardware runs are queued; matching-head Windows packaging and installed-device acceptance remain open.**
+
+## 2026-11-06 — exact matching-head package closeout #2641
+
+- Candidate commit: `b1da6a8d4aee39e83ca9f781e22b92d26bb4859f`.
+- GitHub Actions #2641 completed successfully: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42248725120
+- Full Windows regression: **1,258 tests passed** (66.317 seconds).
+- Focused Stage 6 History/Task Manager preflight and isolated native Qt lifecycle regression passed.
+- Frontend and installer JavaScript syntax checks passed.
+- Frozen application verification, bundled voice/critical module checks and the packaged Sound Design/Music Library acceptance (including Stage 5.3 generation UI and responsive viewport suite) passed.
+- Inno Setup installer and functional HTML installer packaging passed.
+- SHA-256 manifest generation and Microsoft Defender scan passed.
+- Installer, portable package and real Piper benchmark JSON artifacts uploaded successfully.
+- Artifacts: installer #2641 (884,310,710 bytes); portable #2641 (1,368,242,573 bytes); SHA-256 manifest (777 bytes); Piper benchmark evidence (806 bytes).
+- Publish verified installer release step was skipped by workflow policy; uploaded verified artifacts remain available from the Actions run.
+- User-directed physical installation checks remain WAIVED / NOT RUN. No claim is made of manual install or post-install destructive model checks.
+
+**Disposition:** EXACT-HEAD REGRESSION AND PACKAGED WINDOWS ACCEPTANCE PASS on #2641. Step 7 software/package gate is current through #2641; physical accelerator acceptance remains separate and open.
+
+## Matching-head acceptance update — 6 November 2026
+
+- Final responsive acceptance correction is included in candidate `b1da6a8d4aee39e83ca9f781e22b92d26bb4859f`.
+- Build Windows App #2641 passed both jobs: 1,258 regression tests, focused Stage 6 responsive preflight, Qt lifecycle regression, frozen app verification, packaged Sound Design/Music Library acceptance, installer and portable package creation, SHA-256 manifest, Microsoft Defender scan and artifact upload.
+- Exact run: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42248725120
+- Manual installed-Windows acceptance remains user-waived/not run.
+- Real GPU acceptance remains pending: NVIDIA run #1 and AMD/Intel run #9 have not started because their self-hosted jobs are queued. No GPU target or under-60-second Qwen performance result is claimed.
+
+## Final all-ledger exact-head checkpoint request — 6 November 2026
+
+All seven execution ledgers, the master requirement/bug/change register and this closeout record now include the successful #2641 package evidence. This commit requests one final full regression and Windows installer/portable package run against the combined documentation head. Physical installed-app checks remain user-waived/not run. Real NVIDIA/AMD/Intel hardware acceptance remains pending because the self-hosted jobs have not started; queued jobs are not accepted as results.
+
+## Cross-step Qwen verification update — 7 November 2026
+
+- Companion hosted Windows CPU Qwen acceptance workflow [run #1](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42301856102) passed its real inference flow and uploaded audio/diagnostics. Actual output was valid 30.000-second mono 24 kHz PCM; warmed synthesis took 268.184 seconds, so under-60-second target was not met on CPU.
+- Source CI [#2662](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/42301856057) passed 38 focused tests and 1,258 full regression tests.
+- Real NVIDIA/AMD/Intel hardware acceptance remains queued and is not represented as passed. Physical installed-app checks remain user-waived/not run.
+
+
+## User decision — accelerator and physical testing deferred (7 November 2026)
+
+The user confirms the necessary hardware is not currently available and directs that the physical accelerator checks be performed later. This is **DEFERRED / NOT RUN**, not a pass and not a permanent waiver.
+
+- NVIDIA CUDA Qwen 1.7B under-60-second preview: deferred until suitable NVIDIA hardware is available.
+- AMD ROCm Qwen 1.7B under-60-second preview: deferred until suitable AMD hardware is available.
+- Intel XPU Qwen 1.7B under-60-second preview: deferred until suitable Intel hardware is available.
+- Physical installed-Windows acceptance: deferred for the user's later hands-on test.
+- Hosted CPU real Qwen evidence remains 30.000s output at 268.184s warmed synthesis; it does not meet the performance target.
+
+The exact-head #2672 checkpoint is still running at the time of this ledger update. Its regression job passed; frozen-app verification, bundled-module verification and packaged Sound Design/Music Library acceptance passed; functional HTML installer packaging and remaining release-artifact gates are still running/pending.
+
+**Disposition:** pending successful #2672, Stage 7 may be closed for software implementation, regression and packaged acceptance, with GPU performance and physical installed-app checks clearly carried forward as deferred acceptance. No GPU performance pass is claimed. Stage 8 may start on that basis.
+
+
+## Final deferred-hardware documentation-head checkpoint request — 7 November 2026
+
+The user has approved deferring real GPU and physical installed-app tests until the required hardware is available. These remain explicit carry-forward checks, not passed criteria. The four closeout records now reflect this decision. Run a fresh exact-head full regression and Windows package checkpoint against this updated documentation head before declaring the Stage 7 software/package closeout ready for Stage 8.

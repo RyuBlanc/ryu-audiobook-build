@@ -16,6 +16,7 @@ from PySide6.QtSvg import QSvgRenderer
 
 ROOT = Path(__file__).resolve().parent
 from app.version import APP_VERSION
+from scripts.qt_payload_pruner import prune_optional_qt_assets
 
 BUILD_NUMBER = os.environ.get("RYU_BUILD_NUMBER", "dev")
 INSTALLER_VERSION_FILE = ROOT / "installer" / "version.generated.iss"
@@ -415,6 +416,12 @@ args = [
     "--collect-all=onnxruntime",
     "--collect-all=kokoro_onnx",
     "--collect-all=espeakng_loader",
+    "--exclude-module=PySide6.QtQuick",
+    "--exclude-module=PySide6.QtQml",
+    "--exclude-module=PySide6.QtQuick3D",
+    "--exclude-module=PySide6.QtQuick3DPhysics",
+    "--exclude-module=PySide6.QtPdf",
+    "--exclude-module=PySide6.QtShaderTools",
     "--hidden-import=PySide6.QtCore",
     "--hidden-import=PySide6.QtGui",
     "--hidden-import=PySide6.QtWidgets",
@@ -439,6 +446,12 @@ args = [
     f"--add-data={ROOT / "app" / "tts" / "chatterbox_worker.py"};app/tts",
     f"--add-data={ROOT / "app" / "tts" / "expression.py"};app/tts",
     f"--add-data={ROOT / "app" / "tts" / "qwen_character_worker.py"};app/tts",
+    # Qwen runs in its own Python venv outside the frozen EXE. Its accelerator
+    # selector reads saved performance history through app.core.paths, so the
+    # complete core package must exist as physical .py files under _internal;
+    # collecting it only into PyInstaller's PYZ archive is not visible to that
+    # external interpreter.
+    f"--add-data={ROOT / "app" / "core"};app/core",
     *[
         f"--add-data={ROOT / (module.replace('.', '/') + '.py')};{module.rsplit('.', 1)[0].replace('.', '/')}"
         for module in required_modules
@@ -473,3 +486,6 @@ else:
     )
 
 PyInstaller.__main__.run(args)
+
+pruned_optional_assets = prune_optional_qt_assets(ROOT / "dist" / "Ryu's Audiobook")
+print("Removed optional QtWebEngine DevTools debug resources:", pruned_optional_assets)

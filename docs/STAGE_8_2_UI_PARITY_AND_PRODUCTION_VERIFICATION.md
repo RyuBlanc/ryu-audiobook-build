@@ -1,6 +1,6 @@
 # Stage 8.2 — Full UI parity and production verification
 
-**Branch:** `fix/import-qa-speaker-hover-hardware`  
+**Historical branch snapshot:** `fix/import-qa-speaker-hover-hardware`  
 **Started:** 2026-10-19  
 **Baseline commit:** `8357e2eef8a0a217077f54b14bfaf0298e258fab`  
 **Baseline Windows build:** [Build #493](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39186820298) — successful
@@ -142,6 +142,23 @@ The remaining implementation is frozen to six packages. Defects found during a p
 5. **Package 5 / Stage 8.2.11 — Windows release validation.** Build installer and portable packages from the same candidate; verify bundled assets, launch, local playback, and compact-window behavior. CI packaging is not manual runtime acceptance.
 6. **Package 6 / Stage 8.2.12 — Final acceptance/release.** Run full regression and packaging workflows, compare UI parity to approved HTML, capture artifact names/sizes/checksums, resolve release blockers, and provide the final verified application.
 
+
+
+### Help & Guide — user-facing documentation update (added; existing plan unchanged)
+
+- [ ] Update the in-app Help & Guide content to match the latest accepted requirements and the actual Version 1.2.0 application behavior. This is an addition to the existing Stage 8 work, not a new package or a change to package order.
+- [ ] Explain the complete user journey in plain language: create/open a project, import a book, organize and edit chapters, configure voices and profiles, assign characters, manage pronunciation, configure background music and sound cues, preview, generate, play, and locate completed audiobooks.
+- [ ] Add clear, task-based instructions for Models Center and Performance Center, including where models are installed, how to inspect model/runtime status, verify or repair installations, understand hardware/backend availability, and interpret measured benchmark results. Explain that acceleration and performance depend on supported hardware; do not promise unsupported GPU behavior or performance targets.
+- [ ] Explain project settings, storage/output locations, default-versus-project settings, supported preview durations (10/30/60/90 seconds), audio output options, local-first/offline behavior, and which providers require network access or credentials.
+- [ ] Document real generation controls and states: readiness checks, progress, elapsed time/ETA, pause/resume checkpoints, cancel, retry/recovery, provider/network failures, empty-chapter handling, and where to find job history and outputs.
+- [ ] Add practical troubleshooting steps for missing models/dependencies, unavailable providers, invalid reference audio or permissions, preview failures, interrupted jobs, missing output files, and storage/path problems. Each guide should state what the user can safely try and when to inspect logs or contact support; avoid destructive advice.
+- [ ] Use short sections, descriptive headings, numbered steps, concise explanations, consistent names matching the UI, and examples where they clarify a task. Explain technical terms when first used; avoid internal implementation details and developer-only language.
+- [ ] Keep screenshots/illustrations aligned with the current approved UI only if they can be maintained accurately. Do not include stale controls, outdated layouts, placeholder screenshots, or instructions for features that are not implemented.
+- [ ] Verify every instruction against the current application and latest requirement register. Mark unsupported or deferred behavior honestly, including hardware-specific acceptance that remains deferred; never present planned functionality as available.
+- [ ] Check spelling, navigation/link targets, version references, and consistency across Help & Guide pages. Ensure the guide is readable at normal and reduced window sizes and can be found from the app's Help entry point.
+- [ ] Acceptance evidence: record the reviewed app commit/version, guide sections updated, UI paths checked, links/screenshots checked, and any known limitations. Help & Guide content is not accepted merely because text was added.
+
+
 ## Current preview-duration contract clarification — October 25, 2026
 
 The active native Voice Studio selector, desktop preview bridge, persisted Settings validation, HTML adapter, and current preview contract tests support **10, 30, 60, and 90 seconds**. Requests for 20 or 45 seconds are rejected before a worker starts. Older Stage 8.2 build notes above document an earlier planned target set and should be read as historical evidence, not as the current runtime contract.
@@ -156,3 +173,14 @@ The active native Voice Studio selector, desktop preview bridge, persisted Setti
 - Added a regression test that exercises custom BGM on one chapter, no BGM on another, scene cue insertion, and output duration bounds. Static contract tests cover the bridge, adapter, generation manager, and assembler connections.
 - **Validation pending:** the latest changes must pass a full Windows CI run. Interactive playback, sound levels, and all 15 destinations still require packaged Windows acceptance. Do not mark Package 2 complete until CI passes and the mix behavior has been verified against actual user projects.
 
+
+
+---
+
+## Current Stage 8 authority and continuation note
+
+This file preserves the historical Stage 8.2.1–8.2.4 audit and evidence. Its older branch name and status snapshot must not be treated as the current execution state.
+
+The controlling current plan is the approved six-step sequence recorded in `docs/FINAL_COMPLETION_ROADMAP.md`; the live requirement-by-requirement evidence, PR lineage, Sound Design fixes, Help & Guide status, responsive matrix and remaining blockers are recorded in `docs/stage-8/STAGE-8-REQUIREMENT-TRACEABILITY.md`.
+
+Current working branch: `stage-7/step-6-safe-auto-fallback`. Do not restart completed stages or merge stacked PRs blindly. The latest candidate must pass a matching-head full regression run and Windows artifact-checkpoint build; older Build #493/#637/#642 evidence is historical and does not validate the current candidate.

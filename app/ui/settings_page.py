@@ -5,7 +5,7 @@ import re
 import shutil
 import tempfile
 
-from PySide6.QtCore import QSettings, Qt, QUrl
+from PySide6.QtCore import QSettings, Qt, QUrl, QThread, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
@@ -26,8 +26,62 @@ from PySide6.QtWidgets import (
 from app.core.paths import (
     app_root, audio_library_root, audiobooks_root, default_audiobooks_root,
     default_library_root, library_root, models_root, voices_root,
+    default_models_root, default_runtimes_root, default_model_cache_root,
+    default_temporary_root, runtimes_root, model_cache_root, temporary_root,
 )
 from app.version import full_version
+
+from app.core.storage_migration import migrate_storage_root, StorageMigrationError
+
+
+class StorageMigrationWorker(QThread):
+    progress = Signal(str)
+    succeeded = Signal(str, str)
+    failed = Signal(str)
+
+    def __init__(self, source: Path, destination: Path, settings_key: str, parent=None):
+        super().__init__(parent)
+        self.source = Path(source)
+        self.destination = Path(destination)
+        self.settings_key = settings_key
+
+    def run(self) -> None:
+        try:
+            settings = QSettings("RyuBlanc", "Ryu's Audiobook")
+
+            def persist(path: Path) -> None:
+                settings.setValue(self.settings_key, str(path))
+                settings.sync()
+                if settings.status() != QSettings.Status.NoError:
+                    raise StorageMigrationError("Windows did not confirm the storage setting write.")
+
+            def validate(path: Path) -> bool:
+                if not path.is_dir():
+                    return False
+                import os
+                for folder, _dirs, files in os.walk(path, followlinks=False):
+                    for name in files:
+                        item = Path(folder) / name
+                        if item.is_symlink() or not item.is_file():
+                            return False
+                        with item.open("rb") as stream:
+                            stream.read(1)
+                return True
+
+            plan = migrate_storage_root(
+                self.source, self.destination, persist_root=persist,
+                validate_root=validate, reserve_bytes=512 * 1024 * 1024,
+                journal_dir=app_root() / "Settings" / "Storage Migrations",
+                settings_key=self.settings_key,
+                progress=lambda stage, done, total: self.progress.emit(
+                    f"Storage migration {stage}: {done}/{total} files"
+                ),
+            )
+            self.succeeded.emit(str(plan.destination), self.settings_key)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
 
 
 def _storage_space_summary(folder: Path) -> str:
@@ -41,6 +95,40 @@ def _storage_space_summary(folder: Path) -> str:
         return f"Unavailable — {exc}"
     gib = 1024 ** 3
     return f"{usage.free / gib:.1f} GB free of {usage.total / gib:.1f} GB"
+
+
+def _storage_capacity_summary(folder: Path) -> str:
+    """Show used, free and total bytes for the filesystem containing a storage root."""
+    path = Path(folder).expanduser()
+    if not path.is_dir():
+        return "Unavailable — folder missing or drive disconnected"
+    try:
+        usage = shutil.disk_usage(str(path))
+        used = max(0, int(usage.total) - int(usage.free))
+        gib = 1024 ** 3
+        return f"{used / gib:.1f} GB used · {usage.free / gib:.1f} GB free · {usage.total / gib:.1f} GB total"
+    except OSError:
+        return "Unavailable — filesystem capacity could not be read"
+
+
+def _storage_root_change_error(current: Path, destination: Path) -> str:
+    """Refuse to orphan data until the verified migration workflow is available."""
+    source = Path(current).expanduser()
+    target = Path(destination).expanduser()
+    try:
+        if source.resolve() == target.resolve():
+            return ""
+    except OSError:
+        if str(source).casefold() == str(target).casefold():
+            return ""
+    if not source.is_dir():
+        return "The current storage location is unavailable. Reconnect its drive before changing the location so installed data is not orphaned."
+    try:
+        if any(source.iterdir()):
+            return "This location contains existing data. A verified copy, integrity check and rollback-capable migration are required before it can be changed."
+    except OSError as exc:
+        return f"The current storage location cannot be inspected safely: {exc}"
+    return ""
 
 
 def _storage_root_write_error(folder: Path) -> str:
@@ -192,6 +280,10 @@ class SettingsPage(QWidget):
         self.settings = QSettings("RyuBlanc", "Ryu's Audiobook")
         self._selected_library_root = library_root()
         self._selected_audio_assets_root = audiobooks_root()
+        self._selected_models_root = models_root()
+        self._selected_runtime_root = runtimes_root()
+        self._selected_model_cache_root = model_cache_root()
+        self._selected_temporary_root = temporary_root()
         self._storage_path_labels = {}
         self._storage_space_labels = {}
 
@@ -280,10 +372,10 @@ class SettingsPage(QWidget):
         storage = QGroupBox("Local storage")
         storage_layout = QVBoxLayout(storage)
         note = QLabel(
-            "All content stays local. Project Library controls where new imports are stored; "
-            "existing projects remain visible in their original folders. Audio Assets controls "
-            "the default destination for new audiobook exports. Free space is read from the "
-            "selected folder's actual filesystem."
+            "All content stays local. Project Library controls new imports and Audio Assets controls new exports. "
+            "Models, Provider Runtime, Model Cache and Temporary/Staging roots are independently configurable. "
+            "Changing a non-empty managed root is blocked until verified migration is available; existing files are never moved by changing a setting. "
+            "Filesystem capacity is read from the selected drive. Restart the app after changing a managed root."
         )
         note.setObjectName("muted")
         note.setWordWrap(True)
@@ -294,6 +386,10 @@ class SettingsPage(QWidget):
         self._add_storage_root_row(
             storage_layout, "Audio Assets (new exports)", "audio_assets", self._selected_audio_assets_root
         )
+        self._add_storage_root_row(storage_layout, "Models (model weights)", "models", self._selected_models_root)
+        self._add_storage_root_row(storage_layout, "Provider Runtime (Python / engines)", "runtime", self._selected_runtime_root)
+        self._add_storage_root_row(storage_layout, "Model Cache / Downloads", "model_cache", self._selected_model_cache_root)
+        self._add_storage_root_row(storage_layout, "Temporary / Staging", "temporary", self._selected_temporary_root)
         for label, folder in (
             ("Open Application Data", app_root()),
             ("Open Voice Profiles", voices_root()),
@@ -361,6 +457,14 @@ class SettingsPage(QWidget):
             return self._selected_library_root
         if kind == "audio_assets":
             return self._selected_audio_assets_root
+        if kind == "models":
+            return self._selected_models_root
+        if kind == "runtime":
+            return self._selected_runtime_root
+        if kind == "model_cache":
+            return self._selected_model_cache_root
+        if kind == "temporary":
+            return self._selected_temporary_root
         raise ValueError(f"Unknown storage root: {kind}")
 
     def _set_root_for_kind(self, kind: str, path: Path) -> None:
@@ -368,6 +472,14 @@ class SettingsPage(QWidget):
             self._selected_library_root = path
         elif kind == "audio_assets":
             self._selected_audio_assets_root = path
+        elif kind == "models":
+            self._selected_models_root = path
+        elif kind == "runtime":
+            self._selected_runtime_root = path
+        elif kind == "model_cache":
+            self._selected_model_cache_root = path
+        elif kind == "temporary":
+            self._selected_temporary_root = path
         else:
             raise ValueError(f"Unknown storage root: {kind}")
 
@@ -378,7 +490,7 @@ class SettingsPage(QWidget):
         path_label = QLabel(str(folder))
         path_label.setObjectName("muted")
         path_label.setWordWrap(True)
-        space_label = QLabel(_storage_space_summary(folder))
+        space_label = QLabel(_storage_capacity_summary(folder))
         space_label.setObjectName("muted")
         change = QPushButton("Choose…")
         change.clicked.connect(
@@ -392,6 +504,10 @@ class SettingsPage(QWidget):
         open_button.clicked.connect(
             lambda _checked=False, root_kind=kind: self.open_folder(self._root_for_kind(root_kind))
         )
+        copy_button = QPushButton("Copy Path")
+        copy_button.clicked.connect(
+            lambda _checked=False, root_kind=kind: QApplication.clipboard().setText(str(self._root_for_kind(root_kind)))
+        )
         self._storage_path_labels[kind] = path_label
         self._storage_space_labels[kind] = space_label
         row.addWidget(detail)
@@ -400,17 +516,26 @@ class SettingsPage(QWidget):
         row.addWidget(change)
         row.addWidget(use_default)
         row.addWidget(open_button)
+        row.addWidget(copy_button)
         layout.addLayout(row)
 
     def _refresh_storage_root_labels(self) -> None:
-        for kind in ("library", "audio_assets"):
+        for kind in ("library", "audio_assets", "models", "runtime", "model_cache", "temporary"):
             folder = self._root_for_kind(kind)
             self._storage_path_labels[kind].setText(str(folder))
-            self._storage_space_labels[kind].setText(_storage_space_summary(folder))
+            self._storage_space_labels[kind].setText(_storage_capacity_summary(folder))
 
     def _choose_storage_root(self, kind: str) -> None:
         current = self._root_for_kind(kind)
-        caption = "Choose Project Library Folder" if kind == "library" else "Choose Audio Assets Folder"
+        captions = {
+            "library": "Choose Project Library Folder",
+            "audio_assets": "Choose Audio Assets Folder",
+            "models": "Choose Models Folder",
+            "runtime": "Choose Provider Runtime Folder",
+            "model_cache": "Choose Model Cache Folder",
+            "temporary": "Choose Temporary / Staging Folder",
+        }
+        caption = captions[kind]
         selected = QFileDialog.getExistingDirectory(self, caption, str(current))
         if not selected:
             return
@@ -420,12 +545,34 @@ class SettingsPage(QWidget):
             QMessageBox.warning(self, "Storage Location Unavailable", f"{candidate}\n\n{error}")
             self.status.setText("Storage location was not changed because the selected folder is unavailable.")
             return
+        active = {
+            "library": library_root(),
+            "audio_assets": audiobooks_root(),
+            "models": models_root(),
+            "runtime": runtimes_root(),
+            "model_cache": model_cache_root(),
+            "temporary": temporary_root(),
+        }[kind]
+        if kind in {"models", "runtime", "model_cache", "temporary"}:
+            change_error = _storage_root_change_error(active, candidate)
+            if change_error and "verified copy" not in change_error:
+                QMessageBox.warning(self, "Storage Location Unavailable", f"{active} → {candidate}\n\n{change_error}")
+                self.status.setText("Storage location was not changed; the original path is preserved.")
+                return
         self._set_root_for_kind(kind, candidate)
         self._refresh_storage_root_labels()
         self.status.setText("Storage location selected. Press Save Settings to apply it.")
 
     def _use_default_storage_root(self, kind: str) -> None:
-        default = default_library_root() if kind == "library" else default_audiobooks_root()
+        defaults = {
+            "library": default_library_root(),
+            "audio_assets": default_audiobooks_root(),
+            "models": default_models_root(),
+            "runtime": default_runtimes_root(),
+            "model_cache": default_model_cache_root(),
+            "temporary": default_temporary_root(),
+        }
+        default = defaults[kind]
         self._set_root_for_kind(kind, default)
         self._refresh_storage_root_labels()
         self.status.setText("Default storage location selected. Press Save Settings to apply it.")
@@ -441,12 +588,99 @@ class SettingsPage(QWidget):
         self.window_size.setCurrentIndex(max(0, self.window_size.findData(str(self.settings.value("ui/window_size", "auto")))))
         self.default_bitrate.setCurrentIndex(max(0, self.default_bitrate.findData(int(self.settings.value("audio/default_bitrate", 256) or 256))))
 
+
+    def _start_storage_migration(self, source: Path, destination: Path, settings_key: str) -> None:
+        if self._migration_worker is not None and self._migration_worker.isRunning():
+            self.status.setText("A storage migration is already running.")
+            return
+        app = QApplication.instance()
+        if app is not None:
+            running = []
+            for widget in app.allWidgets():
+                # Many page workers are stored as attributes without QObject parents.
+                for value in getattr(widget, "__dict__", {}).values():
+                    if isinstance(value, QThread) and value.isRunning() and value is not self._migration_worker:
+                        running.append(value)
+                for thread in widget.findChildren(QThread):
+                    if thread.isRunning() and thread is not self._migration_worker:
+                        running.append(thread)
+            if running:
+                message = "Storage migration is blocked while another background task is running. Wait for downloads, inference, previews or repairs to finish."
+                self.status.setText(message)
+                QMessageBox.warning(self, "Storage In Use", message)
+                return
+        self.save_button.setEnabled(False)
+        self.status.setText("Preparing verified storage migration…")
+        self._migration_window = self.window()
+        if self._migration_window is not None:
+            self._migration_window.setEnabled(False)
+        self._migration_worker = StorageMigrationWorker(source, destination, settings_key, self)
+        self._migration_worker.progress.connect(self.status.setText)
+        self._migration_worker.succeeded.connect(self._storage_migration_succeeded)
+        self._migration_worker.failed.connect(self._storage_migration_failed)
+        self._migration_worker.finished.connect(self._storage_migration_finished)
+        self._migration_worker.start()
+
+    def _storage_migration_succeeded(self, destination: str, settings_key: str) -> None:
+        mapping = {
+            "storage/models_root": "models",
+            "storage/runtime_root": "runtime",
+            "storage/model_cache_root": "model_cache",
+            "storage/temporary_root": "temporary",
+        }
+        self._set_root_for_kind(mapping[settings_key], Path(destination))
+        self.status.setText("Storage copy and integrity verification passed. Original files were retained at the previous location.")
+
+    def _storage_migration_failed(self, message: str) -> None:
+        self.status.setText(f"Storage migration failed safely: {message}")
+        QMessageBox.warning(self, "Storage Migration Failed", message)
+
+    def _storage_migration_finished(self) -> None:
+        if self._migration_window is not None:
+            self._migration_window.setEnabled(True)
+            self._migration_window = None
+        self.save_button.setEnabled(True)
+        worker = self._migration_worker
+        self._migration_worker = None
+        if worker is not None:
+            worker.deleteLater()
+        if "integrity verification passed" in self.status.text():
+            self.save_settings()
+
     def save_settings(self) -> None:
         selected_roots = (
             ("Project Library", self._selected_library_root),
             ("Audio Assets", self._selected_audio_assets_root),
+            ("Models", self._selected_models_root),
+            ("Provider Runtime", self._selected_runtime_root),
+            ("Model Cache / Downloads", self._selected_model_cache_root),
+            ("Temporary / Staging", self._selected_temporary_root),
         )
+        active_roots = {
+            "Project Library": library_root(),
+            "Audio Assets": audiobooks_root(),
+            "Models": models_root(),
+            "Provider Runtime": runtimes_root(),
+            "Model Cache / Downloads": model_cache_root(),
+            "Temporary / Staging": temporary_root(),
+        }
         for label, folder in selected_roots:
+            if label in {"Models", "Provider Runtime", "Model Cache / Downloads", "Temporary / Staging"}:
+                change_error = _storage_root_change_error(active_roots[label], folder)
+                if change_error:
+                    if "verified copy" in change_error:
+                        key = {
+                            "Models": "storage/models_root",
+                            "Provider Runtime": "storage/runtime_root",
+                            "Model Cache / Downloads": "storage/model_cache_root",
+                            "Temporary / Staging": "storage/temporary_root",
+                        }[label]
+                        self._start_storage_migration(active_roots[label], folder, key)
+                        return
+                    message = f"{label} cannot be changed from {active_roots[label]} to {folder}.\n\n{change_error}"
+                    self.status.setText(message)
+                    QMessageBox.warning(self, "Storage Migration Required", message)
+                    return
             error = _storage_root_write_error(folder)
             if error:
                 message = f"{label} cannot be used at {folder}\n\n{error}"
@@ -465,10 +699,22 @@ class SettingsPage(QWidget):
         self.settings.setValue("ui/reduce_motion", self.reduce_motion.isChecked())
         self.settings.setValue("storage/library_root", str(self._selected_library_root))
         self.settings.setValue("storage/audio_assets_root", str(self._selected_audio_assets_root))
+        self.settings.setValue("storage/models_root", str(self._selected_models_root))
+        self.settings.setValue("storage/runtime_root", str(self._selected_runtime_root))
+        self.settings.setValue("storage/model_cache_root", str(self._selected_model_cache_root))
+        self.settings.setValue("storage/temporary_root", str(self._selected_temporary_root))
         self.settings.sync()
-        roots_persisted = (
-            str(self.settings.value("storage/library_root", "") or "") == str(self._selected_library_root)
-            and str(self.settings.value("storage/audio_assets_root", "") or "") == str(self._selected_audio_assets_root)
+        expected_roots = {
+            "storage/library_root": self._selected_library_root,
+            "storage/audio_assets_root": self._selected_audio_assets_root,
+            "storage/models_root": self._selected_models_root,
+            "storage/runtime_root": self._selected_runtime_root,
+            "storage/model_cache_root": self._selected_model_cache_root,
+            "storage/temporary_root": self._selected_temporary_root,
+        }
+        roots_persisted = all(
+            str(self.settings.value(key, "") or "") == str(path)
+            for key, path in expected_roots.items()
         )
         if self.settings.status() != QSettings.Status.NoError or not roots_persisted:
             self.status.setText("Settings could not be verified on disk; storage locations were not applied.")
@@ -479,6 +725,10 @@ class SettingsPage(QWidget):
             return
         self._selected_library_root = library_root()
         self._selected_audio_assets_root = audiobooks_root()
+        self._selected_models_root = models_root()
+        self._selected_runtime_root = runtimes_root()
+        self._selected_model_cache_root = model_cache_root()
+        self._selected_temporary_root = temporary_root()
         self._refresh_storage_root_labels()
         app = QApplication.instance()
         if app is not None:
@@ -499,8 +749,9 @@ class SettingsPage(QWidget):
         if callable(apply_size):
             apply_size(window_size)
         self.status.setText(
-            "Settings saved locally. New imports use the selected Project Library and new exports use Audio Assets; "
-            "existing projects and saved output destinations stay in place. UI preferences and default audio quality are also saved."
+            "Settings saved locally. New imports use Project Library and new exports use Audio Assets. "
+            "Model/runtime/cache/temporary roots are saved for the next app launch; restart Ryu's Audiobook to apply them. "
+            "existing projects remain visible in their original folders. Saved output destinations stay in place."
         )
 
     @staticmethod

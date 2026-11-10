@@ -76,6 +76,22 @@ NAME_STOPWORDS = {
     "School","Academy","Student","Teacher","President","Captain","Commander","General",
 }
 
+# These are never valid cast identities, even when an LLM marks them as an
+# explicit speaker or a previous false detection has acquired a voice profile.
+# Ambiguous content words are intentionally not all hard-blocked: an explicitly
+# confirmed name such as Will Smith remains valid.
+_HARD_NON_CHARACTER_WORDS = {
+    "a", "an", "the", "any", "some", "each", "every", "either", "neither", "both",
+    "oh", "ah", "uh", "hmm", "huh", "um", "erm", "eh",
+    "i", "me", "my", "mine", "we", "us", "our", "ours", "you", "your", "yours",
+    "he", "him", "his", "she", "her", "hers", "it", "its", "they", "them", "their", "theirs",
+    "this", "that", "these", "those", "who", "whom", "whose", "which", "what", "where", "when", "why", "how",
+    "and", "but", "or", "so", "if", "as", "than", "then", "there", "here",
+    "to", "of", "in", "on", "at", "by", "for", "from", "with", "about", "into", "over", "under",
+    "not", "no", "yes", "anyway", "wait", "okay", "fine", "good", "right", "well", "please", "sorry",
+    "actually", "perhaps", "suddenly", "finally", "clearly", "certainly", "obviously", "honestly",
+}
+
 
 def analyze_chapter(chapter: Chapter) -> CharacterAnalysis:
     return analyze_book([chapter])
@@ -541,6 +557,151 @@ def _is_plausible_name(value: str) -> bool:
     )
 
 
+_PROSE_NAME_STARTERS = {
+    "hearing", "letting", "astonished", "surprised", "amazed", "confused",
+    "suddenly", "finally", "meanwhile", "however", "therefore", "instead",
+    "although", "because", "perhaps", "actually", "apparently", "obviously",
+    "clearly", "honestly", "certainly", "unfortunately", "fortunately",
+}
+_NON_PERSON_DESCRIPTORS = {
+    "haired", "eyed", "looking", "wearing", "holding", "standing", "sitting",
+    "smiling", "frowning", "glowing", "shining", "covered", "filled",
+    "shaped", "sized", "colored", "coloured", "skinned",
+}
+
+
+
+def character_detection_exclusion_keys(
+    exclusions: list[dict] | tuple[dict, ...] | None,
+    series: str,
+    protected_names: set[str] | list[str] | tuple[str, ...] | None = None,
+) -> set[str]:
+    """Return dismissed character names/aliases for one series.
+
+    A dismissal is scoped to the series in which the user made it. Explicit,
+    user-confirmed assignment names are removed from the exclusion set so an
+    intentional later assignment can restore the identity without allowing
+    an unrelated series or ordinary AI guess to bypass the dismissal.
+    """
+    wanted_series = str(series or "").strip().casefold()
+    if not wanted_series or not isinstance(exclusions, (list, tuple)):
+        return set()
+    result: set[str] = set()
+    for row in exclusions:
+        if not isinstance(row, dict):
+            continue
+        row_series = str(row.get("series") or "").strip().casefold()
+        if not row_series or row_series != wanted_series:
+            continue
+        name = str(row.get("name") or row.get("primary_name") or "").strip()
+        if name:
+            result.add(name.casefold())
+        aliases = row.get("aliases") or []
+        if isinstance(aliases, str):
+            aliases = [aliases]
+        if isinstance(aliases, (list, tuple, set)):
+            result.update(
+                str(alias).strip().casefold()
+                for alias in aliases if str(alias or "").strip()
+            )
+    protected: set[str] = set()
+    for value in (protected_names or ()):
+        if isinstance(value, dict):
+            protected_series = str(value.get("series") or "").strip().casefold()
+            if protected_series and protected_series != wanted_series:
+                continue
+            names = [value.get("name"), *(value.get("aliases") or [])]
+        else:
+            # A plain string is interpreted as a confirmed name in the requested
+            # series for simple callers and legacy tests.
+            names = [value]
+        protected.update(
+            str(name).strip().casefold()
+            for name in names if str(name or "").strip()
+        )
+    return result - protected
+
+
+def is_user_confirmed_character_record(record: dict | None) -> bool:
+    """Return whether a saved cast row has explicit user-backed identity evidence.
+
+    Series/scope is bookkeeping and is never confirmation. Explicit create/edit,
+    a manually maintained alias/sample, or a selected voice is confirmation.
+    Hard English function words, pronouns and interjections are rejected even
+    when a record otherwise has user-backed metadata.
+    """
+    if not isinstance(record, dict):
+        return False
+    return bool(
+        record.get("user_created")
+        or record.get("manual")
+        or record.get("manual_aliases")
+        or record.get("voice_profile")
+        or record.get("voice_name")
+        or str(record.get("dialogue_sample_source") or "").strip().casefold() == "manual"
+    )
+
+
+_EXPLICIT_SPEAKER_NAME_PREFIXES = {
+    "will", "captain", "commander", "general", "president", "prince",
+    "princess", "emperor", "empress", "king", "queen", "lord", "lady",
+    "doctor", "professor", "miss",
+}
+
+
+def is_likely_character_name(value: str, *, trusted: bool = False, explicit: bool = False) -> bool:
+    """Reject English prose and function words even when AI attribution is explicit.
+
+    Explicit attribution can resolve limited title/name ambiguity (for example,
+    "Captain Mira"), but it cannot turn a sentence starter or descriptor into a
+    person. Trusted identities still cannot be articles, pronouns or interjections.
+    """
+    cleaned = _clean_name(str(value or "").strip())
+    if not cleaned or len(cleaned) > 80:
+        return False
+    words = [
+        re.sub(r"[’']s$", "", part).strip(".,!?;:")
+        for part in cleaned.split()
+    ]
+    words = [part for part in words if part]
+    if not 1 <= len(words) <= 3:
+        return False
+    if not all(word and (word[0].isupper() or not word[0].isascii()) for word in words):
+        return False
+    lowered = [part.casefold() for part in words]
+    if any(word in _HARD_NON_CHARACTER_WORDS for word in lowered):
+        return False
+    if any(word in _PROSE_NAME_STARTERS for word in lowered):
+        return False
+    if any(
+        word in _NON_PERSON_DESCRIPTORS
+        or word.rsplit("-", 1)[-1] in _NON_PERSON_DESCRIPTORS
+        for word in lowered
+    ):
+        return False
+    if len(words) > 1 and (lowered[0].endswith("ing") or lowered[0].endswith("ed")):
+        return False
+
+    from app.tts.pronunciation_suggester import is_common_english_phrase
+    if is_common_english_phrase(cleaned) and not trusted:
+        return False
+    if trusted:
+        return True
+
+    title_prefix_override = bool(
+        explicit
+        and len(words) > 1
+        and lowered[0] in _EXPLICIT_SPEAKER_NAME_PREFIXES
+        and _is_plausible_name(" ".join(words[1:]))
+    )
+    if not _is_plausible_name(cleaned) and not title_prefix_override:
+        return False
+    if not title_prefix_override and lowered[0] in {x.casefold() for x in NAME_STOPWORDS}:
+        return False
+    if len(words) > 1 and all(part.isupper() for part in words):
+        return False
+    return True
+
 def merge_character_analysis_record(candidate: Character, prior: dict | None = None) -> dict:
     """Refresh analysis evidence while preserving explicitly saved cast metadata.
 
@@ -553,11 +714,28 @@ def merge_character_analysis_record(candidate: Character, prior: dict | None = N
     prior_aliases = prior.get("aliases") or []
     if isinstance(prior_aliases, str):
         prior_aliases = [prior_aliases]
+    # Previously saved aliases with user-backed cast metadata (manual/user-created
+    # identity or an explicitly selected voice) are confirmed identities, not fresh
+    # AI guesses. Preserve those aliases through re-analysis while still applying
+    # the unconditional hard-word guard (articles, pronouns and interjections).
+    # New aliases produced by the current analysis remain untrusted and must pass
+    # the strict candidate filter.
+    prior_aliases_are_user_confirmed = is_user_confirmed_character_record(prior)
     aliases = list(dict.fromkeys(
         str(alias).strip()
-        for alias in [*prior_aliases, *(candidate.aliases or [])]
+        for alias in prior_aliases
         if str(alias).strip()
+        and is_likely_character_name(
+            str(alias), trusted=prior_aliases_are_user_confirmed
+        )
     ))
+    aliases.extend(
+        str(alias).strip()
+        for alias in (candidate.aliases or [])
+        if str(alias).strip()
+        and is_likely_character_name(str(alias), trusted=False)
+    )
+    aliases = list(dict.fromkeys(aliases))
     item = {
         "name": candidate.name,
         "role": str(prior.get("role") or candidate.role),

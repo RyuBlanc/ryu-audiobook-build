@@ -262,7 +262,7 @@ class Stage3NarratorManagementTests(unittest.TestCase):
         self.assertEqual(resolved["source"], "series_default")
         self.assertEqual(profile.name, "Series Narrator")
 
-    def test_generation_blocks_unidentified_quoted_dialogue_instead_of_sending_it_to_narrator(self):
+    def test_generation_blocks_unidentified_quoted_dialogue_when_character_voice_is_configured(self):
         chapter = Chapter(1, "One", 'The gate opened. “Who are you?” Then silence followed.')
         project = SimpleNamespace(chapters=[chapter])
         self.bridge._project_series_name = lambda _project, _state: "The Series"
@@ -274,8 +274,15 @@ class Stage3NarratorManagementTests(unittest.TestCase):
         }
         narrator_profile = self._profile("Series Narrator")
         self.bridge._find_profile = lambda name: narrator_profile if name == "Series Narrator" else None
-        with self.assertRaisesRegex(ValueError, "dialogue passage.*need speaker review"):
-            self.bridge._resolve_narrator_for_generation(project, {}, [chapter])
+        # GEN-07 permits all-dialogue narrator routing only when no character
+        # voice profile is configured. The normal cast-aware gate remains strict.
+        state = {"characters": [{"name": "Mira", "voice_profile": "Mira Voice"}]}
+        with patch(
+            "app.ui.premium_v2_host.load_profiles",
+            return_value=[narrator_profile, self._profile("Mira Voice")],
+        ):
+            with self.assertRaisesRegex(ValueError, "dialogue passage.*need speaker review"):
+                self.bridge._resolve_narrator_for_generation(project, state, [chapter])
 
     def test_generation_fails_closed_when_effective_narrator_profile_is_missing(self):
         chapter = Chapter(1, "One", "The sun rose.")

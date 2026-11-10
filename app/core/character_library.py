@@ -107,6 +107,83 @@ def list_characters(series: str | None = None, include_deleted: bool = False, pa
     return sorted(rows, key=lambda row: (str(row.get("series") or "").casefold(), str(row.get("primary_name") or "").casefold()))
 
 
+def prune_invalid_character_records(
+    series: str,
+    path: Path | None = None,
+    protected_names: set[str] | list[str] | tuple[str, ...] | None = None,
+) -> dict:
+    """Move invalid legacy detections to Recovery and remove invalid aliases.
+
+    Cleanup is restricted to one series. Invalid primary rows are retained in
+    the existing deleted/recovery store rather than permanently erased.
+    Explicit source assignments may protect a legitimate identity, but the
+    shared validator still rejects hard function words and interjections.
+    """
+    wanted = str(series or "").strip()
+    if not wanted:
+        return {"removed": 0, "aliases_removed": 0}
+    from app.chapters.characters import is_likely_character_name, is_user_confirmed_character_record
+
+    protected = {
+        str(value or "").strip().casefold()
+        for value in (protected_names or ())
+        if str(value or "").strip()
+    }
+    target = path or character_library_path()
+    store = _read_store(target)
+    kept: list[dict] = []
+    removed = 0
+    aliases_removed = 0
+    changed = False
+    for row in store["active"]:
+        if str(row.get("series") or "").strip().casefold() != wanted.casefold():
+            kept.append(row)
+            continue
+        primary = str(row.get("primary_name") or row.get("name") or "").strip()
+        trusted = is_user_confirmed_character_record(row) or primary.casefold() in protected
+        if not primary or not is_likely_character_name(primary, trusted=trusted):
+            deleted = dict(row)
+            deleted_at = _timestamp()
+            deleted["deleted_at"] = deleted_at
+            deleted["updated_at"] = deleted_at
+            deleted["deletion_reason"] = "Removed from active cast by character-name quality cleanup"
+            store["deleted"].append(deleted)
+            removed += 1
+            changed = True
+            continue
+
+        raw_aliases = row.get("aliases") or []
+        if isinstance(raw_aliases, str):
+            raw_aliases = [raw_aliases]
+        raw_aliases = list(raw_aliases) if isinstance(raw_aliases, (list, tuple)) else []
+        alias_trusted = trusted or bool(row.get("manual_aliases"))
+        valid_aliases: list[str] = []
+        seen = {primary.casefold()}
+        for alias in raw_aliases:
+            value = str(alias or "").strip()
+            key = value.casefold()
+            if not value or key in seen:
+                continue
+            if not is_likely_character_name(value, trusted=alias_trusted) or (
+                key in {"oh", "ah", "uh", "hmm", "huh", "um", "erm", "eh", "the", "a", "an", "any"}
+            ):
+                aliases_removed += 1
+                changed = True
+                continue
+            seen.add(key)
+            valid_aliases.append(value)
+        if valid_aliases != raw_aliases:
+            row["aliases"] = valid_aliases
+            row["updated_at"] = _timestamp()
+            changed = True
+        kept.append(row)
+
+    if changed:
+        store["active"] = kept
+        _write_store(store, target)
+    return {"removed": removed, "aliases_removed": aliases_removed}
+
+
 def list_deleted_characters(path: Path | None = None) -> list[dict]:
     """List soft-deleted character records separately for the recovery view."""
     return _read_store(path or character_library_path())["deleted"]
@@ -191,6 +268,9 @@ def sync_characters(
                 "line_count": _safe_count(source.get("line_count", source.get("lines", source.get("dialogue_count", 0)))),
                 "chapter_count": _safe_count(source.get("chapter_count", source.get("chapters", 0))),
                 "confidence": _safe_confidence(source.get("confidence", 100)),
+                "user_created": bool(source.get("user_created")),
+                "manual": bool(source.get("manual")),
+                "manual_aliases": bool(source.get("manual_aliases")),
                 "source_project_folder": str(source_project_folder or ""),
                 "source_project_title": str(source_project_title or ""),
                 "created_at": _timestamp(),
@@ -200,6 +280,9 @@ def sync_characters(
             continue
 
         match["series"] = series_name
+        for flag in ("user_created", "manual", "manual_aliases"):
+            if source.get(flag):
+                match[flag] = True
         source_short = str(source.get("short") or "").strip()
         if source_short and (update_names or not str(match.get("short") or "").strip()):
             match["short"] = source_short[:120]
@@ -260,6 +343,8 @@ def update_character(record_id: str, changes: dict, path: Path | None = None) ->
     elif not str(record.get("short") or "").strip():
         record["short"] = primary.split()[0][:120]
     record["aliases"] = aliases
+    record["manual"] = True
+    record["manual_aliases"] = True
     if "dialogue_sample" in changes:
         record["dialogue_sample"] = str(changes.get("dialogue_sample") or "").strip()
         record["dialogue_sample_source"] = "manual"

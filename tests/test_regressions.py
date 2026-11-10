@@ -427,7 +427,7 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn("_apply_narration_speed(", generator)
         self.assertIn("if len(completed) % 4 == 0", generator)
 
-    def test_qwen_long_form_runtime_uses_lighter_base_and_larger_units(self):
+    def test_qwen_long_form_runtime_preserves_selected_model_on_gpu_memory_fallback(self):
         provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
         runtime = Path("app/tts/qwen_character_runtime.py").read_text(encoding="utf-8")
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
@@ -437,7 +437,8 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("recommended_preview_chunk_sentences = 4", provider)
         self.assertIn("best_long_form_clone_kind", provider)
         self.assertIn("base-0.6b", runtime)
-        self.assertIn("Base 1.7B exceeded available GPU memory", worker)
+        self.assertIn("retrying the same selected model on CPU without changing voice identity", worker)
+        self.assertNotIn('fallback_kind = "base-0.6b"', worker)
         self.assertIn('"longform": self.qwen_mode != "design-preview"', provider)
         self.assertIn("def _recommended_max_new_tokens", worker)
         self.assertIn("recommended_batch_size", provider)
@@ -1227,28 +1228,61 @@ class RegressionTests(unittest.TestCase):
             voice_page._QWEN_PREVIEW_PROFILE_KEY = original_key
 
     def test_voice_preview_is_invalidated_when_target_settings_change(self):
+        from types import SimpleNamespace
+        from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QPushButton
         from app.ui.voice_page import VoicePage
 
-        page = VoicePage()
-        try:
-            page.last_preview = Path(tempfile.gettempdir()) / "old-preview.wav"
-            page.last_preview_elapsed_seconds = 12.0
-            page.play_button.setEnabled(True)
-            page.save_preview_button.setEnabled(True)
+        # Exercise the real invalidation method and setting-change signal without
+        # constructing VoicePage's unrelated QMediaPlayer/QAudioOutput stack.
+        app = QApplication.instance() or QApplication([])
+        duration = QComboBox()
+        duration.addItems(["30 seconds", "60 seconds"])
+        preview_button = QPushButton("Generate preview")
+        play_button = QPushButton("Play")
+        save_button = QPushButton("Save")
+        engine_status = QLabel("Ready")
+        status = QLabel("Preview ready")
 
-            current = page.preview_duration.currentIndex()
-            page.preview_duration.setCurrentIndex(
-                (current + 1) % page.preview_duration.count()
+        with tempfile.TemporaryDirectory() as temporary:
+            old_preview = Path(temporary) / "old-preview.wav"
+            old_preview.write_bytes(b"temporary-preview")
+            page = SimpleNamespace(
+                _invalidating_preview=False,
+                _preview_request_id=7,
+                _preview_requested_signature=("old-target",),
+                _preview_profile_signature=("old-profile",),
+                preview_worker=None,
+                player=None,
+                last_preview=old_preview,
+                last_preview_elapsed_seconds=12.0,
+                preview_button=preview_button,
+                play_button=play_button,
+                save_preview_button=save_button,
+                preview_engine_status=engine_status,
+                status=status,
+                preview_percent_bar=None,
+                preview_activity_bar=None,
+                _is_live_qt_object=VoicePage._is_live_qt_object,
+                _discard_preview_output=VoicePage._discard_preview_output,
+                _refresh_assignment_actions=lambda: None,
             )
+            duration.currentIndexChanged.connect(
+                lambda *_args: VoicePage._invalidate_preview(page)
+            )
+            play_button.setEnabled(True)
+            save_button.setEnabled(True)
+            duration.setCurrentIndex(1)
 
             self.assertIsNone(page.last_preview)
             self.assertIsNone(page.last_preview_elapsed_seconds)
-            self.assertFalse(page.play_button.isEnabled())
-            self.assertFalse(page.save_preview_button.isEnabled())
-            self.assertIn("Preview invalidated", page.preview_engine_status.text())
-        finally:
-            page.close()
-            page.deleteLater()
+            self.assertFalse(play_button.isEnabled())
+            self.assertFalse(save_button.isEnabled())
+            self.assertTrue(preview_button.isEnabled())
+            self.assertFalse(old_preview.exists())
+            self.assertEqual(page._preview_request_id, 8)
+            self.assertIsNone(page._preview_requested_signature)
+            self.assertIsNone(page._preview_profile_signature)
+            self.assertIn("Preview invalidated", engine_status.text())
 
     def test_voice_preview_invalidation_ignores_deleted_qt_status_widget(self):
         import shiboken6
@@ -1414,7 +1448,7 @@ class RegressionTests(unittest.TestCase):
         from app.build_info import BUILD_NUMBER
         from app.version import full_version
 
-        self.assertEqual(full_version(), f"v1.1.1 • Build {BUILD_NUMBER}")
+        self.assertEqual(full_version(), f"v1.2.0 • Build {BUILD_NUMBER}")
 
     def test_import_controls_use_the_audiobook_brand_mark(self):
         source = Path("app/ui/workflow.py").read_text(encoding="utf-8")
@@ -1579,6 +1613,111 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('message.startswith("paused:")', generation)
         self.assertIn("def toggle_generation_pause(self) -> None:", generation)
         self.assertIn('"paused"}', generation)
+
+    def _run_chunk_checkpoint_control_test(self, control: str) -> None:
+        import threading
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.tts.manager import GenerationManager
+
+        first_started = threading.Event()
+        release_first = threading.Event()
+        paused_at_checkpoint = threading.Event()
+        second_started = threading.Event()
+        summaries = []
+
+        class BlockingProvider:
+            def __init__(self):
+                self.calls = 0
+
+            def synthesize(self, text, output_path, voice=None):
+                self.calls += 1
+                if self.calls == 1:
+                    first_started.set()
+                    if not release_first.wait(8):
+                        raise TimeoutError("first synthesis was not released by the test")
+                elif self.calls == 2:
+                    second_started.set()
+                _write_wav(Path(output_path), 0.05)
+                return output_path
+
+            def close(self):
+                return None
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            chapter_dir = root / "working_audio" / "001_Opening"
+            (chapter_dir / "chunks").mkdir(parents=True)
+            # Two deterministic chunks make the pause checkpoint observable
+            # between synthesis requests without depending on heuristic text
+            # splitting or an external TTS provider.
+            plan = SimpleNamespace(
+                chapter_dir=chapter_dir,
+                chunks_with_voices=(("First saved passage.", "Narrator"), ("Second saved passage.", "Narrator")),
+                signature="manager-checkpoint-test-v1",
+                completed=frozenset(),
+            )
+            provider = BlockingProvider()
+
+            def progress(_chapter, _total, _done, message):
+                if str(message or "").startswith("paused:"):
+                    paused_at_checkpoint.set()
+
+            manager = GenerationManager(
+                provider,
+                "Narrator",
+                [Chapter(1, "Opening", "First saved passage. Second saved passage.")],
+                root / "working_audio",
+                on_progress=progress,
+                on_finished=summaries.append,
+                narration_speed=1.0,
+                pacing_profile="off",
+            )
+
+            with patch("app.tts.generator.prepare_chapter_plan", return_value=plan):
+                manager.start(None, "Checkpoint test", "Test Author")
+                self.assertTrue(first_started.wait(5), "first chunk synthesis did not start")
+                manager.pause()
+                release_first.set()
+                self.assertTrue(
+                    paused_at_checkpoint.wait(5),
+                    "pause did not become visible at the persisted chunk checkpoint",
+                )
+                self.assertEqual(provider.calls, 1, "the next chunk started before pause was released")
+
+                if control == "resume":
+                    manager.resume()
+                    self.assertTrue(second_started.wait(5), "resume did not restart the next chunk")
+                elif control == "cancel":
+                    manager.cancel()
+                else:
+                    self.fail(f"Unsupported checkpoint control: {control}")
+
+                manager._thread.join(timeout=10)
+                self.assertFalse(manager._thread.is_alive(), "generation worker did not leave the checkpoint")
+                self.assertEqual(len(summaries), 1)
+
+            summary = summaries[0]
+            if control == "resume":
+                self.assertFalse(summary.cancelled)
+                self.assertEqual(summary.chapters_completed, 1)
+                self.assertEqual(summary.chapters_failed, [])
+                self.assertEqual(provider.calls, 2)
+                self.assertTrue((chapter_dir / "chunks" / "00001.wav").is_file())
+                self.assertTrue((chapter_dir / "chunks" / "00002.wav").is_file())
+            else:
+                self.assertTrue(summary.cancelled)
+                self.assertEqual(summary.chapters_completed, 0)
+                self.assertEqual(summary.chapters_failed, [])
+                self.assertEqual(provider.calls, 1)
+                self.assertTrue((chapter_dir / "chunks" / "00001.wav").is_file())
+                self.assertFalse((chapter_dir / "chunks" / "00002.wav").exists())
+
+    def test_generation_pause_resume_runs_through_saved_chunk_checkpoint(self):
+        self._run_chunk_checkpoint_control_test("resume")
+
+    def test_generation_cancel_while_paused_stops_at_saved_chunk_checkpoint(self):
+        self._run_chunk_checkpoint_control_test("cancel")
 
     def test_project_title_is_propagated_to_generation_and_editor(self):
         workflow = Path("app/ui/workflow.py").read_text(encoding="utf-8")
@@ -1864,6 +2003,627 @@ class RegressionTests(unittest.TestCase):
             self.assertGreater(output.stat().st_size, 1024)
             self.assertGreaterEqual(_duration_ms(output), 4000)
             self.assertLessEqual(_duration_ms(output), 5500)
+
+    def test_chapter_based_bgm_never_falls_back_to_auto_music(self):
+        from unittest.mock import patch
+        from app.audio.assembler import _duration_ms, _mix_chapter_bgm
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            chapters = []
+            for number, title in ((1, "First"), (2, "Second")):
+                chapter_dir = root / f"{number:03d}_{title}"
+                _write_wav(chapter_dir / "chunks" / "00001.wav", 2.2)
+                chapters.append(chapter_dir)
+
+            default_music = root / "default.wav"
+            chapter_music = root / "chapter-one.wav"
+            _write_wav(default_music, 1.0)
+            _write_wav(chapter_music, 1.0)
+            output = root / "chapter-based-auto-mode.m4b"
+
+            # Chapter-Based BGM must ignore both the book default and automatic
+            # mood-selected music. Only the explicitly saved chapter track may
+            # be mixed; an unassigned chapter must remain narration-only.
+            with (
+                patch("app.audio.library.resolve_music_track", return_value=default_music) as auto_music,
+                patch("app.audio.assembler._mix_chapter_bgm", wraps=_mix_chapter_bgm) as chapter_mix,
+            ):
+                assemble_m4b(
+                    chapters,
+                    output,
+                    "Chapter-Based BGM auto-mode regression",
+                    chapter_titles=["First", "Second"],
+                    background_audio_path=default_music,
+                    background_audio_volume=0.18,
+                    background_audio_mode="auto",
+                    chapter_transition_sound=False,
+                    chapter_bgm_strategy="chapter-based",
+                    chapter_bgm_overrides={
+                        "1": {"rule": "custom", "path": str(chapter_music), "volume": 0.22},
+                        "2": {"rule": "none", "volume": 0.18},
+                    },
+                )
+
+                auto_music.assert_not_called()
+                self.assertEqual(chapter_mix.call_count, 1)
+                self.assertEqual(Path(chapter_mix.call_args.args[1]), chapter_music)
+
+            self.assertTrue(output.is_file())
+            self.assertGreater(output.stat().st_size, 1024)
+            self.assertGreaterEqual(_duration_ms(output), 4000)
+            self.assertLessEqual(_duration_ms(output), 5500)
+
+    def test_same_bgm_auto_mode_uses_one_track_for_every_chapter(self):
+        from unittest.mock import patch
+        from app.audio.assembler import _duration_ms, _run
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            chapters = []
+            for number, title in ((1, "First"), (2, "Second")):
+                chapter_dir = root / f"{number:03d}_{title}"
+                _write_wav(chapter_dir / "chunks" / "00001.wav", 2.2)
+                chapters.append(chapter_dir)
+
+            first_track = root / "book-default-first.wav"
+            alternate_track = root / "book-default-alternate.wav"
+            _write_wav(first_track, 1.0)
+            _write_wav(alternate_track, 1.0)
+            output = root / "same-bgm-auto-mode.m4b"
+
+            # Even when a legacy project still records auto source mode, the
+            # Same BGM strategy must resolve one book-level track, not choose
+            # a different mood track independently for each chapter.
+            with (
+                patch(
+                    "app.audio.library.resolve_music_track",
+                    side_effect=[first_track, alternate_track],
+                ) as automatic_music,
+                patch("app.audio.assembler._run", wraps=_run) as ffmpeg_run,
+            ):
+                assemble_m4b(
+                    chapters,
+                    output,
+                    "Same BGM auto-mode regression",
+                    chapter_titles=["First", "Second"],
+                    background_audio_volume=0.18,
+                    background_audio_mode="auto",
+                    auto_music_style="auto",
+                    auto_music_variation=None,
+                    chapter_transition_sound=False,
+                    chapter_bgm_strategy="same",
+                )
+
+                self.assertEqual(automatic_music.call_count, 1)
+                # Auto mode uses the book-level FFmpeg mixer directly rather
+                # than _mix_chapter_bgm (the latter is the Chapter-Based path).
+                # Verify that both chapter mixes receive the same resolved bed.
+                book_bgm_calls = [
+                    call.args[0] for call in ffmpeg_run.call_args_list
+                    if "-stream_loop" in call.args[0] and str(first_track) in call.args[0]
+                ]
+                self.assertEqual(len(book_bgm_calls), 2)
+                self.assertTrue(all(str(alternate_track) not in args for args in book_bgm_calls))
+
+            self.assertTrue(output.is_file())
+            self.assertGreater(output.stat().st_size, 1024)
+            self.assertGreaterEqual(_duration_ms(output), 4000)
+            self.assertLessEqual(_duration_ms(output), 5500)
+
+    def test_chapter_based_sound_design_preview_ignores_auto_bgm_for_unassigned_chapter(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.ui.premium_v2_host import PremiumV2Bridge
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "saved-narration.wav"
+            source.write_bytes(b"saved narration fixture")
+            automatic_track = root / "automatic-default.wav"
+            automatic_track.write_bytes(b"automatic music fixture")
+            host = SimpleNamespace(_preview_cancel_events={})
+            state = {
+                "background_audio_mode": "auto",
+                "background_audio_enabled": True,
+                "chapter_bgm_strategy": "chapter-based",
+                "chapter_bgm_overrides": {},
+                "_preview_chapter_number": 2,
+                "_preview_chapter_index": 2,
+                "_preview_chapter_title": "Chapter Two",
+                "_preview_chapter_text": "The story continues.",
+            }
+
+            def write_output(args):
+                Path(args[-1]).write_bytes(b"encoded preview" * 200)
+
+            with (
+                patch("app.ui.premium_v2_host.app_root", return_value=root),
+                patch("app.audio.library.effective_background_audio_mode", return_value="auto"),
+                patch("app.audio.library.is_chapter_transition_sound_enabled", return_value=False),
+                patch("app.audio.library.validate_saved_audio_paths"),
+                patch("app.audio.assembler._duration_ms", return_value=10000),
+                patch("app.audio.assembler._selected_music_recipe", return_value=("calm", 0)),
+                patch("app.audio.assembler._chapter_bgm_override_for", return_value={"rule": "none"}) as resolve_override,
+                patch("app.audio.library.resolve_music_track", return_value=automatic_track) as automatic_music,
+                patch("app.audio.assembler._mix_chapter_bgm") as chapter_mix,
+                patch("app.audio.assembler._run", side_effect=write_output),
+            ):
+                output = PremiumV2Bridge._render_sound_design_preview(
+                    host, source, "chapter-preview-no-bgm", state
+                )
+
+            self.assertTrue(output.is_file())
+            resolve_override.assert_called_once()
+            automatic_music.assert_not_called()
+            chapter_mix.assert_not_called()
+
+    def test_chapter_based_sound_design_preview_uses_only_explicit_chapter_track_in_auto_mode(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.ui.premium_v2_host import PremiumV2Bridge
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "saved-narration.wav"
+            source.write_bytes(b"saved narration fixture")
+            automatic_track = root / "automatic-default.wav"
+            automatic_track.write_bytes(b"automatic music fixture")
+            chapter_track = root / "chapter-two.wav"
+            chapter_track.write_bytes(b"explicit chapter music fixture")
+            host = SimpleNamespace(_preview_cancel_events={})
+            state = {
+                "background_audio_mode": "auto",
+                "background_audio_enabled": True,
+                "chapter_bgm_strategy": "chapter-based",
+                "chapter_bgm_overrides": {},
+                "_preview_chapter_number": 2,
+                "_preview_chapter_index": 2,
+                "_preview_chapter_title": "Chapter Two",
+                "_preview_chapter_text": "The story continues.",
+            }
+
+            def write_mix(_source, track, output, _volume, **_kwargs):
+                self.assertEqual(Path(track), chapter_track)
+                output.write_bytes(b"mixed chapter preview" * 200)
+                return output
+
+            with (
+                patch("app.ui.premium_v2_host.app_root", return_value=root),
+                patch("app.audio.library.effective_background_audio_mode", return_value="auto"),
+                patch("app.audio.library.is_chapter_transition_sound_enabled", return_value=False),
+                patch("app.audio.library.validate_saved_audio_paths"),
+                patch("app.audio.assembler._duration_ms", return_value=10000),
+                patch("app.audio.assembler._selected_music_recipe", return_value=("calm", 0)),
+                patch(
+                    "app.audio.assembler._chapter_bgm_override_for",
+                    return_value={"rule": "custom", "path": str(chapter_track), "volume": 0.2},
+                ) as resolve_override,
+                patch("app.audio.library.resolve_music_track", return_value=automatic_track) as automatic_music,
+                patch("app.audio.assembler._mix_chapter_bgm", side_effect=write_mix) as chapter_mix,
+                patch("app.audio.assembler._run", side_effect=lambda args: Path(args[-1]).write_bytes(b"encoded" * 200)),
+            ):
+                output = PremiumV2Bridge._render_sound_design_preview(
+                    host, source, "chapter-preview-explicit-bgm", state
+                )
+
+            self.assertTrue(output.is_file())
+            resolve_override.assert_called_once()
+            automatic_music.assert_not_called()
+            chapter_mix.assert_called_once()
+
+    def test_full_book_sound_preview_reuses_only_saved_eligible_chapter_audio(self):
+        import threading
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+        from app.ui.full_book_preview import start_full_book_preview
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            project_folder = root / "project"
+            audio_root = project_folder / "working_audio"
+            audio_root.mkdir(parents=True)
+            chapters = [
+                SimpleNamespace(number=1, title="Opening", chapter_id="chapter-opening",
+                                 text="Opening text.", skip_for_generation=False),
+                SimpleNamespace(number=2, title="Empty chapter", chapter_id="chapter-empty",
+                                 text="   ", skip_for_generation=False),
+                SimpleNamespace(number=3, title="Excluded", chapter_id="chapter-excluded",
+                                 text="Excluded text.", skip_for_generation=True),
+                SimpleNamespace(number=4, title="Finale", chapter_id="chapter-finale",
+                                 text="Finale text.", skip_for_generation=False),
+            ]
+            saved_dirs = []
+            for folder_name, chapter in (("old-opening-folder", chapters[0]), ("renamed-finale-folder", chapters[3])):
+                folder = audio_root / folder_name
+                _write_wav(folder / "chunks" / "00001.wav", 1.0)
+                (folder / "narration.json").write_text(
+                    json.dumps({
+                        "chapter_id": chapter.chapter_id,
+                        "chapter": chapter.number,
+                        "title": chapter.title,
+                    }),
+                    encoding="utf-8",
+                )
+                saved_dirs.append(folder)
+
+            project = SimpleNamespace(folder=project_folder, title="Preview Book", chapters=chapters)
+            state = {
+                "title": "Preview Book",
+                "author": "Test Author",
+                "audio_bitrate": 256,
+                "chapter_bgm_strategy": "same",
+            }
+            captured = {}
+
+            class DeferredThread:
+                def __init__(self, target, args, daemon, name):
+                    captured["target"] = target
+                    captured["args"] = args
+                    captured["daemon"] = daemon
+                    captured["name"] = name
+
+                def start(self):
+                    captured["started"] = True
+
+            host = SimpleNamespace(
+                _active_project=lambda: project,
+                _new_job=Mock(return_value="preview-job"),
+                _job_update=Mock(),
+                _jobs_lock=threading.RLock(),
+                _preview_cancel_events={},
+                _now=lambda: "2026-11-07T00:00:00+05:30",
+            )
+
+            with (
+                patch("app.core.state.load_state", return_value=state),
+                patch("app.audio.library.validate_saved_audio_paths"),
+                patch("app.core.paths.app_root", return_value=root),
+                patch("app.ui.full_book_preview.threading.Thread", DeferredThread),
+            ):
+                result = start_full_book_preview(host)
+
+            self.assertTrue(captured.get("started"))
+            self.assertEqual(result["job_id"], "preview-job")
+            self.assertEqual(result["chapter_count"], 2)
+            self.assertTrue(result["reuses_saved_narration"])
+            self.assertEqual(captured["args"][3], saved_dirs)
+            self.assertEqual(captured["args"][4], ["Opening", "Finale"])
+            self.assertTrue(Path(result["output_path"]).parent.is_dir())
+            host._job_update.assert_called_once()
+            self.assertEqual(host._job_update.call_args.kwargs["state"], "running")
+
+    def test_chapter_based_auto_mode_ignores_stale_automatic_track_path(self):
+        from app.audio.library import validate_saved_audio_paths
+
+        with tempfile.TemporaryDirectory() as temp:
+            missing_auto_track = Path(temp) / "deleted-automatic-track.wav"
+            state = {
+                "background_audio_mode": "auto",
+                "background_audio_enabled": True,
+                "chapter_bgm_strategy": "chapter-based",
+                "auto_music_track_path": str(missing_auto_track),
+                "chapter_bgm_overrides": {"2": {"rule": "none"}},
+                "chapter_transition_sound": False,
+            }
+
+            # The unused auto-selection path must not block a Chapter-Based
+            # project whose selected chapter explicitly has No BGM.
+            validate_saved_audio_paths(state)
+
+    def test_chapter_based_auto_mode_validates_explicit_chapter_track(self):
+        from app.audio.library import validate_saved_audio_paths
+
+        with tempfile.TemporaryDirectory() as temp:
+            missing_chapter_track = Path(temp) / "deleted-chapter-track.wav"
+            state = {
+                "background_audio_mode": "auto",
+                "background_audio_enabled": True,
+                "chapter_bgm_strategy": "chapter-based",
+                "auto_music_track_path": "",
+                "chapter_bgm_overrides": {
+                    "2": {"rule": "custom", "path": str(missing_chapter_track), "volume": 0.2}
+                },
+                "chapter_transition_sound": False,
+            }
+
+            # Chapter overrides are active in Chapter-Based mode regardless
+            # of the legacy auto/manual source-mode flag and must fail closed.
+            with self.assertRaisesRegex(FileNotFoundError, "custom BGM for chapter 2"):
+                validate_saved_audio_paths(state)
+
+    def test_same_bgm_manual_mode_does_not_layer_legacy_ambience(self):
+        from unittest.mock import patch
+        from app.audio.assembler import _duration_ms, _run
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            chapter_dir = root / "001_Chapter"
+            _write_wav(chapter_dir / "chunks" / "00001.wav", 2.2)
+            book_track = root / "book-default.wav"
+            legacy_ambience = root / "legacy-ambience.wav"
+            _write_wav(book_track, 1.0)
+            _write_wav(legacy_ambience, 1.0)
+            output = root / "single-book-bgm.m4b"
+
+            with patch("app.audio.assembler._run", wraps=_run) as ffmpeg_run:
+                assemble_m4b(
+                    [chapter_dir],
+                    output,
+                    "Single BGM layer regression",
+                    chapter_titles=["Chapter"],
+                    background_audio_mode="manual",
+                    background_audio_path=book_track,
+                    background_audio_volume=0.18,
+                    ambience_audio_path=legacy_ambience,
+                    ambience_audio_volume=0.15,
+                    chapter_transition_sound=False,
+                    chapter_bgm_strategy="same",
+                )
+
+            mix_commands = [
+                call.args[0] for call in ffmpeg_run.call_args_list
+                if call.args and "-filter_complex" in call.args[0]
+                and "bedraw" in call.args[0][call.args[0].index("-filter_complex") + 1]
+            ]
+            self.assertEqual(len(mix_commands), 1)
+            filter_complex = mix_commands[0][mix_commands[0].index("-filter_complex") + 1]
+            self.assertIn("amix=inputs=2", filter_complex)
+            self.assertIn("bedraw1", filter_complex)
+            self.assertNotIn("bedraw2", filter_complex)
+            self.assertTrue(output.is_file())
+            self.assertGreater(output.stat().st_size, 1024)
+            self.assertGreaterEqual(_duration_ms(output), 2000)
+
+    def test_chapter_based_no_bgm_ignores_legacy_book_ambience(self):
+        from unittest.mock import patch
+        from app.audio.assembler import _duration_ms, _run
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            chapter_dir = root / "001_Chapter"
+            _write_wav(chapter_dir / "chunks" / "00001.wav", 2.2)
+            book_default = root / "legacy-book-default.wav"
+            legacy_ambience = root / "legacy-ambience.wav"
+            _write_wav(book_default, 1.0)
+            _write_wav(legacy_ambience, 1.0)
+            output = root / "chapter-no-bgm.m4b"
+
+            with patch("app.audio.assembler._run", wraps=_run) as ffmpeg_run:
+                assemble_m4b(
+                    [chapter_dir],
+                    output,
+                    "Chapter-Based No BGM regression",
+                    chapter_titles=["Chapter"],
+                    background_audio_mode="manual",
+                    background_audio_path=book_default,
+                    background_audio_volume=0.18,
+                    ambience_audio_path=legacy_ambience,
+                    ambience_audio_volume=0.15,
+                    chapter_transition_sound=False,
+                    chapter_bgm_strategy="chapter-based",
+                    chapter_bgm_overrides={"1": {"rule": "none"}},
+                )
+
+            bed_commands = [
+                call.args[0] for call in ffmpeg_run.call_args_list
+                if call.args and "-filter_complex" in call.args[0]
+                and "bedraw" in call.args[0][call.args[0].index("-filter_complex") + 1]
+            ]
+            self.assertEqual(bed_commands, [])
+            self.assertTrue(output.is_file())
+            self.assertGreater(output.stat().st_size, 1024)
+            self.assertGreaterEqual(_duration_ms(output), 2000)
+
+    def test_same_bgm_validation_ignores_unused_legacy_ambience_path(self):
+        from app.audio.library import validate_saved_audio_paths
+
+        with tempfile.TemporaryDirectory() as temp:
+            book_track = Path(temp) / "book-default.wav"
+            missing_legacy_ambience = Path(temp) / "removed-legacy-ambience.wav"
+            _write_wav(book_track, 1.0)
+            state = {
+                "background_audio_mode": "manual",
+                "background_audio_enabled": True,
+                "chapter_bgm_strategy": "same",
+                "background_audio_path": str(book_track),
+                "ambience_audio_path": str(missing_legacy_ambience),
+                "chapter_transition_sound": False,
+            }
+
+            # A single book-default BGM is authoritative. A stale legacy
+            # ambience path is neither layered nor allowed to block generation.
+            validate_saved_audio_paths(state)
+
+    def test_manual_voice_preview_uses_one_book_bgm_not_legacy_ambience_layer(self):
+        from app.audio.preview_mixer import mix_voice_preview
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            voice = root / "voice.wav"
+            book_track = root / "book-default.wav"
+            legacy_ambience = root / "legacy-ambience.wav"
+            output = root / "preview.wav"
+            _write_wav(voice, 1.0)
+            _write_wav(book_track, 1.0)
+            _write_wav(legacy_ambience, 1.0)
+            captured = {}
+
+            def fake_ffmpeg(args):
+                captured["args"] = list(args)
+                Path(args[-1]).write_bytes(b"mixed preview" * 200)
+
+            with (
+                patch("app.audio.preview_mixer._run_ffmpeg", side_effect=fake_ffmpeg),
+                patch("app.audio.preview_mixer._duration_seconds", return_value=1.0),
+            ):
+                result = mix_voice_preview(
+                    voice,
+                    output,
+                    "A short voice preview.",
+                    background_enabled=True,
+                    background_mode="manual",
+                    background_audio_path=book_track,
+                    music_volume=0.18,
+                    ambience_audio_path=legacy_ambience,
+                    ambience_volume=0.15,
+                    story_effects_enabled=False,
+                    chapter_transition_sound=False,
+                )
+
+            self.assertEqual(result, output.resolve())
+            self.assertEqual(captured["args"].count("-i"), 2)
+            input_paths = [
+                captured["args"][index + 1]
+                for index, argument in enumerate(captured["args"][:-1])
+                if argument == "-i"
+            ]
+            self.assertTrue(any(Path(path).samefile(book_track) for path in input_paths))
+            self.assertFalse(any(Path(path).samefile(legacy_ambience) for path in input_paths))
+            self.assertTrue(output.is_file())
+
+    def test_full_book_preview_mixes_disposable_copies_without_mutating_saved_narration(self):
+        import threading
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+        from app.ui.full_book_preview import _render_full_book_preview
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source_dir = root / "project" / "working_audio" / "001_Chapter"
+            source_chunk = source_dir / "chunks" / "00001.wav"
+            _write_wav(source_chunk, 1.0)
+            original_bytes = source_chunk.read_bytes()
+            output = root / "Previews" / "full-book-mix-preview.m4b"
+            output.parent.mkdir(parents=True)
+            captured = {}
+            cancel_event = threading.Event()
+
+            def mutate_only_staged_audio(chapter_dirs, output_path, *args, **kwargs):
+                captured["staged_dirs"] = list(chapter_dirs)
+                self.assertNotEqual(Path(chapter_dirs[0]).resolve(), source_dir.resolve())
+                staged_chunk = Path(chapter_dirs[0]) / "chunks" / "00001.wav"
+                staged_chunk.write_bytes(b"staged preview mutation")
+                kwargs["progress"](1, 1, "mixing")
+                Path(output_path).write_bytes(b"valid preview output" * 200)
+                return Path(output_path)
+
+            host = SimpleNamespace(
+                _job_update=Mock(),
+                _jobs_lock=threading.RLock(),
+                _preview_cancel_events={"preview-job": cancel_event},
+            )
+            state = {
+                "background_audio_mode": "off",
+                "background_audio_enabled": False,
+                "chapter_transition_sound": False,
+            }
+
+            with (
+                patch("app.audio.assembler.assemble_m4b", side_effect=mutate_only_staged_audio),
+                patch("app.audio.assembler._duration_ms", return_value=1000),
+            ):
+                _render_full_book_preview(
+                    host, "preview-job", SimpleNamespace(), [source_dir], ["Chapter"],
+                    output, "Preview Book", "Author", {"title": "Preview Book"}, 256,
+                    state, cancel_event,
+                )
+
+            self.assertEqual(source_chunk.read_bytes(), original_bytes)
+            self.assertTrue(output.is_file())
+            self.assertFalse(captured["staged_dirs"][0].exists())
+            self.assertEqual(host._job_update.call_args.kwargs["state"], "completed")
+            self.assertNotIn("preview-job", host._preview_cancel_events)
+
+    def test_full_book_preview_cancel_discards_partial_mix_output(self):
+        import threading
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+        from app.ui.full_book_preview import _render_full_book_preview
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source_dir = root / "project" / "working_audio" / "001_Chapter"
+            _write_wav(source_dir / "chunks" / "00001.wav", 1.0)
+            output = root / "Previews" / "cancelled-mix-preview.m4b"
+            output.parent.mkdir(parents=True)
+            cancel_event = threading.Event()
+
+            def cancel_during_mix(_chapter_dirs, output_path, *args, **kwargs):
+                Path(output_path).write_bytes(b"partial mix output" * 200)
+                cancel_event.set()
+                kwargs["progress"](1, 1, "mixing")
+
+            host = SimpleNamespace(
+                _job_update=Mock(),
+                _jobs_lock=threading.RLock(),
+                _preview_cancel_events={"preview-job": cancel_event},
+            )
+            state = {
+                "background_audio_mode": "off",
+                "background_audio_enabled": False,
+                "chapter_transition_sound": False,
+            }
+
+            with (
+                patch("app.audio.assembler.assemble_m4b", side_effect=cancel_during_mix),
+                patch("app.audio.assembler._duration_ms", return_value=1000),
+            ):
+                _render_full_book_preview(
+                    host, "preview-job", SimpleNamespace(), [source_dir], ["Chapter"],
+                    output, "Preview Book", "Author", {"title": "Preview Book"}, 256,
+                    state, cancel_event,
+                )
+
+            self.assertFalse(output.exists())
+            self.assertEqual(host._job_update.call_args.kwargs["state"], "cancelled")
+            self.assertNotIn("preview-job", host._preview_cancel_events)
+
+    def test_package_size_report_breaks_down_offline_runtime_and_installer_overhead(self):
+        import json
+        from package_size_report import DEFAULT_TARGET_BYTES, build_report
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            dist = root / "dist" / "Ryu's Audiobook"
+            files = {
+                dist / "_internal" / "bundled_models" / "piper" / "voice.onnx": 10,
+                dist / "_internal" / "bundled_models" / "kokoro" / "model.onnx": 20,
+                dist / "_internal" / "assets" / "starter_audio" / "music" / "track.mp3": 30,
+                dist / "_internal" / "PySide6" / "QtWebEngineCore.dll": 40,
+                dist / "_internal" / "onnxruntime" / "capi" / "onnxruntime.dll": 50,
+                dist / "Ryu's Audiobook.exe": 60,
+            }
+            for path, size in files.items():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"x" * size)
+
+            installer_dir = root / "installer" / "installer-output"
+            installer_dir.mkdir(parents=True)
+            (installer_dir / "Ryu's Audiobook Setup.exe").write_bytes(b"h" * 150)
+            (installer_dir / "Ryu's Audiobook Core Setup.exe").write_bytes(b"c" * 100)
+            (installer_dir / "payload_info.generated.json").write_text(
+                json.dumps({"version": "1.2.0+build.test", "installed_size_bytes": 210, "file_count": 6}),
+                encoding="utf-8",
+            )
+
+            report = build_report(root, dist, target_bytes=200)
+
+            self.assertEqual(DEFAULT_TARGET_BYTES, 500_000_000)
+            self.assertEqual(report["dist"]["total_bytes"], 210)
+            self.assertEqual(report["dist"]["file_count"], 6)
+            self.assertFalse(report["dist"]["target_met"])
+            self.assertEqual(report["offline_assets"]["piper_models"]["size_bytes"], 10)
+            self.assertEqual(report["offline_assets"]["kokoro_models"]["size_bytes"], 20)
+            self.assertEqual(report["offline_assets"]["starter_audio"]["size_bytes"], 30)
+            self.assertEqual(report["runtime_components"]["PySide6"]["total_bytes"], 40)
+            self.assertEqual(report["runtime_components"]["onnxruntime"]["total_bytes"], 50)
+            self.assertEqual(report["installers"]["html_setup_bytes"], 150)
+            self.assertEqual(report["installers"]["core_setup_bytes"], 100)
+            self.assertEqual(report["installers"]["html_wrapper_overhead_bytes"], 50)
+            self.assertEqual(report["payload_info"]["version"], "1.2.0+build.test")
+            self.assertTrue(any(note.startswith("The report does not mutate assets.") for note in report["notes"]))
 
     def test_pause_profiles_keep_sentence_and_dialogue_turns_natural(self):
         from app.tts.pacing import pause_after_ms
@@ -3130,7 +3890,7 @@ Rias Gremory
                 _write_wav(output_path, 0.20)
 
         captured = {}
-        def capture_units(text, provider, voice, pronunciation_dictionary, max_chars, dialogue_assignments=None):
+        def capture_units(text, provider, voice, pronunciation_dictionary, max_chars, dialogue_assignments=None, preserve_paragraph_boundaries=False):
             captured["max_chars"] = max_chars
             return [("A complete preview sentence.", voice)]
 
@@ -3342,456 +4102,3 @@ Rias Gremory
                 encoding="utf-8",
             )
 
-            partial_dir = root / "002_Chapter_2"
-            (partial_dir / "chunks").mkdir(parents=True)
-            (partial_dir / "generation.json").write_text(
-                '{"chunks_total": 3, "completed": [0]}',
-                encoding="utf-8",
-            )
-
-            chapters = [
-                Chapter(1, "Chapter 1", "one"),
-                Chapter(2, "Chapter 2", "two"),
-                Chapter(3, "Chapter 3", "three"),
-            ]
-            (completed_dir / "narration.json").write_text(
-                json.dumps({"chapter_id": chapters[0].chapter_id}),
-                encoding="utf-8",
-            )
-            (partial_dir / "narration.json").write_text(
-                json.dumps({"chapter_id": chapters[1].chapter_id}),
-                encoding="utf-8",
-            )
-            state = inspect_generation_state(root, chapters)
-            self.assertEqual(state.completed_chapters, (1,))
-            self.assertEqual(state.partial_chapters, (2,))
-            self.assertTrue(state.resume_available)
-
-
-    def test_online_tts_network_error_is_classifiable(self):
-        from app.tts.providers.edge_tts import EdgeTTSProvider, OnlineTTSNetworkError
-
-        self.assertTrue(issubclass(OnlineTTSNetworkError, RuntimeError))
-        self.assertTrue(getattr(EdgeTTSProvider, "is_online_provider", False))
-
-    def test_edge_tts_classifies_no_audio_as_transient_service_error(self):
-        from app.tts.providers.edge_tts import EdgeTTSProvider
-
-        self.assertTrue(EdgeTTSProvider._is_transient_service_error("NoAudioReceived: No audio was received. Please verify that your parameters are correct."))
-        self.assertTrue(EdgeTTSProvider._is_transient_service_error("WebSocket connection was closed by the server"))
-        self.assertTrue(EdgeTTSProvider._is_transient_service_error("getaddrinfo failed"))
-        self.assertFalse(EdgeTTSProvider._is_transient_service_error("An invalid voice parameter was supplied"))
-
-    def test_edge_tts_uses_extended_transient_retry_budget(self):
-        from app.tts.providers.edge_tts import EdgeTTSProvider
-
-        self.assertEqual(EdgeTTSProvider.transient_retry_attempts, 5)
-        self.assertEqual(EdgeTTSProvider.request_timeout_seconds, 60)
-
-    def test_online_tts_provider_stops_generation_after_service_failure(self):
-        from app.tts.providers.edge_tts import EdgeTTSProvider, OnlineTTSNetworkError
-
-        self.assertTrue(EdgeTTSProvider.stop_on_failure)
-        self.assertEqual(EdgeTTSProvider.request_timeout_seconds, 60)
-        self.assertTrue(issubclass(OnlineTTSNetworkError, RuntimeError))
-
-    def test_manager_stops_after_online_provider_failure(self):
-        from app.tts.manager import GenerationManager
-
-        class StopProvider:
-            stop_on_failure = True
-
-            def synthesize(self, text, output_path, voice=None):
-                raise RuntimeError("online voice service unavailable")
-
-            def close(self):
-                pass
-
-        summaries = []
-        manager = GenerationManager(
-            StopProvider(),
-            "voice",
-            [
-                Chapter(1, "One", "One"),
-                Chapter(2, "Two", "Two"),
-                Chapter(3, "Three", "Three"),
-            ],
-            Path(tempfile.mkdtemp()),
-            on_finished=summaries.append,
-        )
-        manager.start()
-        manager._thread.join(timeout=10)
-
-        self.assertEqual(len(summaries), 1)
-        self.assertEqual(summaries[0].chapters_failed, [1])
-
-    def test_project_save_round_trip_preserves_manual_chapter_edits(self):
-        from app.core.project import Project
-
-        with tempfile.TemporaryDirectory() as temp:
-            folder = Path(temp) / "Book"
-            project = Project(
-                "Book",
-                folder,
-                None,
-                [
-                    Chapter(1, "Chapter One", "Edited body text."),
-                    Chapter(2, "Chapter Two", "Second edited body."),
-                ],
-            )
-            project.save()
-
-            loaded = Project.load(folder)
-            self.assertEqual(
-                [(c.number, c.title, c.text) for c in loaded.chapters],
-                [
-                    (1, "Chapter One", "Edited body text."),
-                    (2, "Chapter Two", "Second edited body."),
-                ],
-            )
-
-
-    def test_empty_chapter_repair_preserves_existing_edits_and_assignments(self):
-        source = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
-        start = source.index("def _repair_empty_chapters_from_source")
-        end = source.index("def _refresh_resume_state", start)
-        repair = source[start:end]
-        self.assertIn('if str(chapter.text or "").strip():', repair)
-        self.assertIn("Existing non-empty bodies are user", repair)
-        self.assertIn('"dialogue_assignments"] = getattr(current, "dialogue_assignments", [])', repair)
-        self.assertIn("temp_file.replace(chapters_file)", repair)
-        self.assertNotIn("self.chapters[:] = detected", repair)
-
-    def test_empty_chapter_repair_has_chapter_number_fallback(self):
-        source = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
-        start = source.index("def _repair_empty_chapters_from_source")
-        end = source.index("def _refresh_resume_state", start)
-        repair = source[start:end]
-        self.assertIn("detected_by_number", repair)
-        self.assertIn("candidate = detected_by_number.get(int(chapter.number))", repair)
-        self.assertIn('if str(chapter.text or "").strip():', repair)
-
-    def test_generation_progress_range_uses_only_chapters_sent_to_manager(self):
-        source = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
-        start = source.index("def start(self)")
-        end = source.index("def toggle_generation_pause", start)
-        generation_start = source[start:end]
-        self.assertIn("generation_chapters, skipped_empty_chapters = partition_chapters_by_body(self.chapters)", generation_start)
-        self.assertIn("self.progress.setRange(0, len(generation_chapters))", generation_start)
-        self.assertNotIn("self.progress.setRange(0, len(self.chapters))", generation_start)
-
-    def test_generation_readiness_allows_valid_chapters_and_nonblocking_empty_chapters(self):
-        from app.chapters.detector import Chapter
-        from app.tts.readiness import build_generation_readiness, partition_chapters_by_body
-
-        valid = Chapter(1, "Chapter One", "Narration text.")
-        empty = Chapter(2, "Chapter Two", "   ")
-        chapters, skipped = partition_chapters_by_body([valid, empty])
-        self.assertEqual(chapters, [valid])
-        self.assertEqual(skipped, [empty])
-
-        readiness = build_generation_readiness(
-            [valid, empty], "Narrator", "piper", "C:/Books/Book.m4b"
-        )
-        chapter_item = next(item for item in readiness.items if item.label == "Chapters")
-        self.assertTrue(readiness.ready)
-        self.assertFalse(chapter_item.ok)
-        self.assertFalse(chapter_item.blocking)
-        self.assertIn("will be skipped", chapter_item.detail)
-
-    def test_generation_readiness_blocks_qwen_voice_when_runtime_is_missing(self):
-        from app.chapters.detector import Chapter
-        from app.tts.readiness import build_generation_readiness
-
-        readiness = build_generation_readiness(
-            [Chapter(1, "Chapter One", "Narration text.")],
-            "Custom Character Voice",
-            "qwen-character",
-            "C:/Books/Book.m4b",
-            qwen_runtime_ready=False,
-        )
-        self.assertFalse(readiness.ready)
-        item = next(item for item in readiness.items if item.label == "Qwen3-TTS runtime")
-        self.assertTrue(item.blocking)
-        self.assertFalse(item.ok)
-        self.assertIn("Install / repair", item.detail)
-
-    def test_generation_readiness_does_not_require_qwen_for_other_voices(self):
-        from app.chapters.detector import Chapter
-        from app.tts.readiness import build_generation_readiness
-
-        readiness = build_generation_readiness(
-            [Chapter(1, "Chapter One", "Narration text.")],
-            "Piper Narrator",
-            "piper",
-            "C:/Books/Book.m4b",
-            qwen_runtime_ready=False,
-        )
-        self.assertTrue(readiness.ready)
-        item = next(item for item in readiness.items if item.label == "Qwen3-TTS runtime")
-        self.assertTrue(item.ok)
-        self.assertFalse(item.blocking)
-        self.assertIn("Not required", item.detail)
-
-    def test_qwen_profile_model_readiness_requires_selected_model_and_design_base(self):
-        from types import SimpleNamespace
-        from unittest.mock import patch
-        import app.tts.qwen_character_runtime as runtime
-
-        custom = SimpleNamespace(qwen_mode="custom", model_id="auto")
-        with patch.object(runtime, "best_custom_kind", return_value="custom-0.6b"), patch.object(runtime, "model_installed", side_effect=lambda kind: kind == "custom-0.6b"):
-            self.assertEqual(runtime.required_models_for_profile(custom), ("custom-0.6b",))
-            self.assertEqual(runtime.profile_model_readiness(custom)[0], True)
-
-        design = SimpleNamespace(qwen_mode="design", model_id="auto")
-        with patch.object(runtime, "best_long_form_clone_kind", return_value="base-0.6b"), patch.object(runtime, "model_installed", return_value=False):
-            ready, detail = runtime.profile_model_readiness(design)
-            self.assertFalse(ready)
-            self.assertIn("base-0.6b", detail)
-            self.assertIn("design-1.7b", detail)
-
-    def test_generation_readiness_blocks_missing_qwen_model_only_for_qwen(self):
-        from app.chapters.detector import Chapter
-        from app.tts.readiness import build_generation_readiness
-
-        chapter = Chapter(1, "Chapter One", "Narration text.")
-        readiness = build_generation_readiness(
-            [chapter], "Qwen Character", "qwen-character", "C:/Books/Book.m4b",
-            qwen_runtime_ready=True,
-            qwen_models_ready=False,
-            qwen_model_detail="Missing custom-0.6b model files.",
-        )
-        self.assertFalse(readiness.ready)
-        item = next(item for item in readiness.items if item.label == "Qwen voice model")
-        self.assertFalse(item.ok)
-        self.assertTrue(item.blocking)
-        self.assertIn("custom-0.6b", item.detail)
-
-        other = build_generation_readiness(
-            [chapter], "Piper Narrator", "piper", "C:/Books/Book.m4b",
-            qwen_runtime_ready=False,
-            qwen_models_ready=False,
-            qwen_model_detail="Missing custom-0.6b model files.",
-        )
-        self.assertTrue(other.ready)
-        item = next(item for item in other.items if item.label == "Qwen voice model")
-        self.assertTrue(item.ok)
-        self.assertFalse(item.blocking)
-        self.assertIn("Not required", item.detail)
-
-    def test_generation_readiness_blocks_when_every_chapter_is_empty(self):
-        from app.chapters.detector import Chapter
-        from app.tts.readiness import build_generation_readiness
-
-        readiness = build_generation_readiness(
-            [Chapter(1, "Chapter One", " "), Chapter(2, "Chapter Two", "")],
-            "Narrator",
-            "piper",
-            "C:/Books/Book.m4b",
-        )
-        chapter_item = next(item for item in readiness.items if item.label == "Chapters")
-        self.assertFalse(readiness.ready)
-        self.assertTrue(chapter_item.blocking)
-        self.assertIn("No chapter contains body text", chapter_item.detail)
-
-
-    def test_stage5_shared_theme_defines_consistent_studio_surfaces_and_focus_states(self):
-        from pathlib import Path
-
-        source = Path("app/main.py").read_text(encoding="utf-8")
-        self.assertIn("Dragon Studio Stage 5", source)
-        self.assertIn("QWidget#studioMainPanel", source)
-        self.assertIn("QMenu::item:selected", source)
-        self.assertIn("QComboBox:focus", source)
-        self.assertIn("QTableWidget::item", source)
-        self.assertIn("QPushButton#primary:disabled", source)
-
-    def test_stage5_html_aligned_page_styles_cover_dashboard_import_and_workflow(self):
-        from pathlib import Path
-
-        source = Path("app/main.py").read_text(encoding="utf-8")
-        self.assertIn("QScrollArea#dashboardScroll", source)
-        self.assertIn("QFrame#importDropZone", source)
-        self.assertIn("QWidget#dashboardMetric", source)
-        self.assertIn("QPushButton#workflowStep:checked", source)
-        self.assertIn("QProgressBar::chunk", source)
-
-    def test_stage5_import_studio_uses_scroll_area_to_prevent_clipped_controls(self):
-        from pathlib import Path
-
-        source = Path("app/ui/import_page.py").read_text(encoding="utf-8")
-        self.assertIn("QScrollArea", source)
-        self.assertIn('scroll.setObjectName("importScroll")', source)
-        self.assertIn("scroll.setWidgetResizable(True)", source)
-        self.assertIn("scroll.setHorizontalScrollBarPolicy", source)
-        self.assertIn("self.create_button.clicked.connect(self.create_project)", source)
-
-
-    def test_stage5_chapter_studio_scrolls_page_controls_on_short_displays(self):
-        from pathlib import Path
-
-        source = Path("app/ui/chapter_editor.py").read_text(encoding="utf-8")
-        self.assertIn("QScrollArea", source)
-        self.assertIn('scroll.setObjectName("chapterEditorScroll")', source)
-        self.assertIn("scroll.setWidgetResizable(True)", source)
-        self.assertIn("scroll.setHorizontalScrollBarPolicy", source)
-        # Keep core editor actions and the chapter/text workspace in the scroll content.
-        self.assertIn('QPushButton("Re-detect Chapters")', source)
-        self.assertIn('QLabel("Chapter Text")', source)
-        self.assertIn("self._autosave_timer.timeout.connect(self._autosave)", source)
-
-
-    def test_stage5_audiobooks_player_screen_scrolls_without_losing_controls(self):
-        from pathlib import Path
-
-        source = Path("app/ui/audiobooks_page.py").read_text(encoding="utf-8")
-        self.assertIn("QScrollArea", source)
-        self.assertIn("scroll.setObjectName(\"audiobooksScroll\")", source)
-        self.assertIn("scroll.setWidgetResizable(True)", source)
-        self.assertIn("scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)", source)
-        self.assertIn("scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)", source)
-        self.assertIn("self.play_button.clicked.connect(self.play_selected)", source)
-        self.assertIn("self.pause_button.clicked.connect(self.pause_resume)", source)
-        self.assertIn("self.stop_button.clicked.connect(self.stop_playback)", source)
-        self.assertIn("self.timeline.sliderMoved.connect(self.player.setPosition)", source)
-        self.assertIn("self.open_output_button.clicked.connect(self._open_output_folder)", source)
-
-    def test_stage5_voice_cast_studio_scrolls_on_short_displays(self):
-        from pathlib import Path
-
-        source = Path("app/ui/voice_cast_page.py").read_text(encoding="utf-8")
-        self.assertIn("QScrollArea", source)
-        self.assertIn("scroll.setObjectName(\"voiceCastScroll\")", source)
-        self.assertIn("scroll.setWidgetResizable(True)", source)
-        self.assertIn("scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)", source)
-        self.assertIn("scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)", source)
-        self.assertIn("self.analyze_button.clicked.connect(self.analyze)", source)
-        self.assertIn("self.assign_button.clicked.connect(self.assign_voice)", source)
-        self.assertIn("self.unassign_button.clicked.connect(self.unassign_voice)", source)
-
-    def test_stage5_qwen_voice_cache_reset_handles_worker_errors_and_restores_button(self):
-        from pathlib import Path
-
-        source = Path("app/ui/models_page.py").read_text(encoding="utf-8")
-        worker_start = source.index("class QwenCacheResetWorker")
-        worker_end = source.index("\n\nclass QwenRepairWorker", worker_start)
-        worker = source[worker_start:worker_end]
-        self.assertIn("failed = Signal(str)", worker)
-        self.assertIn("try:", worker)
-        self.assertIn("self.failed.emit(str(exc))", worker)
-        self.assertIn("self.qwen_cache_worker.failed.connect(self._qwen_cache_reset_failed)", source)
-        self.assertIn("def _qwen_cache_reset_failed(self, message: str)", source)
-        reset = source[source.index("def reset_qwen_voice_cache"):source.index("def _qwen_cache_reset_ok")]
-        failed_handler = source[source.index("def _qwen_cache_reset_failed"):source.index("def repair_qwen_runtime")]
-        # Every model action now shares a single lifecycle lock. The button is
-        # restored centrally after QThread.finished, not from each callback.
-        self.assertIn('if not self._begin_operation("reset Qwen voice cache"):', reset)
-        self.assertIn("self.qwen_cache_worker.finished.connect(self._end_operation)", reset)
-        self.assertIn("self._update_operation_controls()", source[source.index("def _end_operation"):source.index("def _update_uninstall_button")])
-        self.assertNotIn("self.reset_qwen_cache.setEnabled(True)", failed_handler)
-        self.assertIn("QMessageBox.warning", failed_handler)
-
-    def test_stage5_hardware_studio_scrolls_and_preserves_benchmark_actions(self):
-        from pathlib import Path
-
-        source = Path("app/ui/hardware_page.py").read_text(encoding="utf-8")
-        self.assertIn("QScrollArea", source)
-        self.assertIn('scroll.setObjectName("hardwareScroll")', source)
-        self.assertIn("scroll.setWidgetResizable(True)", source)
-        self.assertIn("scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)", source)
-        self.assertIn("scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)", source)
-        self.assertIn("self.benchmark_button.clicked.connect(self.run_benchmark)", source)
-        self.assertIn("self.benchmark_thread.start()", source)
-        self.assertIn("self.benchmark_thread.finished_result.connect(self._benchmark_finished)", source)
-
-    def test_stage5_generation_history_scrolls_and_preserves_project_actions(self):
-        from pathlib import Path
-
-        source = Path("app/ui/history_page.py").read_text(encoding="utf-8")
-        self.assertIn("QScrollArea", source)
-        self.assertIn('scroll.setObjectName("historyScroll")', source)
-        self.assertIn("scroll.setWidgetResizable(True)", source)
-        self.assertIn("scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)", source)
-        self.assertIn("scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)", source)
-        self.assertIn("self.refresh_button.clicked.connect(self.refresh)", source)
-        self.assertIn("self.open_button.clicked.connect(self._open_project)", source)
-        self.assertIn("self.production_button.clicked.connect(self._open_generation)", source)
-        self.assertIn("self.output_button.clicked.connect(self._open_output_folder)", source)
-        self.assertIn("self.table.itemSelectionChanged.connect(self._selection_changed)", source)
-
-    def test_stage5_audiobook_library_scrolls_without_losing_collection_actions(self):
-        from pathlib import Path
-
-        source = Path("app/ui/library.py").read_text(encoding="utf-8")
-        self.assertIn("QScrollArea", source)
-        self.assertIn('scroll.setObjectName("libraryScroll")', source)
-        self.assertIn("scroll.setWidgetResizable(True)", source)
-        self.assertIn("scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)", source)
-        self.assertIn("scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)", source)
-        self.assertIn("self.grid_button.clicked.connect", source)
-        self.assertIn("self.list_button.clicked.connect", source)
-        self.assertIn("self.open_button.clicked.connect(self.open_selected)", source)
-        self.assertIn("self.delete_button.clicked.connect(self.delete_selected)", source)
-        self.assertIn("self.folder_button.clicked.connect(self.open_selected_folder)", source)
-
-    def test_stage5_settings_studio_scrolls_without_losing_preferences_or_storage_actions(self):
-        from pathlib import Path
-
-        source = Path("app/ui/settings_page.py").read_text(encoding="utf-8")
-        self.assertIn("QScrollArea", source)
-        self.assertIn('scroll.setObjectName("settingsScroll")', source)
-        self.assertIn("scroll.setWidgetResizable(True)", source)
-        self.assertIn("scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)", source)
-        self.assertIn("scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)", source)
-        self.assertIn("self.save_button.clicked.connect(self.save_settings)", source)
-        self.assertIn("self.default_bitrate", source)
-        self.assertIn("self.open_log_button.clicked.connect(self.open_application_log)", source)
-        self.assertIn('("Open Voice Profiles", voices_root())', source)
-
-    def test_stage5_mini_player_keeps_playback_controls_in_compact_windows(self):
-        from pathlib import Path
-
-        source = Path("app/ui/workflow.py").read_text(encoding="utf-8")
-        self.assertIn("compact_player = width < 1080", source)
-        self.assertIn("self.mini_title.setVisible(not compact_player)", source)
-        self.assertIn("self.mini_position.setVisible(not compact_player)", source)
-        self.assertIn("self.mini_duration.setVisible(not compact_player)", source)
-        self.assertIn("self.mini_play_button.clicked.connect(self._toggle_mini_playback)", source)
-        self.assertIn("self.mini_timeline.sliderMoved.connect(self._seek_mini_player)", source)
-        self.assertIn("self.mini_open_button.clicked.connect(lambda: self.select_section(\"Audiobooks\"))", source)
-
-    def test_stage5_header_adapts_to_compact_window_widths(self):
-        from pathlib import Path
-
-        source = Path("app/ui/workflow.py").read_text(encoding="utf-8")
-        self.assertIn("def resizeEvent(self, event)", source)
-        self.assertIn("compact_header = width < 1240", source)
-        self.assertIn("self.project_label.setVisible(not compact_header)", source)
-        self.assertIn("self.global_search.setMaximumWidth(180 if width < 1400 else 250)", source)
-        self.assertIn("self.global_search.returnPressed.connect(self._search_library)", source)
-
-    def test_stage5_workflow_rail_scrolls_instead_of_compressing_navigation_steps(self):
-        from pathlib import Path
-
-        source = Path("app/ui/workflow.py").read_text(encoding="utf-8")
-        self.assertIn('workflow_rail.setMinimumWidth(1080)', source)
-        self.assertIn('workflow_scroll.setObjectName("workflowRailScroll")', source)
-        self.assertIn("workflow_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)", source)
-        self.assertIn("workflow_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)", source)
-        self.assertIn("self.workflow_step_buttons[key] = button", source)
-        self.assertIn("self._navigate_workflow_step(target)", source)
-
-
-if __name__ == "__main__":
-    unittest.main()
-
-
-    def test_production_studio_validates_chapter_audio_and_normalizes_m4b_output(self):
-        source = Path("app/ui/assembly_page.py").read_text(encoding="utf-8")
-        self.assertIn("def _validate_build_inputs", source)
-        self.assertIn('chunks_dir.glob("*.wav")', source)
-        self.assertIn("chapter folder is missing", source)
-        self.assertIn("no WAV audio chunks found", source)
-        self.assertIn('output_path.suffix.casefold() != ".m4b"', source)
-        self.assertIn("self._validate_build_inputs()", source)
-        self.assertIn("An audiobook packaging job is already running.", source)

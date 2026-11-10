@@ -4,6 +4,31 @@
   window.__ryuPremiumAdapterFailure = '';
   const $ = id => document.getElementById(id);
 
+  // Background Jobs is a shared shell dialog, so its responsive bounds must
+  // exist from the first screen. Do not wait for Models Center to render before
+  // injecting this rule: users can open Task Manager on a fresh 600px-wide
+  // window before ever visiting Models.
+  function ensureTaskManagerResponsiveStyles() {
+    if ($('ryuTaskManagerResponsiveStyles')) return;
+    const style = document.createElement('style');
+    style.id = 'ryuTaskManagerResponsiveStyles';
+    style.textContent = [
+      '#backgroundJobsModal .jobs-modal,',
+      '.modal-back .jobs-modal {',
+      'box-sizing:border-box!important;',
+      'width:min(780px,100%)!important;',
+      'min-width:0!important;',
+      'max-width:100%!important;',
+      'margin-left:auto;',
+      'margin-right:auto;',
+      '}'
+    ].join(' ');
+    (document.head || document.documentElement).appendChild(style);
+  }
+  ensureTaskManagerResponsiveStyles();
+
+  let narratorOnlySavePromise = Promise.resolve();
+
   // Job polling runs every 1.5 seconds. Avoid writing the same values back to
   // Chromium's DOM/style system when nothing changed; this keeps layout work
   // proportional to real state changes rather than polling frequency.
@@ -260,7 +285,7 @@
     if (error) console.error('[Ryu backend]', text);
   };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
-  let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, profileEditOriginalName = '', activeJob = null, activeJobType = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, chapterListEpoch = 0, chapterSelectionEpoch = 0, cueListEpoch = 0, cueSearchTimer = null, previewAudio = null, lastVoicePreviewPath = null, lastVoicePreviewProfileName = '', lastVoicePreviewChapterNumber = null, lastVoicePreviewChapterTitle = '', voicePreviewValid = false, voicePreviewEpoch = 0, previewVolume = 0.85, voiceAssignmentEpoch = 0, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8, productionFullJobId = null, productionPreviewJobId = null, productionJobSnapshots = {full:null,preview:null}, productionJobMonitors = {full:null,preview:null}, productionMonitorEpochs = {full:0,preview:0}, productionPreviewRequestProjectFolder = '', productionPreviewSelectionProjectFolder = '', productionPreviewSelectedChapter = null, productionPreviewSelectedChapterId = '', productionPreviewSelectedChapterSignature = '', productionPreviewRequestChapterNumber = 0, productionPreviewRequestChapterId = '';
+  let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, profileEditOriginalName = '', activeJob = null, activeJobType = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, jobsRefreshRequested = false, chapterListEpoch = 0, chapterSelectionEpoch = 0, cueListEpoch = 0, cueSearchTimer = null, previewAudio = null, lastVoicePreviewPath = null, lastVoicePreviewProfileName = '', lastVoicePreviewChapterNumber = null, lastVoicePreviewChapterTitle = '', voicePreviewValid = false, voicePreviewEpoch = 0, previewVolume = 0.85, voiceAssignmentEpoch = 0, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8, productionFullJobId = null, productionPreviewJobId = null, productionJobSnapshots = {full:null,preview:null}, productionJobMonitors = {full:null,preview:null}, productionMonitorEpochs = {full:0,preview:0}, productionPreviewRequestProjectFolder = '', productionPreviewSelectionProjectFolder = '', productionPreviewSelectedChapter = null, productionPreviewSelectedChapterId = '', productionPreviewSelectedChapterSignature = '', productionPreviewRequestChapterNumber = 0, productionPreviewRequestChapterId = '';
   let elevenCandidates = [], selectedElevenCandidate = null, elevenDesignSeed = 7300;
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], pronunciationEnabled = true, activePronunciationSeries = '', lastPronunciationPreview = null, pronunciationRowPreviewState = new Map(), pronunciationSelectionKeys = new Set(), selectedSoundPath = null, selectedCuePath = null, pendingCueSlot = null, pendingCueAssignments = Object.create(null), cueChangesDirty = false, cueSaveError = '', cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null, chapterBgmDraftDirty = false, mixLevelsDirty = false, soundPreviewKind = null, soundPreviewPath = null;
   let chapterBgmCandidateTrackPath = null, chapterBgmCandidateChapter = null, chapterBgmSavePromise = null, cueSavePromise = null;
@@ -269,6 +294,8 @@
   let mixLevelsRevision = 0, mixLevelsSavePromise = null;
   let soundManifestSavePromise = null, soundManifestSaveRevision = 0, soundManifestPendingOverrides = Object.create(null);
   let cueClearAllStaged = false;
+  let modelInventoryLoadPromise = null, modelInventoryScanRequested = false, modelInventoryLoadedAt = 0, forceModelInventoryRefreshPending = false;
+  let soundCatalogLoadPromise = null, soundCatalogScanRequested = false, soundCatalogLoadedAt = 0, forceSoundCatalogRefreshPending = false;
   let providerCatalogs = Object.create(null), providerCatalogEpochs = Object.create(null), voiceListEpoch = 0, modelListEpoch = 0, projectListEpoch = 0, characterListEpoch = 0, termsListEpoch = 0, soundListEpoch = 0, historyListEpoch = 0, librarySearchTimer = null, soundSearchTimer = null;
   let dashboardProject = null, selectedAudiobookFolder = null, miniPlayerDismissed = false;
   let metadataDialogProjectFolder = '', metadataDialogDirty = false, metadataDialogEpoch = 0;
@@ -464,8 +491,134 @@
     const analyzedItems = items.filter(item =>
       item.source === 'local-dialogue-analysis' || analyzedIds.has(String(item.id || ''))
     );
+    const selectedNumber = Number(window.ryuPremiumAiChapterNumber || characterStudioSelectedChapter || window.ryuPremiumSelectedChapter || chapters[0]?.number || 0);
+    const selectedChapter = chapters.find(chapter => Number(chapter.number) === selectedNumber) || chapters[0] || null;
+    const pendingQueue = analyzedItems.filter(item =>
+      Number(item.chapter_number) === Number(selectedChapter?.number) &&
+      !item.assigned && !item.skipped
+    );
+    const queueSignature = String(selectedChapter?.number || 0) + '|' +
+      pendingQueue.map(item => String(item.id || '')).join('|');
+    if (window.ryuPremiumDialogueReviewQueueSignature !== queueSignature) {
+      window.ryuPremiumDialogueReviewQueueSignature = queueSignature;
+      window.ryuPremiumDialogueReviewVisibleCount = 120;
+    }
+    const visibleCount = Math.min(
+      pendingQueue.length,
+      Math.max(120, Number(window.ryuPremiumDialogueReviewVisibleCount || 120))
+    );
+    const nextVisibleCount = Math.min(pendingQueue.length, visibleCount + 120);
+    let chapterNav = $('aiChapterNavigator');
+    if (queue && !chapterNav) {
+      chapterNav = document.createElement('div');
+      chapterNav.id = 'aiChapterNavigator';
+      chapterNav.className = 'ryu-ai-chapter-navigator';
+      chapterNav.style.cssText = 'display:grid;gap:6px;max-height:230px;overflow:auto;margin:0 0 12px;padding-right:3px;';
+      queue.parentElement?.insertBefore(chapterNav, queue);
+    }
+    if (chapterNav) {
+      const priorScroll = chapterNav.scrollTop;
+      const chapterFilter = String(window.ryuPremiumAiChapterFilter || '').trim().toLocaleLowerCase();
+      const statusFilter = String(window.ryuPremiumAiChapterStatusFilter || 'all');
+      const chapterButtons = chapters.map(chapter => {
+        const number = Number(chapter.number);
+        const chapterPassages = items.filter(item => Number(item.chapter_number) === number);
+        const assignedCount = chapterPassages.filter(item => item.assigned && !item.skipped).length;
+        const aiSuggestedCount = chapterPassages.filter(item =>
+          !item.skipped && Array.isArray(item.suggestions) && item.suggestions.length > 0
+        ).length;
+        const skippedCount = chapterPassages.filter(item => item.skipped).length;
+        const pendingRows = chapterPassages.filter(item => !item.assigned && !item.skipped);
+        const wordCount = Math.max(
+          0,
+          Number(chapter.word_count) ||
+            String(chapter.text || '').trim().split(/\s+/).filter(Boolean).length
+        );
+        const status = !characterAnalysisStatus.analyzed ? 'Not analysed yet' :
+          (pendingRows.length ? 'Needs review' : 'Review complete');
+        const statusKey = !characterAnalysisStatus.analyzed ? 'not-analysed' :
+          (pendingRows.length ? 'needs-review' : 'complete');
+        const searchText = (number + ' ' + String(chapter.title || '')).toLocaleLowerCase();
+        const matchesSearch = !chapterFilter || searchText.includes(chapterFilter);
+        const matchesStatus = statusFilter === 'all' || statusFilter === statusKey;
+        const hidden = matchesSearch && matchesStatus ? '' : ' hidden';
+        const active = number === Number(selectedChapter?.number);
+        return '<button type="button" class="chapter-pick ' + (active ? 'active' : '') +
+          '" data-ai-chapter-number="' + number + '" data-ai-chapter-status="' + statusKey +
+          '" data-ai-chapter-search="' + esc(searchText) + '" aria-current="' + (active ? 'page' : 'false') + '"' + hidden +
+          ' style="display:flex;flex-direction:column;align-items:flex-start;gap:3px;width:100%;text-align:left;padding:9px 11px;border-radius:9px;border:1px solid ' +
+          (active ? 'var(--accent,#c92c57)' : 'var(--border,#303744)') +
+          ';background:' + (active ? 'rgba(197,39,82,.16)' : 'rgba(255,255,255,.02)') +
+          ';color:inherit;cursor:pointer"><b>Chapter ' + number + ' · ' +
+          esc(String(chapter.title || 'Untitled chapter')) + '</b><small>' +
+          esc(status + ' · ' + pendingRows.length + ' pending') +
+          '</small><small style="white-space:normal;line-height:1.45">' +
+          esc(wordCount.toLocaleString() + ' words · ' + chapterPassages.length + ' detected · ' +
+            assignedCount + ' assigned · ' + aiSuggestedCount + ' AI suggestions · ' +
+            pendingRows.length + ' needs review · ' + skippedCount + ' skipped') +
+          '</small></button>';
+      }).join('');
+      const statusOptions = [
+        ['all', 'All statuses'],
+        ['not-analysed', 'Not analysed'],
+        ['needs-review', 'Needs review'],
+        ['complete', 'Review complete']
+      ].map(([value, label]) =>
+        '<option value="' + value + '"' + (statusFilter === value ? ' selected' : '') + '>' + label + '</option>'
+      ).join('');
+      chapterNav.innerHTML =
+        '<div class="ryu-character-subsection">Chapters · select to review</div>' +
+        '<label style="display:grid;gap:4px"><span class="muted">Search chapter number or title</span>' +
+        '<input type="search" data-ai-chapter-filter aria-label="Search chapters by number or title" placeholder="Search chapters…" value="' +
+        esc(String(window.ryuPremiumAiChapterFilter || '')) + '" style="width:100%;min-width:0"></label>' +
+        '<label style="display:grid;gap:4px"><span class="muted">Filter by review status</span>' +
+        '<select data-ai-chapter-status-filter aria-label="Filter chapters by review status" style="width:100%;min-width:0">' +
+        statusOptions + '</select></label>' +
+        (chapterButtons || '<div class="ryu-character-empty">No chapters are loaded.</div>') +
+        '<div data-ai-chapter-filter-empty hidden class="ryu-character-empty">No chapters match these filters.</div>';
+      chapterNav.scrollTop = priorScroll;
+      if (!chapterNav.dataset.liveBound) {
+        chapterNav.dataset.liveBound = '1';
+        const applyChapterFilters = () => {
+          const term = String(window.ryuPremiumAiChapterFilter || '').trim().toLocaleLowerCase();
+          const selectedStatus = String(window.ryuPremiumAiChapterStatusFilter || 'all');
+          let visible = 0;
+          chapterNav.querySelectorAll('[data-ai-chapter-number]').forEach(button => {
+            const matchesSearch = !term || String(button.dataset.aiChapterSearch || '').includes(term);
+            const matchesStatus = selectedStatus === 'all' || button.dataset.aiChapterStatus === selectedStatus;
+            button.hidden = !(matchesSearch && matchesStatus);
+            if (!button.hidden) visible++;
+          });
+          const empty = chapterNav.querySelector('[data-ai-chapter-filter-empty]');
+          if (empty) empty.hidden = visible > 0;
+        };
+        chapterNav.addEventListener('input', event => {
+          const input = event.target.closest('[data-ai-chapter-filter]');
+          if (!input) return;
+          window.ryuPremiumAiChapterFilter = String(input.value || '');
+          applyChapterFilters();
+        });
+        chapterNav.addEventListener('change', event => {
+          const select = event.target.closest('[data-ai-chapter-status-filter]');
+          if (!select) return;
+          window.ryuPremiumAiChapterStatusFilter = String(select.value || 'all');
+          applyChapterFilters();
+        });
+        chapterNav.addEventListener('click', event => {
+          const button = event.target.closest('[data-ai-chapter-number]');
+          if (!button) return;
+          const number = Number(button.dataset.aiChapterNumber);
+          if (!chapters.some(chapter => Number(chapter.number) === number)) return;
+          window.ryuPremiumAiChapterNumber = number;
+          window.ryuPremiumSelectedChapter = number;
+          characterStudioSelectedChapter = number;
+          window.ryuPremiumSelectedDialogueId = '';
+          renderDialogueReview();
+        });
+      }
+    }
     const renderSignature = JSON.stringify([
-      characterAnalysisStatus.analyzed, items.map(item => [
+      characterAnalysisStatus.analyzed, selectedChapter?.number, queueSignature, visibleCount, items.map(item => [
         item.id,item.chapter_number,item.start,item.end,item.text,item.speakers,item.assigned,
         item.assignmentSource,item.skipped,(item.suggestions||[]).map(candidate=>[candidate.name,candidate.confidence,candidate.evidence])
       ])
@@ -489,8 +642,6 @@
     if (progressLabel) progressLabel.textContent = !characterAnalysisStatus.analyzed
       ? 'Run Analyze book' : (counted.length ? percent + '% assigned' : 'No suggestions');
     if (pendingBadge) pendingBadge.textContent = characterAnalysisStatus.analyzed ? remaining + ' left' : 'Not analyzed';
-    const selectedNumber = Number(window.ryuPremiumAiChapterNumber || characterStudioSelectedChapter || window.ryuPremiumSelectedChapter || chapters[0]?.number || 0);
-    const selectedChapter = chapters.find(chapter => Number(chapter.number) === selectedNumber) || chapters[0] || null;
     if (title) title.textContent = selectedChapter
       ? 'Chapter ' + selectedChapter.number + ' · ' + String(selectedChapter.title || 'Untitled chapter')
       : 'Dialogue review';
@@ -500,11 +651,10 @@
         ? 'Green passages are saved assignments; orange passages have real analysis suggestions; plain passages have no saved assignment or supported prediction.'
         : 'Open a local project to review its source text and dialogue assignments.');
     if (queue) {
-      const pending = analyzedItems.filter(item => !item.assigned && !item.skipped);
       if (!characterAnalysisStatus.analyzed) {
         queue.innerHTML = '<div class="ryu-character-empty"><b>Analysis has not run</b>Select Run analysis again to create review suggestions from the active project. Manual source-text assignment is still available.</div>';
       } else {
-        queue.innerHTML = pending.slice(0, 120).map(item => {
+        const visibleRows = pendingQueue.slice(0, visibleCount).map(item => {
           const preview = item.text.length > 75 ? item.text.slice(0, 72) + '…' : item.text;
           const candidate = item.suggestions?.[0];
           const note = candidate
@@ -514,7 +664,15 @@
             '" data-ai-line="' + esc(item.id) + '" data-dialogue-id="' + esc(item.id) + '">' +
             '<span>Chapter ' + Number(item.chapter_number) + ' · ' + esc(item.chapter_title) + '</span><b>' + esc(preview) +
             '</b><small>' + esc(note) + '</small></button>';
-        }).join('') || '<div class="ryu-character-empty"><b>Review queue is clear</b>All analyzed passages are assigned or skipped, or the analysis found no suggestions. Run analysis again to refresh suggestions.</div>';
+        }).join('');
+        const remaining = Math.max(0, pendingQueue.length - visibleCount);
+        const loadMore = remaining > 0
+          ? '<button type="button" class="btn small secondary" data-ai-load-more data-ai-next-count="' + nextVisibleCount +
+            '" aria-label="Show more passages; ' + remaining + ' remaining" style="width:100%;margin-top:8px">Show more passages · ' +
+            Math.min(120, remaining) + ' more (' + remaining + ' remaining)</button>'
+          : '';
+        queue.innerHTML = (visibleRows + loadMore) ||
+          '<div class="ryu-character-empty"><b>Review queue is clear</b>All analyzed passages are assigned or skipped, or the analysis found no suggestions. Run analysis again to refresh suggestions.</div>';
       }
     }
     renderAiChapterDocument();
@@ -665,31 +823,74 @@
 
     const chapterCount = Number(project.chapter_count || 0);
     const preparedChapters = Number(project.prepared_chapter_count || 0);
-    const chaptersReady = chapterCount > 0 && preparedChapters === chapterCount;
-    const hasChapterText = preparedChapters > 0;
+    const eligibleChapters = Math.max(0, Number(
+      project.eligible_chapter_count ?? project.prepared_chapter_count ?? 0
+    ));
+    const emptyChapters = Math.max(0, Number(project.empty_chapter_count || 0));
+    const excludedChapters = Math.max(0, Number(project.excluded_chapter_count || 0));
+    const chaptersReady = eligibleChapters > 0;
+    const metadataComplete = project.metadata_complete === true;
+    const metadataMissing = Array.isArray(project.metadata_missing_fields)
+      ? project.metadata_missing_fields : [];
     const narratorName = String(project.narrator || project.voice_profile || '').trim();
-    const narratorReady = Boolean(String(project.voice_profile || '').trim());
+    const narratorReady = project.narrator_voice_configured === true &&
+      project.narrator_profile_available === true && Boolean(String(project.voice_profile || '').trim());
+    const narratorOnlyRequested = project.narrator_only_generation === true;
+    const configuredCharacterVoiceCount = Math.max(0, Number(
+      project.configured_character_voice_profile_count ?? project.character_voice_count ?? 0
+    ));
+    const narratorOnlyEligibilityInvalid = narratorOnlyRequested && configuredCharacterVoiceCount > 0;
+    const narratorOnly = narratorOnlyRequested && configuredCharacterVoiceCount === 0;
     const characterCount = Number(project.character_count || 0);
-    const characterVoiceCount = Number(project.character_voice_count || 0);
-    const characterReviewed = Boolean(project.character_analysis_done);
-    const charactersReady = characterReviewed &&
-      (characterCount === 0 || characterVoiceCount >= characterCount);
-    const outputReady = Boolean(project.output_configured);
-    const canGenerate = chapterCount > 0 && hasChapterText && narratorReady && outputReady;
+    const characterVoiceCount = Math.max(0, Number(project.character_voice_count || 0));
+    const dialogueIndexReady = project.dialogue_index_ready === true;
+    const dialogueReviewComplete = project.dialogue_review_complete === true;
+    const characterAssignmentIssues = Math.max(0, Number(project.character_assignment_issue_count || 0));
+    const pendingDialogue = Math.max(0, Number(project.pending_dialogue_count || 0));
+    const conflictingDialogue = Math.max(0, Number(project.conflicting_dialogue_count || 0));
+    const dialogueIndexIssues = Math.max(0, Number(project.dialogue_index_issue_count || 0));
+    const charactersReady = !narratorOnlyEligibilityInvalid && (
+      narratorOnly || (
+        dialogueIndexReady && dialogueReviewComplete && characterAssignmentIssues === 0
+      )
+    );
+    const charactersDetail = narratorOnly
+      ? '0 configured character voice profiles · saved narrator reads all passages'
+      : (narratorOnlyRequested && configuredCharacterVoiceCount > 0
+        ? configuredCharacterVoiceCount + ' configured profile(s) · switch to multi-character review'
+        : (!dialogueIndexReady
+          ? 'Dialogue index unavailable · refresh Character Studio'
+          : (characterAssignmentIssues
+            ? characterAssignmentIssues + ' saved character assignment(s) need attention'
+            : (!dialogueReviewComplete
+              ? pendingDialogue + ' passage(s) need review · ' + conflictingDialogue
+                + ' conflict(s) · ' + dialogueIndexIssues + ' index issue(s)'
+              : (characterCount === 0
+                ? 'No character dialogue needs review'
+                : characterVoiceCount + ' / ' + characterCount + ' character voice assignment(s)')))));
+    const outputReady = project.output_configured === true &&
+      project.output_folder_ready === true && project.output_format_supported === true;
+    const canGenerate = chaptersReady && metadataComplete && narratorReady && outputReady && charactersReady;
     const pronunciationCount = Number(project.pronunciation_rule_count || 0);
     const soundConfigured = Boolean(project.sound_design_configured);
+    const chapterDetail = chaptersReady
+      ? eligibleChapters + ' eligible chapter(s)' +
+        (emptyChapters || excludedChapters
+          ? ' · skip ' + emptyChapters + ' empty / ' + excludedChapters + ' excluded' : '')
+      : (chapterCount ? 'No eligible chapters' : 'No chapters imported');
+    const metadataDetail = metadataComplete ? 'Book & metadata' :
+      ('Missing: ' + (metadataMissing.slice(0, 3).join(', ') || 'required project details') +
+        (metadataMissing.length > 3 ? ' +' + (metadataMissing.length - 3) + ' more' : ''));
 
     const stageState = [
-      {key:'import', ready:Boolean(project.source_exists), detail:project.source_exists ? 'Book & metadata' : 'Source file missing'},
-      {key:'chapters', ready:chaptersReady, detail:chaptersReady ? 'Structure & text' :
-        (chapterCount ? preparedChapters + '/' + chapterCount + ' chapters ready' : 'No chapters imported')},
-      {key:'voices', ready:narratorReady, detail:narratorReady ? (narratorName || project.voice_profile) : 'Choose a voice profile'},
-      {key:'characters', ready:charactersReady, detail:!characterReviewed ? 'Not analyzed' :
-        (characterCount === 0 ? 'No characters found' :
-          (charactersReady ? 'Voices assigned' : (characterCount-characterVoiceCount) + ' need review'))},
+      {key:'import', ready:metadataComplete, detail:metadataDetail},
+      {key:'chapters', ready:chaptersReady, detail:chapterDetail},
+      {key:'voices', ready:narratorReady, detail:narratorReady ? (narratorName || project.voice_profile) : 'Choose an available saved narrator'},
+      {key:'characters', ready:charactersReady, detail:charactersDetail},
       {key:'pronunciation', ready:true, detail:pronunciationCount ? pronunciationCount + ' saved rules' : 'Names & terms'},
       {key:'sound', ready:true, detail:soundConfigured ? 'Configured' : 'Music & effects'},
-      {key:'generate', ready:canGenerate, detail:project.completed ? 'Audiobook ready' : (canGenerate ? 'Build audiobook' : 'Setup required')}
+      {key:'generate', ready:canGenerate, detail:project.completed && project.output_path ? 'Audiobook ready' :
+        (canGenerate ? 'Build audiobook' : 'Complete the required setup')}
     ];
     const readyCount = stageState.filter(stage => stage.ready).length;
     if (readinessLabel) readinessLabel.textContent = readyCount + ' of ' + stageState.length + ' stages ready';
@@ -777,21 +978,57 @@
     if (!container) {
       container = document.createElement('section');
       container.id = 'backendAudiobookLibrary';
-      container.className = 'section';
-      page.insertBefore(container, page.firstElementChild);
+      container.className = 'section audiobook-library-section';
+      const pageHead = page.querySelector(':scope > .page-head');
+      if (pageHead && pageHead.parentElement === page) pageHead.insertAdjacentElement('afterend', container);
+      else page.insertBefore(container, page.firstElementChild);
     }
-    const available = rows.filter(project => project.completed && project.output_path);
-    const signature = JSON.stringify(available.map(project => [project.folder,project.title,project.output_path,project.narrator,project.chapter_count,project.cover_path]));
+    const available = (Array.isArray(rows) ? rows : []).filter(project =>
+      Boolean(project && project.completed === true &&
+        typeof project.output_path === 'string' && project.output_path.trim())
+    );
+    const signature = JSON.stringify({
+      rows:available.map(project => [
+        project.folder,project.title,project.status,project.output_path,project.author,
+        project.narrator,project.chapter_count,project.cover_path
+      ]),
+      selected:selectedAudiobookFolder
+    });
     if (container.dataset.audiobookLibrarySignature === signature) return;
     container.dataset.audiobookLibrarySignature = signature;
-    container.innerHTML = '<div class="section-head"><div><p class="eyebrow">YOUR LIBRARY</p><h2>Generated audiobooks</h2></div><p class="muted">' +
-      available.length + ' ready to play</p></div><div class="recent-grid">' +
-      (available.map(project => '<article class="card project-card" data-project-folder="' + esc(project.folder || '') +
-        '" data-cover-path="' + esc(project.cover_path || '') + '"><div class="book-cover"></div><div class="project-pad"><span class="badge">Ready</span><h3>' +
-        esc(project.title || 'Untitled audiobook') + '</h3><p class="muted">' + esc(project.narrator || 'Narrator not set') + ' · ' +
-        Number(project.chapter_count || 0) + ' chapters</p><button class="btn small" type="button" data-play-project-folder="' +
-        esc(project.folder || '') + '">Play audiobook</button></div></article>').join('') ||
-        '<p class="muted">No finished audiobooks yet. Generate one in Production Studio to see it here.</p>') + '</div>';
+    const cards = available.map(project => {
+      const folder = String(project.folder || '');
+      const statusValue = String(project.status || 'completed').trim().toLowerCase();
+      const statusLabel = statusValue.replace(/[_-]+/g,' ')
+        .replace(/\b\w/g, letter => letter.toUpperCase());
+      const title = String(project.title || 'Untitled audiobook');
+      const author = String(project.author || '').trim();
+      const narrator = String(project.narrator || '').trim();
+      const details = [
+        author,
+        narrator ? 'Narrated by ' + narrator : '',
+        Number(project.chapter_count || 0) + ' chapters'
+      ].filter(Boolean).join(' · ');
+      const selectedClass = folder && folder === selectedAudiobookFolder ? ' is-selected' : '';
+      return '<article class="card audiobook-library-card' + selectedClass +
+        '" data-project-folder="' + esc(folder) + '" data-cover-path="' + esc(project.cover_path || '') + '">' +
+        '<div class="book-cover audiobook-card-cover" role="img" aria-label="Cover for ' + esc(title) + '"></div>' +
+        '<div class="audiobook-card-content"><div class="audiobook-card-status-row">' +
+        '<span class="badge" data-audiobook-status data-status="' + esc(statusValue) + '">' + esc(statusLabel) + '</span>' +
+        '<span class="audiobook-card-playable">Ready to play</span></div>' +
+        '<h3 class="audiobook-card-title" title="' + esc(title) + '">' + esc(title) + '</h3>' +
+        '<p class="audiobook-card-meta">' + esc(details) + '</p>' +
+        '<div class="audiobook-card-actions">' +
+        '<button class="btn small secondary" type="button" data-open-project-folder="' + esc(folder) +
+        '" aria-label="Open ' + esc(title) + ' in the audiobook player">Open</button>' +
+        '<button class="btn small" type="button" data-play-project-folder="' + esc(folder) +
+        '" aria-label="Play ' + esc(title) + '">Play</button></div></div></article>';
+    }).join('');
+    container.innerHTML = '<div class="audiobook-library-head"><div><p class="eyebrow">YOUR LIBRARY</p>' +
+      '<h2>Generated audiobooks</h2></div><p class="muted">' + available.length +
+      ' completed · ready to play</p></div>' +
+      (cards ? '<div class="audiobook-library-grid">' + cards + '</div>' :
+        '<p class="audiobook-library-empty">No finished audiobooks yet. Generate a book in Production Studio to see it here.</p>');
     applyProjectCovers(container);
   }
   function dashboardGenerationCard(root) {
@@ -900,9 +1137,8 @@
     }
   }
   function audiobookPageActive() {
-    const nav = [...document.querySelectorAll('nav .active,aside .active,.sidebar .active,[aria-current="page"]')]
-      .find(node => /audiobooks/i.test(node.textContent || ''));
-    if (nav) return true;
+    // Rendered page state is authoritative. Sidebar labels can be stale during
+    // navigation and must not keep the dock hidden after Dashboard is visible.
     const page = $('player');
     if (!page || page.hidden || page.classList.contains('hidden')) return false;
     const style = window.getComputedStyle(page);
@@ -940,7 +1176,13 @@
         if (stage && dashboardProject?.folder) writeResumeCheckpoint(dashboardProject.folder, stage);
         setTimeout(() => {
           syncMiniPlayer();
-          refreshProjects().catch(() => {});
+          // Project cards are only rendered by Dashboard and Library. Do not
+          // scan the whole project collection while navigating Voice, Chapters,
+          // Production, Models, History or other unrelated modules.
+          if (page === 'dashboard' || page === 'library') {
+            refreshProjects().catch(() => {});
+          }
+          if (page === 'history') refreshHistory().catch(() => {});
         },0);
         return result;
       };
@@ -958,7 +1200,7 @@
     if (!window.__ryuDashboardProjectTimer) {
       window.__ryuDashboardProjectTimer = setInterval(() => {
         if (dashboardPageActive()) refreshProjects().catch(() => {});
-      }, 3000);
+      }, 15000);
     }
   }
   function updateProjectDeleteButton() {
@@ -1233,6 +1475,63 @@
     projectCardStatusObserver.observe(saveState, {subtree:true,childList:true,characterData:true});
   }
 
+  async function refreshLatestImport() {
+    const page = $('import');
+    if (!page) return null;
+    let card = $('latestImportCard');
+    if (!card) {
+      card = document.createElement('section');
+      card.id = 'latestImportCard';
+      card.className = 'card';
+      card.style.marginBottom = '16px';
+      const header = page.querySelector('.page-head');
+      if (header && header.parentElement === page) header.insertAdjacentElement('afterend', card);
+      else page.prepend(card);
+    }
+    let record = null;
+    try { record = await call('import.latest.get'); }
+    catch (error) {
+      card.hidden = true;
+      card.innerHTML = '';
+      return null;
+    }
+    if (!record || !record.project_folder) {
+      card.hidden = true;
+      card.innerHTML = '';
+      delete card.dataset.latestImportSignature;
+      return null;
+    }
+    const signature = JSON.stringify([
+      record.project_folder, record.title, record.source_name,
+      record.chapter_count, record.imported_at
+    ]);
+    if (card.dataset.latestImportSignature !== signature) {
+      card.dataset.latestImportSignature = signature;
+      const importedAt = new Date(record.imported_at);
+      const importedLabel = Number.isNaN(importedAt.getTime())
+        ? String(record.imported_at || 'Recently')
+        : importedAt.toLocaleString();
+      card.innerHTML =
+        '<div class="section-head" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">' +
+          '<div><span class="eyebrow">Recent import</span><h3 style="margin:4px 0">' + esc(record.title || 'Imported book') + '</h3>' +
+          '<p class="muted" style="margin:0">' + esc(record.source_name || 'Source file unavailable') + ' · ' +
+          Number(record.chapter_count || 0) + ' chapters · ' + esc(importedLabel) + '</p></div>' +
+          '<button class="btn small" type="button" data-open-latest-import>Open imported project</button></div>';
+      card.querySelector('[data-open-latest-import]')?.addEventListener('click', async () => {
+        try {
+          await call('project.open', {folder:record.project_folder});
+          await refreshProjects();
+          window.go('library');
+          showToast('Opened ' + String(record.title || 'the imported project') + '.');
+        } catch (error) {
+          showToast(error.message || 'Could not open the imported project.', 'error');
+        }
+      });
+    }
+    card.hidden = false;
+    return record;
+  }
+
   async function refreshProjects() {
     const requestToken = ++projectListEpoch;
     const loadedProjects = await call('project.list');
@@ -1291,6 +1590,7 @@
     }
     await refreshDashboardHero(projects);
     await refreshCurrentProjectCard();
+    await refreshLatestImport();
     renderAudiobookLibrary(projects);
     if (!playerAudio || !playerAudio.src) clearAudiobookPlayerDisplay();
     if (isVisiblePage('generate')) await refreshProductionSummary();
@@ -1348,7 +1648,11 @@
     const title = voiceLibraryTitles[providerKey] || providerKey;
     const health = panel.querySelector('.health');
     const healthTitle = health?.querySelector('b');
-    if (healthTitle) healthTitle.textContent = title + (result.ready ? ' · Ready' : ' · Setup required');
+    const inventoryStatus = String(result.model_inventory?.status || '');
+    const providerStatus = !result.ready
+      ? (['Missing','Not configured','Partially installed','Unhealthy','Unsupported','Location unavailable','Unavailable','Not assessed'].includes(inventoryStatus) ? inventoryStatus : 'Provider unavailable')
+      : inventoryStatus === 'Installed' ? 'Installed · functional verification pending' : inventoryStatus || 'Ready';
+    if (healthTitle) healthTitle.textContent = title + ' · ' + providerStatus;
     let healthDetail = health?.querySelector('small,.muted');
     if (!healthDetail && healthTitle?.parentElement) {
       healthDetail = document.createElement('small');
@@ -1356,9 +1660,9 @@
       healthDetail.style.cssText = 'display:block;margin-top:4px;line-height:1.45';
       healthTitle.parentElement.appendChild(healthDetail);
     }
-    if (healthDetail) healthDetail.textContent = result.message || (result.count + ' live catalogue entries');
+    if (healthDetail) healthDetail.textContent = [result.model_inventory?.message, result.message || (result.count + ' live catalogue entries')].filter(Boolean).join(' · ');
     updateVoiceHealthIndicator(providerKey,result);
-    if (providerKey === 'eleven' && $('apiState')) $('apiState').textContent = result.ready ? 'API key connected · Voice catalogue ready' : (result.message || 'API key not configured');
+    if (providerKey === 'eleven' && $('apiState')) $('apiState').textContent = result.ready ? 'API key connected · ' + providerStatus : (result.message || 'API key not configured');
     if (providerKey === 'eleven') {
       const createPanel = panel.querySelector('[data-epanel="create"]');
       if (createPanel) {
@@ -1588,8 +1892,11 @@
     const profile=selectedVoice?voices.find(item=>item.saved===true&&item.name.toLowerCase()===selectedVoice.toLowerCase()):null;
     const selectedKey=profile?providerPanelForProfile(profile):(document.querySelector('#voices .provider.active')?.dataset.provider||providerKey||'');
     if(!providerKey||!selectedKey||providerKey!==selectedKey)return;
-    const label=!result?'Checking…':result.ready?'Ready':'Setup required';
-    const color=!result?'var(--muted)':result.ready?'var(--green)':'var(--amber)';
+    const inventoryStatus=String(result?.model_inventory?.status||'');
+    const blockedStatuses=['Missing','Not configured','Partially installed','Unhealthy','Unsupported','Location unavailable','Unavailable','Not assessed'];
+    const label=!result?'Checking…':!result.ready?(blockedStatuses.includes(inventoryStatus)?inventoryStatus:'Provider unavailable'):
+      inventoryStatus==='Installed'?'Installed · functional verification pending':inventoryStatus||'Ready';
+    const color=!result?'var(--muted)':!result.ready?'var(--amber)':inventoryStatus==='Ready'?'var(--green)':'var(--muted)';
     for(const id of ['profileHealth','sumProviderHealth']){
       const node=$(id);if(node){node.textContent=label;node.style.color=color;}
     }
@@ -1706,10 +2013,16 @@
     const status=$('productionPreviewStatus');
     const previewJobState=String(productionJobSnapshots.preview?.state||'').toLowerCase();
     const previewJobOwnsStatus=PRODUCTION_ACTIVE_JOB_STATES.has(previewJobState)||['failed','cancelled'].includes(previewJobState);
-    if(status&&voicePreviewValid){
-      status.textContent='Preview ready · '+(Number(previewAudio?.duration)>0?Number(previewAudio.duration).toFixed(1)+' seconds':'loading duration');
-    }else if(status&&!previewJobOwnsStatus&&!productionJobSnapshots.preview){
-      const selectedNumber=Number(productionPreviewSelectedChapter||0);
+    const selectedNumber=Number(productionPreviewSelectedChapter||0);
+    const previewChapterNumber=Number(lastVoicePreviewChapterNumber||0);
+    const productionPreviewMatchesSelection=Boolean(
+      voicePreviewValid && productionPreviewJobId && selectedNumber>0 &&
+      previewChapterNumber===selectedNumber
+    );
+    if(status&&productionPreviewMatchesSelection){
+      status.textContent='Preview ready · Chapter '+selectedNumber+' · '+
+        (Number(previewAudio?.duration)>0?Number(previewAudio.duration).toFixed(1)+' seconds':'loading duration');
+    }else if(status&&!previewJobOwnsStatus){
       status.textContent=selectedNumber>0
         ? 'Chapter '+selectedNumber+' selected. Generate a new preview for this chapter.'
         : 'Select a saved chapter before generating a preview.';
@@ -1779,7 +2092,12 @@
         if(selectedVoice){
           const profile=voices.find(item=>item.saved===true&&item.name.toLowerCase()===selectedVoice.toLowerCase());
           if(profile&&profile.provider==='qwen-character'&&profile.qwen_mode==='design'){
-            profileEditOriginalName=profile.name;selectedVoice=null;selectedVoiceId=null;selectedVoiceProvider='qwen-character';
+            // Editing the VoiceDesign prompt/preset creates a new draft by
+            // default. Do not retain the prior saved profile as a hidden rename
+            // target; that could overwrite the selected saved voice when saving
+            // a new Anime Hero preset. Updating/renaming an existing profile
+            // remains available through an explicit originalNameOverride.
+            profileEditOriginalName='';selectedVoice=null;selectedVoiceId=null;selectedVoiceProvider='qwen-character';
             updateVoiceSummary({name:$('profileName')?.value||profile.name,provider:'qwen-character',qwen_mode:'design'},{saved:false,previewReady:false,assignment:''});
           }
         }
@@ -2011,6 +2329,13 @@
 
   async function refreshVoices() {
     const requestToken = ++voiceListEpoch;
+    // Load the lightweight persisted profile list first so Voice Studio can
+    // render immediately. A cold Models scan is useful for provider-health
+    // badges, but must never hold the screen-navigation path open.
+    const inventoryTask = loadModelInventory(false).catch(error => {
+      console.warn('[Ryu model inventory]', error?.message || error);
+      return null;
+    });
     const loadedVoices = await call('voice.list');
     if (requestToken !== voiceListEpoch) return voices;
     voices = Array.isArray(loadedVoices) ? loadedVoices : [];
@@ -2048,7 +2373,10 @@
     }
     updateSavedProfileOptions();
     const activeProviderKey = document.querySelector('#voices .provider.active')?.dataset.provider || 'offline';
-    void refreshProviderCatalog(activeProviderKey, false).catch(error => console.warn('[Ryu voice catalogue]', error));
+    void inventoryTask.then(() => {
+      if (requestToken !== voiceListEpoch) return null;
+      return refreshProviderCatalog(activeProviderKey, false);
+    }).catch(error => console.warn('[Ryu voice catalogue]', error));
     // A catalogue selection is not a saved custom profile; the profile name is supplied by the user.
     renderCharacterStudioLive();
     // Keep Pronunciation Studio's per-row preview selector in sync with saved
@@ -2911,6 +3239,7 @@
       '.ryu-assigned-dialogue small{display:block;margin-bottom:6px;font-size:10px;letter-spacing:.06em;text-transform:uppercase;opacity:.8;}' +
       '.ryu-assigned-dialogue-ai{background:rgba(236,160,45,.075);border-color:rgba(236,160,45,.22);box-shadow:inset 3px 0 0 #efae35;}' +
       '.ryu-assigned-dialogue-manual{background:rgba(36,190,122,.07);border-color:rgba(36,190,122,.2);box-shadow:inset 3px 0 0 #22c982;}' +
+      '.ryu-assigned-dialogue-unknown{background:rgba(140,145,155,.06);border-color:rgba(140,145,155,.2);box-shadow:inset 3px 0 0 #8d929b;}' +
       '.ryu-assigned-dialogue.is-selected{outline:2px solid rgba(255,255,255,.62);outline-offset:1px;}' +
       '.assigned-character.active{border-color:rgba(227,182,94,.8);background:rgba(227,182,94,.08);}' +
       '#characterAssignPopover{max-height:82vh;overflow-y:auto;box-sizing:border-box;}' +
@@ -2990,7 +3319,10 @@
     const projectDefaultSeries = String(activeCharacterProjectSeries() || '').trim().toLowerCase();
     const passages = [];
     const chapterSet = new Set();
+    const seenPassageIds = new Set();
     let aiAssigned = 0;
+    let manualAssigned = 0;
+    let sourceUnavailable = 0;
     for (const chapter of chapters) {
       const source = String(chapter.text || '');
       for (const assignment of characterAssignmentsFor(chapter)) {
@@ -3021,10 +3353,17 @@
             start < 0 || end <= start || end > source.length) continue;
         const text = source.slice(start, end);
         if (!text || (assignment.text && String(assignment.text) !== text)) continue;
+        const passageId = String(chapter.number) + ':' + start + ':' + end;
+        if (seenPassageIds.has(passageId)) continue;
+        seenPassageIds.add(passageId);
 
         chapterSet.add(Number(chapter.number));
-        const sourceKind = String(assignment.source || 'manual').trim().toLowerCase();
+        const rawSourceKind = String(assignment.source || '').trim().toLowerCase().replace(/_/g, '-');
+        const sourceKind = ['ai', 'ai-analyzed'].includes(rawSourceKind)
+          ? 'ai' : rawSourceKind === 'manual' ? 'manual' : 'unknown';
         if (sourceKind === 'ai') aiAssigned += 1;
+        else if (sourceKind === 'manual') manualAssigned += 1;
+        else sourceUnavailable += 1;
         passages.push({
           chapter_number:Number(chapter.number), start, end, text,
           source:sourceKind,
@@ -3036,7 +3375,8 @@
     const dialogueLines = passages.length;
     const aiAssignedPercent = dialogueLines ? Math.round(aiAssigned / dialogueLines * 100) : 0;
     return {passages, chapters:[...chapterSet].sort((a,b) => a-b), dialogueLines,
-      aiAssignedLines:aiAssigned, aiAssignedPercent};
+      aiAssignedLines:aiAssigned, manualAssignedLines:manualAssigned,
+      sourceUnavailableLines:sourceUnavailable, aiAssignedPercent};
   }
   function renderCharacterInspector() {
     const selected = selectedCharacterRow();
@@ -3094,14 +3434,15 @@
     if (quotesNode) {
       const rows = assignments.passages;
       quotesNode.innerHTML = rows.length ? rows.map(row => {
-        const sourceKind = String(row.source || 'manual').toLowerCase() === 'ai' ? 'ai' : 'manual';
+        const sourceKind = row.source === 'ai' ? 'ai' : row.source === 'manual' ? 'manual' : 'unknown';
+        const sourceLabel = sourceKind === 'ai' ? 'AI-assigned' :
+          sourceKind === 'manual' ? 'Manually assigned' : 'Source not recorded';
         const key = characterAssignmentKey(selected.name, seriesValue) + '::' +
           row.chapter_number + ':' + row.start + ':' + row.end;
         const active = key === selectedDialogueKey;
         return '<button type="button" class="ryu-assigned-dialogue ryu-assigned-dialogue-' + sourceKind +
           (active ? ' is-selected' : '') + '" data-assigned-dialogue-key="' + esc(key) + '">' +
-          '<small>Chapter ' + Number(row.chapter_number) + ' · ' +
-          (sourceKind === 'ai' ? 'AI-assigned' : 'Manually assigned') + '</small>' +
+          '<small>Chapter ' + Number(row.chapter_number) + ' · ' + sourceLabel + '</small>' +
           '<span>' + esc(row.text) + '</span></button>';
       }).join('') : '<div class="ryu-character-empty"><b>No assigned dialogue yet</b>Assign and save a source passage in Character assigning to see it here.</div>';
       if (selectedDialogueKey && !selectedDialogueRow) window.ryuPremiumSelectedAssignedDialogueKey = '';
@@ -3736,14 +4077,8 @@
     }
     const voice = $('editCharacterVoice');
     if (voice) {
-      voice.title = 'Voice assignments are managed in Character Studio so all volumes stay consistent.';
-      if (!modal.__ryuVoiceLockObserver && typeof MutationObserver !== 'undefined') {
-        modal.__ryuVoiceLockObserver = new MutationObserver(() => {
-          if (!modal.classList.contains('show')) voice.disabled = false;
-        });
-        modal.__ryuVoiceLockObserver.observe(modal, {attributes:true, attributeFilter:['class']});
-      }
-      if (modal.classList.contains('show')) voice.disabled = true;
+      voice.title = 'Choose a saved Voice Studio profile for this character, or select Unassigned.';
+      voice.disabled = voice.options.length <= 1;
     }
   }
   function ensureCharacterRecoveryButton() {
@@ -3911,9 +4246,91 @@
   function pronunciationSelectionKey(term) {
     return pronunciationScopeKey(term) + '|' + String(term.written_form || term.word || '').normalize('NFC').toLocaleLowerCase();
   }
+  function ensurePronunciationDictionaryTools(body) {
+    if (!body || body.closest('.page')?.querySelector('[data-pron-dictionary-tools]')) return;
+    const table = body.closest('table');
+    if (!table?.parentNode) return;
+    const tools = document.createElement('div');
+    tools.dataset.pronDictionaryTools = '1';
+    tools.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0 12px';
+    tools.innerHTML =
+      '<button type="button" class="btn small secondary" data-pron-import>Import dictionary JSON</button>' +
+      '<button type="button" class="btn small ghost" data-pron-export>Export dictionary JSON</button>' +
+      '<button type="button" class="btn small secondary" data-pron-test-matrix>Test selected entry across saved profiles</button>' +
+      '<span class="muted" style="font-size:12px">Select exactly one enabled entry. Each saved profile is tested sequentially using the real pronunciation rule.</span>' +
+      '<div data-pron-test-results style="width:100%;display:grid;gap:8px"></div>';
+    table.parentNode.insertBefore(tools, table);
+  }
+
+  async function exportPronunciationDictionary() {
+    const exported = await call('pronunciation.export');
+    const blob = new Blob([JSON.stringify(exported, null, 2)], {type:'application/json;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    anchor.href = url;
+    anchor.download = 'ryu-pronunciation-dictionary-' + stamp + '.json';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    message('Exported ' + (Array.isArray(exported.entries) ? exported.entries.length : 0) +
+      ' pronunciation entry/entries with their original scopes.');
+  }
+
+  async function importPronunciationDictionary() {
+    const picker = document.createElement('input');
+    picker.type = 'file';
+    picker.accept = '.json,application/json';
+    picker.onchange = async () => {
+      const file = picker.files?.[0];
+      if (!file) return;
+      if (file.size > 5 * 1024 * 1024) {
+        message('Pronunciation dictionary imports are limited to 5 MB.', true);
+        return;
+      }
+      try {
+        const importedDocument = JSON.parse(await file.text());
+        const preview = await call('pronunciation.import', {document:importedDocument, apply:false});
+        const conflicts = Array.isArray(preview.conflicts) ? preview.conflicts : [];
+        if (Number(preview.protected_manual_count || 0) > 0) {
+          throw new Error('The file contains ' + preview.protected_manual_count +
+            ' AI reading(s) that would overwrite a saved manual rule. Resolve those manually before importing.');
+        }
+        let replaceConflicts = false;
+        if (conflicts.length) {
+          const details = conflicts.slice(0, 8).map(row =>
+            row.written_form + ' · ' + row.scope + ': ' + row.existing_spoken_form +
+            ' → ' + row.imported_spoken_form
+          ).join('\n');
+          replaceConflicts = window.confirm(
+            'The import contains ' + conflicts.length + ' conflicting pronunciation rule(s).\n\n' +
+            details + (conflicts.length > 8 ? '\n… and ' + (conflicts.length - 8) + ' more.' : '') +
+            '\n\nReplace these existing readings? Cancel keeps every saved rule unchanged.'
+          );
+          if (!replaceConflicts) {
+            message('Import cancelled. Existing pronunciation rules were not changed.');
+            return;
+          }
+        }
+        const result = await call('pronunciation.import', {
+          document:importedDocument, apply:true, replace_conflicts:replaceConflicts
+        });
+        await refreshTerms();
+        message('Imported ' + Number(result.imported || 0) + ' new pronunciation rule(s), updated ' +
+          Number(result.updated || 0) + ', skipped ' + Number(result.duplicate_count || 0) +
+          ' duplicate(s).');
+      } catch (error) {
+        message(error?.message || String(error), true);
+      }
+    };
+    picker.click();
+  }
+
   function renderPronunciationRows() {
     const body = $('pronDictionaryBody');
     if (!body) return;
+    ensurePronunciationDictionaryTools(body);
     const query = String($('pronSearchAdvanced')?.value || '').trim().toLocaleLowerCase();
     const scopeFilter = $('pronScopeFilter')?.value || 'all';
     const originFilter = $('pronOriginFilter')?.value || 'all';
@@ -4046,6 +4463,140 @@
         '<button type="button" class="btn small ghost" data-pron-ai-dismiss="' + index + '">Dismiss</button></div>'
       ).join('');
   }
+  function renderPronunciationMatrixResults(panel, entry, results) {
+    if (!panel) return;
+    const rows = Array.isArray(results) ? results : [];
+    if (!rows.length) {
+      panel.innerHTML = '<p class="muted">No profile test results have been saved for this entry yet.</p>';
+      return;
+    }
+    panel.innerHTML =
+      '<h4 style="margin:6px 0">Saved-profile test results · ' + esc(entry.written_form || entry.word || '') + '</h4>' +
+      rows.map((row, index) => {
+        const passed = row.status === 'passed';
+        const title = esc(row.profile_name || 'Unknown profile') + ' · ' + esc(row.provider || 'unknown provider');
+        const detail = passed
+          ? Number(row.actual_duration_seconds || 0).toFixed(1) + 's audio · ' +
+            Number(row.synthesis_seconds || 0).toFixed(2) + 's synthesis · ' +
+            Number(row.pronunciation_replacements || 0) + ' replacement(s)'
+          : esc(row.error || 'Profile test failed');
+        const audio = row.audio_url
+          ? '<audio controls preload="none" src="' + esc(row.audio_url) +
+            '" aria-label="Pronunciation test audio for ' + title + '" style="width:100%;max-width:420px"></audio>'
+          : '';
+        return '<div style="border:1px solid var(--border,#39404c);border-radius:8px;padding:9px;display:grid;gap:5px">' +
+          '<b>' + title + '</b><span style="color:' + (passed ? 'var(--success,#258a56)' : 'var(--danger,#bd4141)') +
+          '">' + (passed ? 'Passed · pronunciation rule applied' : 'Failed · pronunciation test not accepted') +
+          '</span><small>' + detail + '</small>' + audio +
+          '<small class="muted">' + esc(row.tested_at || '') + '</small></div>';
+      }).join('');
+  }
+
+  async function loadPronunciationMatrixHistory(entry) {
+    const panel = document.querySelector('[data-pron-test-results]');
+    if (!panel || !entry) return [];
+    const data = await call('pronunciation.test_results.get', {
+      written_form:entry.written_form || entry.word || '',
+      scope:entry.scope || entry.scope_type || 'current_book',
+      scope_id:entry.scope_id || ''
+    });
+    const results = Array.isArray(data?.results) ? data.results : [];
+    renderPronunciationMatrixResults(panel, entry, results);
+    return results;
+  }
+
+  async function runPronunciationProfileMatrix() {
+    const selected = terms.filter(term => pronunciationSelectionKeys.has(pronunciationSelectionKey(term)));
+    if (selected.length !== 1) {
+      throw new Error('Select exactly one pronunciation dictionary row before testing saved profiles.');
+    }
+    const entry = selected[0];
+    if (entry.enabled === false) {
+      throw new Error('Enable this pronunciation entry before running the saved-profile test matrix.');
+    }
+    if (!pronunciationEnabled) {
+      throw new Error('Global pronunciation is OFF. Turn it on before testing this entry in production synthesis.');
+    }
+    const written = String(entry.written_form || entry.word || '').trim();
+    if (!written) throw new Error('The selected dictionary entry has no written form.');
+    await refreshVoices();
+    const profiles = voices.filter(profile => profile && profile.saved === true && profile.name);
+    if (!profiles.length) throw new Error('No saved Voice Studio profiles are available for pronunciation testing.');
+    const panel = document.querySelector('[data-pron-test-results]');
+    if (!panel) throw new Error('The saved-profile test results panel is not available. Refresh Pronunciation Studio.');
+    panel.innerHTML = '<p class="muted">Testing ' + esc(written) + ' sequentially across ' +
+      profiles.length + ' saved profile(s)… Do not close the project during the test.</p>';
+    const outcomes = [];
+    for (const profile of profiles) {
+      const row = {
+        profile_name:String(profile.name),
+        provider:String(profile.provider || 'unknown'),
+        status:'failed',
+        error:'The preview did not complete.'
+      };
+      try {
+        const started = await call('voice.preview', {
+          profile_name:profile.name,
+          text:written,
+          duration_seconds:10,
+          route_character_cast:false,
+          apply_pronunciation_rules:true
+        });
+        if (!started?.job_id) throw new Error('The preview job was not created.');
+        let completedJob = null;
+        await monitorJob(started.job_id, async job => { completedJob = job; });
+        const result = completedJob?.result || {};
+        if (completedJob?.state !== 'completed' || !result.file_url) {
+          throw new Error(completedJob?.error?.message || completedJob?.message ||
+            'The preview completed without playable audio.');
+        }
+        const replacements = Number(result.pronunciation_replacements || 0);
+        if (!Number.isFinite(replacements) || replacements < 1) {
+          throw new Error('The pronunciation rule was not applied to this preview. Check its scope, global setting and written form.');
+        }
+        row.status = 'passed';
+        row.actual_duration_seconds = Number(result.actual_duration_seconds || 0);
+        row.synthesis_seconds = Number(result.synthesis_seconds || 0);
+        row.total_seconds = Number(result.total_seconds || 0);
+        row.real_time_factor = Number(result.real_time_factor || 0);
+        row.pronunciation_replacements = replacements;
+        row.audio_url = String(result.file_url);
+        delete row.error;
+      } catch (error) {
+        row.status = 'failed';
+        row.error = String(error?.message || error || 'Profile test failed').slice(0, 800);
+      }
+      outcomes.push(row);
+      // Persist after each voice so a later provider failure cannot discard earlier evidence.
+      const saved = await call('pronunciation.test_results.save', {
+        written_form:written,
+        scope:entry.scope || entry.scope_type || 'current_book',
+        scope_id:entry.scope_id || '',
+        results:[{
+          profile_name:row.profile_name,
+          provider:row.provider,
+          status:row.status,
+          actual_duration_seconds:row.actual_duration_seconds,
+          synthesis_seconds:row.synthesis_seconds,
+          total_seconds:row.total_seconds,
+          real_time_factor:row.real_time_factor,
+          pronunciation_replacements:row.pronunciation_replacements,
+          error:row.error
+        }]
+      });
+      if (!saved || Number(saved.saved || 0) !== 1) {
+        throw new Error('Could not persist the test result for ' + profile.name + '.');
+      }
+      renderPronunciationMatrixResults(panel, entry, outcomes);
+      panel.scrollIntoView?.({block:'nearest',behavior:'smooth'});
+    }
+    const passed = outcomes.filter(row => row.status === 'passed').length;
+    const failed = outcomes.length - passed;
+    message('Pronunciation profile matrix completed: ' + passed + ' passed, ' + failed +
+      ' failed. Results are saved against ' + written + '.');
+    return outcomes;
+  }
+
   async function refreshTerms() {
     const requestToken = ++termsListEpoch;
     const [loaded, settings] = await Promise.all([
@@ -4112,9 +4663,103 @@
       }
     });
   }
+  async function waitForCatalogueScan(jobId, label) {
+    if (!jobId) throw new Error('The ' + label + ' refresh did not create a background job.');
+    return new Promise((resolve, reject) => {
+      let checking = false;
+      let settled = false;
+      let timer = null;
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearInterval(timer);
+        timer = null;
+        callback(value);
+      };
+      const tick = async () => {
+        if (settled || checking) return;
+        checking = true;
+        try {
+          const jobs = await call('job.list', {include_hidden:true});
+          const job = Array.isArray(jobs) ? jobs.find(row => row.job_id === jobId) : null;
+          if (!job) throw new Error('The ' + label + ' refresh job disappeared before reporting a result.');
+          if (job.state === 'completed') finish(resolve, job);
+          else if (['failed','cancelled'].includes(job.state)) {
+            finish(reject, new Error(job.error?.message || job.message ||
+              ('The ' + label + ' refresh ' + job.state + '.')));
+          }
+        } catch (error) {
+          finish(reject, error);
+        } finally {
+          checking = false;
+        }
+      };
+      timer = setInterval(() => { void tick(); }, 750);
+      void tick();
+    });
+  }
+
+  async function loadModelInventory(forceRefresh = false) {
+    if (modelInventoryLoadPromise) return modelInventoryLoadPromise;
+    const task = (async () => {
+      if (!forceRefresh && modelInventoryScanRequested &&
+          Date.now() - modelInventoryLoadedAt < 5000) {
+        return await call('models.list');
+      }
+      // Read the last-known-good snapshot immediately. A cold/expired request
+      // starts a single-flight worker; this bridge call never enumerates files.
+      await call('models.list');
+      modelInventoryScanRequested = true;
+      const scan = await call('models.refresh');
+      await waitForCatalogueScan(scan?.job_id, 'model inventory');
+      const rows = await call('models.list');
+      modelInventoryLoadedAt = Date.now();
+      return rows;
+    })();
+    modelInventoryLoadPromise = task;
+    try {
+      return await task;
+    } catch (error) {
+      modelInventoryScanRequested = false;
+      modelInventoryLoadedAt = 0;
+      throw error;
+    } finally {
+      if (modelInventoryLoadPromise === task) modelInventoryLoadPromise = null;
+    }
+  }
+
+  async function loadSoundCatalogue(forceRefresh = false) {
+    if (soundCatalogLoadPromise) return soundCatalogLoadPromise;
+    const task = (async () => {
+      if (!forceRefresh && soundCatalogScanRequested &&
+          Date.now() - soundCatalogLoadedAt < 20000) {
+        return await call('sound.catalog');
+      }
+      await call('sound.catalog');
+      soundCatalogScanRequested = true;
+      const scan = await call('sound.refresh');
+      await waitForCatalogueScan(scan?.job_id, 'Sound Design catalogue');
+      const rows = await call('sound.catalog');
+      soundCatalogLoadedAt = Date.now();
+      return rows;
+    })();
+    soundCatalogLoadPromise = task;
+    try {
+      return await task;
+    } catch (error) {
+      soundCatalogScanRequested = false;
+      soundCatalogLoadedAt = 0;
+      throw error;
+    } finally {
+      if (soundCatalogLoadPromise === task) soundCatalogLoadPromise = null;
+    }
+  }
+
   async function refreshSounds() {
     const requestToken = ++soundListEpoch;
-    const loaded = await call('sound.catalog');
+    const forceRefresh = forceSoundCatalogRefreshPending;
+    forceSoundCatalogRefreshPending = false;
+    const loaded = await loadSoundCatalogue(forceRefresh);
     if (requestToken !== soundListEpoch) return sounds;
     sounds = Array.isArray(loaded) ? loaded : [];
     const selectedMusicTrack = selectedSoundPath
@@ -4184,7 +4829,7 @@
     // that epoch owns Music Library grid renders, and cue refreshes may overlap a
     // source/category refresh triggered immediately after a music import.
     const [loadedCatalog, loadedAssignments] = await Promise.all([
-      call('sound.catalog'),
+      loadSoundCatalogue(false),
       call('sound.cues.get')
     ]);
     if (requestToken !== cueListEpoch) return cueAssignments;
@@ -4684,7 +5329,62 @@
       (kind === 'warn' ? 'var(--amber)' : (kind === 'error' ? 'var(--danger)' : 'var(--muted)'));
   }
 
-  function renderProductionMetadataGate(active) {
+  function productionGenerationBlockReason(active) {
+    if (!active?.folder) return 'Open a saved project before starting full generation.';
+    const configuredCharacterVoiceCount = Math.max(0, Number(
+      active.configured_character_voice_profile_count ?? active.character_voice_count ?? 0
+    ));
+    const narratorOnly = active.narrator_only_generation === true;
+    if (narratorOnly && configuredCharacterVoiceCount > 0) {
+      return 'Narrator-Only Generation is no longer available because '
+        + configuredCharacterVoiceCount
+        + ' valid character voice profile(s) are configured. Turn it off to use multi-character speaker review.';
+    }
+    if (!narratorOnly && active.dialogue_index_ready !== true) {
+      return 'The canonical dialogue index could not be verified. Refresh Character Studio and retry before generating.';
+    }
+    const assignmentIssues = Math.max(0, Number(active.character_assignment_issue_count || 0));
+    if (!narratorOnly && assignmentIssues > 0) {
+      return assignmentIssues + ' saved character voice assignment(s) need attention before generation.';
+    }
+    const pendingDialogue = Math.max(0, Number(active.pending_dialogue_count || 0));
+    const conflictingDialogue = Math.max(0, Number(active.conflicting_dialogue_count || 0));
+    const indexIssues = Math.max(0, Number(active.dialogue_index_issue_count || 0));
+    if (!narratorOnly && active.dialogue_review_complete !== true) {
+      return 'Generation is blocked until dialogue review is complete: '
+        + pendingDialogue + ' passage(s) need speaker review, '
+        + conflictingDialogue + ' conflict(s), and '
+        + indexIssues + ' source/index issue(s).';
+    }
+    const unsaved = metadataDialogDirty && metadataDialogProjectFolder === String(active.folder);
+    if (unsaved) return 'Save or discard Input Project Details changes before generation.';
+    if (active.metadata_complete !== true) {
+      const missing = Array.isArray(active.metadata_missing_fields) ? active.metadata_missing_fields : [];
+      return 'Complete required Input Project Details' +
+        (missing.length ? ': ' + missing.join(', ') : '') + '.';
+    }
+    if (active.narrator_voice_configured !== true || active.narrator_profile_available !== true) {
+      return 'Choose and save an available narrator voice profile before full generation.';
+    }
+    const eligibleChapters = Math.max(0, Number(
+      active.eligible_chapter_count ?? active.prepared_chapter_count ?? 0
+    ));
+    if (eligibleChapters < 1) {
+      return 'Add narration text or re-include at least one chapter for generation.';
+    }
+    if (active.output_format_supported !== true) {
+      return 'Select a supported .m4b output destination before generation.';
+    }
+    if (active.output_folder_ready !== true) {
+      return 'Choose an output folder that exists or whose parent is writable.';
+    }
+    if (active.output_configured !== true) {
+      return 'Configure a writable .m4b output destination before generation.';
+    }
+    return '';
+  }
+
+function renderProductionMetadataGate(active) {
     const status = $('productionMetadataStatus');
     const start = $('startGenerate');
     if (!active?.folder) {
@@ -4701,6 +5401,7 @@
     const unsaved = metadataDialogDirty && metadataDialogProjectFolder === String(active.folder);
     const missing = Array.isArray(active.metadata_missing_fields) ? active.metadata_missing_fields : [];
     const complete = active.metadata_complete === true;
+    const generationBlockReason = productionGenerationBlockReason(active);
     if (status) {
       status.textContent = unsaved
         ? 'Unsaved changes — save Input Project Details before full generation.'
@@ -4709,12 +5410,13 @@
           : 'Incomplete metadata — complete: ' + (missing.join(', ') || 'required project details') + '.');
       status.style.color = complete && !unsaved ? 'var(--green)' : 'var(--amber)';
     }
+    const audioActive = productionJobIsActive(productionJobSnapshots.full) ||
+      productionJobIsActive(productionJobSnapshots.preview);
     if (start) {
-      start.disabled = !complete || unsaved;
-      start.title = start.disabled
-        ? (unsaved ? 'Save or discard Input Project Details changes before generation.'
-          : 'Complete the missing required metadata before full generation.')
-        : 'Generate the full audiobook using saved project configuration.';
+      start.disabled = Boolean(generationBlockReason) || audioActive;
+      start.title = audioActive
+        ? 'Finish or cancel the active Production audio operation first.'
+        : (generationBlockReason || 'Generate the full audiobook using saved project configuration.');
     }
   }
 
@@ -4853,9 +5555,30 @@
         }
         persisted = true;
         metadataDialogDirty = false;
+        // Update the in-memory Production gate from the same authoritative
+        // save response before the asynchronous project refresh can run.
+        window.ryuPremiumActiveProject = {
+          ...(window.ryuPremiumActiveProject || {}),
+          folder: String(result.project_folder || metadataDialogProjectFolder),
+          title: String(result.title || ''),
+          author: String(result.author || ''),
+          publisher: String(result.publisher || ''),
+          series: String(result.series || ''),
+          series_name: String(result.series_name || result.series || ''),
+          series_volume: String(result.series_volume || ''),
+          language: String(result.language || ''),
+          year: String(result.year || ''),
+          genre: String(result.genre || ''),
+          narrator: String(result.narrator || ''),
+          voice_profile: String(result.narrator || ''),
+          cover_path: String(result.cover_path || ''),
+          metadata_complete: result.metadata_complete === true,
+          metadata_missing_fields: Array.isArray(result.metadata_missing_fields)
+            ? result.metadata_missing_fields.slice() : []
+        };
         setMetadataDialogStatus('Project details saved successfully.', 'ready');
         dialog.close();
-        renderProductionMetadataGate(window.ryuPremiumActiveProject || null);
+        renderProductionMetadataGate(window.ryuPremiumActiveProject);
       } catch (error) {
         metadataDialogDirty = true;
         setMetadataDialogStatus('Save failed: ' + (error?.message || String(error)), 'error');
@@ -4943,27 +5666,56 @@
 
     const chapterCount = Math.max(0, Number(active.chapter_count || 0));
     const preparedCount = Math.max(0, Math.min(chapterCount, Number(active.prepared_chapter_count || 0)));
-    const chaptersReady = chapterCount > 0 && preparedCount === chapterCount;
-    setProductionStatus('productionChaptersReady',
-      chapterCount ? preparedCount + ' / ' + chapterCount + ' chapters prepared' : 'No chapters available',
-      chaptersReady ? 'ready' : 'warn');
+    const eligibleCount = Math.max(0, Math.min(chapterCount, Number(active.eligible_chapter_count ?? preparedCount)));
+    const emptyCount = Math.max(0, Number(active.empty_chapter_count || 0));
+    const excludedCount = Math.max(0, Number(active.excluded_chapter_count || 0));
+    const chaptersReady = eligibleCount > 0;
+    const chapterStatus = eligibleCount
+      ? eligibleCount + ' eligible for generation' +
+        (emptyCount || excludedCount ? ' · skip ' + emptyCount + ' empty / ' + excludedCount + ' excluded' : '')
+      : (chapterCount ? 'No eligible chapters · add text or re-include a chapter' : 'No chapters available');
+    setProductionStatus('productionChaptersReady', chapterStatus, chaptersReady ? 'ready' : 'warn');
 
-    const narratorReady = active.narrator_voice_configured === true;
+    const narratorReady = active.narrator_voice_configured === true &&
+      active.narrator_profile_available === true;
     const narratorProfile = String(active.voice_profile || '').trim();
     setProductionStatus('productionNarratorReady',
       narratorReady ? 'Saved voice profile · ' + narratorProfile : 'No saved narrator voice profile',
       narratorReady ? 'ready' : 'warn');
 
-    let characterStatus = 'Character analysis not run';
-    let characterKind = 'warn';
-    if (analysisDone && totalCharacters === 0) {
-      characterStatus = 'No character speakers detected';
+    const configuredCharacterVoiceCount = Math.max(0, Number(
+      active.configured_character_voice_profile_count ?? active.character_voice_count ?? 0
+    ));
+    const narratorOnlyRequested = active.narrator_only_generation === true;
+    const narratorOnly = narratorOnlyRequested && configuredCharacterVoiceCount === 0;
+    const assignmentIssues = Math.max(0, Number(active.character_assignment_issue_count || 0));
+    const pendingDialogue = Math.max(0, Number(active.pending_dialogue_count || 0));
+    const conflictingDialogue = Math.max(0, Number(active.conflicting_dialogue_count || 0));
+    const dialogueIndexIssues = Math.max(0, Number(active.dialogue_index_issue_count || 0));
+    let characterStatus = narratorOnly
+      ? '0 configured character voice profiles · character voice assignment not required; saved narrator reads all passages'
+      : 'Character analysis not run';
+    let characterKind = narratorOnly ? 'ready' : 'warn';
+    if (narratorOnlyRequested && configuredCharacterVoiceCount > 0) {
+      characterStatus = configuredCharacterVoiceCount
+        + ' valid character voice profile(s) · narrator-only is no longer eligible; switch to multi-character speaker review';
+      characterKind = 'warn';
+    } else if (!narratorOnly && active.dialogue_index_ready !== true) {
+      characterStatus = 'Canonical dialogue index unavailable · refresh Character Studio before generation';
+      characterKind = 'warn';
+    } else if (!narratorOnly && assignmentIssues > 0) {
+      characterStatus = assignmentIssues + ' saved character voice assignment(s) need attention';
+      characterKind = 'warn';
+    } else if (!narratorOnly && active.dialogue_review_complete !== true) {
+      characterStatus = pendingDialogue + ' passage(s) need speaker review · '
+        + conflictingDialogue + ' conflict(s) · ' + dialogueIndexIssues + ' index issue(s)';
+      characterKind = 'warn';
+    } else if (!narratorOnly && analysisDone && totalCharacters === 0) {
+      characterStatus = 'No character dialogue needs speaker review';
       characterKind = 'ready';
-    } else if (totalCharacters > 0) {
-      const missing = Math.max(0, totalCharacters - assignedCharacters);
-      characterStatus = assignedCharacters + ' / ' + totalCharacters + ' assigned' +
-        (missing ? ' · ' + missing + ' need voice assignment' : '');
-      characterKind = missing ? 'warn' : 'ready';
+    } else if (!narratorOnly) {
+      characterStatus = configuredCharacterVoiceCount + ' valid character voice profile(s) · dialogue index reviewed';
+      characterKind = 'ready';
     }
     setProductionStatus('productionCharacterVoices', characterStatus, characterKind);
 
@@ -4973,11 +5725,12 @@
       : 'No custom pronunciation rules saved · optional',
       pronunciationCount ? 'ready' : 'info');
 
-    const outputReady = active.output_folder_ready === true && active.output_format_supported === true;
+    const outputReady = active.output_configured === true &&
+      active.output_folder_ready === true && active.output_format_supported === true;
     const outputStatus = active.output_format_supported === false
       ? 'Unsupported output type · choose M4B'
       : (outputReady ? 'Writable · ' + String(active.output_folder || '')
-        : 'Output folder is missing or not writable');
+        : 'Output destination is missing or its folder is not writable');
     setProductionStatus('productionOutputReady', outputStatus, outputReady ? 'ready' : 'warn');
     renderProductionMetadataGate(active);
     return active;
@@ -5062,12 +5815,13 @@
       (productionPreviewSelectedChapterId && currentId && productionPreviewSelectedChapterId !== currentId) ||
       (productionPreviewSelectedChapterSignature && currentSignature !== productionPreviewSelectedChapterSignature)
     )) {
-      // Chapter numbers can be reused, and saved text/title can change while
-      // retaining the same ID. Neither case may keep stale playable audio.
+      // Chapter data can change during a refresh while the user's selected
+      // chapter number remains valid. Invalidate stale audio, but preserve
+      // that explicit Production selection instead of falling back to the
+      // independent Chapter Studio selection.
       invalidateVoicePreview();
-      productionPreviewSelectedChapter = null;
-      productionPreviewSelectedChapterId = '';
-      productionPreviewSelectedChapterSignature = '';
+      productionPreviewSelectedChapterId = currentId;
+      productionPreviewSelectedChapterSignature = currentSignature;
     }
     if (!rows.length) {
       productionPreviewSelectedChapter = null;
@@ -5138,19 +5892,29 @@
           syncProductionPreviewChapterSelector();
           return;
         }
-        if (chapterNumber === Number(productionPreviewSelectedChapter)) return;
-        productionPreviewSelectedChapter = chapterNumber;
-        productionPreviewSelectedChapterId = String(chapter.chapter_id || chapter.id || '');
-        productionPreviewSelectedChapterSignature = JSON.stringify([
-          chapterNumber, productionPreviewSelectedChapterId,
-          String(chapter.title || ''), String(chapter.text || '')
+        const chapterId = String(chapter.chapter_id || chapter.id || '');
+        const chapterSignature = JSON.stringify([
+          chapterNumber, chapterId, String(chapter.title || ''), String(chapter.text || '')
         ]);
-        invalidateVoicePreview();
-        if ($('productionPreviewStatus')) {
+        const selectionChanged =
+          chapterNumber !== Number(productionPreviewSelectedChapter) ||
+          chapterId !== productionPreviewSelectedChapterId ||
+          chapterSignature !== productionPreviewSelectedChapterSignature;
+        // Reconcile the selected identity even when the number is unchanged.
+        // The selector can be restored from a project refresh while its internal
+        // chapter identity is stale; returning early here leaves the visible
+        // selection and Production status out of sync.
+        productionPreviewSelectedChapter = chapterNumber;
+        productionPreviewSelectedChapterId = chapterId;
+        productionPreviewSelectedChapterSignature = chapterSignature;
+        if (selectionChanged) {
+          invalidateVoicePreview();
+          if ($('productionPreviewTiming')) $('productionPreviewTiming').textContent = 'No preview generated for this chapter yet.';
+        }
+        if (!voicePreviewValid && $('productionPreviewStatus')) {
           $('productionPreviewStatus').textContent =
             'Chapter ' + chapterNumber + ' selected. Generate a new preview for this chapter.';
         }
-        if ($('productionPreviewTiming')) $('productionPreviewTiming').textContent = 'No preview generated for this chapter yet.';
         syncProductionPreviewControls();
       });
       picker.append(caption, select);
@@ -5444,13 +6208,129 @@
     const fullStart = $('startGenerate');
     const previewStart = $('previewGenerate');
     const anyAudioActive = fullActive || previewActive;
+    const generationBlockReason = productionGenerationBlockReason(project);
     syncProductionPreviewChapterSelector();
-    if (fullStart) fullStart.disabled = anyAudioActive;
+    let narratorOnlyControl = $('narratorOnlyGeneration');
+    if (!narratorOnlyControl) {
+      const generateButton = $('startGenerate');
+      const generateCard = generateButton?.closest('.card') || generateButton?.parentElement;
+      if (generateCard) {
+        const row = document.createElement('label');
+        row.id = 'narratorOnlyGenerationControl';
+        row.style.cssText = 'display:flex;align-items:flex-start;gap:10px;margin:12px 0;padding:12px;border:1px solid var(--border,rgba(128,128,128,.28));border-radius:10px;cursor:pointer';
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.id = 'narratorOnlyGeneration';
+        input.checked = project?.narrator_only_generation === true;
+        input.disabled = project?.narrator_only_eligible !== true;
+        input.style.cssText = 'margin-top:3px;flex:0 0 auto';
+        input.addEventListener('change', () => {
+          const requested = input.checked === true;
+          input.disabled = true;
+          narratorOnlySavePromise = (async () => {
+            try {
+              // The control is created once and reused when the user switches
+              // books. Resolve the displayed and persisted identities at click
+              // time; never retain the project from the first render closure.
+              const displayedProject = window.ryuPremiumActiveProject || null;
+              if (!displayedProject?.folder) {
+                throw new Error('Open a saved project before changing Narrator-Only Generation.');
+              }
+              const active = await call('project.get_active', {});
+              const normalizeFolder = value => String(value || '')
+                .replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+              if (!active?.folder ||
+                  normalizeFolder(active.folder) !== normalizeFolder(displayedProject.folder)) {
+                throw new Error('The active project changed while saving Narrator-Only Generation. Reopen Production and retry.');
+              }
+              const saved = await call('production.narrator_only.save', {
+                enabled:requested,
+                expected_project_folder:String(active.folder || '')
+              });
+              if (normalizeFolder(saved?.project_folder) !== normalizeFolder(active.folder)) {
+                throw new Error('The active project changed while saving Narrator-Only Generation. Reopen Production and retry.');
+              }
+              input.checked = saved.enabled === true;
+              input.disabled = saved.automatic !== true && saved.user_opt_out !== true &&
+                active.narrator_only_eligible !== true;
+              window.ryuPremiumActiveProject = {...active,
+                narrator_only_generation:input.checked,
+                narrator_only_generation_user_opt_out:saved.user_opt_out === true,
+                narrator_only_generation_auto:saved.automatic === true};
+              const status = $('narratorOnlyGenerationStatus');
+              if (status) status.textContent = input.checked
+                ? (saved.automatic === true
+                  ? 'Automatically enabled because this book has no configured character voice profiles. The saved narrator reads all narration and dialogue.'
+                  : 'Saved for this book. The narrator reads all narration and dialogue.')
+                : 'Off by your choice. Character assignments and speaker review will be used.';
+            } catch (error) {
+              const currentProject = window.ryuPremiumActiveProject || null;
+              input.checked = currentProject?.narrator_only_generation === true;
+              message(error?.message || String(error), true);
+              throw error;
+            } finally {
+              input.disabled = (window.ryuPremiumActiveProject || {}).narrator_only_eligible !== true;
+            }
+          })();
+          narratorOnlySavePromise.catch(() => {});
+        });
+        const copy = document.createElement('span');
+        copy.style.cssText = 'display:grid;gap:3px;min-width:0';
+        const title = document.createElement('strong');
+        title.textContent = 'Narrator-Only Generation';
+        const description = document.createElement('small');
+        description.className = 'muted';
+        description.textContent = 'Automatically use the saved narrator for every passage, including dialogue, when this book has zero configured character voice profiles and an available narrator. Uncheck to review dialogue before generation; adding a character voice profile returns production to multi-character routing.';
+        const status = document.createElement('small');
+        status.id = 'narratorOnlyGenerationStatus';
+        status.className = 'muted';
+        status.textContent = input.checked
+          ? (project?.narrator_only_generation_auto === true
+            ? 'Automatically enabled because this book has no configured character voice profiles. The saved narrator reads all narration and dialogue.'
+            : 'Saved for this book. The narrator reads all narration and dialogue.')
+          : (project?.narrator_only_generation_user_opt_out === true
+            ? 'Off by your choice. Character assignments and speaker review will be used.'
+            : (project?.narrator_only_eligible === true
+              ? 'Available. This book has no configured character voice profiles.'
+              : 'Unavailable until this book has an available narrator and no configured character voice profiles.'));
+        copy.append(title,description,status);
+        row.append(input,copy);
+        generateButton?.parentElement?.insertBefore(row,generateButton);
+        narratorOnlyControl = input;
+      }
+    } else {
+      const savedValue = project?.narrator_only_generation === true;
+      if (document.activeElement !== narratorOnlyControl && narratorOnlyControl.checked !== savedValue) {
+        narratorOnlyControl.checked = savedValue;
+      }
+      narratorOnlyControl.disabled = project?.narrator_only_eligible !== true;
+      const status = $('narratorOnlyGenerationStatus');
+      if (status) status.textContent = savedValue
+        ? (project?.narrator_only_generation_auto === true
+          ? 'Automatically enabled because this book has no configured character voice profiles. The saved narrator reads all narration and dialogue.'
+          : 'Saved for this book. The narrator reads all narration and dialogue.')
+        : (project?.narrator_only_generation_user_opt_out === true
+          ? 'Off by your choice. Character assignments and speaker review will be used.'
+          : (project?.narrator_only_eligible === true
+            ? 'Available. This book has no configured character voice profiles.'
+            : 'Unavailable until this book has an available narrator and no configured character voice profiles.'));
+    }
+    // Job-state refreshes must reuse the exact Production prerequisite
+    // gate; polling must never re-enable generation after a blocker is found.
+    if (fullStart) {
+      fullStart.disabled = anyAudioActive || Boolean(generationBlockReason);
+      fullStart.title = anyAudioActive
+        ? 'Finish or cancel the active Production audio operation first.'
+        : (generationBlockReason || 'Generate the full audiobook using saved project configuration.');
+    }
+    // Preview remains available when metadata is incomplete; only active audio
+    // work prevents a second full/preview operation.
     if (previewStart) previewStart.disabled = anyAudioActive;
     syncProductionPreviewControls();
   }
 
   async function refreshChapterBgm() {
+    await loadSoundCatalogue(false);
     chapterBgmState = await call('sound.chapter_bgm.get');
     const fadeIn = Number(chapterBgmState.fade_in_seconds ?? 2);
     const fadeOut = Number(chapterBgmState.fade_out_seconds ?? 3);
@@ -5767,6 +6647,7 @@
   function backgroundGenerationJobActions(job, id, action, canControlGeneration, canCancelImport, canCancelPreview) {
     const state = String(job.state || 'unknown').toLowerCase();
     const isGeneration = Boolean(canControlGeneration);
+    const canCancelAnalysis = String(job.type || '').toLowerCase() === 'character-analysis';
     const actions = [];
     if (isGeneration && state === 'running') {
       actions.push(action('pause','Pause','secondary'));
@@ -5780,7 +6661,8 @@
     } else if (state === 'queued' ||
         (isGeneration && ['running','paused','pause_requested'].includes(state)) ||
         (canCancelImport && state === 'running') ||
-        (canCancelPreview && ['queued','running'].includes(state))) {
+        (canCancelPreview && ['queued','running'].includes(state)) ||
+        (canCancelAnalysis && ['queued','running'].includes(state))) {
       actions.push(action('cancel','Cancel','ghost'));
     }
     if (state === 'failed' && job.recoverable && isGeneration) {
@@ -5789,7 +6671,7 @@
     } else if (state === 'cancelled' && isGeneration) {
       actions.push(action('retry','Retry','secondary'));
     }
-    if (['running','pause_requested'].includes(state) && !isGeneration && !canCancelImport && !canCancelPreview) {
+    if (['running','pause_requested'].includes(state) && !isGeneration && !canCancelImport && !canCancelPreview && !canCancelAnalysis) {
       actions.push('<small>Cancellation and pause are not supported for this operation.</small>');
     }
     return actions.join('');
@@ -5814,11 +6696,41 @@
     group.appendChild(button);
   }
 
+  // Intercept Task Manager filters before the reference HTML's demo onclick
+  // handlers can repaint the live job list with prototype rows.
+  if (!window.__ryuBackendJobFilterCaptureBound) {
+    window.__ryuBackendJobFilterCaptureBound = true;
+    document.addEventListener('click', event => {
+      const filter = event.target?.closest?.('#backgroundJobsModal [data-job-filter]');
+      if (!filter) return;
+      const requested = String(filter.dataset.jobFilter || 'active');
+      if (!['active','completed','all','failed'].includes(requested)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      backendJobFilter = requested;
+      filter.parentElement?.querySelectorAll('[data-job-filter]').forEach(button => {
+        button.classList.toggle('active', button === filter);
+      });
+      const list = $('backgroundJobsList');
+      if (list) list.dataset.backendJobsSignature = '';
+      refreshJobs().catch(error => message(error?.message || String(error), true));
+    }, true);
+  }
+
   async function refreshJobs() {
-    // Multiple callers share one in-flight refresh so the 1.5s heartbeat, job
-    // monitor and manual refresh cannot issue overlapping DOM updates.
+    // Coalesce overlapping calls without dropping state changes. A Task Manager
+    // filter can change while job.list is in flight; that request must receive
+    // a follow-up render using the latest filter before callers resolve.
+    jobsRefreshRequested = true;
     if (jobsRefreshPromise) return jobsRefreshPromise;
-    const refreshPromise = refreshJobsImpl();
+    const refreshPromise = (async () => {
+      let latestJobs = [];
+      while (jobsRefreshRequested) {
+        jobsRefreshRequested = false;
+        latestJobs = await refreshJobsImpl();
+      }
+      return latestJobs;
+    })();
     jobsRefreshPromise = refreshPromise;
     try { return await refreshPromise; }
     finally { if (jobsRefreshPromise === refreshPromise) jobsRefreshPromise = null; }
@@ -5826,6 +6738,9 @@
   async function refreshJobsImpl() {
     ensureFailedJobsFilter();
     const allJobs = await call('job.list', {include_hidden:false});
+    if (allJobs.some(job => String(job.type || '').toLowerCase() === 'import' && job.state === 'completed')) {
+      await refreshLatestImport();
+    }
     // A poll can start before the modal is parsed and finish after it is mounted.
     // Re-run the idempotent filter ensure after the asynchronous bridge call.
     ensureFailedJobsFilter();
@@ -5844,9 +6759,44 @@
       // and error contents are updated in place below; rebuilding every row
       // when a worker first emits a message flashes the entire job panel.
       const signature = jobs.map(j => [
-        j.job_id, j.state, j.type, j.title, Boolean(j.recoverable), String(j.error?.code || '')
+        j.job_id, j.state, j.type, j.title, Boolean(j.recoverable), j.project_title, String(j.error?.code || '')
       ].join('\u001f')).join('\u001e');
-      if (box.dataset.backendJobsSignature !== signature) {
+      const renderedRows = Array.from(box.querySelectorAll('[data-backend-job]'));
+      const renderedIds = renderedRows.map(row => String(row.dataset.backendJob || '')).sort();
+      const expectedIds = jobs.map(job => String(job.job_id || '')).sort();
+      const rowStructureValid = renderedRows.length === jobs.length &&
+        renderedRows.every(row =>
+          row.children.length === 3 &&
+          row.children[0].classList.contains('job-type-icon') &&
+          row.children[1].classList.contains('job-main') &&
+          row.children[2].classList.contains('job-actions')
+        ) &&
+        !box.querySelector('.job-row:not([data-backend-job])');
+      // Every backend-owned operation must keep one identity-matched View action,
+      // including imports/previews which intentionally expose no generation controls.
+      // Repair a missing/mismatched action in-place before any whole-list rebuild.
+      renderedRows.forEach(row => {
+        const id = String(row.dataset.backendJob || '');
+        const actions = row.querySelector('.job-actions');
+        const view = actions?.querySelector('[data-job-view]');
+        if (id && actions && (!view || String(view.dataset.jobView || '') !== id)) {
+          if (view) view.remove();
+          const button = document.createElement('button');
+          button.className = 'btn small secondary';
+          button.type = 'button';
+          button.dataset.jobView = id;
+          button.textContent = 'View';
+          actions.prepend(button);
+        }
+      });
+      const rowsHaveViewActions = renderedRows.every(row => {
+        const id = String(row.dataset.backendJob || '');
+        const view = row.querySelector('[data-job-view]');
+        return Boolean(id && view && String(view.dataset.jobView || '') === id);
+      });
+      const backendDomMatches = JSON.stringify(renderedIds) === JSON.stringify(expectedIds) &&
+        rowStructureValid && rowsHaveViewActions;
+      if (box.dataset.backendJobsSignature !== signature || !backendDomMatches) {
         box.innerHTML = jobs.map(j => {
           const id = esc(j.job_id || ''), state = String(j.state || 'unknown');
           const action = (name,label,cls) => '<button class="btn small ' + cls + '" data-job-action="' + name + '" data-job-id="' + id + '">' + label + '</button>';
@@ -5854,14 +6804,22 @@
           const canCancelImport = j.type === 'import';
           const canCancelPreview = ['voice-preview','production-preview','sound-design-preview'].includes(j.type);
           const actions = backgroundGenerationJobActions(j, id, action, canControlGeneration, canCancelImport, canCancelPreview);
+          const icon = j.type === 'audiobook-generation' ? '♪' :
+            (j.type === 'import' ? '⇧' : (String(j.type || '').includes('preview') ? '▶' : '⚙'));
+          const view = '<button class="btn small secondary" type="button" data-job-view="' + id + '">View</button>';
+          const pct = Math.max(0,Math.min(100,Number(j.progress || 0)));
+          const stateClass = state.toLowerCase().replace(/[^a-z0-9_-]/g,'-');
           return '<article class="job-row" data-backend-job="' + id + '">' +
-            '<b data-job-title>' + esc(j.title || j.type || id) + '</b>' +
-            '<p data-job-stage>' + esc(j.stage || j.message || state) + '</p>' +
-            '<div class="progress"><i data-job-progress style="width:' + Math.max(0,Math.min(100,Number(j.progress || 0))) + '%"></i></div>' +
-            '<small data-job-state>' + esc(state) + ' · ' + Math.round(Number(j.progress || 0)) + '%</small>' +
-            '<p data-job-message' + (j.message ? '' : ' hidden') + '>' + esc(j.message || '') + '</p>' +
-            '<p class="muted" data-job-error' + (j.error?.message ? '' : ' hidden') + '>' + esc(j.error?.message || '') + '</p>' +
-            '<div class="toolbar">' + actions + '</div></article>';
+            '<div class="job-type-icon" aria-hidden="true">' + icon + '</div>' +
+            '<div class="job-main">' +
+              '<h3 data-job-title>' + esc(j.title || j.type || id) + '</h3>' +
+              '<p data-job-stage>' + esc(j.stage || j.message || state) + '</p>' +
+              '<div class="job-meta" data-job-meta>' + esc(jobMetaSummary(j)) + '</div>' +
+              '<div class="job-progress-line"><div class="progress"><i data-job-progress style="width:' + pct + '%"></i></div>' +
+                '<small class="job-state-' + stateClass + '" data-job-state>' + esc(state) + ' · ' + Math.round(Number(j.progress || 0)) + '%</small></div>' +
+              '<p data-job-message' + (j.message ? '' : ' hidden') + '>' + esc(j.message || '') + '</p>' +
+              '<p class="muted" data-job-error' + (j.error?.message ? '' : ' hidden') + '>' + esc(j.error?.message || '') + '</p>' +
+            '</div><div class="job-actions">' + view + actions + '</div></article>';
         }).join('') || '<p class="muted" data-backend-empty="1">No backend jobs in this view.</p>';
         box.dataset.backendJobsSignature = signature;
       } else {
@@ -5872,11 +6830,13 @@
           const stage = row.querySelector('[data-job-stage]');
           const progress = row.querySelector('[data-job-progress]');
           const state = row.querySelector('[data-job-state]');
+          const meta = row.querySelector('[data-job-meta]');
           const messageNode = row.querySelector('[data-job-message]');
           const errorNode = row.querySelector('[data-job-error]');
           writeTextIfChanged(stage, j.stage || j.message || j.state || 'unknown');
           writeStyleIfChanged(progress, 'width', pct + '%');
           writeTextIfChanged(state, String(j.state || 'unknown') + ' · ' + Math.round(pct) + '%');
+          writeTextIfChanged(meta, jobMetaSummary(j));
           writeTextIfChanged(messageNode, j.message || '');
           writeBooleanIfChanged(messageNode, 'hidden', !j.message);
           writeTextIfChanged(errorNode, j.error?.message || '');
@@ -5885,7 +6845,7 @@
       }
       box.dataset.backendJobsRendered = '1';
     }
-    writeTextIfChanged($('jobsRunningCount'), allJobs.filter(j => ['running','pause_requested','cancel_requested'].includes(j.state)).length);
+    writeTextIfChanged($('jobsRunningCount'), allJobs.filter(j => ['running','pause_requested','cancel_requested','retrying'].includes(j.state)).length);
     writeTextIfChanged($('jobsQueuedCount'), allJobs.filter(j => j.state === 'queued').length);
     writeTextIfChanged($('jobsCompletedCount'), allJobs.filter(j => j.state === 'completed').length);
     writeTextIfChanged($('backgroundJobCount'), allJobs.filter(j => !['completed','failed','cancelled'].includes(j.state)).length + ' background jobs');
@@ -6567,9 +7527,24 @@
         '</b><small>' + esc(row.series) + ' · ' + esc(row.profile || 'No audio profile assigned') +
         (row.source === 'library' ? ' · Character Library' : ' · This project') + '</small></button>';
     }).join('') || '<p class="muted">No saved characters exist yet. Use New character to create one in a series.</p>';
+    const savedVoiceProfiles = characterSavedProfiles();
+    const profileOptions = ['<option value="">No character voice profile yet</option>',
+      ...savedVoiceProfiles.map(profile => '<option value="' + esc(profile.name) + '">' +
+        esc(profile.name) + ' · ' + esc(profile.provider || 'Voice') + '</option>')
+    ].join('');
+    const profileSelector = '<div class="ryu-character-subsection" style="margin-top:12px">Character audio profile</div>' +
+      '<label class="ryu-ai-profile-selector" style="display:grid;gap:6px;margin:0 0 12px">' +
+      '<span>Assign a saved Voice Studio profile now (or assign one later)</span>' +
+      '<select id="aiCharacterVoiceProfile" style="width:100%;min-width:0">' + profileOptions + '</select></label>';
     if ($('predictionList')) $('predictionList').innerHTML =
       '<div class="ryu-character-subsection">AI suggestions</div>' + candidateHtml +
-      '<div class="ryu-character-subsection">Saved / manually created characters</div>' + savedHtml;
+      '<div class="ryu-character-subsection">Saved / manually created characters</div>' + savedHtml +
+      profileSelector;
+    const initialChoice = $('predictionList')?.querySelector('.prediction-option.active');
+    const initialProfile = String(initialChoice?.dataset.profile || '');
+    if ($('aiCharacterVoiceProfile') && savedVoiceProfiles.some(profile => profile.name === initialProfile)) {
+      $('aiCharacterVoiceProfile').value = initialProfile;
+    }
     if ($('confirmAiCharacter')) $('confirmAiCharacter').disabled = !(suggestions.length || savedOptions.length);
     const removeButton = ensureDialogueUnassignButton();
     if (removeButton) removeButton.hidden = !(item.assignmentPresent || item.assigned);
@@ -6592,7 +7567,7 @@
         '<option value="' + esc(profile.name) + '">' + esc(profile.name) + ' · ' + esc(profile.provider || 'Voice') + '</option>'
       ).join('');
       $('editCharacterVoice').value = selected.voice_profile || '';
-      $('editCharacterVoice').disabled = true;
+      $('editCharacterVoice').disabled = saved.length === 0;
     }
     if ($('editCharacterScope')) $('editCharacterScope').value = selected.scope || 'Current book only';
     populateEditCharacterSeriesOptions(characterSeries(selected));
@@ -6613,7 +7588,7 @@
       name,
       short_description:$('editCharacterShort')?.value || '',
       aliases:$('editCharacterAliases')?.value || '',
-      voice_profile:String(current.voice_profile || ''),
+      voice_profile:String($('editCharacterVoice')?.value ?? current.voice_profile ?? ''),
       series, scope:series ? 'Series · ' + series : 'Current book only',
       notes:$('editCharacterNotes')?.value || ''
     });
@@ -6630,7 +7605,7 @@
     const current = selectedCharacterRow();
     if (!current) throw new Error('Select a real project character before deleting.');
     const name = characterCanonical(current);
-    if (!window.confirm('Remove "' + name + '" from this project cast? Reusable Character Library data is retained.')) return;
+    if (!window.confirm('Dismiss "' + name + '" from this project cast and prevent Character Analysis from automatically adding it again in "' + characterSeries(current) + '"? Saved dialogue assignments must be cleared first. The reusable Character Library entry is retained; explicitly adding it again from the Library restores detection for this series.')) return;
     await call('character.delete', {name, series:characterSeries(current)});
     window.ryuPremiumSelectedCharacter = '';
     window.ryuPremiumSelectedCharacterSeries = '';
@@ -6813,6 +7788,11 @@
       if (button.matches('#predictionList .prediction-option')) {
         handle(() => {
           document.querySelectorAll('#predictionList .prediction-option').forEach(item => item.classList.toggle('active', item === button));
+          if ($('aiCharacterVoiceProfile')) {
+            const preferred = String(button.dataset.profile || '');
+            $('aiCharacterVoiceProfile').value = characterSavedProfiles().some(profile => profile.name === preferred)
+              ? preferred : '';
+          }
           if ($('confirmAiCharacter')) $('confirmAiCharacter').disabled = false;
         });
         return;
@@ -6824,8 +7804,9 @@
           if (!name) throw new Error('Select an AI suggestion or a saved character first.');
           const assignmentSource = selected.dataset.source === 'ai' ? 'ai' : 'manual';
           const assignmentConfidence = assignmentSource === 'ai' ? Number(selected.dataset.confidence || 0) : 1.0;
+          const selectedProfile = String($('aiCharacterVoiceProfile')?.value ?? selected.dataset.profile ?? '').trim();
           await assignPassageToCharacter(name, String(selected.dataset.series || activeCharacterProjectSeries()),
-            String(selected.dataset.profile || ''), assignmentSource, assignmentConfidence);
+            selectedProfile, assignmentSource, assignmentConfidence);
           $('aiPredictionModal')?.classList.remove('show');
           window.ryuPremiumSelectedDialogueId = '';
         });
@@ -6998,7 +7979,15 @@
       if (!previewText.trim()) throw new Error('Select a passage in Chapter Studio before generating a passage preview.');
     }
     if (!previewText.trim()) throw new Error('The selected preview text is empty.');
-    const payload = {profile_name:name,text:previewText,duration_seconds:Number(duration),chapter_number:c?.number};
+    const payload = {
+      profile_name:name,
+      text:previewText,
+      duration_seconds:Number(duration),
+      chapter_number:c?.number,
+      // Voice Studio auditions the selected profile itself. Character cast
+      // routing belongs to Production/Character Studio, not this voice test.
+      route_character_cast:false
+    };
     if (!savedProfile) {
       const panel = document.querySelector('#voices .provider.active');
       const design = document.querySelector('#voices .provider[data-provider="voicedesign"]');
@@ -7106,13 +8095,19 @@
     activePlayerChapters = chapters;
     const chapterList = grid?.querySelector('aside.card .list');
     if (chapterList) {
-      chapterList.innerHTML = chapters.map(chapter => {
-        const start = Number(chapter.start_seconds);
-        const hasTiming = Number.isFinite(start) && start >= 0;
+      chapterList.innerHTML = chapters.map((chapter, index) => {
+        const start = Number(chapter.start_seconds), end = Number(chapter.end_seconds);
+        const hasTiming = Number.isFinite(start) && start >= 0 && Number.isFinite(end) && end > start;
         return '<div class="list-item" role="button" tabindex="' + (hasTiming ? '0' : '-1') +
-          '" data-audiobook-chapter-start="' + (hasTiming ? String(start) : '') + '"' +
-          (hasTiming ? '' : ' aria-disabled="true"') + '>' +
+          '" data-audiobook-chapter-index="' + String(index) + '"' +
+          ' data-audiobook-chapter-start="' + (hasTiming ? String(start) : '') + '"' +
+          ' data-audiobook-chapter-end="' + (hasTiming ? String(end) : '') + '"' +
+          ' aria-pressed="false"' + (hasTiming ? '' : ' aria-disabled="true"') + '>' +
           esc('Chapter ' + Number(chapter.number || 0) + ' · ' + String(chapter.title || 'Untitled chapter')) +
+          '<small class="muted" data-audiobook-chapter-time="' + (hasTiming ? 'true' : 'false') +
+          '" style="display:block;margin-top:4px;font-size:11px">' +
+          esc(hasTiming ? formatTime(start) + ' – ' + formatTime(end) : 'Timing unavailable') +
+          '</small>' +
           '</div>';
       }).join('') || '<div class="list-item">No chapter metadata available.</div>';
     }
@@ -7124,7 +8119,11 @@
     const volumeControl = page?.querySelector('.player-grid .toolbar input.range');
     if (volumeControl) volumeControl.value = String(Math.round(playerVolume * 100));
     const playerButtons = [...(page?.querySelectorAll('.player-controls button') || [])];
-    const hasTimedChapters = chapters.some(chapter => Number.isFinite(Number(chapter.start_seconds)));
+    const hasTimedChapters = chapters.some(chapter => {
+      const start = Number(chapter.start_seconds), end = Number(chapter.end_seconds);
+      return Number.isFinite(start) && start >= 0 &&
+        Number.isFinite(end) && end > start;
+    });
     if (playerButtons[1]) {
       playerButtons[1].disabled = !hasTimedChapters;
       playerButtons[1].title = hasTimedChapters ? 'Previous chapter' : 'Chapter navigation is unavailable for this audiobook file';
@@ -7133,8 +8132,11 @@
       playerButtons[3].disabled = !hasTimedChapters;
       playerButtons[3].title = hasTimedChapters ? 'Next chapter' : 'Chapter navigation is unavailable for this audiobook file';
     }
-    const duration = playerAudio?.duration || 0;
-    if ($('playerTimeline')) { $('playerTimeline').value = duration ? (playerAudio.currentTime / duration) * 100 : 0; $('playerTimeline').disabled = false; }
+    const duration = Number(playerAudio?.duration) || 0;
+    if ($('playerTimeline')) {
+      $('playerTimeline').value = duration > 0 ? (playerAudio.currentTime / duration) * 100 : 0;
+      $('playerTimeline').disabled = !(playerAudio && playerAudio.src && Number.isFinite(duration) && duration > 0);
+    }
     if ($('currentTime')) $('currentTime').textContent = formatTime(playerAudio?.currentTime || 0);
     if ($('miniProgress')) $('miniProgress').style.width =
       (playerAudio?.duration ? playerAudio.currentTime / playerAudio.duration * 100 : 0) + '%';
@@ -7150,7 +8152,34 @@
       if (time) time.textContent = formatTime(playerAudio?.currentTime || 0);
       applyProjectCover(mini.querySelector('.mini-cover,.book-cover,.project-cover,[data-project-cover],img[alt*="cover" i]'), data.cover_path || '');
     }
+    syncActivePlayerChapter(playerAudio);
     setPlaybackButtonState();
+  }
+  function syncActivePlayerChapter(audio = playerAudio) {
+    if (!audio || audio !== playerAudio) return null;
+    const current = Number(audio.currentTime), chapters = Array.isArray(activePlayerChapters) ? activePlayerChapters : [];
+    const activeIndex = Number.isFinite(current) && current >= 0
+      ? chapters.findIndex(chapter => {
+          const start = Number(chapter.start_seconds), end = Number(chapter.end_seconds);
+          return Number.isFinite(start) && Number.isFinite(end) && end > start &&
+            current >= start && current < end;
+        }) : -1;
+    const rows = [...($('player')?.querySelectorAll('[data-audiobook-chapter-start]') || [])];
+    rows.forEach((row,index) => {
+      const selected = index === activeIndex;
+      row.classList.toggle('active',selected);
+      row.setAttribute('aria-pressed',selected ? 'true' : 'false');
+      if (selected) row.setAttribute('aria-current','true');
+      else row.removeAttribute('aria-current');
+    });
+    const heading = $('player')?.querySelector('.player-grid > .card:nth-child(2) h2');
+    if (heading) {
+      const chapter = activeIndex >= 0 ? chapters[activeIndex] : null;
+      heading.textContent = chapter
+        ? 'Chapter ' + Number(chapter.number || activeIndex + 1) + ' · ' + String(chapter.title || 'Untitled chapter')
+        : 'Full audiobook';
+    }
+    return activeIndex >= 0 ? chapters[activeIndex] : null;
   }
   function persistPlayerPosition(force = false, reset = false, folder = selectedAudiobookFolder, audio = playerAudio) {
     if (!folder || !audio || !audio.src) return;
@@ -7161,11 +8190,36 @@
     void call('player.position.save', {folder, position_seconds:seconds})
       .catch(error => console.warn('[Ryu player position]', error?.message || error));
   }
+  let playerPreferenceSave = Promise.resolve();
+  function savePlayerPreferences(patch) {
+    // Serialize preference updates so rapid rate/volume changes cannot let an
+    // older response overwrite a newer setting. Return the real backend save.
+    playerPreferenceSave = playerPreferenceSave.catch(() => {}).then(async () => {
+      const saved = await call('settings.save', patch);
+      if (saved?.saved === false) throw new Error('Player preferences were not saved.');
+      if (Object.prototype.hasOwnProperty.call(patch, 'player_rate')) {
+        const acknowledgedRate = Number(saved?.player_rate);
+        if (!Number.isFinite(acknowledgedRate) ||
+            Math.abs(acknowledgedRate - Number(patch.player_rate)) > 0.01) {
+          throw new Error('The saved playback speed was not confirmed by Settings read-back.');
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(patch, 'player_volume')) {
+        const acknowledgedVolume = Number(saved?.player_volume);
+        if (!Number.isFinite(acknowledgedVolume) ||
+            Math.abs(acknowledgedVolume - Number(patch.player_volume)) > 0.01) {
+          throw new Error('The saved player volume was not confirmed by Settings read-back.');
+        }
+      }
+      return saved;
+    });
+    return playerPreferenceSave;
+  }
   function applyPlayerRate(value, persist = true) {
     const rate = Number(value);
     if (!Number.isFinite(rate) || rate < 0.5 || rate > 2) {
       message('Playback speed must be between 0.5× and 2.0×.', true);
-      return;
+      return Promise.reject(new Error('Playback speed must be between 0.5× and 2.0×.'));
     }
     playerRate = rate;
     if (playerAudio) playerAudio.playbackRate = rate;
@@ -7174,18 +8228,20 @@
       const candidate = Number(String(button.textContent || '').replace('×','').trim());
       button.classList.toggle('active', Number.isFinite(candidate) && Math.abs(candidate-rate) < 0.01);
     });
-    if (persist) void call('settings.save', {player_rate:rate})
-      .catch(error => message(error?.message || String(error), true));
+    if (!persist) return Promise.resolve({playback_rate:rate});
+    return savePlayerPreferences({player_rate:rate})
+      .catch(error => { message(error?.message || String(error), true); throw error; });
   }
   function applyPlayerVolume(value, persist = false) {
     const amount = Number(value);
-    if (!Number.isFinite(amount)) return;
+    if (!Number.isFinite(amount)) return Promise.resolve(null);
     playerVolume = Math.max(0, Math.min(1, amount / 100));
     if (playerAudio) playerAudio.volume = playerVolume;
     const control = $('player')?.querySelector('.player-grid .toolbar input.range');
     if (control) control.value = String(Math.round(playerVolume * 100));
-    if (persist) void call('settings.save', {player_volume:playerVolume})
-      .catch(error => message(error?.message || String(error), true));
+    if (!persist) return Promise.resolve({playback_volume:playerVolume});
+    return savePlayerPreferences({player_volume:playerVolume})
+      .catch(error => { message(error?.message || String(error), true); throw error; });
   }
   function seekPlayerBy(seconds) {
     if (!playerAudio || !playerAudio.src || !Number.isFinite(playerAudio.duration)) {
@@ -7197,7 +8253,11 @@
   function jumpPlayerChapter(direction) {
     if (!playerAudio || !playerAudio.src) return;
     const chapters = activePlayerChapters
-      .filter(chapter => Number.isFinite(Number(chapter.start_seconds)))
+      .filter(chapter => {
+        const start = Number(chapter.start_seconds), end = Number(chapter.end_seconds);
+        return Number.isFinite(start) && start >= 0 &&
+          Number.isFinite(end) && end > start;
+      })
       .slice().sort((a,b) => Number(a.start_seconds) - Number(b.start_seconds));
     if (!chapters.length) {
       message('Chapter navigation is unavailable for this audiobook file.', true);
@@ -7235,48 +8295,66 @@
     speedButtons.forEach(button => {
       button.onclick = () => {
         const rate = Number(String(button.textContent || '').replace('×','').trim());
-        applyPlayerRate(rate, true);
+        void applyPlayerRate(rate, true);
       };
     });
     const volumeControl = page.querySelector('.player-grid .toolbar input.range');
     if (volumeControl) {
-      volumeControl.oninput = () => applyPlayerVolume(volumeControl.value, false);
-      volumeControl.onchange = () => applyPlayerVolume(volumeControl.value, true);
+      volumeControl.oninput = () => { void applyPlayerVolume(volumeControl.value, false); };
+      volumeControl.onchange = () => { void applyPlayerVolume(volumeControl.value, true); };
     }
-    page.addEventListener('click', event => {
-      const chapter = event.target.closest('[data-audiobook-chapter-start]');
+    const playSelectedChapter = async chapter => {
       if (!chapter || chapter.getAttribute('aria-disabled') === 'true') return;
-      if (!playerAudio || !playerAudio.src) {
-        message('Choose Play audiobook on a finished title before selecting a chapter.', true);
+      const audio = playerAudio, start = Number(chapter.dataset.audiobookChapterStart),
+        end = Number(chapter.dataset.audiobookChapterEnd);
+      if (!audio || !audio.src || !Number.isFinite(audio.duration) ||
+          !Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) {
+        message('This audiobook chapter has no usable embedded playback timing.', true);
         return;
       }
-      const start = Number(chapter.dataset.audiobookChapterStart);
-      if (Number.isFinite(start) && start >= 0) playerAudio.currentTime = start;
+      audio.currentTime = Math.max(0,Math.min(audio.duration,start));
+      syncActivePlayerChapter(audio);
+      try { await audio.play(); }
+      catch (error) { message(error?.message || 'The selected chapter could not be started.',true); }
+    };
+    page.addEventListener('click', event => {
+      const chapter = event.target && typeof event.target.closest === 'function'
+        ? event.target.closest('[data-audiobook-chapter-start]') : null;
+      if (!chapter || chapter.getAttribute('aria-disabled') === 'true') return;
+      void playSelectedChapter(chapter);
     });
     page.addEventListener('keydown', event => {
       if (event.key !== 'Enter' && event.key !== ' ') return;
-      const chapter = event.target.closest('[data-audiobook-chapter-start]');
+      const chapter = event.target && typeof event.target.closest === 'function'
+        ? event.target.closest('[data-audiobook-chapter-start]') : null;
       if (!chapter || chapter.getAttribute('aria-disabled') === 'true') return;
       event.preventDefault();
-      const start = Number(chapter.dataset.audiobookChapterStart);
-      if (playerAudio && playerAudio.src && Number.isFinite(start) && start >= 0) playerAudio.currentTime = start;
+      void playSelectedChapter(chapter);
     });
     applyPlayerRate(playerRate, false);
     applyPlayerVolume(playerVolume * 100, false);
   }
   async function openPlayer(projectFolder = selectedAudiobookFolder) {
+    const autoplay = arguments[1]?.autoplay !== false;
     const folder = String(projectFolder || '').trim();
     if (!folder) throw new Error('Select a finished audiobook from the Audiobooks library before playing.');
     const data = await call('player.get_active', {folder});
-    if (playerAudio && playerAudio.src === data.file_url) {
+    if (playerAudio && playerAudio.src === data.file_url &&
+        String(playerAudio.dataset?.projectFolder || '') === folder) {
       selectedAudiobookFolder = folder;
       miniPlayerDismissed = false;
+      playerAudio.dataset.projectFolder = folder;
       playerRate = Number.isFinite(Number(data.playback_rate)) ? Number(data.playback_rate) : playerRate;
       playerVolume = Number.isFinite(Number(data.playback_volume)) ? Math.max(0,Math.min(1,Number(data.playback_volume))) : playerVolume;
       playerAudio.playbackRate = playerRate;
       playerAudio.volume = playerVolume;
       renderSelectedAudiobook(data);
-      if (playerAudio.paused) await playerAudio.play(); else playerAudio.pause();
+      if (autoplay) {
+        if (playerAudio.paused) await playerAudio.play(); else playerAudio.pause();
+      } else if (!playerAudio.paused) {
+        // Open is load-only: reopening the already-selected book must not leave it playing.
+        playerAudio.pause();
+      }
       syncMiniPlayer();
       setPlaybackButtonState();
       return;
@@ -7293,33 +8371,53 @@
       ? Number(data.playback_volume) : 0.8;
     playerAudio = new Audio(data.file_url);
     const audio = playerAudio;
+    audio.dataset.projectFolder = folder;
     const audioFolder = folder;
     audio.preload = 'metadata';
     audio.playbackRate = playerRate;
     audio.volume = playerVolume;
-    audio.ontimeupdate = () => {
-      const duration = audio.duration || 0, current = audio.currentTime || 0;
-      if ($('playerTimeline') && duration) $('playerTimeline').value = current / duration * 100;
-      if ($('miniProgress') && duration) $('miniProgress').style.width = current / duration * 100 + '%';
+    const updateAudioPositionUi = () => {
+      if (audio !== playerAudio || audioFolder !== selectedAudiobookFolder) return;
+      const duration = Number(audio.duration) || 0, current = Number(audio.currentTime) || 0;
+      if ($('playerTimeline')) {
+        $('playerTimeline').value = duration > 0 ? current / duration * 100 : 0;
+        $('playerTimeline').disabled = !(audio.src && Number.isFinite(duration) && duration > 0);
+      }
+      if ($('miniProgress') && duration > 0) $('miniProgress').style.width = current / duration * 100 + '%';
       if ($('currentTime')) $('currentTime').textContent = formatTime(current);
       const time = $('miniPlayer')?.querySelector('span.muted');
       if (time) time.textContent = formatTime(current);
+      syncActivePlayerChapter(audio);
       setPlaybackButtonState();
       persistPlayerPosition(false, false, audioFolder, audio);
     };
-    audio.onplay = () => { setPlaybackButtonState(); syncMiniPlayer(); };
+    audio.ontimeupdate = updateAudioPositionUi;
+    audio.onseeked = updateAudioPositionUi;
+    audio.onplay = () => {
+      if (audio !== playerAudio || audioFolder !== selectedAudiobookFolder) return;
+      // Reassert the selected project's current preference on the media element.
+      // Qt WebEngine may return a newly loaded element to 1× before playback starts.
+      audio.playbackRate = playerRate;
+      audio.volume = playerVolume;
+      setPlaybackButtonState(); syncMiniPlayer();
+    };
     audio.onpause = () => {
-      persistPlayerPosition(true, false, audioFolder, audio);
-      setPlaybackButtonState();
-      syncMiniPlayer();
+      if (audio !== playerAudio || audioFolder !== selectedAudiobookFolder) return;
+      persistPlayerPosition(true,false,audioFolder,audio);
+      setPlaybackButtonState(); syncMiniPlayer();
     };
     audio.onended = () => {
-      persistPlayerPosition(true, true, audioFolder, audio);
-      setPlaybackButtonState();
-      syncMiniPlayer();
+      if (audio !== playerAudio || audioFolder !== selectedAudiobookFolder) return;
+      persistPlayerPosition(true,true,audioFolder,audio);
+      setPlaybackButtonState(); syncMiniPlayer();
     };
     audio.onloadedmetadata = () => {
-      if (playerAudio !== audio) return;
+      if (audio !== playerAudio || audioFolder !== selectedAudiobookFolder) return;
+      // Apply persisted preferences after the browser has finished loading the
+      // media resource; setting playbackRate before load/metadata is not enough
+      // in every Qt WebEngine build.
+      audio.playbackRate = playerRate;
+      audio.volume = playerVolume;
       const duration = Number(audio.duration) || 0;
       const savedPosition = Math.max(0, Number(data.playback_position_seconds) || 0);
       if (duration > 0 && savedPosition > 0 && savedPosition < duration - 1) {
@@ -7330,11 +8428,13 @@
       renderSelectedAudiobook(data);
     };
     audio.onerror = () => {
+      if (audio !== playerAudio || audioFolder !== selectedAudiobookFolder) return;
       miniPlayerDismissed = true;
       syncMiniPlayer();
       message('The local audiobook file could not be opened in the embedded player.', true);
     };
-    await audio.play();
+    if (autoplay) await audio.play();
+    else audio.load();
     miniPlayerDismissed = false;
     renderSelectedAudiobook(data);
     syncMiniPlayer();
@@ -7344,22 +8444,239 @@
     const n = Math.max(0, Math.floor(Number(seconds) || 0)), h = Math.floor(n / 3600), m = Math.floor((n % 3600) / 60), sec = n % 60;
     return h ? h + ':' + String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0') : m + ':' + String(sec).padStart(2,'0');
   };
+  function ensureHistoryRangeControls(section) {
+    const filters = $('historyFilters');
+    if (!section || !filters || !filters.parentElement) return null;
+    let controls = $('historyRangeControls');
+    if (!controls) {
+      controls = document.createElement('div');
+      controls.id = 'historyRangeControls';
+      controls.className = 'toolbar';
+      controls.style.display = 'flex';
+      controls.style.flexWrap = 'wrap';
+      controls.style.alignItems = 'end';
+      controls.style.gap = '10px';
+      controls.style.margin = '12px 0 14px';
+      controls.innerHTML =
+        '<label style="display:grid;gap:4px;min-width:180px;flex:1;font-size:12px;color:var(--muted)">Search' +
+          '<input id="historySearchFilter" type="search" placeholder="Job, project, chapter or error" ' +
+          'style="min-width:0;width:100%;padding:9px 11px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:9px"></label>' +
+        '<label style="display:grid;gap:4px;min-width:140px;font-size:12px;color:var(--muted)">From Date' +
+          '<input id="historyFromDate" type="date" aria-label="History from date" ' +
+          'style="padding:9px 11px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:9px"></label>' +
+        '<label style="display:grid;gap:4px;min-width:140px;font-size:12px;color:var(--muted)">To Date' +
+          '<input id="historyToDate" type="date" aria-label="History to date" ' +
+          'style="padding:9px 11px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:9px"></label>' +
+        '<button class="btn small secondary" id="clearHistoryFilters" type="button">Clear filters</button>' +
+        '<small id="historyFilterHint" class="muted" role="status" aria-live="polite"></small>';
+      filters.insertAdjacentElement('afterend', controls);
+      const refresh = () => {
+        section.dataset.historyRenderSignature = '';
+        refreshHistory().catch(error => message(error?.message || String(error), true));
+      };
+      controls.querySelectorAll('input').forEach(input => {
+        input.addEventListener('input', refresh);
+        input.addEventListener('change', refresh);
+      });
+      $('clearHistoryFilters')?.addEventListener('click', () => {
+        const search = $('historySearchFilter'), from = $('historyFromDate'), to = $('historyToDate');
+        if (search) search.value = '';
+        if (from) from.value = '';
+        if (to) to.value = '';
+        refresh();
+      });
+    }
+    // Remove prototype sample records after the page is connected to real data.
+    section.querySelectorAll('.history-row:not([data-backend-history])').forEach(row => row.remove());
+    return controls;
+  }
+
+  function jobDateValue(job) {
+    return job?.completed_at || job?.updated_at || job?.started_at || job?.queued_at || job?.created_at || '';
+  }
+
+  function generationModeLabel(job) {
+    if (String(job?.type || '') !== 'audiobook-generation') return '';
+    const result = job?.result && typeof job.result === 'object' ? job.result : {};
+    if (result.narrator_only === true || result.generation_mode === 'narrator_only') return 'Narrator-only';
+    if (result.generation_mode === 'character_cast') return 'Character cast';
+    // Legacy jobs created before mode tracking must not be silently re-labelled.
+    return 'Generation mode not recorded';
+  }
+
+  function jobMetaSummary(job) {
+    const project = String(job?.project_title || job?.project_name || '').trim() || 'Project unavailable';
+    const mode = generationModeLabel(job);
+    const phase = String(job?.chapter_title || job?.stage || job?.phase || '').trim();
+    const elapsed = Number(job?.elapsed_seconds);
+    const elapsedText = Number.isFinite(elapsed) && elapsed >= 0 ? formatTime(elapsed) : 'Elapsed time unavailable';
+    const dateValue = jobDateValue(job);
+    const dateText = dateValue && Number.isFinite(Date.parse(dateValue))
+      ? new Date(dateValue).toLocaleString() : 'Timestamp unavailable';
+    return [project, mode, phase, elapsedText, dateText].filter(Boolean).join(' · ');
+  }
+
+  function ensureJobDetailsModal() {
+    let root = $('jobDetailsModal');
+    if (root) return root;
+    root = document.createElement('div');
+    root.id = 'jobDetailsModal';
+    root.className = 'modal-back';
+    root.innerHTML =
+      '<div class="modal" role="dialog" aria-modal="true" aria-labelledby="jobDetailsTitle" ' +
+      'style="width:min(760px,calc(100vw - 28px));max-height:calc(100vh - 36px);overflow:auto">' +
+        '<div class="modal-title"><div><span class="eyebrow">OPERATION DETAILS</span>' +
+          '<h2 id="jobDetailsTitle">Background job</h2><p class="muted" id="jobDetailsSubtitle"></p></div>' +
+          '<button class="icon-btn" type="button" data-job-detail-close aria-label="Close job details">×</button></div>' +
+        '<div id="jobDetailsFields" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px"></div>' +
+        '<div id="jobDetailsError" class="muted" style="margin-top:12px;white-space:pre-wrap"></div>' +
+        '<div id="jobDetailsActions" class="toolbar" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px"></div>' +
+        '<div class="toolbar" style="display:flex;justify-content:flex-end;margin-top:14px">' +
+          '<button class="btn small secondary" type="button" id="jobDetailsOpenTaskManager">Open Task Manager</button>' +
+          '<button class="btn small ghost" type="button" data-job-detail-close>Close</button>' +
+        '</div></div>';
+    document.body.appendChild(root);
+    root.addEventListener('click', event => {
+      if (event.target === root || event.target.closest('[data-job-detail-close]')) root.classList.remove('show');
+      if (event.target.closest('#jobDetailsOpenTaskManager')) {
+        root.classList.remove('show');
+        $('backgroundJobsButton')?.click();
+      }
+    });
+    if (!window.__ryuJobDetailsEscapeBound) {
+      window.__ryuJobDetailsEscapeBound = true;
+      document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') $('jobDetailsModal')?.classList.remove('show');
+      });
+    }
+    return root;
+  }
+
+  function renderJobDetails(job) {
+    const root = ensureJobDetailsModal();
+    const id = String(job?.job_id || job?.id || '');
+    const state = String(job?.state || 'unknown');
+    const error = job?.error && typeof job.error === 'object'
+      ? String(job.error.message || '') : String(job?.error || '');
+    const generationResult = job?.result && typeof job.result === 'object' ? job.result : {};
+    const generationMode = generationModeLabel(job) || 'Not applicable';
+    const configuredProfiles = Number(generationResult.character_voice_profile_count);
+    const generationIdentityFields = String(job?.type || '') === 'audiobook-generation'
+      ? [
+          ['Generation mode', generationMode],
+          ['Saved narrator profile', generationResult.voice_profile || 'Not recorded'],
+          ['Character profiles configured',
+            Number.isFinite(configuredProfiles) && configuredProfiles >= 0
+              ? String(Math.floor(configuredProfiles)) : 'Not recorded']
+        ]
+      : [];
+    const result = job?.result && typeof job.result === 'object'
+      ? String(job.result.summary || job.result.message || '')
+      : String(job?.result || '');
+    const fields = [
+      ['Job ID', id],
+      ['Type', job?.type || job?.operation || 'Unknown'],
+      ['Project', job?.project_title || job?.project_name || 'Project unavailable'],
+      ['Status', state],
+      ['Progress', Number.isFinite(Number(job?.progress)) ? Math.round(Number(job.progress)) + '%' : 'Unavailable'],
+      ['Chapter', job?.chapter_title || job?.chapter_number || job?.chapter || 'Not applicable'],
+      ['Phase', job?.stage || job?.phase || 'Not reported'],
+      ['Elapsed time', Number.isFinite(Number(job?.elapsed_seconds)) ? formatTime(job.elapsed_seconds) : 'Unavailable'],
+      ['Queued', job?.queued_at || 'Unavailable'],
+      ['Started', job?.started_at || 'Unavailable'],
+      ['Finished', job?.completed_at || 'Not finished'],
+      ['Output', job?.output_path || job?.result?.output_path || 'No output registered'],
+      ...generationIdentityFields,
+      ['Result', result || 'No result summary reported'],
+      ['Recovery', job?.recoverable ? 'Recoverable' : 'Not marked recoverable']
+    ];
+    $('jobDetailsTitle').textContent = String(job?.title || job?.type || 'Background job');
+    $('jobDetailsSubtitle').textContent = (job?.project_title || 'Local task') + ' · ' + state;
+    $('jobDetailsFields').innerHTML = fields.map(([label,value]) =>
+      '<div style="padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--surface);min-width:0">' +
+        '<small class="muted">' + esc(label) + '</small><div data-job-detail-field="' +
+        esc(label.toLowerCase().replace(/[^a-z0-9]+/g,'-')) +
+        '" style="margin-top:4px;overflow-wrap:anywhere">' + esc(value) + '</div></div>'
+    ).join('');
+    $('jobDetailsError').textContent = error ? 'Failure details: ' + error : '';
+    const action = (name,label,cls) =>
+      '<button class="btn small ' + cls + '" data-job-action="' + name + '" data-job-id="' + esc(id) + '">' + label + '</button>';
+    const isGeneration = String(job?.type || '') === 'audiobook-generation';
+    const isImport = String(job?.type || '') === 'import';
+    const isPreview = ['voice-preview','production-preview','sound-design-preview'].includes(String(job?.type || ''));
+    const stateActions = backgroundGenerationJobActions(job || {}, esc(id), action, isGeneration, isImport, isPreview);
+    $('jobDetailsActions').innerHTML = stateActions || '<small class="muted">No additional operation is available for this job state.</small>';
+    root.classList.add('show');
+  }
+
+  async function openJobDetails(jobId) {
+    const id = String(jobId || '').trim();
+    if (!id) throw new Error('Select a job before opening its details.');
+    const [jobs, history] = await Promise.all([
+      call('job.list', {include_hidden:true}),
+      call('history.list')
+    ]);
+    const jobRows = Array.isArray(jobs) ? jobs : [];
+    const historyRows = Array.isArray(history) ? history : [];
+    const historyMatch = historyRows.find(row => String(row.job_id || row.id || '') === id);
+    const queueMatch = jobRows.find(row => String(row.job_id || row.id || '') === id);
+    const job = historyMatch || queueMatch;
+    if (!job) throw new Error('This job is no longer available in History or the task queue.');
+    renderJobDetails(job);
+    return job;
+  }
+
   async function refreshHistory() {
     const requestToken = ++historyListEpoch;
+    const section = $('history');
+    ensureHistoryRangeControls(section);
+    const filters = $('historyFilters');
+    const host = filters?.parentElement;
+    const filter = filters?.querySelector('button.active')?.textContent?.trim().toLowerCase() || 'all';
+    const query = String($('historySearchFilter')?.value || '').trim().toLowerCase();
+    const fromDate = String($('historyFromDate')?.value || '').trim();
+    const toDate = String($('historyToDate')?.value || '').trim();
+    const hint = $('historyFilterHint');
+    if (fromDate && toDate && fromDate > toDate) {
+      if (hint) hint.textContent = 'From Date must be on or before To Date.';
+      if (section) section.querySelectorAll('[data-backend-history]').forEach(el => el.remove());
+      if (host) {
+        let empty = host.querySelector('[data-history-empty]');
+        if (!empty) { empty = document.createElement('p'); empty.dataset.historyEmpty='1'; empty.className='muted'; host.appendChild(empty); }
+        empty.textContent = 'Choose a valid date range to view History.';
+      }
+      return [];
+    }
+    if (hint) hint.textContent = '';
     const loaded = await call('history.list');
     if (requestToken !== historyListEpoch) return [];
     const rows = Array.isArray(loaded) ? loaded : [];
-    const section = $('history');
-    const filter = $('historyFilters')?.querySelector('button.active')?.textContent?.trim().toLowerCase() || 'all';
-    const host = $('historyFilters')?.parentElement;
-    const visible = rows.filter(j => {
-      const state = String(j.state || '').toLowerCase();
-      if (filter === 'completed') return state === 'completed';
-      if (filter === 'running') return ['queued','running','pause_requested','paused','retrying'].includes(state);
-      if (filter === 'failed') return ['failed','cancelled'].includes(state);
+    const fromTime = fromDate ? new Date(fromDate + 'T00:00:00').getTime() : null;
+    const toTime = toDate ? new Date(toDate + 'T23:59:59.999').getTime() : null;
+    const activeStates = ['queued','running','pause_requested','paused','cancel_requested','retrying'];
+    const visible = rows.filter(job => {
+      const state = String(job.state || '').toLowerCase();
+      if (filter === 'completed' && state !== 'completed') return false;
+      if (filter === 'running' && !activeStates.includes(state)) return false;
+      if (filter === 'failed' && !['failed','cancelled'].includes(state)) return false;
+      const timestamp = Date.parse(jobDateValue(job));
+      if (fromTime !== null && (!Number.isFinite(timestamp) || timestamp < fromTime)) return false;
+      if (toTime !== null && (!Number.isFinite(timestamp) || timestamp > toTime)) return false;
+      if (query) {
+        const searchable = [
+          job.job_id,job.title,job.type,job.operation,job.project_title,job.project_name,
+          job.project_folder,job.chapter_title,job.chapter_number,job.stage,job.phase,
+          job.message,job.error?.code,job.error?.message,job.output_path
+        ].map(value => String(value ?? '')).join(' ').toLowerCase();
+        if (!searchable.includes(query)) return false;
+      }
       return true;
     });
-    const signature = JSON.stringify({filter,rows:visible.map(j => [j.job_id,j.title,j.type,j.project_title,j.stage,j.message,j.state,j.elapsed_seconds,j.progress,j.error?.message])});
+    const signature = JSON.stringify({
+      filter,query,fromDate,toDate,
+      rows:visible.map(job => [job.job_id,job.title,job.type,job.project_title,job.stage,job.message,
+        job.state,job.elapsed_seconds,job.progress,job.error?.message,jobDateValue(job)])
+    });
     if (section && host && section.dataset.historyRenderSignature === signature) return rows;
     if (section) section.querySelectorAll('[data-backend-history]').forEach(el => el.remove());
     if (host) {
@@ -7368,28 +8685,321 @@
         if (!empty) { empty = document.createElement('p'); empty.dataset.historyEmpty='1'; empty.className='muted'; host.appendChild(empty); }
         empty.textContent = 'No matching backend jobs yet.';
       } else if (empty) empty.remove();
-      visible.forEach(j => {
+      visible.forEach(job => {
         const row = document.createElement('div');
-        row.className = 'history-row'; row.dataset.backendHistory='1';
-        const label = String(j.state || 'queued');
-        const duration = j.elapsed_seconds ? formatTime(j.elapsed_seconds) : 'Elapsed time unavailable';
-        row.innerHTML = '<div><b>' + esc(j.title || j.type || 'Background task') + '</b><br><span class="muted">' +
-          esc(j.project_title || 'Local task') + ' · ' + esc(j.stage || j.message || '') + ' · ' + esc(duration) +
-          '</span></div><span class="badge ' + (label==='failed'?'red':label==='running'?'info':'') + '">' + esc(label) +
-          '</span><span>' + Math.round(Number(j.progress || 0)) + '%</span><button class="btn small secondary" data-history-job="' +
-          esc(j.job_id) + '">View</button>';
-        if (host) host.appendChild(row);
+        const id = String(job.job_id || job.id || '');
+        const state = String(job.state || 'unknown').toLowerCase();
+        const label = state.replace(/_/g,' ');
+        const elapsed = Number(job.elapsed_seconds);
+        const duration = Number.isFinite(elapsed) && elapsed >= 0 ? formatTime(elapsed) : 'Elapsed time unavailable';
+        const progress = Number(job.progress);
+        const progressText = Number.isFinite(progress) ? Math.round(progress) + '%' : '—';
+        const timestamp = jobDateValue(job);
+        const timestampText = timestamp && Number.isFinite(Date.parse(timestamp))
+          ? new Date(timestamp).toLocaleString() : 'Timestamp unavailable';
+        const phase = [job.chapter_title || (job.chapter_number ? 'Chapter ' + job.chapter_number : ''),
+          job.stage || job.phase || ''].filter(Boolean).join(' · ');
+        const project = job.project_title || job.project_name || 'Project unavailable';
+        const errorText = job.error?.message
+          ? '<small class="muted" style="color:var(--danger)">Error: ' + esc(job.error.message) + '</small>' : '';
+        row.className = 'history-row';
+        row.dataset.backendHistory='1';
+        row.dataset.historyJob = id;
+        row.innerHTML =
+          '<div><b>' + esc(job.title || job.type || 'Background task') + '</b><br>' +
+            '<span class="muted">' + esc(project) + ' · ' + esc(phase || job.message || 'No phase reported') + ' · ' + esc(duration) + '</span><br>' +
+            '<small class="muted">' + esc(timestampText) + '</small><br>' + errorText +
+          '</div><span class="badge ' + (state === 'failed' || state === 'cancelled' ? 'red' : ['running','queued','pause_requested','paused','retrying'].includes(state) ? 'info' : '') + '">' +
+            esc(label) + '</span><span>' + esc(progressText) + '</span>' +
+          '<button class="btn small secondary" type="button" data-history-job="' + esc(id) + '">View</button>';
+        host.appendChild(row);
       });
       if (section) section.dataset.historyRenderSignature = signature;
     }
     return rows;
   }
+  async function renderHardwareOptimizationSettings(result = {}) {
+    const section = $('performance');
+    if (!section) return;
+    let panel = $('performanceHardwareOptimization');
+    if (!panel) {
+      panel = document.createElement('section');
+      panel.id = 'performanceHardwareOptimization';
+      panel.className = 'card';
+      panel.style.marginTop = '18px';
+      section.appendChild(panel);
+    }
+    let settings = {};
+    try { settings = await call('settings.get', {}); } catch (error) {
+      panel.innerHTML = '<h3>Hardware Optimization</h3><p class="muted">Settings are unavailable: ' + esc(error?.message || error) + '</p>';
+      return;
+    }
+    const accelerators = Array.isArray(result.accelerators) ? result.accelerators : [];
+    const available = [...new Set(accelerators
+      .filter(item => item && item.supported === true && ['cuda', 'rocm', 'xpu'].includes(String(item.backend)))
+      .map(item => String(item.backend)))];
+    const options = [
+      {value:'automatic', label:'Automatic — choose the best validated backend'},
+      {value:'cpu', label:'CPU only'}
+    ];
+    if (available.includes('cuda')) options.push({value:'cuda',label:'NVIDIA CUDA'});
+    if (available.includes('rocm')) options.push({value:'rocm',label:'AMD ROCm'});
+    if (available.includes('xpu')) options.push({value:'xpu',label:'Intel XPU'});
+    const selected = String(settings.qwen_backend || 'automatic').toLowerCase();
+    if (!options.some(option => option.value === selected)) {
+      options.push({value:selected,label:selected.toUpperCase() + ' — saved choice, currently unavailable'});
+    }
+    const lowMemory = settings.qwen_low_memory === true;
+    const concurrency = lowMemory ? 1 : Math.max(1, Math.min(3, Number(settings.concurrency || 1)));
+    const qwenModels = Array.isArray(result.qwen_models_installed) ? result.qwen_models_installed : [];
+    const last = result.last_inference && typeof result.last_inference === 'object' ? result.last_inference : {};
+    const actual = last.verified_inference
+      ? String(last.backend || 'unknown').toUpperCase() + ' · ' + String(last.device || 'device unavailable')
+      : 'No verified Qwen inference recorded yet';
+    panel.innerHTML =
+      '<div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">' +
+        '<div><h3 style="margin:0">Hardware Optimization</h3>' +
+        '<p class="muted" style="margin:4px 0 0">Hardware detection, validated runtime and actual model inference are reported separately.</p></div>' +
+        '<span class="muted" style="font-size:12px">Last Qwen inference: ' + esc(actual) + '</span></div>' +
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:14px">' +
+        '<label>Preferred Qwen backend<select id="performanceQwenBackend" class="input" style="display:block;width:100%;margin-top:6px">' +
+          options.map(option => '<option value="' + esc(option.value) + '"' + (option.value === selected ? ' selected' : '') + '>' + esc(option.label) + '</option>').join('') +
+        '</select></label>' +
+        '<label style="display:flex;gap:8px;align-items:center"><input id="performanceQwenLowMemory" type="checkbox"' + (lowMemory ? ' checked' : '') + '> Low-memory mode</label>' +
+        '<label>Maximum concurrent audiobook jobs<select id="performanceHeavyConcurrency" class="input" style="display:block;width:100%;margin-top:6px"' + (lowMemory ? ' disabled' : '') + '>' +
+          [1,2,3].map(value => '<option value="' + value + '"' + (value === concurrency ? ' selected' : '') + '>' + value + '</option>').join('') +
+        '</select></label>' +
+      '</div>' +
+      '<p class="muted" style="margin:10px 0 0;font-size:12px">Low-memory mode enforces one heavy generation job, requests low-memory model loading when supported and checks actual free accelerator memory before loading. If a GPU runtime cannot be validated, Auto reports the reason and falls back to CPU without changing the selected model or voice identity. Settings apply to new jobs; active inference is never switched mid-job.</p>' +
+      '<div style="display:grid;grid-template-columns:minmax(180px,1fr) auto;gap:10px;align-items:end;margin-top:14px">' +
+        '<label>Qwen CustomVoice benchmark model<select id="performanceQwenBenchmarkModel" class="input" style="display:block;width:100%;margin-top:6px">' +
+          qwenModels.map(kind => '<option value="' + esc(kind) + '">' + esc(kind) + '</option>').join('') +
+        '</select></label>' +
+        '<button type="button" class="' + esc($('runTtsBenchmark')?.className || $('runBenchmark')?.className || 'btn') + '" data-run-qwen-benchmark ' + (qwenModels.length ? '' : 'disabled') + '>Run Qwen 30s warm preview benchmark</button>' +
+      '</div>' +
+      (!qwenModels.length ? '<p class="muted" style="margin:6px 0 0;font-size:12px">Install and verify a Qwen CustomVoice 0.6B or 1.7B model in Models Center to run this benchmark.</p>' : '') +
+      '<div style="display:flex;justify-content:flex-end;margin-top:12px"><button type="button" class="' + esc($('runTtsBenchmark')?.className || $('runBenchmark')?.className || 'btn') + '" data-save-hardware-optimization>Save optimization settings</button></div>';
+    const low = panel.querySelector('#performanceQwenLowMemory');
+    const concurrencySelect = panel.querySelector('#performanceHeavyConcurrency');
+    low?.addEventListener('change', () => {
+      if (concurrencySelect) {
+        concurrencySelect.disabled = low.checked;
+        if (low.checked) concurrencySelect.value = '1';
+      }
+    });
+    panel.querySelector('[data-run-qwen-benchmark]')?.addEventListener('click', act(async () => {
+      const modelKind = panel.querySelector('#performanceQwenBenchmarkModel')?.value;
+      if (!modelKind) { message('Install a Qwen CustomVoice model before benchmarking.', true); return; }
+      const button = panel.querySelector('[data-run-qwen-benchmark]');
+      if (button) button.disabled = true;
+      try {
+        const queued = await call('performance.qwen_benchmark', {model_kind: modelKind, voice: 'Ryan'});
+        await refreshJobs();
+        message('Qwen 30-second warm preview benchmark queued for ' + modelKind + '.');
+        await monitorJob(queued.job_id, null, async job => {
+          await refreshPerformance();
+          await refreshJobs();
+          const result = job?.result || {};
+          if (job?.state === 'completed' && result.success) {
+            message('Qwen benchmark: ' + Number(result.seconds).toFixed(2) + 's for ' +
+              Number(result.audio_seconds).toFixed(2) + 's audio · RTF ' +
+              Number(result.realtime_factor).toFixed(3) + ' · ' +
+              (result.target_performance_met ? '30s / under-60s target met' : 'target not met'));
+          } else {
+            message(job?.error?.message || job?.message || 'Qwen benchmark failed.', true);
+          }
+        });
+      } finally {
+        if (button) button.disabled = false;
+      }
+    }));
+    panel.querySelector('[data-save-hardware-optimization]')?.addEventListener('click', act(async () => {
+      const backend = panel.querySelector('#performanceQwenBackend')?.value || 'automatic';
+      const lowMemoryEnabled = Boolean(low?.checked);
+      const maxConcurrent = lowMemoryEnabled ? 1 : Number(concurrencySelect?.value || 1);
+      await call('settings.save', {
+        qwen_backend: backend,
+        qwen_low_memory: lowMemoryEnabled,
+        concurrency: maxConcurrent
+      });
+      message('Hardware optimization settings saved. They apply to newly started Qwen and audiobook generation jobs.');
+      await refreshPerformance();
+    }));
+  }
+
+  function renderPerformanceHistory(result = {}) {
+    const section = $('performance');
+    if (!section) return;
+    let panel = $('performanceBenchmarkHistory');
+    if (!panel) {
+      panel = document.createElement('section');
+      panel.id = 'performanceBenchmarkHistory';
+      panel.className = 'card';
+      panel.style.marginTop = '18px';
+      section.appendChild(panel);
+    }
+    const records = Array.isArray(result.benchmark_history) ? result.benchmark_history : [];
+    const buttonClass = $('runTtsBenchmark')?.className || $('runBenchmark')?.className || 'btn';
+    const rows = records.map((record, index) => {
+      const data = record?.result && typeof record.result === 'object' ? record.result : {};
+      const hardware = data.hardware && typeof data.hardware === 'object' ? data.hardware : {};
+      const resources = data.resources && typeof data.resources === 'object' ? data.resources : {};
+      const success = data.success === true;
+      const status = success ? 'Successful' : 'Failed';
+      const measuredAt = record.measured_at ? new Date(record.measured_at).toLocaleString() : 'Date unavailable';
+      const duration = Number.isFinite(Number(data.seconds)) ? Number(data.seconds).toFixed(2) + ' s' : 'Not measured';
+      const audio = Number.isFinite(Number(data.audio_seconds)) ? Number(data.audio_seconds).toFixed(2) + ' s' : 'Not measured';
+      const rtf = Number.isFinite(Number(data.realtime_factor)) ? Number(data.realtime_factor).toFixed(3) : 'Not measured';
+      const cpu = Number.isFinite(Number(resources.cpu_percent)) ? Number(resources.cpu_percent).toFixed(1) + '%' : 'Unavailable';
+      const ram = Number.isFinite(Number(resources.memory_available_bytes)) ? (Number(resources.memory_available_bytes) / 1024 ** 3).toFixed(1) + ' GB free' : 'Unavailable';
+      const gpu = hardware.gpu_name || 'No GPU reported';
+      const backend = data.backend_verified === true
+        ? String(data.backend || 'unknown').toUpperCase() + ' · verified'
+        : 'Unverified · requested ' + String(data.requested_backend || 'automatic');
+      const gpuUse = resources.gpu_percent !== null && resources.gpu_percent !== undefined && Number.isFinite(Number(resources.gpu_percent))
+        ? Number(resources.gpu_percent).toFixed(1) + '%' : 'Unavailable';
+      const vram = resources.vram_used_mb !== null && resources.vram_used_mb !== undefined &&
+        resources.vram_total_mb !== null && resources.vram_total_mb !== undefined
+        ? Number(resources.vram_used_mb).toFixed(0) + ' / ' + Number(resources.vram_total_mb).toFixed(0) + ' MB'
+        : 'Unavailable';
+      const target = data.target_audio_seconds === 30
+        ? (data.target_performance_met ? '30s preview / under 60s: met' : '30s preview / under 60s: not met')
+        : '';
+      return '<article class="performance-history-row" style="padding:12px 0;border-top:1px solid var(--border-subtle,rgba(255,255,255,.10))">' +
+        '<div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center">' +
+          '<label style="display:flex;gap:7px;align-items:center"><input type="checkbox" data-performance-select="' + esc(String(record.benchmark_id || '')) + '"> Compare</label>' +
+          '<strong>' + esc(String(data.model_kind || data.voice || 'Piper')) + '</strong>' +
+          (data.provider ? '<span class="muted" style="margin-left:8px">' + esc(String(data.provider)) + '</span>' : '') +
+          '<span class="muted">' + esc(status) + ' · ' + esc(measuredAt) +
+          (record.source_origin === 'imported' ? ' · Imported from ' + esc(String(record.source_file_name || 'another PC')) : ' · This PC') + '</span>' +
+        '</div>' +
+        '<div class="muted" style="margin-top:5px;font-size:12px">' +
+          'Actual inference backend: ' + esc(String(backend)) + ' · GPU: ' + esc(String(gpu)) +
+        '</div>' +
+        (hardware.recommended_backend ? '<div class="muted" style="margin-top:4px;font-size:11px">Host recommendation: ' + esc(String(hardware.recommended_backend)) + '</div>' : '') +
+        '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:6px;font-size:12px">' +
+          '<span>Synthesis: ' + esc(duration) + '</span><span>Audio: ' + esc(audio) +
+          '</span><span>RTF: ' + esc(rtf) + '</span><span>CPU: ' + esc(cpu) +
+          '</span><span>RAM: ' + esc(ram) + '</span><span>GPU: ' + esc(gpuUse) +
+          '</span><span>VRAM: ' + esc(vram) + '</span>' +
+        '</div>' +
+        (target ? '<div style="margin-top:6px;font-size:12px"><strong>' + esc(target) + '</strong></div>' : '') +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">' +
+          '<button type="button" class="' + esc(buttonClass) + '" data-performance-repeat="' + index + '">Repeat</button>' +
+          '<details><summary class="muted" style="cursor:pointer;padding:7px">View details</summary>' +
+          '<pre class="muted" style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;max-height:240px;overflow:auto">' +
+          esc(JSON.stringify(record, null, 2)) + '</pre></details>' +
+        '</div></article>';
+    }).join('');
+    panel.innerHTML =
+      '<div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">' +
+        '<div><h3 style="margin:0">Benchmark History</h3>' +
+        '<p class="muted" style="margin:4px 0 0">Persisted local synthesis measurements; clearing this list does not clear Background Jobs or model files.</p></div>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+          '<button type="button" class="' + esc(buttonClass) + '" data-performance-import>Import PC report</button>' +
+          '<button type="button" class="' + esc(buttonClass) + '" data-performance-compare ' + (records.length >= 2 ? '' : 'disabled') + '>Compare selected (2)</button>' +
+          '<button type="button" class="' + esc(buttonClass) + '" data-performance-export ' + (records.length ? '' : 'disabled') + '>Export report</button>' +
+          '<button type="button" class="' + esc(buttonClass) + '" data-performance-clear ' + (records.length ? '' : 'disabled') + '>Clear history</button>' +
+        '</div></div>' +
+      (rows || '<p class="muted" style="margin:12px 0 0">No benchmark runs have been recorded yet. Run a real local TTS benchmark to create the first record.</p>');
+    const comparisonButton = panel.querySelector('[data-performance-compare]');
+    const comparisonChecks = [...panel.querySelectorAll('[data-performance-select]')];
+    const updateComparisonButton = () => {
+      const selectedCount = comparisonChecks.filter(input => input.checked).length;
+      if (comparisonButton) {
+        comparisonButton.disabled = selectedCount !== 2;
+        comparisonButton.textContent = 'Compare selected (' + selectedCount + '/2)';
+      }
+    };
+    comparisonChecks.forEach(input => input.addEventListener('change', () => {
+      const checked = comparisonChecks.filter(item => item.checked);
+      if (checked.length > 2) input.checked = false;
+      updateComparisonButton();
+    }));
+    updateComparisonButton();
+    panel.querySelector('[data-performance-import]')?.addEventListener('click', act(async () => {
+      const imported = await call('performance.history.import', {});
+      if (imported?.cancelled) return;
+      message('Imported ' + Number(imported?.imported || 0) + ' benchmark record(s). Original PC hardware information was preserved.');
+      await refreshPerformance();
+    }));
+    comparisonButton?.addEventListener('click', act(async () => {
+      const selected = comparisonChecks.filter(input => input.checked).map(input => input.dataset.performanceSelect);
+      if (selected.length !== 2) return;
+      const comparison = await call('performance.history.compare', {benchmark_ids:selected});
+      let resultPanel = panel.querySelector('#performanceComparisonResult');
+      if (!resultPanel) {
+        resultPanel = document.createElement('section');
+        resultPanel.id = 'performanceComparisonResult';
+        resultPanel.className = 'card';
+        resultPanel.style.marginTop = '12px';
+        panel.appendChild(resultPanel);
+      }
+      const first = comparison.records?.[0] || {}, second = comparison.records?.[1] || {};
+      const fmt = value => Number.isFinite(Number(value)) ? Number(value).toFixed(2) : 'Unavailable';
+      resultPanel.innerHTML =
+        '<h4 style="margin:0 0 8px">PC performance comparison</h4>' +
+        '<p class="muted" style="margin:0 0 8px">Same provider, model, voice and workload. Imported results retain their source-PC details.</p>' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px">' +
+          '<div><strong>' + esc(String(first.label || 'PC A')) + '</strong><div class="muted">Backend: ' + esc(String(first.backend || 'Unavailable')) + '</div><div>Synthesis: ' + fmt(first.synthesis_seconds) + ' s</div><div>RTF: ' + fmt(first.realtime_factor) + '</div></div>' +
+          '<div><strong>' + esc(String(second.label || 'PC B')) + '</strong><div class="muted">Backend: ' + esc(String(second.backend || 'Unavailable')) + '</div><div>Synthesis: ' + fmt(second.synthesis_seconds) + ' s</div><div>RTF: ' + fmt(second.realtime_factor) + '</div></div>' +
+        '</div><p style="margin:10px 0 0"><strong>Faster: ' + esc(String(comparison.faster || 'Equal')) + '</strong> · ' + fmt(comparison.speedup_ratio) + '× relative speed difference</p>';
+    }));
+    panel.querySelector('[data-performance-export]')?.addEventListener('click', act(async () => {
+      const exported = await call('performance.history.export', {});
+      if (exported?.cancelled) return;
+      if (!exported?.exported) { message('There are no benchmark records to export.', true); return; }
+      message('Benchmark report exported: ' + (exported.path || 'saved'));
+    }));
+    panel.querySelector('[data-performance-clear]')?.addEventListener('click', act(async () => {
+      const accepted = await requestModelActionDialog({
+        title: 'Clear benchmark history',
+        description: 'Only saved Performance Center benchmark records will be cleared. Background Jobs history, projects, model files and voice profiles will remain untouched.',
+        confirmLabel: 'Clear benchmark records',
+        danger: true
+      });
+      if (!accepted) return;
+      const cleared = await call('performance.history.clear', {});
+      message('Cleared ' + Number(cleared?.cleared || 0) + ' benchmark record(s). Background Job history was preserved.');
+      await refreshPerformance();
+    }));
+    panel.querySelectorAll('[data-performance-repeat]').forEach(button => {
+      button.addEventListener('click', act(async () => {
+        const index = Number(button.dataset.performanceRepeat);
+        const record = records[index];
+        const voice = String(record?.result?.voice || '').trim();
+        if (!voice) { message('The saved benchmark does not contain a repeatable voice selection.', true); return; }
+        button.disabled = true;
+        try {
+          const isQwen = data.provider === 'QwenCharacterProvider';
+          const command = isQwen ? 'performance.qwen_benchmark' : 'performance.benchmark';
+          const payload = isQwen ? {voice, model_kind: data.model_kind} : {voice};
+          const queued = await call(command, payload);
+          await refreshJobs();
+          message('Repeat benchmark queued for ' + voice + '.');
+          await monitorJob(queued.job_id, null, async job => {
+            await refreshPerformance();
+            await refreshJobs();
+            if (job?.state === 'completed' && job?.result?.success) {
+              message('Repeat benchmark complete: ' + Number(job.result.seconds).toFixed(2) +
+                's synthesis · RTF ' + Number(job.result.realtime_factor).toFixed(3));
+            } else {
+              message(job?.error?.message || job?.message || 'Repeat benchmark failed.', true);
+            }
+          });
+        } finally {
+          button.disabled = false;
+        }
+      }));
+    });
+  }
+
   async function refreshPerformance() {
     let result;
     try {
-      result = await call('performance.info');
+      result = await call('performance.info', {refresh:false});
     } catch (error) {
-      result = {available:false, reason:error?.message || 'Live hardware telemetry is unavailable in this build.'};
+      result = {available:false, reason:error?.message || 'Live hardware telemetry is unavailable.'};
     }
     const section = $('performance');
     if (!result?.available) {
@@ -7398,45 +9008,51 @@
         ['Unavailable', 'CPU telemetry unavailable'],
         ['Unavailable', 'GPU / VRAM telemetry unavailable'],
         ['Not tested', 'Generation performance'],
-        ['Unavailable', 'Recommended backend']
+        ['Unavailable', 'Backend recommendation']
       ];
-      metrics?.forEach((metric, index) => {
-        const strong = metric.querySelector('strong');
-        const detail = metric.querySelector('span');
-        if (strong && labels[index]) strong.textContent = labels[index][0];
-        if (detail && labels[index]) detail.textContent = labels[index][1];
+      metrics?.forEach((metric,index)=>{
+        const strong=metric.querySelector('strong'),detail=metric.querySelector('span');
+        if(strong&&labels[index])strong.textContent=labels[index][0];
+        if(detail&&labels[index])detail.textContent=labels[index][1];
       });
-      section?.querySelectorAll('.ready-list .ready b').forEach(node => { node.textContent = 'Not measured'; });
-      if ($('benchmarkResult')) $('benchmarkResult').textContent = 'Unavailable';
-      const note = $('benchmarkResult')?.parentElement?.querySelector('p.muted');
-      if (note) note.textContent = result?.reason || 'Live hardware telemetry and benchmark results are not connected in this build.';
-      return {...(result || {}), available:false};
+      if($('benchmarkResult'))$('benchmarkResult').textContent='Not tested';
+      const note=$('benchmarkResult')?.parentElement?.querySelector('p.muted');
+      if(note)note.textContent=result?.reason||'Host telemetry is unavailable on this device.';
+      await renderHardwareOptimizationSettings(result || {});
+      renderPerformanceHistory(result || {});
+      return {...(result||{}),available:false};
     }
-
-    // Only render actual backend measurements. If a field is missing or invalid,
-    // overwrite any legacy sample value rather than leaving it on screen.
-    const metrics = section?.querySelectorAll('.grid.metrics .metric');
-    const numeric = value => value !== null && value !== undefined && value !== '' &&
-      Number.isFinite(Number(value)) ? Number(value) : null;
-    const cpu = numeric(result.cpu_percent);
-    const gpu = numeric(result.gpu_percent);
-    const vram = numeric(result.vram_used_mb);
-    const duration = numeric(result.generation_seconds);
-    const values = [
-      [cpu === null ? 'Unavailable' : cpu.toFixed(1) + '%', 'CPU usage'],
-      [gpu === null ? 'Unavailable' : gpu.toFixed(1) + '%',
-        vram === null ? 'VRAM unavailable' : Math.round(vram) + ' MB VRAM'],
-      [duration === null ? 'Not tested' : duration.toFixed(1) + ' s', 'Measured generation time'],
-      [String(result.recommended_backend || 'Unavailable'), 'Backend recommendation']
+    const metrics=section?.querySelectorAll('.grid.metrics .metric');
+    const fmt=value=>value!==null&&value!==undefined&&Number.isFinite(Number(value))?Number(value):null;
+    const cpu=fmt(result.cpu_percent),gpu=fmt(result.gpu_percent),vram=fmt(result.vram_used_mb),
+      totalVram=fmt(result.vram_total_mb),duration=fmt(result.generation_seconds);
+    const ram=fmt(result.memory_total_bytes),free=fmt(result.memory_available_bytes);
+    const values=[
+      [cpu===null?'Unavailable':cpu.toFixed(1)+'%','CPU usage'],
+      [gpu===null?'Detected':gpu.toFixed(1)+'%',result.gpu_name?
+        result.gpu_name+' · '+(vram===null?'VRAM telemetry unavailable':Math.round(vram)+' / '+Math.round(totalVram||0)+' MB VRAM'):'GPU telemetry'],
+      [duration===null?'Not tested':duration.toFixed(2)+' s',
+        duration===null?'No real synthesis benchmark yet':
+          (result.benchmark_voice||'Piper')+' · '+(fmt(result.benchmark_audio_seconds)===null?'audio duration unavailable':fmt(result.benchmark_audio_seconds).toFixed(2)+' s audio')+
+          (fmt(result.benchmark_realtime_factor)===null?'':' · RTF '+fmt(result.benchmark_realtime_factor).toFixed(2))],
+      [String(result.recommended_backend||'Unavailable'),result.backend_active?'Runtime active':'Detected / runtime status']
     ];
-    metrics?.forEach((metric, index) => {
-      const strong = metric.querySelector('strong');
-      const detail = metric.querySelector('span');
-      if (strong && values[index]) strong.textContent = values[index][0];
-      if (detail && values[index]) detail.textContent = values[index][1];
+    metrics?.forEach((metric,index)=>{
+      const strong=metric.querySelector('strong'),detail=metric.querySelector('span');
+      if(strong&&values[index])strong.textContent=values[index][0];
+      if(detail&&values[index])detail.textContent=values[index][1];
     });
-    if ($('benchmarkResult')) $('benchmarkResult').textContent =
-      duration === null ? 'Not tested' : duration.toFixed(1) + ' s';
+    const ready=section?.querySelectorAll('.ready-list .ready b');
+    if(ready?.length){
+      ready[0].textContent=ram===null?'Unavailable':(ram/1024**3).toFixed(1)+' GB total RAM';
+      if(ready[1])ready[1].textContent=free===null?'Unavailable':(free/1024**3).toFixed(1)+' GB available RAM';
+      if(ready[2])ready[2].textContent=result.backend_active?'GPU runtime active':'No active GPU runtime';
+    }
+    const note=$('benchmarkResult')?.parentElement?.querySelector('p.muted');
+    if(note)note.textContent=(result.reason||'Live host telemetry connected.')+' · '+(result.platform||'')+' · '+(result.processor||'');
+    if($('benchmarkResult'))$('benchmarkResult').textContent=duration===null?'Not tested':duration.toFixed(1)+' s';
+    await renderHardwareOptimizationSettings(result);
+    renderPerformanceHistory(result);
     return result;
   }
   function requestModelActionDialog(options = {}) {
@@ -7489,8 +9105,10 @@
     return amount.toFixed(unit >= 3 ? 1 : 0) + ' ' + units[unit];
   }
   function modelNeedsAttention(model) {
-    return /incomplete|missing|not installed|needs installation|needs setup|setup required|api key required|unavailable|runtime required|dependency missing|not configured|not ready|no .* detected|no .* installed/i
-      .test(String(model?.status || ''));
+    const status = String(model?.status || '').trim().toLowerCase();
+    if (['missing','not configured','partially installed','unhealthy','unsupported','location unavailable'].includes(status)) return true;
+    return /incomplete|needs installation|needs setup|setup required|api key required|runtime required|dependency missing|not ready|no .* detected|no .* installed/i
+      .test(status);
   }
   function modelLifecycleActionButtons(model) {
     const actions = [];
@@ -7515,7 +9133,7 @@
         ' title="Remove only this app-managed component">Uninstall</button>');
     }
     const verifyId = model.verify_id || model.model_id;
-    actions.push('<button type="button" class="btn secondary small" data-model-verify="' + esc(verifyId) + '" title="Check the actual installed files and all required dependencies">Verify</button>');
+    actions.push('<button type="button" class="btn secondary small" data-model-verify="' + esc(verifyId) + '" title="Check actual installed files and required dependencies; this does not claim functional inference readiness">Verify files</button>');
     const providerTarget = ({
       piper:'offline', kokoro:'offline', 'custom-0.6b':'customvoice', 'custom-1.7b':'customvoice',
       'design-1.7b':'voicedesign', 'base-0.6b':'qwenclone', 'base-1.7b':'qwenclone',
@@ -7532,16 +9150,23 @@
     return actions.join('');
   }
   function renderModelInventory() {
+    if (!document.getElementById('modelInstallDetailsStyle')) {
+      const style = document.createElement('style');
+      style.id = 'modelInstallDetailsStyle';
+      style.textContent = '.model-install-details[open]>.model-install-content{display:grid;gap:10px;padding-top:10px}#backgroundJobsModal .jobs-modal,.modal-back .jobs-modal{box-sizing:border-box;width:min(780px,calc(100vw - 40px));min-width:0;max-width:calc(100vw - 40px)}';
+      document.head.appendChild(style);
+    }
     const rows = Array.isArray(window.ryuModelInventoryRows) ? window.ryuModelInventoryRows : [];
     const grid = $('modelGrid');
-    const toolbar = $('modelInventoryToolbar');
     const query = String($('modelInventorySearch')?.value || '').trim().toLowerCase();
     const filter = $('modelInventoryFilter')?.value || 'all';
     const filtered = rows.filter(model => {
-      const searchText = [model.name,model.provider,model.model_id,model.status,model.notes,model.requirements].join(' ').toLowerCase();
+      const searchText = [model.name,model.provider,model.model_id,model.status,model.status_detail,
+        model.capability,model.version,model.notes,model.requirements,
+        ...(Array.isArray(model.dependencies) ? model.dependencies : [])].join(' ').toLowerCase();
       if (query && !searchText.includes(query)) return false;
       if (filter === 'attention' && !modelNeedsAttention(model)) return false;
-      if (filter === 'ready' && (!model.installed || modelNeedsAttention(model))) return false;
+      if (filter === 'ready' && String(model.status || '') !== 'Ready') return false;
       if (filter === 'local' && model.component_type === 'provider') return false;
       return true;
     });
@@ -7551,17 +9176,21 @@
     grid.style.gap = '12px';
     grid.style.alignItems = 'stretch';
     grid.style.minWidth = '0';
+    grid.style.paddingBottom = '48px';
     const signature = JSON.stringify(rows);
     if (grid.dataset.modelSignature !== signature || grid.dataset.modelFilter !== query + '|' + filter) {
       grid.dataset.modelSignature = signature;
       grid.dataset.modelFilter = query + '|' + filter;
       grid.innerHTML = filtered.map(model => {
         const local = model.component_type !== 'provider';
-        const status = String(model.status || (model.installed ? 'Installed' : 'Needs setup'));
+        const status = String(model.status || (model.installed ? 'Installed' : 'Missing'));
         const problem = modelNeedsAttention({...model,status});
-        const badge = model.installed && !problem ? '' : problem ? 'warn' : 'info';
-        const storage = Number(model.storage_bytes || 0) > 0 ? '<span class="model-meta-item">Local files · ' + esc(formatModelBytes(model.storage_bytes)) + '</span>' : '';
+        const badge = status === 'Ready' ? '' : status === 'Installed' ? 'info' : problem ? 'warn' : 'info';
+        const storage = Number(model.storage_bytes || 0) > 0
+          ? '<span class="model-meta-item">Local files · ' + esc(formatModelBytes(model.storage_bytes)) + '</span>' : '';
         const requirement = model.requirements ? '<p class="model-requirements">' + esc(model.requirements) + '</p>' : '';
+        const statusDetail = model.status_detail && model.status_detail !== status
+          ? '<p class="muted" style="font-size:12px;margin:0">' + esc(model.status_detail) + '</p>' : '';
         const piperVoices = model.model_id === 'piper' && Array.isArray(model.installed_voice_names) && model.installed_voice_names.length
           ? '<div class="model-voice-manager"><label>Installed local voices<select data-piper-voice-select>' +
             model.installed_voice_names.map(name => '<option value="' + esc(name) + '">' + esc(name) + '</option>').join('') +
@@ -7569,40 +9198,85 @@
             '<button type="button" class="btn secondary small" data-model-repair="piper">Repair selected voice</button>' +
             '<button type="button" class="btn danger small" data-model-uninstall="piper">Remove selected voice</button></div></div>'
           : '';
+        const pathRows = [];
+        const addPathRow = (label, location, path) => {
+          if (!path) return;
+          pathRows.push('<div class="model-path-row" style="display:grid;gap:6px;margin:8px 0">' +
+            '<strong>' + esc(label) + '</strong><code style="overflow-wrap:anywhere;white-space:normal">' + esc(path) + '</code>' +
+            '<div class="model-actions"><button type="button" class="btn secondary small" data-model-open-folder="' + esc(model.model_id) + '" data-model-location="' + esc(location) + '">Open folder</button>' +
+            '<button type="button" class="btn secondary small" data-model-copy-path="' + esc(model.model_id) + '" data-model-location="' + esc(location) + '">Copy path</button></div></div>');
+        };
+        addPathRow('Model location', 'model', model.model_path);
+        addPathRow('Runtime location', 'runtime', model.runtime_path);
+        addPathRow('Python environment', 'python', model.python_path);
+        addPathRow('Runtime executable', 'runtime_executable', model.runtime_executable);
+        const verifiedAt = model.last_verified ? new Date(model.last_verified) : null;
+        const verifiedLabel = verifiedAt && !Number.isNaN(verifiedAt.getTime()) ? verifiedAt.toLocaleString() : 'Not verified';
+        const dependencyList = Array.isArray(model.dependencies) ? model.dependencies.join(', ') : String(model.dependencies || '');
+        const deviceList = Array.isArray(model.supported_devices) && model.supported_devices.length
+          ? model.supported_devices.join(', ') : 'Not yet assessed';
+        const infoRows = [
+          ['Capability', model.capability],
+          ['Detected version', model.version || 'Not reported'],
+          ['Runtime version', model.runtime_version || 'Not reported'],
+          ['Runtime status', model.runtime_status || 'Not assessed'],
+          ['Health', model.health || 'Not verified'],
+          ['Last verified', verifiedLabel],
+          ['Dependencies', dependencyList || 'Not reported'],
+          ['Hardware compatibility', model.hardware_compatibility || 'Not assessed'],
+          ['Supported compute devices', deviceList]
+        ];
+        const infoMarkup = '<div class="model-install-info" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:8px">' +
+          infoRows.map(([label,value]) => '<div style="min-width:0;padding:8px;border:1px solid var(--border,rgba(255,255,255,.1));border-radius:8px">' +
+            '<span class="muted" style="display:block;font-size:11px">' + esc(label) + '</span>' +
+            '<strong style="display:block;overflow-wrap:anywhere;font-size:12px">' + esc(value) + '</strong></div>').join('') +
+          '</div>';
+        const details = local && (model.file_inventory_available || pathRows.length)
+          ? '<details class="model-install-details" data-model-details="' + esc(model.model_id) + '" style="border-top:1px solid var(--border,rgba(255,255,255,.12));padding-top:8px">' +
+            '<summary style="cursor:pointer;font-weight:600">Installation details · actual paths, runtime and files</summary>' +
+            '<div class="model-install-content">' + infoMarkup + pathRows.join('') +
+            '<div data-model-file-list style="display:grid;gap:6px"><span class="muted">Expand to enumerate the actual installed files and their sizes.</span></div></div></details>'
+          : '';
         return '<article class="card model-card" data-model-id="' + esc(model.model_id) + '" style="display:flex;flex-direction:column;gap:12px;min-width:0">' +
           '<div class="model-card-head" style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">' +
             '<div style="min-width:0"><div class="model-eyebrow">' + esc(String(model.provider || 'Local component').replace(/-/g,' ')) + '</div>' +
             '<h3 style="margin:6px 0 0;overflow-wrap:anywhere">' + esc(model.name) + '</h3></div>' +
             '<span class="badge ' + badge + '" title="' + esc(status) + '">' + esc(status) + '</span></div>' +
           '<p class="muted model-description">' + esc(model.notes || 'No additional details were returned by the local backend.') + '</p>' +
-          (storage ? '<div class="model-meta">' + storage + '</div>' : '') + requirement +
-          piperVoices +
+          (storage ? '<div class="model-meta">' + storage + '</div>' : '') + requirement + statusDetail +
+          piperVoices + details +
           '<div class="model-actions">' + modelLifecycleActionButtons(model) + '</div>' +
         '</article>';
       }).join('') || '<p class="muted model-empty">No components match this filter. Refresh the model status or change the filter.</p>';
     }
 
-    const status = $('modelInventorySummary');
-    if (status) {
+    const summary = $('modelInventorySummary');
+    if (summary) {
       const managed = rows.filter(model => model.component_type !== 'provider');
-      const installed = managed.filter(model => model.installed && !modelNeedsAttention(model)).length;
-      const needsSetup = managed.length - installed;
+      const ready = rows.filter(model => model.status === 'Ready').length;
+      const installed = rows.filter(model => model.status === 'Installed').length;
+      const needsAttention = rows.filter(model => modelNeedsAttention(model)).length;
       const providers = rows.filter(model => model.component_type === 'provider');
-      const providersReady = providers.filter(model => model.installed).length;
+      const providersAvailable = providers.filter(model => model.installed).length;
       const free = rows.find(model => model.disk_free_bytes != null)?.disk_free_bytes;
       const storageRoot = rows.find(model => model.storage_root)?.storage_root || 'Local application model folder';
-      status.innerHTML =
+      const managedStorageBytes = rows.reduce((sum, model) => sum + Math.max(0, Number(model.storage_bytes || 0)), 0);
+      summary.innerHTML =
         '<div class="model-summary-metrics">' +
-          '<div><span>Managed components ready</span><strong>' + installed + ' / ' + managed.length + '</strong></div>' +
-          '<div><span>Need setup or attention</span><strong>' + needsSetup + '</strong></div>' +
-          '<div><span>System / online providers ready</span><strong>' + providersReady + ' / ' + providers.length + '</strong></div>' +
-          '<div><span>Drive free at model location</span><strong>' + esc(formatModelBytes(free)) + '</strong></div>' +
-        '</div><p class="model-storage-path">Storage root: <code>' + esc(storageRoot) + '</code></p>';
+          '<div><span>Total components</span><strong>' + rows.length + '</strong></div>' +
+          '<div><span>Ready</span><strong>' + ready + '</strong></div>' +
+          '<div><span>Installed · not yet verified</span><strong>' + installed + '</strong></div>' +
+          '<div><span>Needs attention</span><strong>' + needsAttention + '</strong></div>' +
+          '<div><span>System / online providers available</span><strong>' + providersAvailable + ' / ' + providers.length + '</strong></div>' +
+        '</div><p class="model-storage-path">Storage root: <code>' + esc(storageRoot) + '</code> · Managed files: ' +
+          esc(formatModelBytes(managedStorageBytes)) + ' · Drive free: ' + esc(formatModelBytes(free)) + '</p>';
     }
   }
   async function refreshModels() {
     const requestToken = ++modelListEpoch;
-    const loadedRows = await call('models.list');
+    const forceRefresh = forceModelInventoryRefreshPending;
+    forceModelInventoryRefreshPending = false;
+    const loadedRows = await loadModelInventory(forceRefresh);
     if (requestToken !== modelListEpoch) return window.ryuModelInventoryRows || [];
     const rows = Array.isArray(loadedRows) ? loadedRows : [];
     window.ryuModelInventoryRows = rows;
@@ -7632,6 +9306,7 @@
           refreshButton.disabled = true;
           refreshButton.textContent = 'Refreshing…';
           try {
+            forceModelInventoryRefreshPending = true;
             await refreshModels();
             await refreshVoices();
             message('Model status refreshed from the local installation and saved voice catalogue.');
@@ -7667,9 +9342,9 @@
     }
     const heading = root.querySelector('.model-runtime h2');
     const managed = rows.filter(model => model.component_type !== 'provider');
-    const ready = managed.filter(model => model.installed && !modelNeedsAttention(model)).length;
+    const ready = managed.filter(model => model.status === 'Ready').length;
     const missing = managed.length - ready;
-    if (heading) heading.textContent = ready + ' managed component(s) ready · ' + missing + ' need setup or attention';
+    if (heading) heading.textContent = ready + ' managed component(s) functionally ready · ' + missing + ' need setup or further verification';
     // Replace the HTML prototype's fixed storage number with a total derived
     // from live per-component file sizes. Its old capacity bar had no measured
     // denominator, so hide it instead of presenting a fake percentage.
@@ -7707,8 +9382,422 @@
     renderModelInventory();
     return rows;
   }
+  async function refreshStorageRoots() {
+    const result = await call('storage.get');
+    const rows = Array.isArray(result?.roots) ? result.roots : [];
+    for (const row of rows) {
+      const path = $('storagePath_' + row.kind);
+      const capacity = $('storageCapacity_' + row.kind);
+      if (path) path.textContent = row.path || 'Path unavailable';
+      if (capacity) {
+        const format = value => formatModelBytes(Math.max(0, Number(value || 0)));
+        capacity.textContent = row.available
+          ? Number(row.file_count || 0).toLocaleString() + ' files · ' + format(row.component_bytes) +
+            ' component data · ' + format(row.used_bytes) + ' used · ' + format(row.free_bytes) +
+            ' free · ' + format(row.total_bytes) + ' total'
+          : 'Location unavailable · configured path preserved; reconnect the drive to restore access.';
+      }
+    }
+    const status = $('storageStatus');
+    if (status) status.textContent = result?.restart_required
+      ? 'Storage status refreshed from the local filesystem. Root changes require an application restart.'
+      : 'Storage status refreshed.';
+    const cleanupHost = $('storageMigrationCleanup');
+    if (cleanupHost) {
+      const pending = Array.isArray(result?.pending_cleanup) ? result.pending_cleanup : [];
+      cleanupHost.innerHTML = pending.length
+        ? '<h3>Verified migrations · retained source copies</h3>' + pending.map(item =>
+            '<div class="setting-row" style="align-items:flex-start;flex-wrap:wrap"><div style="min-width:210px;flex:1"><b>Retained source copy</b><p class="muted">' +
+            esc(item.file_count || 0) + ' files · ' + esc(formatModelBytes(item.total_bytes || 0)) +
+            '</p><code style="display:block;overflow-wrap:anywhere">' + esc(item.source || '') +
+            '</code><p class="muted">Verified destination: ' + esc(item.destination || '') +
+            '</p></div><button class="btn secondary" data-storage-cleanup-source="' + esc(item.journal_name || '') +
+            '">Verify &amp; remove old copy</button></div>'
+          ).join('')
+        : '<p class="muted">No verified migration source copies are awaiting cleanup.</p>';
+      cleanupHost.querySelectorAll('[data-storage-cleanup-source]').forEach(button => {
+        if (button.dataset.ryuCleanupBound === 'true') return;
+        button.dataset.ryuCleanupBound = 'true';
+        button.addEventListener('click', async event => {
+          event.preventDefault(); event.stopPropagation();
+          button.disabled = true;
+          const prior = button.textContent;
+          button.textContent = 'Verifying…';
+          try {
+            const cleanup = await call('storage.cleanup_source', {journal_name:button.dataset.storageCleanupSource});
+            if (cleanup?.cancelled) return;
+            await refreshStorageRoots();
+            message('Retained source copy removed only after file-by-file verification against the active destination.');
+          } catch (error) {
+            message(error?.message || String(error), true);
+          } finally {
+            button.disabled = false; button.textContent = prior;
+          }
+        });
+      });
+    }
+    return result;
+  }
+  function renderHelpGuide() {
+    const root = document.getElementById('help');
+    if (!root || root.dataset.ryuHelpGuideRendered === 'true') return;
+    root.dataset.ryuHelpGuideRendered = 'true';
+
+    const topics = [
+      {
+        title: 'Getting started',
+        summary: 'A safe path from an imported book to a finished audiobook.',
+        items: [
+          'Open Library to continue an existing project, or use Import Book to create a project from a supported source file.',
+          'Review the extracted text and chapter boundaries before configuring voices. Save edits before moving to another screen.',
+          'Choose a narrator voice, review detected characters, set pronunciation and sound preferences, then complete Input Project Details.',
+          'Use the chapter preview to check the selected chapter and settings before starting full-book generation.',
+          'After generation, open Audiobooks to listen to the M4B output and use History or Background Jobs if a task needs attention.'
+        ]
+      },
+      {
+        title: 'Dashboard and Library',
+        summary: 'Find projects, check their status and recover work safely.',
+        items: [
+          'Dashboard counts and recent-project cards reflect local project data. Select a card to reopen that exact project.',
+          'In Library, search by project metadata and filter by status. Open a project to restore its saved book and metadata.',
+          'Use the project delete and recovery controls carefully. Review Trash before permanent purge; deleting a project must not erase its completed History records.',
+          'If a project is missing or interrupted, use the available recovery guidance rather than creating a duplicate project immediately.'
+        ]
+      },
+      {
+        title: 'Import Studio',
+        summary: 'Bring in book text without silently losing content.',
+        items: [
+          'Supported source formats are TXT, EPUB, searchable PDF and DOCX. Unsupported or corrupt files should show a clear error.',
+          'Use Browse or drag and drop to select a file. Wait for extraction to finish and inspect the text preview, title, author and cover metadata.',
+          'Check the extracted chapter and word coverage before continuing. Cancel a long import if the wrong file was selected.',
+          'Scanned/image-only PDF OCR is not supported. Use a searchable PDF or convert the source to DOCX or TXT first.'
+        ]
+      },
+      {
+        title: 'Chapter Studio',
+        summary: 'Review, edit and organize the book before narration.',
+        items: [
+          'Run chapter detection, then review every heading and boundary. Detection should not silently replace your manual edits.',
+          'Rename, reorder, split, edit or delete chapters using the available controls. Save changes and wait for the Saved status before leaving.',
+          'Use search and Find & Replace to locate text. Review punctuation, paragraph breaks, dialogue and multilingual names after cleanup.',
+          'Empty or whitespace-only chapters are identified separately. Valid chapters can continue; an all-empty book must be repaired before generation.',
+          'If a save is still in progress, wait for it to finish before splitting or changing chapters again.'
+        ]
+      },
+      {
+        title: 'Voice Studio',
+        summary: 'Choose a provider, configure a voice, save a profile and preview it.',
+        items: [
+          'Follow Voice Library → Configure → Voice Profile → Preview & Assign. Guided mode and Show All Steps should preserve the current selection.',
+          'Provider readiness is based on the actual runtime, model, network or API configuration. A catalogue entry alone does not mean the provider is ready.',
+          'Save Profile Only stores the profile without changing the narrator. Save and Use as Narrator changes the active project narrator; Assign to Character opens the character selector.',
+          'Preview targets include 10, 30, 60 or 90 seconds. Check the requested and actual duration, listen in the in-app player, and wait for successful preview completion before assigning.',
+          'Changing provider, voice, profile, model, prompt or preview text invalidates an older preview. Generate a fresh preview before assignment.',
+          'For voice cloning or custom reference audio, use only voices and recordings you are authorized to use. Online providers require network access; local providers depend on installed models and supported hardware.'
+        ]
+      },
+      {
+        title: 'Character Studio',
+        summary: 'Review the cast and make sure each dialogue line uses the intended voice.',
+        items: [
+          'Run Analyze after importing or substantially editing the book. Review character candidates, confidence and dialogue examples before accepting suggestions.',
+          'Use the left chapter list in both Manual and AI review to open the full text of a specific chapter. The AI pending queue is filtered to the selected chapter; selecting a passage opens the source-backed review panel.',
+          'Use Assigned Cast to review the character, series, dialogue-line count and chapter count. Assigned Voice and AI-assignment percentages reflect saved project assignments, not suggested matches.',
+          'Manual assignments are shown separately from AI suggestions. Review low-confidence matches and correct aliases or speaker names when needed. Accepting an AI suggestion saves an assignment; a suggestion alone does not change the cast.',
+          'When reviewing an AI or manual passage, you can choose a saved Voice Studio profile in the review panel. Edit Character also lets you change the saved profile for an existing project character.',
+          'Use the selected dialogue and selected saved profile to Test Voice. Stop, resume or replay the test from the in-app controls.',
+          'Unquoted narration is automatically routed to the project Narrator. Quoted or dash-led dialogue remains in Needs Speaker Review during normal cast-aware generation until it has a character assignment.'
+        ]
+      },
+      {
+        title: 'Narrator-only audiobook generation (GEN-07)',
+        summary: 'Generate a complete audiobook with the narrator voice when no character voice profiles are configured.',
+        items: [
+          'Narrator-only mode is available when the active project has zero saved character voice-profile assignments. A list of detected or manually created character candidates without voice profiles does not prevent this mode.',
+          'Choose a valid, available saved narrator profile using the project narrator or its series default. The narrator must still be configured; missing narrator profiles continue to block generation.',
+          'In narrator-only mode, the narrator intentionally reads every passage, including quoted and dash-led dialogue. You do not need to create character profiles or assign speakers just to generate this version.',
+          'The Production job identifies Narrator-only mode and records the effective narrator and zero configured character profiles. Preview and final generation use the same narrator-only route.',
+          'As soon as any character voice profile is configured in the project, normal cast-aware rules apply. Unassigned dialogue must then be reviewed or assigned before full generation; the app does not silently route a partial cast to the narrator.',
+          'Required project metadata, valid chapters, output-folder permissions and the selected narrator remain mandatory in both modes.'
+        ]
+      },
+      {
+        title: 'Character Library',
+        summary: 'Reuse characters and series information across projects.',
+        items: [
+          'Create or select a series, then add a character with a canonical name, aliases and a representative dialogue sample.',
+          'Choose a saved voice profile when one is appropriate. A library entry is reusable reference data; confirm the assignment in the current project.',
+          'Review series volume and project metadata before generation. Do not assume a character-library voice has been assigned until the project shows the saved assignment.'
+        ]
+      },
+      {
+        title: 'Pronunciation Studio',
+        summary: 'Control how names and uncommon words are spoken.',
+        items: [
+          'Add a written form and the exact pronunciation you want spoken. Use the preview to hear the result with the selected voice profile.',
+          'Use Current Book for project-specific overrides and Global Library for reusable entries. A book-specific entry takes precedence over a global entry for the same written form.',
+          'AI-suggested and manually entered terms are identified separately. Edit, delete or multi-delete entries after reviewing them.',
+          'Use the Enable control and the studio-wide pronunciation toggle to control whether saved rules are applied. The Generate toggle must stay synchronized with this setting.',
+          'For Japanese names or foreign words, enter the intended English-letter pronunciation explicitly when the automatic pronunciation is not correct. Check common-word suggestions before accepting them.'
+        ]
+      },
+      {
+        title: 'Sound Design Studio',
+        summary: 'Choose one background-music strategy and review cues before production.',
+        items: [
+          'Same BGM uses one book-default track throughout the book. Chapter-Based BGM uses only the explicit track saved for each chapter; an unassigned chapter means No BGM and must not fall back to the book default.',
+          'Version 1 uses one BGM bed at a time. Do not layer a second legacy ambience track under the selected BGM. Chapter BGM volume is limited to 50%; the book default starts at 18% and is limited to 50%.',
+          'Set the chapter track start offset and end/fade behavior where available. The short chapter preview uses the measured audio boundary after paragraph one when the complete first paragraph is included; if the preview is too short or the boundary is ambiguous, increase the duration or choose Immediate / After 10 seconds.',
+          'The supported cue slots are Opening, Next Chapter and Closing. Keep cue files short (up to five seconds), preview them, and use Save Cue Changes. Do not expect a separate Scene Transition slot in Version 1.',
+          'Voice Only disables all BGM and cues while preserving saved selections for later. Confirm the live mix summary and levels before opening Production Studio.',
+          'Use the full-book mix preview to hear the saved narration with the current BGM strategy and cues. It uses temporary copies of saved narration and must not modify the source chapter audio.'
+        ]
+      },
+      {
+        title: 'Music Library',
+        summary: 'Import, categorize and audition background tracks.',
+        items: [
+          'Browse All, Fantasy adventure, Battle & warfare, Mystery, Horror, Romance, Sci-fi, Calm narration or Others.',
+          'Use search and category filters to find an installed or imported track. Select a track and use Play/Pause to preview it.',
+          'Import a supported audio file, choose its category and wait for validation and metadata saving. The track should remain available after leaving the page or restarting the app.',
+          'The master BGM default is 18% and the maximum is 50%. Chapter volume is a separate setting, also limited to 50%.'
+        ]
+      },
+      {
+        title: 'Production Studio',
+        summary: 'Check metadata, preview a chapter and generate the complete book.',
+        items: [
+          'Open Input Project Details near the output-folder and job controls. Review title, author, narrator, publisher, series, volume, language, release year, genre and cover image.',
+          'Complete the required metadata before full-book generation. Incomplete details are highlighted and block full generation; a short preview remains available.',
+          'Select a saved chapter in the chapter-preview selector. Preview Audio should render only that chapter, show the selected chapter and actual duration, and keep the full-book generation action separate.',
+          'Choose 10, 30, 60 or 90 seconds for preview (30 seconds by default). Listen to the result and download it only after the preview has completed successfully.',
+          'During full generation, monitor the current chapter/stage, progress, elapsed time, remaining-time estimate and any error details. Use Pause, Resume, Cancel, Retry or Recover when the job state offers that action.',
+          'Preview and final generation should use the same saved pronunciation, voice assignments, BGM strategy, cues and output settings. Save changes in their studio before starting production.'
+        ]
+      },
+      {
+        title: 'Audiobooks',
+        summary: 'Listen to completed output and navigate by chapter.',
+        items: [
+          'Open a completed audiobook and use Play/Pause, the timeline, volume and speed controls.',
+          'Use the 15-second forward/back controls and the chapter list to navigate. Selecting a chapter should move the playhead to that chapter.',
+          'The mini-player remains available while navigating to other screens. Close it when you no longer need playback.',
+          'Check the title, author, narrator, cover and chapter list against the project metadata. If playback or chapter navigation fails, keep the output and record the issue before regenerating.'
+        ]
+      },
+      {
+        title: 'History and Background Jobs',
+        summary: 'Understand completed work and manage active tasks.',
+        items: [
+          'History is the durable record of terminal operations, including completed, failed and cancelled tasks. Use date filters and search to locate an operation.',
+          'Background Jobs shows active and queued work. Open job details to inspect progress, logs, error messages and the project or chapter involved.',
+          'Use View, Cancel, Retry or Recover only when the job state offers that action. Character Analysis can be cancelled at a safe inference or chapter boundary; a cancelled analysis does not replace the saved cast with partial results.',
+          'A running synthesis or inference may finish its current safe unit before cancellation takes effect. Check the terminal job state in History instead of assuming the task stopped at the instant Cancel was selected.',
+          'A retry should preserve valid completed work and report what will be regenerated. History and Background Jobs should agree about the final state of an operation. If a job disappears from the active queue, check History for its terminal result.'
+        ]
+      },
+      {
+        title: 'Models Center',
+        summary: 'Manage installed voice models and their storage safely.',
+        items: [
+          'Review each model/runtime status, version, install location, checksum or health result before using it.',
+          'Install missing components, Repair unhealthy installations, Verify files or Uninstall unused models from the model action menu.',
+          'Active generation or preview jobs protect models they are using. Wait for those jobs to finish before uninstalling or moving a model.',
+          'For Qwen, set the global Base model size preference to 0.6B or 1.7B in Models & Voice Engines. VoiceDesign itself uses its 1.7B model and also requires a compatible Base model for long-form voice identity consistency.',
+          'The compute backend can be Automatic or an explicitly selected supported CPU/GPU backend. Automatic attempts a compatible GPU runtime when available; treat a GPU as active only after a real inference reports that device, not merely because Windows lists an adapter.',
+          'Uninstalling a model must not delete projects, saved voice profiles or user audio. Check the displayed path before removing files.',
+          'Use Settings > Storage to choose supported model, project-library and audio-asset roots. Keep external drives connected during migration and verification.'
+        ]
+      },
+      {
+        title: 'Performance Center',
+        summary: 'Check hardware and measure actual synthesis performance.',
+        items: [
+          'Refresh the hardware snapshot to inspect CPU, RAM, GPU, VRAM, CUDA/accelerator availability, operating system, disk and model information.',
+          'Run the TTS benchmark separately from the hardware refresh. Review synthesis time, generated audio duration, real-time factor (RTF), throughput, resource use and errors.',
+          'Repeat and export benchmark records. Compare results only when hardware, model, provider, settings and test text are comparable.',
+          'A 30-second preview under 60 seconds is a performance target, not a guarantee on every CPU, GPU or provider. Use the recorded benchmark and actual preview time to assess the machine.'
+        ]
+      },
+      {
+        title: 'Settings and Storage',
+        summary: 'Configure paths, appearance and local storage locations.',
+        items: [
+          'Open Settings > Storage to manage supported project-library, audio-asset and model roots. Review the current and target paths before migration.',
+          'Do not unplug an external drive while a storage migration, copy or verification is in progress. Keep it connected until the app confirms completion; if interrupted, reconnect the same drive and use the displayed recovery status before retrying. Keep the source until verification succeeds.',
+          'Set the output folder and confirm it is writable before generation. The output path shown in Production Studio should match Settings.',
+          'Use the appearance and accessibility controls for theme, text scale, window size and reduced motion where available.',
+          'Book text and custom reference audio are stored locally for supported local workflows. Online providers require network access and should be clearly identified.'
+        ]
+      },
+      {
+        title: 'Troubleshooting',
+        summary: 'Practical checks for common problems.',
+        items: [
+          'Preview fails or no sound plays: confirm the selected provider/model is ready, check the output device and volume, inspect the job error, then retry a short preview.',
+          'Wrong voice is heard: confirm the saved profile, provider voice ID, narrator/character assignment and preview validity. Generate a fresh preview after changing any of them.',
+          'No BGM on a chapter: in Chapter-Based mode, assign one explicit track to that chapter. No BGM is intentional when no track is saved; the book default is not a fallback.',
+          'Generation cannot start: review empty chapters, missing voices, metadata completeness, output-folder permissions and missing model assets.',
+          'A storage migration is interrupted: keep the source drive connected, reopen Settings > Storage and use the displayed recovery/verification status before retrying.',
+          'An import looks incomplete: compare extracted text and chapter/word coverage with the source. Scanned PDFs need OCR outside this app before import.',
+          'A job fails: open its details in Background Jobs or History, read the actual error, then use Retry or Recover only when offered.'
+        ]
+      },
+      {
+        title: 'Known limitations',
+        summary: 'Features that should not be mistaken for supported behavior.',
+        items: [
+          'Scanned/image-only PDF OCR is not supported; use searchable PDFs or another supported text format.',
+          'M4B is the supported final audiobook container. M4A and MP3 export are not currently supported as final output formats.',
+          'The Production chapter preview preserves paragraph boundaries when the selected Chapter-Based track uses After first paragraph. It can demonstrate that offset only when the generated preview contains the complete first paragraph and its exact measured audio boundary. If the selected preview window ends too early or the boundary cannot be measured exactly, the app explains how to increase the duration or choose another offset. The full-book mix preview remains available for checking the saved narration mix.',
+          'GPU acceleration depends on the detected hardware, drivers and installed runtime. A device should be treated as supported only when the app reports it and a real benchmark/preview succeeds.',
+          'The installed music catalogue and any imported track must have verified source and licensing information. Do not assume a large track count or a licence that is not displayed.'
+        ]
+      }
+    ];
+
+    const cards = topics.map((topic, index) => (
+      '<details class="panel help-guide-card" data-help-guide-card style="padding:14px 16px;border:1px solid var(--border,rgba(127,127,127,.25));border-radius:12px;background:var(--panel,var(--surface,transparent))"' +
+      (index === 0 ? ' open' : '') + '>' +
+      '<summary style="cursor:pointer;display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;font-weight:650">' +
+      esc(topic.title) + '<span style="font-weight:400;color:var(--muted,#888);font-size:12px">' + esc(topic.summary) + '</span></summary>' +
+      '<ul style="margin:12px 0 0;padding-left:20px;display:grid;gap:8px;line-height:1.55">' +
+      topic.items.map(item => '<li>' + esc(item) + '</li>').join('') +
+      '</ul></details>'
+    )).join('');
+
+    root.innerHTML =
+      '<div class="help-guide-shell" style="display:grid;gap:14px;padding-bottom:24px">' +
+        '<header style="display:grid;gap:6px">' +
+          '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+            '<h1 style="margin:0">Help &amp; Guide</h1>' +
+            '<span class="badge" style="font-size:11px">Stage 8 acceptance candidate</span>' +
+          '</div>' +
+          '<p class="muted" style="margin:0;line-height:1.5">Task-based instructions for importing a book, preparing voices, configuring sound, generating an audiobook and recovering work. This guide describes the current candidate and calls out known limitations.</p>' +
+        '</header>' +
+        '<div class="help-guide-toolbar" role="search" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+          '<input id="helpGuideSearch" type="search" aria-label="Search Help and Guide" placeholder="Search a screen, task or setting" style="flex:1;min-width:220px" />' +
+          '<button type="button" class="btn small secondary" id="helpGuideExpandAll">Expand all</button>' +
+          '<button type="button" class="btn small secondary" id="helpGuideCollapseAll">Collapse all</button>' +
+        '</div>' +
+        '<div id="helpGuideSections" style="display:grid;gap:10px">' + cards + '</div>' +
+        '<p id="helpGuideNoResults" class="muted" hidden>No guide topics match that search. Try a screen name or a shorter phrase.</p>' +
+      '</div>';
+
+    const cardsInPage = Array.from(root.querySelectorAll('[data-help-guide-card]'));
+    const search = root.querySelector('#helpGuideSearch');
+    const noResults = root.querySelector('#helpGuideNoResults');
+    search?.addEventListener('input', () => {
+      const query = String(search.value || '').trim().toLowerCase();
+      let visible = 0;
+      cardsInPage.forEach(card => {
+        const match = !query || card.textContent.toLowerCase().includes(query);
+        card.hidden = !match;
+        if (match) visible += 1;
+      });
+      if (noResults) noResults.hidden = visible > 0;
+    });
+    root.querySelector('#helpGuideExpandAll')?.addEventListener('click', () => {
+      cardsInPage.filter(card => !card.hidden).forEach(card => { card.open = true; });
+    });
+    root.querySelector('#helpGuideCollapseAll')?.addEventListener('click', () => {
+      cardsInPage.forEach(card => { card.open = false; });
+    });
+  }
+
+  function wireStorageControls() {
+    const cleanupButton = $('storageCleanupTemp');
+    if (cleanupButton && cleanupButton.dataset.ryuCleanupBound !== 'true') {
+      cleanupButton.dataset.ryuCleanupBound = 'true';
+      cleanupButton.addEventListener('click', async event => {
+        event.preventDefault(); event.stopPropagation();
+        const prior = cleanupButton.textContent;
+        cleanupButton.disabled = true; cleanupButton.textContent = 'Reviewing…';
+        try {
+          const result = await call('storage.cleanup_temp');
+          if (result?.cancelled) return;
+          await refreshStorageRoots();
+          message(result?.cleaned
+            ? 'Safe cleanup completed. Removed ' + (result.removed || []).length + ' eligible entries.'
+            : 'No eligible app-owned temporary/download entries were found.');
+        } catch (error) {
+          message(error?.message || String(error), true);
+        } finally {
+          cleanupButton.disabled = false; cleanupButton.textContent = prior;
+        }
+      });
+    }
+    const storageTab = document.querySelector('[data-settings-tab="storage"]');
+    if (storageTab && storageTab.dataset.ryuStorageRefreshBound !== 'true') {
+      storageTab.dataset.ryuStorageRefreshBound = 'true';
+      storageTab.addEventListener('click', () => {
+        void refreshStorageRoots().catch(error => message(error?.message || String(error), true));
+      });
+    }
+    // The old prototype "Choose Folder" control had no unambiguous root kind.
+    // Route it to the real Storage tab instead of leaving a dead disabled button.
+    document.querySelectorAll('#settings button').forEach(button => {
+      if ((button.textContent || '').trim().toLowerCase() !== 'choose folder') return;
+      if (button.dataset.ryuStorageNavigationBound === 'true') return;
+      button.dataset.ryuStorageNavigationBound = 'true';
+      button.disabled = false;
+      button.removeAttribute('aria-disabled');
+      button.removeAttribute('data-backend-unavailable');
+      button.textContent = 'Manage storage locations';
+      button.setAttribute('aria-label', 'Manage storage locations');
+      button.title = 'Open Storage settings to manage supported project, audio asset and model locations.';
+      button.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (storageTab) storageTab.click();
+        else message('Storage settings are unavailable in this build.', true);
+      });
+    });
+    document.querySelectorAll('[data-storage-action][data-storage-kind]').forEach(button => {
+      if (button.dataset.ryuStorageBound === 'true') return;
+      button.dataset.ryuStorageBound = 'true';
+      button.addEventListener('click', async event => {
+        event.preventDefault(); event.stopPropagation();
+        const action = button.dataset.storageAction;
+        const kind = button.dataset.storageKind;
+        const prior = button.textContent;
+        button.disabled = true;
+        button.textContent = action === 'choose' ? 'Choose…' : action === 'default' ? 'Applying…' : action === 'open' ? 'Opening…' : 'Copying…';
+        try {
+          if (action === 'choose' || action === 'default') {
+            const result = await call('storage.choose_root', {kind, use_default:action === 'default'});
+            if (result?.cancelled) return;
+            if (result?.job_id) {
+              message('Verified storage migration started. Track its progress in Background Jobs.');
+              await refreshJobs();
+              await monitorJob(result.job_id, null, async () => {
+                await refreshStorageRoots();
+                message('Storage migration finished. The original source remains until you explicitly clean it up.');
+              });
+            } else {
+              await refreshStorageRoots();
+              message('Storage location saved. Restart Ryu’s Audiobook to apply the new root.');
+            }
+          } else if (action === 'open') {
+            await call('storage.open_root', {kind});
+            message('Opened the selected storage folder.');
+          } else if (action === 'copy') {
+            await call('storage.copy_root', {kind});
+            message('Storage path copied to the clipboard.');
+          }
+        } catch (error) {
+          message(error?.message || String(error), true);
+        } finally {
+          button.disabled = false; button.textContent = prior;
+        }
+      });
+    });
+  }
   async function loadSettings() {
     const settings = await call('settings.get');
+    wireStorageControls();
     if ($('themeSelectAdvanced') && settings.theme) $('themeSelectAdvanced').value = settings.theme;
     if ($('effectsModeAdvanced') && settings.effects) $('effectsModeAdvanced').value = settings.effects;
     if ($('uiTextScale')) $('uiTextScale').value = String(settings.text_scale || 100);
@@ -7728,27 +9817,163 @@
     return result;
   }
   function applyUnavailableControlStates() {
-    const disable = (element, reason) => {
+    const hide = (element, reason) => {
       if (!element || element.dataset.backendUnavailable === 'true') return;
-      element.disabled = true;
-      element.setAttribute('aria-disabled', 'true');
+      element.hidden = true;
+      element.setAttribute('aria-hidden', 'true');
       element.dataset.backendUnavailable = 'true';
       element.title = reason;
-      const label = (element.getAttribute('aria-label') || element.textContent || element.id || 'Control').trim();
-      element.setAttribute('aria-label', label + '. Unavailable: ' + reason);
     };
-    // Character Studio actions are now bound to source-backed project data.
-    // Only prototype queue buttons without exact source identity remain unavailable.
-    const dialogueReason = 'This item is not linked to an exact source dialogue passage. Refresh the chapter and choose a real passage.';
+    // Character Studio actions are bound only to exact source-backed dialogue.
+    // Hide stale prototype queue rows rather than presenting inert disabled actions.
+    const dialogueReason = 'This item is not linked to an exact source dialogue passage.';
     document.querySelectorAll('#aiQueue [data-ai-line]:not([data-dialogue-id])')
-      .forEach(element => disable(element, dialogueReason));
-    // Model Center lifecycle actions are backed by models.install/repair/uninstall/verify.
-    document.querySelectorAll('#settings button').forEach(element => {
-      if ((element.textContent || '').trim().toLowerCase() === 'choose folder') {
-        disable(element, 'Changing the application storage root is not implemented. Existing project and asset paths remain unchanged.');
+      .forEach(element => hide(element, dialogueReason));
+    // The legacy storage button is routed to the functional Storage tab by wireStorageControls().
+    const benchmarkButton = $('runBenchmark');
+    if (benchmarkButton) {
+      benchmarkButton.disabled = false;
+      benchmarkButton.removeAttribute('aria-disabled');
+      benchmarkButton.title = 'Refresh CPU, memory, GPU and accelerator runtime information.';
+    }
+  }
+
+  async function runHardwareBenchmark() {
+    const button = $('runBenchmark');
+    const prior = button?.textContent;
+    if (button) { button.disabled = true; button.textContent = 'Checking hardware…'; }
+    try {
+      const hardware = await call('performance.info', {refresh:true});
+      await refreshPerformance();
+      const runtime = hardware.backend_active
+        ? hardware.backend.toUpperCase() + ' runtime is active'
+        : (hardware.recommended_backend || 'CPU') + ' is the selected backend';
+      const summary = [
+        'Hardware scan complete.',
+        hardware.cpu_percent === null || hardware.cpu_percent === undefined ? 'CPU: unavailable' : 'CPU: ' + Number(hardware.cpu_percent).toFixed(1) + '%',
+        hardware.memory_total_bytes ? 'RAM: ' + (hardware.memory_available_bytes/1024**3).toFixed(1) + ' / ' + (hardware.memory_total_bytes/1024**3).toFixed(1) + ' GB available/total' : 'RAM: unavailable',
+        hardware.gpu_name ? 'GPU: ' + hardware.gpu_name : 'GPU: not detected',
+        runtime,
+        hardware.reason || ''
+      ].filter(Boolean).join(' · ');
+      message(summary);
+      return hardware;
+    } catch (error) {
+      message(error?.message || String(error), true);
+      throw error;
+    } finally {
+      if (button) { button.disabled = false; button.textContent = prior || 'Run benchmark'; }
+    }
+  }
+  function wireTtsBenchmarkButton() {
+    const scanButton = $('runBenchmark');
+    if (!scanButton || $('runTtsBenchmark')) return;
+    const button = document.createElement('button');
+    button.id = 'runTtsBenchmark';
+    button.type = 'button';
+    button.className = scanButton.className;
+    button.textContent = 'Run TTS Benchmark';
+    button.title = 'Synthesize a real local Piper sample in the background and measure elapsed time, audio duration and realtime factor.';
+    scanButton.insertAdjacentElement('afterend', button);
+    button.addEventListener('click', act(async () => {
+      const prior = button.textContent;
+      button.disabled = true;
+      button.textContent = 'Benchmarking…';
+      try {
+        const queued = await call('performance.benchmark', {});
+        await refreshJobs();
+        message('A real local Piper synthesis benchmark is running in Background Jobs.');
+        await monitorJob(queued.job_id, null, async job => {
+          await refreshPerformance();
+          await refreshJobs();
+          const result = job?.result || {};
+          if (job?.state === 'completed' && result.success) {
+            message('TTS benchmark complete: ' + (result.voice || 'Piper') + ' · ' +
+              Number(result.seconds).toFixed(2) + 's for ' +
+              Number(result.audio_seconds).toFixed(2) + 's audio · RTF ' +
+              Number(result.realtime_factor).toFixed(2));
+          } else {
+            message(job?.error?.message || job?.message || 'The TTS benchmark failed.', true);
+          }
+        });
+      } finally {
+        button.disabled = false;
+        button.textContent = prior;
       }
+    }));
+  }
+
+  function wireModelDetails() {
+    if (document.body.dataset.ryuModelDetailsBound === 'true') return;
+    document.body.dataset.ryuModelDetailsBound = 'true';
+
+    const loadFiles = async (details, offset = 0, append = false) => {
+      const modelId = details?.dataset.modelDetails || '';
+      const host = details?.querySelector('[data-model-file-list]');
+      if (!modelId || !host) return;
+      if (!append) host.innerHTML = '<span class="muted">Reading installed files…</span>';
+      try {
+        const result = await call('models.files', {model_id:modelId,offset,limit:100});
+        const rows = Array.isArray(result.files) ? result.files : [];
+        const fileSummary = '<div class="muted" style="font-size:11px;margin:4px 0 8px">' +
+          esc(String(result.total_files || 0)) + ' actual file(s) · ' + esc(formatModelBytes(result.total_bytes || 0)) +
+          ' · ' + esc(result.accessible ? 'Storage location accessible' : 'Storage location unavailable') + '</div>';
+        const markup = rows.map(file =>
+          '<div class="model-file-row" style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:start;padding:6px 0;border-bottom:1px solid var(--border,rgba(255,255,255,.08))">' +
+            '<div style="min-width:0"><strong>' + esc(file.name || 'Installed file') + '</strong>' +
+            '<div><code style="font-size:11px;white-space:normal;overflow-wrap:anywhere">' + esc(file.path || '') + '</code></div>' +
+            '<span class="muted" style="font-size:11px">' + esc(file.role || 'file') + '</span></div>' +
+            '<strong style="white-space:nowrap">' + esc(formatModelBytes(file.size_bytes)) + '</strong></div>'
+        ).join('');
+        if (append) {
+          host.querySelector('[data-model-files-more]')?.remove();
+          host.insertAdjacentHTML('beforeend', markup);
+        } else {
+          host.innerHTML = fileSummary + (markup || '<span class="muted">No installed files were found for this component.</span>');
+        }
+        const nextOffset = offset + rows.length;
+        if (result.has_more) {
+          host.insertAdjacentHTML('beforeend',
+            '<button type="button" class="btn secondary small" data-model-files-more="' + esc(modelId) +
+            '" data-model-files-offset="' + nextOffset + '">Load more files (' + esc(String(result.total_files - nextOffset)) + ' remaining)</button>');
+        }
+        details.dataset.filesLoaded = 'true';
+      } catch (error) {
+        host.innerHTML = '<span class="muted">Could not read installed files: ' + esc(error?.message || String(error)) + '</span>';
+        details.dataset.filesLoaded = 'false';
+      }
+    };
+
+    document.addEventListener('toggle', event => {
+      const details = event.target;
+      if (!details?.matches?.('details[data-model-details]') || !details.open) return;
+      if (details.dataset.filesLoaded === 'true' || details.dataset.filesLoading === 'true') return;
+      details.dataset.filesLoading = 'true';
+      void loadFiles(details).finally(() => { details.dataset.filesLoading = 'false'; });
+    }, true);
+
+    document.addEventListener('click', event => {
+      const button = event.target?.closest?.('[data-model-open-folder], [data-model-copy-path], [data-model-files-more]');
+      if (!button) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      void (async () => {
+        if (button.hasAttribute('data-model-files-more')) {
+          const details = button.closest('details[data-model-details]');
+          await loadFiles(details, Number(button.dataset.modelFilesOffset || 0), true);
+          return;
+        }
+        const modelId = button.dataset.modelOpenFolder || button.dataset.modelCopyPath || '';
+        const location = button.dataset.modelLocation || 'model';
+        if (button.hasAttribute('data-model-open-folder')) {
+          const result = await call('models.open_folder', {model_id:modelId,location});
+          message('Opened folder: ' + result.path);
+        } else {
+          const result = await call('models.copy_path', {model_id:modelId,location});
+          message('Copied path: ' + result.path);
+        }
+      })().catch(error => message(error?.message || String(error), true));
     });
-    disable($('runBenchmark'), 'Live hardware telemetry and repeatable benchmark execution are not implemented in this build; performance is intentionally marked Not tested.');
   }
 
   async function wire() {
@@ -7760,6 +9985,8 @@
       progress:null
     });
     installUiTextScaleRuntime();
+    renderHelpGuide();
+    wireModelDetails();
     installCharacterStudioHandlers();
     // Remove the prototype's same-element click handlers synchronously, before
     // any asynchronous backend initialization or real handler registration.
@@ -7786,6 +10013,20 @@
         message('Open Audiobooks and choose Play audiobook on a finished title first.', true);
         return;
       }
+      // Toggle the existing media object directly when the selected book is
+      // already loaded. This avoids a backend round-trip racing a mini-player click.
+      if (playerAudio && playerAudio.src &&
+          playerAudio.dataset?.projectFolder === selectedAudiobookFolder) {
+        const current = playerAudio;
+        if (current.paused) {
+          current.play().catch(err => message(err?.message || 'Audiobook playback could not be resumed.', true));
+        } else {
+          current.pause();
+        }
+        syncMiniPlayer();
+        setPlaybackButtonState();
+        return;
+      }
       openPlayer(selectedAudiobookFolder).catch(err => message(err?.message || String(err), true));
     };
     if ($('mainPlay')) $('mainPlay').onclick = playSelectedAudiobook;
@@ -7809,6 +10050,23 @@
         try { await fn(); }
         catch (err) { message(err?.message || String(err), true); }
       };
+      if (button && button.dataset.openProjectFolder) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        void runAction(async () => {
+          const folder = String(button.dataset.openProjectFolder || '').trim();
+          if (!folder) throw new Error('The selected audiobook card has no project folder.');
+          selectedAudiobookFolder = folder;
+          miniPlayerDismissed = false;
+          await openPlayer(folder, {autoplay:false});
+          // Opening a completed book must remain a load-only operation. Refreshing
+          // project cards here can run concurrently with media metadata loading
+          // and previously allowed the idle-player reset to clear the just-opened UI.
+          renderAudiobookLibrary(projects);
+          message('Opened ' + (projects.find(project => String(project.folder) === folder)?.title || 'selected audiobook') +
+            ' in the player. Press Play when ready.');
+        });
+        return;
+      }
       if (button && button.dataset.playProjectFolder) {
         e.preventDefault(); e.stopImmediatePropagation();
         void runAction(async () => {
@@ -7862,18 +10120,16 @@
         refreshHistory().catch(err => message(err?.message || String(err), true));
         return;
       }
+      const jobView = e.target.closest('[data-job-view]');
+      if (jobView) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        openJobDetails(jobView.dataset.jobView).catch(err => message(err?.message || String(err), true));
+        return;
+      }
       const historyJob = e.target.closest('[data-history-job]');
       if (historyJob) {
         e.preventDefault(); e.stopImmediatePropagation();
-        (async()=> {
-          const id = historyJob.dataset.historyJob;
-          const rows = await call('history.list');
-          const job = rows.find(j => String(j.job_id) === String(id));
-          if (!job) throw new Error('This history job is no longer available. Refresh History and try again.');
-          await refreshJobs();
-          $('backgroundJobsButton')?.click();
-          message((job.title || job.type || 'Background task') + ' · ' + (job.stage || job.message || job.state) + ' · ' + Math.round(Number(job.progress || 0)) + '%');
-        })().catch(err => message(err?.message || String(err), true));
+        openJobDetails(historyJob.dataset.historyJob).catch(err => message(err?.message || String(err), true));
         return;
       }
       const add=e.target.closest('#addLibraryCharacter'), imp=e.target.closest('#importCharacterLibrary'), edit=e.target.closest('[data-edit-library]'), remove=e.target.closest('[data-delete-library]'), test=e.target.closest('[data-test-library]'), studio=e.target.closest('[data-character-studio]'), save=e.target.closest('#saveCharacterProfile'), del=e.target.closest('#deleteCharacter');
@@ -7968,16 +10224,8 @@
         });
       }
     });
-    if ($('historyFilters')) $('historyFilters').querySelectorAll('button').forEach(button => button.addEventListener('click', () => {
-      $('historyFilters').querySelectorAll('button').forEach(b=>b.classList.toggle('active',b===button));
-      refreshHistory().catch(e=>message(e.message,true));
-    }));
-    if ($('history')) $('history').addEventListener('click', e => {
-      const b=e.target.closest('[data-history-job]'); if(!b)return;
-      const jobId=b.dataset.historyJob;
-      call('job.list',{include_hidden:true}).then(rows=>{const j=rows.find(x=>x.job_id===jobId);if(j)message((j.title||j.type)+' — '+(j.state||'unknown')+' · '+(j.stage||j.message||''));}).catch(x=>message(x.message,true));
-    });
-    if ($('checkModelUpdates')) $('checkModelUpdates').onclick=act(async()=>{await refreshModels();message('Local model catalogue refreshed. This checks the local catalogue; it does not contact an online update service.');});
+
+    if ($('checkModelUpdates')) $('checkModelUpdates').onclick=act(async()=>{forceModelInventoryRefreshPending = true;await refreshModels();message('Local model catalogue refreshed. This checks the local catalogue; it does not contact an online update service.');});
     if ($('startQwenInstall')) $('startQwenInstall').onclick=act(async()=>{
       const choice=document.querySelector('input[name="qwenInstall"]:checked')?.value||'customvoice';
       const data=await call('models.install',{selection:choice});
@@ -7987,10 +10235,8 @@
     document.querySelectorAll('[data-close-qwen]').forEach(b=>b.addEventListener('click',()=>$('qwenInstallModal')?.classList.remove('show')));
     if ($('clearModelQueue')) $('clearModelQueue').onclick=act(async()=>{await call('job.clear_completed');await refreshJobs();await refreshHistory();message('Completed background jobs cleared from the active queue.');});
     if ($('runIntegrityCheck')) $('runIntegrityCheck').onclick=act(runDiagnostics);
-    if ($('runBenchmark')) $('runBenchmark').onclick=act(async()=>{
-      const result=await refreshPerformance();
-      message(result.reason||'Hardware benchmark is not available in this build.',!result.available);
-    });
+    if ($('runBenchmark')) $('runBenchmark').onclick=act(runHardwareBenchmark);
+    wireTtsBenchmarkButton();
     if ($('chapterSearch')) $('chapterSearch').oninput=()=>{
       const q=$('chapterSearch').value.trim().toLowerCase();
       $('chapterList')?.querySelectorAll('[data-chapter-number]').forEach(el=>el.hidden=!el.textContent.toLowerCase().includes(q));
@@ -8352,6 +10598,7 @@
     if ($('generatePreview')) $('generatePreview').onclick=act(previewVoice);
     ensureProductionPreviewMonitorUi();
     if ($('previewGenerate')) $('previewGenerate').onclick=act(async()=>{
+      await narratorOnlySavePromise;
       const chapterNumber=Number(productionPreviewSelectedChapter||$('productionPreviewChapterSelect')?.value||0);
       if(!chapterNumber)throw new Error('Select a saved chapter in the Production preview chapter selector.');
       if(productionJobIsActive(productionJobSnapshots.full))throw new Error('Finish or cancel the full audiobook generation before starting a preview.');
@@ -8386,7 +10633,8 @@
       if($('productionPreviewTiming'))$('productionPreviewTiming').textContent='Waiting for the preview worker to start.';
       if($('previewState'))$('previewState').textContent='Preparing';
       if($('validation'))$('validation').textContent='Preparing selected chapter preview.';
-      const data=await call('production.preview',{profile_name:name,chapter_number:chapterNumber,chapter_id:chapterId,duration_seconds:Number(duration),include_sound_design:true,_production_preview:true});
+      const narratorOnly = $('narratorOnlyGeneration')?.checked === true;
+      const data=await call('production.preview',{profile_name:activeProject.voice_profile,chapter_number:chapterNumber,chapter_id:chapterId,narrator_only_generation:narratorOnly,duration_seconds:Number(duration),include_sound_design:true,_production_preview:true});
       if(previewToken!==voicePreviewEpoch)return;
       if(!data?.job_id)throw new Error('The Production preview job was not created.');
       const previewProfileName=String(data.profile_name||name);
@@ -8496,6 +10744,7 @@
       await refreshJobs();
     });
     if ($('startGenerate')) $('startGenerate').onclick=act(async()=>{
+      await narratorOnlySavePromise;
       if(productionJobIsActive(productionJobSnapshots.full)||productionJobIsActive(productionJobSnapshots.preview))throw new Error('Another Production audio operation is already running. Finish or cancel it before starting full generation.');
       await flushSoundDesignState();
       const [activeProject, savedSettings] = await Promise.all([
@@ -8506,8 +10755,10 @@
       window.ryuPremiumApplicationSettings = savedSettings || {};
       await refreshTerms();
       const bitrate = Number(activeProject?.audio_bitrate || savedSettings?.bitrate || 256);
+      const narratorOnly = $('narratorOnlyGeneration')?.checked === true;
       const data = await call('production.generate_book', {
-        profile_name:selectedVoice || $('profileName')?.value || activeProject?.voice_profile,
+        profile_name:activeProject?.voice_profile,
+        narrator_only_generation:narratorOnly,
         bitrate
       });
       if(!data?.job_id)throw new Error('The full audiobook generation job was not created.');
@@ -8699,8 +10950,7 @@
     });
     // setBookDefaultTrack is handled by the single delegated backend listener.
     // saveSoundPresetAdvanced is handled by the single delegated backend listener.
-    ['mainPlay','miniPlay'].forEach(id=>{if($(id))$(id).onclick=act(openPlayer);});
-    if ($('playerTimeline')) $('playerTimeline').oninput=()=>{if(playerAudio&&playerAudio.duration)playerAudio.currentTime=Number($('playerTimeline').value)/100*playerAudio.duration;};
+    // Player controls and the timeline are bound once earlier; preserve those handlers.
     if ($('hideMini')) $('hideMini').onclick=()=>{
       miniPlayerDismissed = true;
       $('miniPlayer')?.classList.add('hidden');
@@ -9056,6 +11306,9 @@
               target_kind: soundButton.id === 'importMusicTracks' ? 'music' : 'cue',
               category: soundButton.id === 'importMusicTracks' ? ($('musicImportCategory')?.value || 'universal') : 'universal'
             });
+            soundCatalogScanRequested = false;
+            soundCatalogLoadedAt = 0;
+            forceSoundCatalogRefreshPending = true;
             await refreshSounds();
             await refreshSoundCues();
             await refreshChapterBgm();
@@ -9157,10 +11410,24 @@
               if (job.state === 'completed') {
                 const fileUrl = job.result?.file_url || (job.output_path ? 'file:///' + String(job.output_path).replace(/\\/g, '/') : '');
                 if (!fileUrl) throw new Error('The Sound Design preview finished without an audio file.');
-                soundPreviewAudio = new Audio(fileUrl);
-                soundPreviewAudio.onended = () => { soundPreviewAudio = null; };
-                soundPreviewAudio.onerror = () => { soundPreviewAudio = null; message('The Sound Design mix preview could not be played.', true); };
-                await soundPreviewAudio.play();
+                // A replaced preview no longer owns the global playback reference.
+                // Catch pause/replacement rejections so rapid preview changes cannot
+                // leak unhandled play() promises or clear a newer preview's state.
+                stopSoundPreview();
+                const previewAudio = new Audio(fileUrl);
+                soundPreviewAudio = previewAudio;
+                previewAudio.onended = () => {
+                  if (soundPreviewAudio === previewAudio) soundPreviewAudio = null;
+                };
+                previewAudio.onerror = () => {
+                  if (soundPreviewAudio === previewAudio) soundPreviewAudio = null;
+                  message('The Sound Design mix preview could not be played.', true);
+                };
+                await previewAudio.play().catch(error => {
+                  if (previewAudio !== soundPreviewAudio || previewAudio.paused) return;
+                  throw error;
+                });
+                if (soundPreviewAudio !== previewAudio || previewAudio.paused) return;
                 message('Playing the generated Sound Design mix preview.');
                 finished = true;
                 break;
@@ -9377,31 +11644,26 @@
         message(label === 'empty' ? 'Showing empty chapters.' : label === 'review' ? 'Showing chapters that still need review.' : 'Showing all chapters.');
         return;
       }
-      if (button.closest('#player')) {
-        const audioLabel = label.replace(/\s+/g,'');
-        if (['↶15','15↷','0.75×','1×','1.25×','1.5×','◀','▶'].includes(audioLabel)) {
-          stop();
-          (async () => {
-            if (!playerAudio) await openPlayer();
-            if (!playerAudio) throw new Error('No audiobook is loaded in the player.');
-            if (audioLabel === '↶15') playerAudio.currentTime = Math.max(0, playerAudio.currentTime - 15);
-            else if (audioLabel === '15↷') playerAudio.currentTime = Math.min(playerAudio.duration || Infinity, playerAudio.currentTime + 15);
-            else if (['0.75×','1×','1.25×','1.5×'].includes(audioLabel)) {
-              playerAudio.playbackRate = Number(audioLabel.replace('×',''));
-              button.parentElement?.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === button));
-              message('Playback speed set to ' + playerAudio.playbackRate + '×.');
-            } else if (audioLabel === '◀') playerAudio.currentTime = Math.max(0, playerAudio.currentTime - 15);
-            else {
-              if (playerAudio.paused) await playerAudio.play(); else playerAudio.pause();
-            }
-          })().catch(err => message(err?.message || String(err), true));
-          return;
-        }
-      }
+      // Player transport buttons are bound directly by bindAudiobookPlayerControls()
+      // and the shared mainPlay handler. Do not intercept them in capture phase:
+      // the previous '◀'/'▶' glyph routing confused chapter navigation with
+      // 15-second seeking and Play/Pause, because Next and mainPlay share '▶'.
       if (button.id === 'backgroundJobsButton') {
         stop();
         $('backgroundJobsModal')?.classList.add('show');
         refreshJobs().catch(err => message(err?.message || String(err), true));
+        return;
+      }
+      if (button.id === 'closeBackgroundJobs') {
+        stop();
+        $('backgroundJobsModal')?.classList.remove('show');
+        return;
+      }
+      if (button.id === 'openJobHistory') {
+        stop();
+        $('backgroundJobsModal')?.classList.remove('show');
+        if (typeof window.go === 'function') window.go('history');
+        refreshHistory().catch(err => message(err?.message || String(err), true));
         return;
       }
       if (button.id === 'openUpdateLog') {
@@ -9606,6 +11868,19 @@
         })().catch(err => message(err?.message || String(err), true));
         return;
       }
+      if (button.matches('#aiQueue [data-ai-load-more]')) {
+        stop();
+        const nextCount = Number(button.dataset.aiNextCount);
+        const currentCount = Number(window.ryuPremiumDialogueReviewVisibleCount || 120);
+        if (!Number.isInteger(nextCount) || nextCount <= currentCount) {
+          message('The review queue changed. Refresh the chapter and try again.', true);
+          renderDialogueReview();
+          return;
+        }
+        window.ryuPremiumDialogueReviewVisibleCount = nextCount;
+        renderDialogueReview();
+        return;
+      }
       // Automatic per-line AI speaker suggestions remain prototype-only. Manual source-backed dialogue speaker assignments are persisted.
       if (button.matches('[data-ai-line][data-dialogue-id]')) {
         stop();
@@ -9619,16 +11894,17 @@
         }
         return;
       }
-      if (button.id === 'acceptHighConfidence' || button.id === 'skipAiSuggestion' ||
-          button.matches('[data-ai-line]') || button.id === 'aiUseLibrary' ||
-          button.id === 'aiCreateNew' || button.id === 'createCharacterQuick') {
-        stop();
-        message('Bulk acceptance and queue predictions are not connected to verified source passages. Select an individual dialogue passage and explicitly assign a saved character instead.', true);
-        return;
-      }
+      // Source-less queue placeholders are hidden during initialization. Real
+      // Character Studio controls are handled by their dedicated backend actions above.
       if (button.closest('#settings') && label === 'choose folder') {
         stop();
-        message('Custom project-library and audio-assets root selection is not implemented in this build; the existing local storage paths were not changed.', true);
+        const storageTab = document.querySelector('[data-settings-tab="storage"]');
+        if (storageTab) {
+          storageTab.click();
+          message('Manage supported project, audio asset and model storage locations in Settings > Storage.');
+        } else {
+          message('Storage settings are unavailable in this build.', true);
+        }
         return;
       }
       if (button.closest('#settings') && label === 'export logs') {
@@ -9701,6 +11977,18 @@
       if (!button) return;
       const stop = () => { event.preventDefault(); event.stopImmediatePropagation(); };
       const run = fn => { stop(); void Promise.resolve().then(fn).catch(error => message(error?.message || String(error),true)); };
+      if (button.matches('[data-pron-test-matrix]')) {
+        run(runPronunciationProfileMatrix);
+        return;
+      }
+      if (button.matches('[data-pron-import]')) {
+        run(importPronunciationDictionary);
+        return;
+      }
+      if (button.matches('[data-pron-export]')) {
+        run(exportPronunciationDictionary);
+        return;
+      }
       if (button.id === 'addPronunciationAdvanced') {
         run(() => {
           window.ryuPronunciationEditing = null;
@@ -9970,7 +12258,7 @@
           } else if (action === 'verify') {
             const result = await call('models.verify', {model_id:operationId});
             await refreshModels();
-            message((result.available ? 'Verification passed. ' : 'Verification needs attention. ') + result.detail, !result.available);
+            message((result.status === 'Ready' ? 'Ready. ' : result.status === 'Installed' ? 'Files and dependencies are present; functional readiness is not yet confirmed. ' : 'Verification needs attention. ') + result.detail, !['Ready','Installed'].includes(result.status));
             return;
           } else {
             const displayName = String(model.name || operationId);
@@ -9993,6 +12281,27 @@
             payload.voice_name = String(voiceSelect?.value || '').trim();
           }
           const disableLabel = button.textContent;
+          if (action === 'uninstall') {
+            const componentLabel = String(model.name || operationId);
+            const exactTarget = operationId === 'piper'
+              ? 'the selected Piper voice and its matching .onnx.json file'
+              : operationId === 'qwen-model'
+                ? 'only the selected Qwen weight folder'
+                : operationId === 'qwen-runtime'
+                  ? 'the isolated Qwen Python and virtual environment files; downloaded Qwen weights and saved voice profiles are preserved'
+                  : operationId === 'chatterbox' || operationId === 'chatterbox-runtime' || operationId === 'chatterbox-multilingual'
+                    ? 'the shared Chatterbox provider runtime; downloaded Chatterbox model cache, saved voice profiles and books are preserved'
+                    : operationId === 'chatterbox-model-assets'
+                      ? 'only Chatterbox-owned Hugging Face cache folders; other provider caches and the Chatterbox runtime are preserved'
+                      : operationId === 'audiobook-ai'
+                        ? 'the local Audiobook AI runtime and model files'
+                        : 'the selected app-managed component files';
+            const accepted = window.confirm(
+              'Uninstall ' + componentLabel + '?\\n\\nThis removes ' + exactTarget +
+              '.\\n\\nProjects, source books, generated audiobooks and saved voice profiles are not uninstall targets.\\n\\nThe action will be blocked while any other application job is active. Continue?'
+            );
+            if (!accepted) return;
+          }
           button.disabled = true;
           button.textContent = action === 'uninstall' ? 'Removing…' : action === 'repair' ? 'Repairing…' : 'Starting…';
           const modelLifecycleCommands = {install:'models.install',repair:'models.repair',uninstall:'models.uninstall'};

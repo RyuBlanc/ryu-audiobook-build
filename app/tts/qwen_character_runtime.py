@@ -12,7 +12,7 @@ import time
 import urllib.request
 from functools import lru_cache
 
-from app.core.paths import models_root
+from app.core.paths import models_root, runtimes_root, model_cache_root, temporary_root
 from app.version import APP_VERSION
 from app.tts.qwen_accelerator import (
     accelerator_report,
@@ -34,7 +34,7 @@ PYTHON_INSTALLER_URL = (
     f"python-{PYTHON_VERSION}-amd64.exe"
 )
 
-RUNTIME_ROOT = models_root() / "qwen3-tts"
+RUNTIME_ROOT = runtimes_root() / "qwen3-tts"
 PYTHON_ROOT = RUNTIME_ROOT / "python312"
 PYTHON = PYTHON_ROOT / "python.exe"
 VENV_ROOT = RUNTIME_ROOT / "runtime"
@@ -50,7 +50,7 @@ MODEL_IDS = {
     "base-0.6b": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
     "base-1.7b": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
 }
-MODEL_DIRS = {key: RUNTIME_ROOT / key for key in MODEL_IDS}
+MODEL_DIRS = {key: models_root() / "qwen3-tts" / key for key in MODEL_IDS}
 TOKENIZER_ID = "Qwen/Qwen3-TTS-Tokenizer-12Hz"
 
 CUSTOM_SPEAKERS = (
@@ -239,6 +239,7 @@ def _install_runtime_packages(python: Path, progress=None) -> tuple[str, str, st
         "cpu",
     )
     install_plan: list[tuple[str, list[str], str]] = []
+    gpu_fallback_reason = ""
 
     if _has_nvidia_gpu() or active.backend == "cuda":
         install_plan.extend([
@@ -265,30 +266,31 @@ def _install_runtime_packages(python: Path, progress=None) -> tuple[str, str, st
             amd_candidate.name, cpu_name, os_caption, display_version
         )
         if spec is None:
-            raise RuntimeError(
-                f"AMD adapter {amd_candidate.name} is not listed for this Windows release. "
-                "Qwen will not install an unverified ROCm runtime or downgrade this GPU "
-                "to a misleading accelerated state."
+            gpu_fallback_reason = (
+                f"AMD adapter {amd_candidate.name} is not listed in the official "
+                "Windows ROCm/PyTorch matrix; using CPU compatibility mode."
             )
-        if spec["rocm"] == "10.1.0":
-            label = f"AMD ROCm 10.1.0 ({spec['arch']}, Windows 11 25H2)"
-            package_args = [
-                "--index-url", "https://stable.repo.amd.com/rocm/whl-next/",
-                f"torch[device-{spec['arch']}]=={spec['torch']}",
-                f"torchaudio=={spec['torchaudio']}",
-            ]
+            install_plan.append(cpu_plan)
         else:
-            rocm_root = "https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1"
-            package_args = [
-                f"{rocm_root}/rocm_sdk_core-7.2.1-py3-none-win_amd64.whl",
-                f"{rocm_root}/rocm_sdk_devel-7.2.1-py3-none-win_amd64.whl",
-                f"{rocm_root}/rocm_sdk_libraries_custom-7.2.1-py3-none-win_amd64.whl",
-                f"{rocm_root}/rocm-7.2.1.tar.gz",
-                f"{rocm_root}/torch-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl",
-                f"{rocm_root}/torchaudio-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl",
-            ]
-            label = "AMD ROCm 7.2.1 (legacy Windows 11 support)"
-        install_plan.append((label, package_args, "rocm"))
+            if spec["rocm"] == "10.1.0":
+                label = f"AMD ROCm 10.1.0 ({spec['arch']}, Windows 11 25H2)"
+                package_args = [
+                    "--index-url", "https://stable.repo.amd.com/rocm/whl-next/",
+                    f"torch[device-{spec['arch']}]=={spec['torch']}",
+                    f"torchaudio=={spec['torchaudio']}",
+                ]
+            else:
+                rocm_root = "https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1"
+                package_args = [
+                    f"{rocm_root}/rocm_sdk_core-7.2.1-py3-none-win_amd64.whl",
+                    f"{rocm_root}/rocm_sdk_devel-7.2.1-py3-none-win_amd64.whl",
+                    f"{rocm_root}/rocm_sdk_libraries_custom-7.2.1-py3-none-win_amd64.whl",
+                    f"{rocm_root}/rocm-7.2.1.tar.gz",
+                    f"{rocm_root}/torch-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl",
+                    f"{rocm_root}/torchaudio-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl",
+                ]
+                label = "AMD ROCm 7.2.1 (legacy Windows 11 support)"
+            install_plan.append((label, package_args, "rocm"))
     elif intel_candidate is not None and os.name == "nt":
         install_plan.append((
             "Intel XPU (Windows)",
@@ -319,6 +321,12 @@ def _install_runtime_packages(python: Path, progress=None) -> tuple[str, str, st
     else:
         install_plan.append(cpu_plan)
 
+    # Auto mode always retains a validated CPU route after trying a detected
+    # GPU runtime. This is an explicit compatibility fallback, never reported
+    # as GPU acceleration.
+    if install_plan and install_plan[-1][2] != "cpu":
+        install_plan.append(cpu_plan)
+
     install_error = ""
     selected_backend = ""
     selected_label = ""
@@ -336,21 +344,19 @@ def _install_runtime_packages(python: Path, progress=None) -> tuple[str, str, st
             selected_backend, selected_label = expected_backend, label
             break
         install_error = detail
+        if expected_backend != "cpu":
+            gpu_fallback_reason = detail or f"{label} installation failed"
 
-    # Never silently replace a detected GPU runtime with CPU PyTorch. A
-    # user may explicitly select CPU, but Auto must either activate the
-    # compatible GPU backend or report why it could not.
     if not selected_backend:
-        hardware = (
-            f"{amd_candidate.name} (AMD ROCm)" if amd_candidate is not None
-            else f"{intel_candidate.name} (Intel XPU)" if intel_candidate is not None
-            else f"{active.name} ({active.backend})"
-        )
         raise RuntimeError(
-            f"Could not activate the selected Qwen GPU runtime for {hardware}. "
-            "CPU fallback was not installed automatically because it would hide "
-            "a GPU performance failure. Check driver/runtime compatibility and "
-            f"use explicit CPU selection only when intended. Last error: {install_error[-3000:]}"
+            "Could not install a validated Qwen runtime. GPU installation attempts "
+            "and the CPU compatibility fallback both failed. "
+            f"Last error: {install_error[-3000:]}"
+        )
+    if selected_backend == "cpu" and gpu_fallback_reason and progress:
+        progress(
+            "GPU acceleration could not be validated; using CPU compatibility mode. "
+            + gpu_fallback_reason[-700:]
         )
 
     if progress:
@@ -389,14 +395,45 @@ def _install_runtime_packages(python: Path, progress=None) -> tuple[str, str, st
         or (selected_backend == "rocm" and "cuda=True" in normalized and "hip=None" not in normalized)
         or (selected_backend == "xpu" and "xpu=True" in normalized)
     )
-    if not backend_ok:
+    if not backend_ok and selected_backend != "cpu":
         if selected_backend == "rocm":
             reason = "AMD ROCm packages installed but PyTorch did not activate HIP"
         elif selected_backend == "xpu":
             reason = "Intel XPU packages installed but torch.xpu.is_available() is false"
         else:
             reason = f"PyTorch did not activate the selected {selected_backend} backend"
-        raise RuntimeError(f"{reason}. Qwen runtime is not marked ready. {detail[-2500:]}")
+        if progress:
+            progress(
+                f"{reason}. Switching to CPU compatibility mode without changing "
+                "the selected Qwen model or its saved voice identity…"
+            )
+        cpu_code, cpu_detail = _run_capture(
+            [
+                str(python), "-m", "pip", "install", "--upgrade",
+                "--no-cache-dir", *cpu_plan[1],
+            ],
+            timeout=3600,
+        )
+        if cpu_code != 0:
+            raise RuntimeError(
+                f"{reason}. CPU compatibility fallback installation failed: "
+                f"{cpu_detail[-3000:]}"
+            )
+        selected_backend = "cpu"
+        selected_label = "CPU compatibility fallback"
+        code, detail = _run_capture([str(python), "-c", check], timeout=240)
+        if code != 0:
+            raise RuntimeError(
+                "CPU compatibility fallback was installed but its runtime self-test "
+                f"failed: {detail[-3000:]}"
+            )
+        normalized = detail.replace(" ", "")
+        backend_ok = "torch=" in normalized and "torchaudio=" in normalized
+    if not backend_ok:
+        raise RuntimeError(
+            f"Qwen runtime did not validate for backend {selected_backend}. "
+            f"{detail[-2500:]}"
+        )
 
     def output_value(key: str) -> str:
         prefix = key + "="
@@ -926,6 +963,8 @@ def ensure_best_runtime_for_gpu(progress=None) -> str | None:
             detail = verify_runtime(progress)
             installed = json.loads(MARKER.read_text(encoding="utf-8"))
             selected_backend = str(installed.get("accelerator") or "cpu").casefold()
+            from app.tts.qwen_accelerator import detect_accelerators
+            detect_accelerators(refresh=True)
             refreshed = best_accelerator()
             if (
                 selected_backend not in {"cuda", "rocm", "xpu"}
@@ -1024,7 +1063,13 @@ def runtime_environment() -> dict[str, str]:
         if not existing_pythonpath
         else str(app_root) + os.pathsep + existing_pythonpath
     )
-    env["HF_HOME"] = str(RUNTIME_ROOT / "huggingface")
+    cache_root = model_cache_root()
+    cache_root.mkdir(parents=True, exist_ok=True)
+    env["HF_HOME"] = str(cache_root)
+    temp_root = temporary_root()
+    env["TEMP"] = str(temp_root)
+    env["TMP"] = str(temp_root)
+    env["TMPDIR"] = str(temp_root)
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONDONTWRITEBYTECODE"] = "1"

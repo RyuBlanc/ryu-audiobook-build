@@ -30,6 +30,10 @@ on:
       - stage-4/step-3-preview-assembly
       - stage-4/step-4-audio-assembly
       - stage-5/**
+      - stage-6/**
+      - stage-7/**
+      - fix/application-wide-closure-2026-11-08
+      - fix/xapp-08-explicit-narrator-only-2026-11-08
   workflow_dispatch:
 
 # Build artifacts are produced and verified on every main build.
@@ -95,6 +99,17 @@ jobs:
           & $pythonExe -B -m unittest test_regressions.RegressionTests.test_voice_preview_invalidation_ignores_deleted_qt_status_widget -v
           if ($LASTEXITCODE -ne 0) { throw "Isolated Qt lifecycle regression failed with exit code $LASTEXITCODE." }
 
+      - name: Run focused Stage 6 History and Task Manager preflight
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          $repoRoot = (Get-Location).Path
+          $env:PYTHONPATH = "$repoRoot"
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -B -m unittest -v tests.test_p0_ui_refresh_stability tests.test_stage6_history_task_manager
+          if ($LASTEXITCODE -ne 0) { throw "Focused Stage 6 History/Task Manager preflight failed with exit code $LASTEXITCODE." }
+
       - name: Run full regression suite (remaining tests)
         shell: pwsh
         run: |
@@ -110,7 +125,7 @@ jobs:
   # storage cleanup. Only explicit artifact checkpoints (and main/manual runs)
   # may create release artifacts.
   build:
-    if: ${{ github.ref == 'refs/heads/main' || contains(github.event.head_commit.message || '', '[artifact-checkpoint]') || github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.ref == 'refs/heads/main' || contains(github.event.head_commit.message || '', '[artifact-checkpoint]') || contains(github.event.head_commit.message || '', 'Dragon Studio Edition version') || github.event_name == 'workflow_dispatch' }}
     needs: tests
     runs-on: windows-latest
     timeout-minutes: 120
@@ -201,6 +216,11 @@ jobs:
           & $pythonExe -m piper.download_voices --data-dir 'bundled_models\piper' en_US-amy-medium en_US-lessac-medium
           $models = @(Get-ChildItem 'bundled_models\piper\*.onnx')
           if ($models.Count -lt 2) { throw "Expected two bundled Piper voices, found $($models.Count)." }
+
+          Write-Host '=== Stage 7 real bundled Piper synthesis benchmark ==='
+          & $pythonExe -B 'tests\smoke_stage7_real_piper_benchmark.py' --output 'stage7-piper-benchmark.json'
+          if ($LASTEXITCODE -ne 0) { throw "Stage 7 real Piper synthesis benchmark failed with exit code $LASTEXITCODE." }
+          if (-not (Test-Path -LiteralPath 'stage7-piper-benchmark.json' -PathType Leaf)) { throw 'Stage 7 Piper benchmark evidence JSON was not created.' }
 
           Write-Host '=== Download bundled offline Kokoro voices ==='
           New-Item -ItemType Directory -Force -Path 'bundled_models\kokoro' | Out-Null
@@ -393,7 +413,31 @@ jobs:
           if (-not (Test-Path $aiBin)) {
             New-Item -ItemType Directory -Force -Path $aiBin | Out-Null
             Write-Host 'Downloading llama.cpp CPU runtime (maximum 300 seconds).'
-            curl.exe --connect-timeout 15 --max-time 300 -L --fail --retry 2 -o $llamaZip 'https://github.com/ggml-org/llama.cpp/releases/download/b11193/llama-b11193-bin-win-cpu-x64.zip'
+            $llamaZipExpectedSha256 = '1110e183589e0e2ac5b365fb5c3c4a7e149e0760c1989cac18ee426b08e5813a'
+            $llamaZipSources = @(
+              @{ Url='https://github.com/ggml-org/llama.cpp/releases/download/b11193/llama-b11193-bin-win-cpu-x64.zip'; Headers=@() },
+              @{ Url='https://api.github.com/repos/ggml-org/llama.cpp/releases/assets/589841111'; Headers=@('-H','Accept: application/octet-stream','-H','X-GitHub-Api-Version: 2022-11-28') }
+            )
+            $llamaZipDownloaded = $false
+            foreach ($source in $llamaZipSources) {
+              $llamaZipPart = "$llamaZip.part"
+              Remove-Item -LiteralPath $llamaZipPart -Force -ErrorAction SilentlyContinue
+              $curlArgs = @('--connect-timeout','20','--max-time','300','-L','--fail','--retry','2','-o',$llamaZipPart) + $source.Headers + @($source.Url)
+              & curl.exe @curlArgs
+              if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $llamaZipPart -PathType Leaf)) {
+                $actualLlamaZipSha256 = (Get-FileHash -LiteralPath $llamaZipPart -Algorithm SHA256).Hash.ToLowerInvariant()
+                if ($actualLlamaZipSha256 -eq $llamaZipExpectedSha256) {
+                  Move-Item -LiteralPath $llamaZipPart -Destination $llamaZip -Force
+                  $llamaZipDownloaded = $true
+                  break
+                }
+                Write-Warning "Rejected llama.cpp archive from $($source.Url): SHA-256 $actualLlamaZipSha256 did not match the pinned release digest."
+              } else {
+                Write-Warning "llama.cpp download route failed: $($source.Url)"
+              }
+              Remove-Item -LiteralPath $llamaZipPart -Force -ErrorAction SilentlyContinue
+            }
+            if (-not $llamaZipDownloaded) { throw 'Could not obtain the pinned llama.cpp CPU runtime through either official GitHub release route.' }
             Expand-Archive -Force $llamaZip $aiBin
           }
           $server = Get-ChildItem $aiBin -Recurse -Filter 'llama-server.exe' | Select-Object -First 1
@@ -483,14 +527,16 @@ jobs:
           & $venvPython -m pip --version
           & $venvPython -m pip install --disable-pip-version-check --timeout 60 --retries 2 --no-deps qwen-tts==0.1.1
           & $venvPython -c "import importlib.metadata as md; assert md.version('qwen-tts') == '0.1.1'; print('qwen_tts wheel bootstrap OK')"
-          # Install the release logo validator's dependency in the durable private interpreter.
-          # Do not rely on actions/setup-python's toolcache after the later installer steps.
-          & $privatePython -m pip install --disable-pip-version-check --timeout 60 --retries 2 'Pillow>=11,<13'
-          if ($LASTEXITCODE -ne 0) { throw "Private Python Pillow installation failed with exit code $LASTEXITCODE." }
-          $pillowProbe = & $privatePython -B -c "from PIL import Image; print('Private release Pillow=' + Image.__version__)" 2>&1
-          $pillowProbeExitCode = $LASTEXITCODE
-          $pillowProbe | Write-Host
-          if ($pillowProbeExitCode -ne 0) { throw "Private Python cannot import Pillow (exit $pillowProbeExitCode): $($pillowProbe -join ' ')" }
+          # Install every dependency used by the release logo validator and by the
+          # source-side M4B fixture generator in packaged acceptance. The frozen EXE
+          # is separate; this interpreter runs tests/packaged_sound_ui_acceptance.py.
+          & $privatePython -m pip install --disable-pip-version-check --timeout 60 --retries 2 'Pillow>=11,<13' 'imageio-ffmpeg>=0.6,<1' 'mutagen>=1.47,<2'
+          if ($LASTEXITCODE -ne 0) { throw "Private Python packaged-acceptance/release dependency installation failed with exit code $LASTEXITCODE." }
+          $privateDependencyProbe = & $privatePython -B -c "import imageio_ffmpeg, mutagen; from PIL import Image; from app.audio.assembler import assemble_m4b; print('Private release Pillow=' + Image.__version__); print('Private acceptance Mutagen=' + mutagen.version_string); print('Private acceptance assembler=' + assemble_m4b.__name__); print('Private acceptance FFmpeg=' + imageio_ffmpeg.get_ffmpeg_exe())" 2>&1
+          $privateDependencyProbeExitCode = $LASTEXITCODE
+          $privateDependencyProbe | Write-Host
+          if ($privateDependencyProbeExitCode -ne 0) { throw "Private Python cannot import Pillow, imageio_ffmpeg, mutagen or the M4B fixture assembler (exit $privateDependencyProbeExitCode): $($privateDependencyProbe -join ' ')" }
+          if ($privateDependencyProbeExitCode -ne 0) { throw "Private Python cannot import Pillow (exit $privateDependencyProbeExitCode): $($privateDependencyProbe -join ' ')" }
 
       - name: Verify frozen application
         shell: pwsh
@@ -628,6 +674,35 @@ jobs:
             if ($cueFiles.Count -lt 1) { throw "Frozen package has no $kind book-cue audio." }
           }
           Write-Host "Bundled real starter audio verified: BGM=$($starterMusic.Count), with opening/page-turn/closing cue categories."
+
+          # The Qwen inference worker runs in a separate Python venv, outside
+          # the frozen EXE/PYZ. Verify that its physical source tree contains
+          # app.core and that Automatic can follow the GPU-selection path.
+          $corePathCandidates = @(
+            (Join-Path $exeDir 'app\core\paths.py'),
+            (Join-Path $exeDir '_internal\app\core\paths.py')
+          )
+          $corePathsFile = $corePathCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+          if (-not $corePathsFile) { throw 'Frozen package is missing physical app/core/paths.py required by the external Qwen runtime.' }
+          $coreDirectory = Split-Path -Parent $corePathsFile
+          $appDirectory = Split-Path -Parent $coreDirectory
+          $frozenPythonRoot = Split-Path -Parent $appDirectory
+          $qwenRuntimePython = Join-Path $env:RUNNER_TEMP 'ryu-qwen-python-bootstrap\runtime\Scripts\python.exe'
+          if (-not (Test-Path -LiteralPath $qwenRuntimePython -PathType Leaf)) {
+            throw "The isolated Qwen runtime Python is missing: $qwenRuntimePython"
+          }
+          $previousPythonPath = $env:PYTHONPATH
+          try {
+            $env:PYTHONPATH = $frozenPythonRoot
+            $qwenProbe = "from pathlib import Path; from app.core.paths import settings_root; from app.tts import qwen_accelerator as accelerator; accelerator.best_accelerator = lambda: accelerator.Accelerator('cuda', 'cuda:0', 'CI NVIDIA GPU', 8.0, True, 'CI GPU import-path probe'); selected, _reason = accelerator.automatic_accelerator('custom-0.6b', history_path=Path.home() / 'Ryu Qwen Missing CI History.json'); assert selected.backend == 'cuda' and selected.device == 'cuda:0', selected; print('External Qwen app.core import OK: ' + str(settings_root())); print('External Qwen automatic GPU selection OK: ' + selected.backend + ' / ' + selected.device)"
+            $qwenOutput = & $qwenRuntimePython -B -c $qwenProbe 2>&1
+            $qwenExit = $LASTEXITCODE
+            $qwenOutput | Write-Host
+            if ($qwenExit -ne 0) { throw "External Qwen runtime import/GPU-selection smoke failed with exit code $qwenExit." }
+          } finally {
+            if ($previousPythonPath) { $env:PYTHONPATH = $previousPythonPath }
+            else { Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue }
+          }
           Write-Host 'Critical application modules were already exercised by the frozen EXE self-test.'
 
       - name: Run packaged Sound Design Music Library acceptance (including Stage 5.3 generation UI)
@@ -720,6 +795,114 @@ jobs:
           $installer = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Setup.exe"
           if (-not (Test-Path $installer)) { throw "HTML installer frontend was not produced: $installer" }
           Write-Host "Functional HTML installer created: $installer"
+
+      - name: Verify functional HTML installer UI startup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Setup.exe"
+          if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw "HTML installer was not produced: $installer" }
+          $marker = Join-Path $env:TEMP "RyuHtmlInstallerStartup-$env:GITHUB_RUN_ID.json"
+          Remove-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue
+          $env:RYU_INSTALLER_STARTUP_SMOKE_MARKER = $marker
+          $proc = $null
+          try {
+            $proc = Start-Process -FilePath $installer -PassThru
+            $deadline = (Get-Date).AddSeconds(45)
+            $ready = $false
+            while ((Get-Date) -lt $deadline) {
+              $proc.Refresh()
+              if ($proc.HasExited) { throw "HTML installer exited before its native setup bridge became ready (exit code $($proc.ExitCode))." }
+              if (Test-Path -LiteralPath $marker -PathType Leaf) {
+                $startup = Get-Content -LiteralPath $marker -Raw | ConvertFrom-Json
+                if ($startup.status -eq 'failed') { throw "HTML installer startup smoke failed: $($startup.detail)" }
+                if ($startup.status -eq 'ready') { $ready = $true; break }
+              }
+              Start-Sleep -Milliseconds 200
+            }
+            if (-not $ready) { throw "HTML installer page/native bridge did not become ready within 45 seconds." }
+            Write-Host "HTML installer UI and native QWebChannel bridge startup PASSED: $($startup.detail)"
+          } finally {
+            if ($null -ne $proc) { $proc.Refresh(); if (-not $proc.HasExited) { & taskkill.exe /PID $proc.Id /T /F | Out-Null } }
+            Remove-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue
+            Remove-Item Env:RYU_INSTALLER_STARTUP_SMOKE_MARKER -ErrorAction SilentlyContinue
+          }
+
+      - name: Install, launch, upgrade and uninstall Windows installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $coreInstaller = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Core Setup.exe"
+          if (-not (Test-Path -LiteralPath $coreInstaller -PathType Leaf)) { throw "Core installer was not produced: $coreInstaller" }
+          $installDir = Join-Path $env:RUNNER_TEMP ("RyuAudiobookInstallerAcceptance-" + $env:GITHUB_RUN_ID)
+          $userDataTestDir = Join-Path $HOME "Ryu's Audiobook\Library\Stage8InstallerAcceptance"
+          $userDataMarker = Join-Path $userDataTestDir 'preserve-on-uninstall.txt'
+          New-Item -ItemType Directory -Force -Path $userDataTestDir | Out-Null
+          Set-Content -LiteralPath $userDataMarker -Value 'User data must survive installer upgrade and uninstall.' -Encoding UTF8
+          $dirArgument = '/DIR="' + $installDir + '"'
+          $taskArgument = '/TASKS="startmenuicon,desktopicon"'
+          $installLog = Join-Path $env:RUNNER_TEMP ("RyuCoreInstaller-" + $env:GITHUB_RUN_ID + ".log")
+          for ($attempt = 1; $attempt -le 2; $attempt++) {
+            $install = Start-Process -FilePath $coreInstaller -Verb RunAs -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',$dirArgument,$taskArgument,('/LOG="' + $installLog + '"')) -Wait -PassThru
+            if ($install.ExitCode -ne 0) { throw "Core installer install/upgrade attempt $attempt failed with exit code $($install.ExitCode)." }
+            if (-not (Test-Path -LiteralPath (Join-Path $installDir "Ryu's Audiobook.exe") -PathType Leaf)) { throw "Installed application executable is missing after attempt $attempt." }
+            if (-not (Test-Path -LiteralPath $userDataMarker -PathType Leaf)) { throw "Installer attempt $attempt changed or removed user data." }
+          }
+          $exe = Join-Path $installDir "Ryu's Audiobook.exe"
+          $info = (Get-Item -LiteralPath $exe).VersionInfo
+          $semanticVersion = [string]$env:RYU_APP_VERSION
+          if ([string]::IsNullOrWhiteSpace($semanticVersion)) { throw 'Validated application version is unavailable.' }
+          if (-not $info.ProductVersion.StartsWith("$semanticVersion.")) { throw "Installed EXE version mismatch: $($info.ProductVersion)." }
+
+          $selfTestMarker = Join-Path $env:TEMP "RyuInstalledSelfTest-$env:GITHUB_RUN_ID.ok"
+          Remove-Item -LiteralPath $selfTestMarker -Force -ErrorAction SilentlyContinue
+          $env:RYU_FROZEN_SELF_TEST_MARKER = $selfTestMarker
+          $selfTest = Start-Process -FilePath $exe -ArgumentList @('--self-test') -Wait -PassThru -WindowStyle Hidden
+          if ($selfTest.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $selfTestMarker -PathType Leaf)) { throw "Installed application offline self-test failed (exit code $($selfTest.ExitCode))." }
+          Remove-Item Env:RYU_FROZEN_SELF_TEST_MARKER -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath $selfTestMarker -Force -ErrorAction SilentlyContinue
+
+          $startupMarker = Join-Path $env:TEMP "RyuInstalledStartup-$env:GITHUB_RUN_ID.json"
+          Remove-Item -LiteralPath $startupMarker -Force -ErrorAction SilentlyContinue
+          $env:RYU_STARTUP_SMOKE_MARKER = $startupMarker
+          Remove-Item Env:RYU_UI_MODE -ErrorAction SilentlyContinue
+          $app = $null
+          $ready = $false
+          try {
+            $app = Start-Process -FilePath $exe -PassThru
+            $deadline = (Get-Date).AddSeconds(90)
+            while ((Get-Date) -lt $deadline) {
+              $app.Refresh()
+              if ($app.HasExited) { throw "Installed app exited before startup readiness (exit code $($app.ExitCode))." }
+              if (Test-Path -LiteralPath $startupMarker -PathType Leaf) {
+                $startup = Get-Content -LiteralPath $startupMarker -Raw | ConvertFrom-Json
+                if ($startup.status -eq 'failed') { throw "Installed app startup failed: $($startup.detail)" }
+                if ($startup.status -eq 'ready') {
+                  if ($startup.frontend -ne 'Premium V2') { throw "Installed app launched the wrong frontend: $($startup.frontend)." }
+                  if ($startup.version -notmatch ("\bBuild\s+" + [regex]::Escape([string]$env:GITHUB_RUN_NUMBER) + "\b")) { throw "Installed app startup marker does not identify this build: $($startup.version)." }
+                  $ready = $true
+                  break
+                }
+              }
+              Start-Sleep -Milliseconds 500
+            }
+            if (-not $ready) { throw 'Installed app did not reach Premium V2 startup readiness within 90 seconds.' }
+          } finally {
+            if ($null -ne $app) { $app.Refresh(); if (-not $app.HasExited) { & taskkill.exe /PID $app.Id /T /F | Out-Null } }
+            Remove-Item -LiteralPath $startupMarker -Force -ErrorAction SilentlyContinue
+            Remove-Item Env:RYU_STARTUP_SMOKE_MARKER -ErrorAction SilentlyContinue
+            Remove-Item Env:RYU_UI_MODE -ErrorAction SilentlyContinue
+          }
+
+          $uninstaller = Join-Path $installDir 'unins000.exe'
+          if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) { throw 'The installed uninstaller is missing.' }
+          $uninstall = Start-Process -FilePath $uninstaller -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "Uninstaller failed with exit code $($uninstall.ExitCode)." }
+          if (Test-Path -LiteralPath $exe -PathType Leaf) { throw 'Application files remain after successful uninstaller exit.' }
+          if (-not (Test-Path -LiteralPath $userDataMarker -PathType Leaf)) { throw 'Uninstaller removed user data; preservation gate failed.' }
+          Write-Host "Windows install, in-place upgrade, offline self-test, Premium V2 launch, uninstall and user-data preservation PASSED."
+          Remove-Item -LiteralPath $userDataTestDir -Recurse -Force -ErrorAction SilentlyContinue
+          if (Test-Path -LiteralPath $installDir) { Remove-Item -LiteralPath $installDir -Recurse -Force -ErrorAction SilentlyContinue }
 
       - name: Verify original logo transparency and generate release hashes
         shell: pwsh
@@ -814,6 +997,19 @@ jobs:
           $manifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath 'release-sha256-manifest.json' -Encoding utf8
           if (-not (Test-Path -LiteralPath 'release-sha256-manifest.json' -PathType Leaf)) { throw 'Release SHA-256 manifest was not created.' }
 
+      - name: Generate package size breakdown
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = Join-Path $env:RUNNER_TEMP 'ryu-qwen-python-bootstrap\python312\python.exe'
+          if (-not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "Verified private Python for package size reporting is missing: $pythonExe"
+          }
+          & $pythonExe -B 'package_size_report.py' --output 'package-size-report.json' --target-mb 500
+          if ($LASTEXITCODE -ne 0) { throw "Package size report generation failed with exit code $LASTEXITCODE." }
+          if (-not (Test-Path -LiteralPath 'package-size-report.json' -PathType Leaf)) { throw 'Package size report was not created.' }
+          Get-Content -LiteralPath 'package-size-report.json' -Raw | Write-Host
+
       - name: Scan release executables with Microsoft Defender
         shell: pwsh
         run: |
@@ -847,7 +1043,7 @@ jobs:
               throw "Microsoft Defender did not provide a recognized completed-scan result for '$path'. Output: $scanText. No release artifacts will be uploaded."
             }
           }
-          Write-Host 'Microsoft Defender completed both release executable scans without reporting a detection.'
+          Write-Host 'Microsoft Defender completed all three release executable scans (application, HTML installer and core installer) without reporting a detection.'
 
       - name: Upload Windows installer artifact
         id: upload_installer
@@ -863,7 +1059,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Ryu-Audiobook-Release-SHA256-${{ github.run_number }}
-          path: release-sha256-manifest.json
+          path: |
+            release-sha256-manifest.json
+            package-size-report.json
           if-no-files-found: error
           retention-days: 30
 
@@ -876,6 +1074,14 @@ jobs:
           compression-level: 0
           retention-days: 30
 
+      - name: Upload Stage 7 real Piper benchmark evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ryu-Audiobook-Stage7-Piper-Benchmark-${{ github.run_number }}
+          path: stage7-piper-benchmark.json
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Publish verified installer release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: pwsh
@@ -886,3 +1092,4 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($semanticVersion)) { throw "Application version was not exported by the validated build step for release tagging." }
           $tag = "v$semanticVersion-build-${{ github.run_number }}"
           gh release create $tag "installer/installer-output/Ryu's Audiobook Setup.exe" --title "Ryu's Audiobook $tag" --notes "Verified Windows build. Includes offline Piper + Kokoro voices, the Obsidian/Ember dragon-tech interface, global Reduce Motion preference, a local-first audio catalogue with 26 real starter BGM tracks across calm, fantasy, adventure, comedy, action, sci-fi, emotional, mystery, horror and slice-of-life moods, plus six real book opening/page-turn/closing sound cues. Add licensed tracks through Generate > Real BGM catalogue / Real audiobook cue files. Includes Qwen VoiceDesign preset isolation, audiobook AI smoke validation, Chatterbox runtime validation, frozen EXE checks and installer verification. Starter-track source and license notes are included beside the local audio library." --target $env:GITHUB_SHA
+

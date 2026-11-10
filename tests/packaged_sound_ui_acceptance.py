@@ -209,7 +209,7 @@ def validate_imported_audio_metadata(
             raise AssertionError(f"Imported cue metadata mismatch for {path.name}: {metadata!r}")
 
 
-def write_png_fixture(path: Path) -> None:
+def write_png_fixture(path: Path, rgba: tuple[int, int, int, int] = (255, 0, 0, 255)) -> None:
     """Write a tiny valid RGBA PNG which QImageReader can decode in the frozen app."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -219,7 +219,7 @@ def write_png_fixture(path: Path) -> None:
         return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", checksum)
 
     header = struct.pack(">IIBBBBB", 1, 1, 8, 6, 0, 0, 0)
-    scanline = bytes((0, 255, 0, 0, 255))
+    scanline = bytes((0, *rgba))
     signature = bytes((137, 80, 78, 71, 13, 10, 26, 10))
     content = (
         signature
@@ -229,6 +229,92 @@ def write_png_fixture(path: Path) -> None:
     )
     path.write_bytes(content)
 
+
+
+def create_stage6_audiobook_library_fixtures(library_folder: Path, token: str) -> list[dict]:
+    """Create two independently-owned, completed M4B books for Stage 6 UI acceptance."""
+    from app.audio.assembler import assemble_m4b
+
+    library_folder = Path(library_folder).expanduser().resolve()
+    library_folder.mkdir(parents=True, exist_ok=True)
+    specifications = (
+        ("ALPHA", "Stage 6 Library Alpha " + token, "Stage 6 Author Alpha", "Stage 6 Narrator Alpha", 440.0, (220, 45, 75, 255)),
+        ("BETA", "Stage 6 Library Beta " + token, "Stage 6 Author Beta", "Stage 6 Narrator Beta", 660.0, (45, 105, 190, 255)),
+    )
+    fixtures = []
+    for key, title, author, narrator, frequency, rgba in specifications:
+        folder = library_folder / title
+        if folder.exists():
+            raise FileExistsError("Unique Stage 6 audiobook fixture already exists: " + str(folder))
+        folder.mkdir(parents=True)
+        cover = folder / "cover.png"
+        write_png_fixture(cover, rgba=rgba)
+        chapter_title = "Acceptance " + key.title() + " Chapter"
+        chapter_dir = folder / "working_audio" / ("001_" + chapter_title)
+        write_tone_fixture(chapter_dir / "chunks" / "00001.wav", frequency, duration_seconds=3.0)
+        output = folder / "finished-output.m4b"
+        assemble_m4b(
+            chapter_dirs=[chapter_dir],
+            output_path=output,
+            title=title,
+            author=author,
+            cover=cover,
+            chapter_titles=[chapter_title],
+            metadata={
+                "title": title,
+                "author": author,
+                "narrator": narrator,
+                "language": "en",
+                "genre": "Acceptance",
+            },
+            bitrate=128,
+        )
+        project_payload = {"title": title, "source_file": None}
+        chapter_payload = [{
+            "number": 1,
+            "title": chapter_title,
+            "text": "A short packaged audiobook library acceptance fixture.",
+            "dialogue_assignments": [],
+            "review_status": "reviewed",
+            "skip_for_generation": False,
+            "chapter_id": uuid.uuid4().hex,
+        }]
+        state_payload = {
+            "voice_id": None,
+            "voice_profile": narrator,
+            "output_path": str(output.resolve()),
+            "cover_path": str(cover.resolve()),
+            "backend": "automatic",
+            "status": "completed",
+            "background_audio_volume": 0.18,
+            "completed_chapters": [1],
+            "failed_chapters": [],
+            "author": author,
+            "narrator": narrator,
+            "completed_chapter_count": 1,
+            "genre": "Acceptance",
+            "audio_bitrate": 128,
+        }
+        (folder / "project.json").write_text(
+            json.dumps(project_payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        (folder / "chapters.json").write_text(
+            json.dumps(chapter_payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        (folder / "state.json").write_text(
+            json.dumps(state_payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        fixtures.append({
+            "folder": str(folder.resolve()),
+            "title": title,
+            "author": author,
+            "narrator": narrator,
+            "output_path": str(output.resolve()),
+            "cover_path": str(cover.resolve()),
+            "cover_file_name": cover.name,
+            "chapter_title": chapter_title,
+        })
+    return fixtures
 
 def validate_saved_metadata(project_folder: Path, expected: dict) -> dict:
     """Verify real project metadata and project-local cover after the first app process."""
@@ -333,6 +419,8 @@ def _run(args: argparse.Namespace) -> int:
     for path in imported_paths:
         if path.exists() or path.with_name(path.name + ".license.json").exists():
             raise FileExistsError(f"Unique acceptance fixture unexpectedly exists already: {path}")
+
+    stage6_audiobook_fixtures = create_stage6_audiobook_library_fixtures(app_root / "Library", token)
 
     project_folder = app_root / "Library" / f"Stage 2 UI Acceptance {token}"
     project_folder.mkdir(parents=True, exist_ok=False)
@@ -508,12 +596,73 @@ def _run(args: argparse.Namespace) -> int:
         "characters": [],
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    # GEN-07 / XAPP-08 acceptance uses a separate real book containing quoted
+    # dialogue but no configured character voice profiles. The installed app
+    # must enable Narrator-Only Generation explicitly and synthesize every
+    # passage, including the quoted dialogue, with the saved narrator.
+    narrator_only_project_folder = app_root / "Library" / f"Stage 5.4 Narrator Only {token}"
+    narrator_only_project_folder.mkdir(parents=True, exist_ok=False)
+    narrator_only_cover = narrator_only_project_folder / "assets" / "cover.png"
+    write_png_fixture(narrator_only_cover)
+    narrator_only_output_path = temp_root / "stage5.4-narrator-only-full-book.m4b"
+    narrator_only_title = f"Stage 5.4 Narrator Only {token}"
+    narrator_only_chapters = [{
+        "number": 1,
+        "title": "Narrator Only Dialogue Acceptance",
+        "chapter_id": f"stage54-{token}-narrator-only-chapter-1",
+        "text": (
+            "The station clock struck six. “I am ready,” Mira said. "
+            "The train began to move, and the platform disappeared behind her."
+        ),
+        "dialogue_assignments": [],
+        "review_status": "complete",
+        "skip_for_generation": False,
+    }]
+    (narrator_only_project_folder / "project.json").write_text(json.dumps({
+        "title": narrator_only_title, "source_file": None,
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    (narrator_only_project_folder / "chapters.json").write_text(
+        json.dumps(narrator_only_chapters, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    (narrator_only_project_folder / "state.json").write_text(json.dumps({
+        "status": "new",
+        "author": f"Stage 5.4 Narrator Only Author {token}",
+        "publisher": f"Stage 5.4 Narrator Only Press {token}",
+        "series": f"Stage 5.4 Narrator Only Series {token}",
+        "series_volume": "1",
+        "language": "en-US",
+        "year": "2026",
+        "genre": "Acceptance",
+        "cover_path": str(narrator_only_cover.resolve()),
+        "voice_profile": narrator_profile_name,
+        "narrator": narrator_profile_name,
+        "narrator_profile_source": "project_override",
+        "backend": "automatic",
+        "audio_bitrate": 128,
+        "output_path": str(narrator_only_output_path.resolve()),
+        "background_audio_mode": "off",
+        "background_audio_enabled": False,
+        "background_audio_path": "",
+        "background_audio_preferred_path": "",
+        "chapter_bgm_strategy": "same",
+        "chapter_bgm_overrides": {},
+        "sound_cues": {"opening": None, "chapter": None, "closing": None},
+        "narrator_only_generation": False,
+        "character_voice_profile_count": 0,
+        "characters": [],
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+
     def create_generation_project(folder: Path, title: str, output: Path, chapter_id: str, chapter_text: str) -> None:
         folder.mkdir(parents=True, exist_ok=False)
         cover = folder / "assets" / "cover.png"
         write_png_fixture(cover)
+        # This job-control fixture is a real imported project, not a
+        # source-less draft. Keep the production metadata gate strict.
+        source_path = folder / "source.txt"
+        source_path.write_text(chapter_text, encoding="utf-8")
         (folder / "project.json").write_text(json.dumps({
-            "title": title, "source_file": None,
+            "title": title, "source_file": str(source_path.resolve()),
         }, ensure_ascii=False, indent=2), encoding="utf-8")
         (folder / "chapters.json").write_text(json.dumps([{
             "number": 1,
@@ -547,6 +696,11 @@ def _run(args: argparse.Namespace) -> int:
             "chapter_bgm_strategy": "same",
             "chapter_bgm_overrides": {},
             "sound_cues": {"opening": None, "chapter": None, "closing": None},
+            # This dedicated zero-character fixture exercises real generation
+            # job controls using the saved narrator. The application default
+            # remains OFF; this test explicitly opts into narrator-only mode
+            # because no character profiles/dialogue assignments exist.
+            "narrator_only_generation": True,
             "characters": [],
         }, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -613,6 +767,8 @@ def _run(args: argparse.Namespace) -> int:
         "secondary_project_folder": str(secondary_project_folder.resolve()),
         "full_generation_project_folder": str(full_generation_project_folder.resolve()),
         "full_generation_output_path": str(full_generation_output_path.resolve()),
+        "narrator_only_project_folder": str(narrator_only_project_folder.resolve()),
+        "narrator_only_output_path": str(narrator_only_output_path.resolve()),
         "control_project_folder": str(control_project_folder.resolve()),
         "control_output_path": str(control_output_path.resolve()),
         "recovery_project_folder": str(recovery_project_folder.resolve()),
@@ -622,6 +778,7 @@ def _run(args: argparse.Namespace) -> int:
         "narrator_profile_name": narrator_profile_name,
         "metadata_history": metadata_history,
         "metadata_cover_path": str(metadata_cover_source.resolve()),
+        "audiobook_library_fixtures": stage6_audiobook_fixtures,
     }, ensure_ascii=True, indent=2), encoding="utf-8")
 
     environment = os.environ.copy()
@@ -686,6 +843,10 @@ def _run(args: argparse.Namespace) -> int:
             raise AssertionError("The packaged UI did not report completion of the Production Preview Save As action.")
         first_checks = first_result.get("checks") or {}
         for required_check in (
+            "stage6_chapter_preview_owner_project_and_stable_chapter_identity",
+            "stage6_playback_position_persisted_before_process_restart",
+            "stage6_player_volume_rate_persisted_before_restart",
+            "stage6_mini_player_close_preserves_active_session",
             "stage54_packaged_real_multi_chapter_full_generation",
             "stage54_real_generation_pause_resume_cancel",
             "stage54_real_generation_retry_and_history_ownership",
@@ -767,8 +928,22 @@ def _run(args: argparse.Namespace) -> int:
         if process.returncode != 0:
             raise RuntimeError(f"Restarted packaged app returned exit code {process.returncode} after reporting success.")
         restart_checks = restart_result.get("checks") or {}
-        if "stage54_real_restart_recovery" not in restart_checks:
-            raise AssertionError("The restarted packaged app did not complete real interrupted-generation recovery.")
+        for required_check in (
+            "stage54_real_restart_recovery",
+            "stage6_cross_module_production_audiobooks_player_job_history_identity",
+            "stage6_playback_position_restored_after_process_restart",
+            "stage6_mini_player_navigation_and_close_after_restart",
+            "stage6_history_real_search_date_status_and_details",
+            "stage6_task_manager_real_records_filters_details_and_counts",
+            "stage6_task_manager_repairs_missing_view_action_in_place",
+            "stage6_task_manager_repairs_mismatched_view_action_in_place",
+            "stage6_task_manager_backend_dom_stays_stable_after_delayed_refresh",
+            "stage6_responsive_shared_shell_bounds_41_resolutions",
+            "stage6_responsive_viewport_matrix_41_resolutions",
+            "stage6_responsive_window_and_scale_emulation",
+        ):
+            if required_check not in restart_checks:
+                raise AssertionError("The restarted packaged app did not complete required acceptance: " + required_check)
         recovery_output_path = Path(str(json.loads(config.read_text(encoding="utf-8")).get("recovery_output_path") or ""))
         if not recovery_output_path.is_file() or recovery_output_path.stat().st_size < 1024:
             raise AssertionError("Real restart recovery did not create a non-empty M4B output: " + str(recovery_output_path))
@@ -804,6 +979,8 @@ def _run(args: argparse.Namespace) -> int:
         shutil.rmtree(full_generation_project_folder, ignore_errors=True)
         shutil.rmtree(control_project_folder, ignore_errors=True)
         shutil.rmtree(recovery_project_folder, ignore_errors=True)
+        for fixture in stage6_audiobook_fixtures:
+            shutil.rmtree(Path(fixture["folder"]), ignore_errors=True)
         shutil.rmtree(temp_root, ignore_errors=True)
 
 

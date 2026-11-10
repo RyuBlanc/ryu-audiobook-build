@@ -400,7 +400,7 @@ class PreviewAssemblyTests(unittest.TestCase):
                  patch("app.audio.library.validate_saved_audio_paths"), \
                  patch("app.audio.assembler._concat_audio_files", side_effect=fake_concat), \
                  patch("app.audio.assembler._run", side_effect=fake_run), \
-                 patch("app.audio.assembler._duration_ms", side_effect=[10_000, 10_700, 10_700]):
+                 patch("app.audio.assembler._duration_ms", side_effect=[10_000, 700, 10_700, 10_700]):
                 premium_v2_host.PremiumV2Bridge._preview_worker(
                     updates_host, "mix-cleanup", profile, "Mira spoke.", 10, state, threading.Event()
                 )
@@ -418,6 +418,88 @@ class PreviewAssemblyTests(unittest.TestCase):
             self.assertTrue((preview_root / "preview_playback_mix-cleanup.wav").is_file())
             self.assertFalse((preview_root / "preview_mix-cleanup.wav").exists())
             self.assertFalse((preview_root / "sound-preview-opening-mix-cleanup.m4a").exists())
+
+
+    def test_voice_preview_records_exact_first_paragraph_audio_boundary(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            output = root / "preview.wav"
+
+            class Provider:
+                recommended_preview_chunk_sentences = 1
+                recommended_preview_chunk_chars = 360
+
+                def synthesize(self, text, path, voice=None):
+                    _write_wav(Path(path), 0.25)
+
+            with patch(
+                "app.tts.preview._normalize",
+                side_effect=lambda source, destination: Path(destination).write_bytes(Path(source).read_bytes()),
+            ), patch(
+                "app.tts.preview._concat",
+                side_effect=lambda inputs, destination: Path(destination).write_bytes(b"preview" * 400),
+            ):
+                result = build_voice_preview(
+                    "First sentence. Second sentence.\n\nThird paragraph.",
+                    Provider(), "voice", output,
+                    narration_speed=1.0, pacing_profile="off", max_chars=2000,
+                )
+
+            self.assertEqual(result.first_paragraph_end_ms, 500)
+
+    def test_voice_preview_does_not_guess_boundary_inside_a_merged_paragraph_chunk(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            output = root / "preview.wav"
+
+            class Provider:
+                recommended_preview_chunk_sentences = 10
+                recommended_preview_chunk_chars = 1400
+
+                def synthesize(self, text, path, voice=None):
+                    _write_wav(Path(path), 0.25)
+
+            with patch(
+                "app.tts.preview._normalize",
+                side_effect=lambda source, destination: Path(destination).write_bytes(Path(source).read_bytes()),
+            ), patch(
+                "app.tts.preview._concat",
+                side_effect=lambda inputs, destination: Path(destination).write_bytes(b"preview" * 400),
+            ):
+                result = build_voice_preview(
+                    "First paragraph sentence.\n\nSecond paragraph sentence.",
+                    Provider(), "voice", output,
+                    narration_speed=1.0, pacing_profile="off", max_chars=2000,
+                )
+
+            self.assertIsNone(result.first_paragraph_end_ms)
+
+    def test_voice_preview_does_not_mark_a_max_chars_truncated_single_paragraph_complete(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            output = root / "preview.wav"
+            source_text = "A long single paragraph. " * 40
+
+            class Provider:
+                recommended_preview_chunk_sentences = 1
+                recommended_preview_chunk_chars = 80
+
+                def synthesize(self, text, path, voice=None):
+                    _write_wav(Path(path), 0.05)
+
+            with patch(
+                "app.tts.preview._normalize",
+                side_effect=lambda source, destination: Path(destination).write_bytes(Path(source).read_bytes()),
+            ), patch(
+                "app.tts.preview._concat",
+                side_effect=lambda inputs, destination: Path(destination).write_bytes(b"preview" * 400),
+            ):
+                result = build_voice_preview(
+                    source_text, Provider(), "voice", output,
+                    narration_speed=1.0, pacing_profile="off", max_chars=360,
+                )
+
+            self.assertIsNone(result.first_paragraph_end_ms)
 
 if __name__ == "__main__":
     unittest.main()

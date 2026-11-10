@@ -9,6 +9,84 @@ from app.tts.qwen_character_runtime import _run
 
 
 class QwenRuntimeSafetyTests(unittest.TestCase):
+    def test_automatic_backend_uses_cpu_only_when_same_machine_verified_benchmark_is_faster(self):
+        import json
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.tts import qwen_accelerator as accelerator
+
+        hardware = {"gpu_name": "Test GPU", "processor": "Test CPU"}
+        def row(backend, seconds):
+            return {
+                "state": "completed", "measured_at": "2026-11-09T12:00:00Z",
+                "result": {
+                    "provider": "QwenCharacterProvider", "model_kind": "custom-0.6b",
+                    "workload_id": "qwen-customvoice-preview-30s-v1",
+                    "success": True, "backend_verified": True,
+                    "target_duration_met": True, "backend": backend,
+                    "seconds": seconds, "audio_seconds": 30.0, "hardware": hardware,
+                },
+            }
+
+        gpu = SimpleNamespace(backend="cuda", device="cuda:0", name="Test GPU", supported=True,
+                              memory_gb=8.0, reason="")
+        with TemporaryDirectory() as temporary:
+            path = Path(temporary) / "history.json"
+            path.write_text(json.dumps([row("cuda", 40.0), row("cpu", 30.0)]), encoding="utf-8")
+            with patch.object(accelerator, "best_accelerator", return_value=gpu), \
+                 patch("platform.processor", return_value="Test CPU"):
+                selected, reason = accelerator.automatic_accelerator("custom-0.6b", path)
+            self.assertEqual(selected.backend, "cpu")
+            self.assertIn("at least 5% faster", reason)
+
+            path.write_text(json.dumps([row("cuda", 40.0), row("cpu", 39.0)]), encoding="utf-8")
+            with patch.object(accelerator, "best_accelerator", return_value=gpu), \
+                 patch("platform.processor", return_value="Test CPU"):
+                selected, _reason = accelerator.automatic_accelerator("custom-0.6b", path)
+            self.assertEqual(selected.backend, "cuda")
+
+    def test_automatic_backend_ignores_unverified_or_other_model_benchmarks(self):
+        import json
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.tts import qwen_accelerator as accelerator
+
+        gpu = SimpleNamespace(backend="cuda", device="cuda:0", name="Test GPU", supported=True,
+                              memory_gb=8.0, reason="")
+        bad = {
+            "state": "completed", "result": {
+                "provider": "QwenCharacterProvider", "model_kind": "custom-1.7b",
+                "workload_id": "qwen-customvoice-preview-30s-v1", "success": True,
+                "backend_verified": False, "target_duration_met": True, "backend": "cpu",
+                "seconds": 1.0, "audio_seconds": 30.0,
+                "hardware": {"gpu_name": "Test GPU", "processor": "Test CPU"},
+            },
+        }
+        with TemporaryDirectory() as temporary:
+            path = Path(temporary) / "history.json"
+            path.write_text(json.dumps([bad]), encoding="utf-8")
+            with patch.object(accelerator, "best_accelerator", return_value=gpu), \
+                 patch("platform.processor", return_value="Test CPU"):
+                selected, _reason = accelerator.automatic_accelerator("custom-0.6b", path)
+        self.assertEqual(selected.backend, "cuda")
+
+    def test_qwen_huggingface_cache_uses_configured_model_cache_root(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from app.tts import qwen_character_runtime as runtime
+
+        with TemporaryDirectory() as temporary:
+            selected_cache = Path(temporary) / "selected-cache"
+            with patch.object(runtime, "model_cache_root", return_value=selected_cache):
+                environment = runtime.runtime_environment()
+            self.assertEqual(Path(environment["HF_HOME"]), selected_cache)
+            self.assertTrue(selected_cache.is_dir())
+
     def test_command_runner_enforces_timeout_when_child_stalls_without_stdout(self):
         started = time.monotonic()
         with self.assertRaisesRegex(RuntimeError, "timed out after 0.3 seconds"):
@@ -28,7 +106,7 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
             )
         self.assertIn("download stage", progress)
 
-    def test_gpu_cuda_install_failure_does_not_silently_install_cpu_torch(self):
+    def test_gpu_cuda_install_failure_uses_transparent_cpu_compatibility_fallback(self):
         from pathlib import Path
         from unittest.mock import patch
         from app.tts import qwen_character_runtime as runtime
@@ -37,15 +115,18 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
             (0, "pip bootstrap ready"),
             (1, "CUDA 12.8 wheel unavailable"),
             (1, "CUDA 12.6 wheel unavailable"),
+            (0, "CPU PyTorch installed"),
+            (0, "Qwen package installed"),
+            (0, "torch=2.9.1+cpu\ntorchaudio=2.9.1+cpu\ncuda=False\nxpu=False"),
         ]
         candidate = type("Candidate", (), {"backend": "cuda-candidate", "name": "NVIDIA GPU"})()
+        messages = []
         with (
             patch.object(runtime, "_has_nvidia_gpu", return_value=True),
             patch.object(runtime, "best_accelerator", return_value=candidate),
             patch.object(runtime, "_run_capture", side_effect=results) as runner,
         ):
-            with self.assertRaisesRegex(RuntimeError, "CPU fallback was not installed automatically"):
-                runtime._install_runtime_packages(Path("python.exe"))
+            result = runtime._install_runtime_packages(Path("python.exe"), messages.append)
 
         commands = [entry.args[0] for entry in runner.call_args_list]
         index_urls = [
@@ -58,9 +139,68 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
             [
                 "https://download.pytorch.org/whl/cu128",
                 "https://download.pytorch.org/whl/cu126",
+                "https://download.pytorch.org/whl/cpu",
             ],
         )
-        self.assertEqual(runner.call_count, 3)
+        self.assertEqual(result[0], "cpu")
+        self.assertTrue(any("CPU compatibility mode" in message for message in messages))
+        self.assertEqual(runner.call_count, 6)
+
+    def test_preflight_gpu_memory_guard_rejects_model_that_exceeds_free_vram(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from app.tts import qwen_character_worker as worker
+
+        class FakeCuda:
+            @staticmethod
+            def mem_get_info(_device=None):
+                return 100, 1000
+
+        fake_torch = SimpleNamespace(cuda=FakeCuda())
+        with TemporaryDirectory() as temporary:
+            model_path = Path(temporary)
+            (model_path / "model.safetensors").write_bytes(b"x" * 100)
+            with self.assertRaisesRegex(RuntimeError, "cuda:0 out of memory"):
+                worker._preflight_device_memory(fake_torch, "cuda:0", model_path, False)
+
+    def test_low_memory_worker_flag_uses_low_cpu_mem_usage_and_same_model(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.tts import qwen_character_worker as worker
+
+        calls = []
+        class FakeCuda:
+            @staticmethod
+            def is_available():
+                return False
+        class FakeTorch:
+            float32 = "float32"
+            cuda = FakeCuda()
+            version = SimpleNamespace(hip=None)
+            @staticmethod
+            def set_num_threads(_count):
+                return None
+        class FakeModel:
+            @staticmethod
+            def from_pretrained(path, **kwargs):
+                calls.append((path, kwargs))
+                return object()
+        with TemporaryDirectory() as temporary:
+            model_root = Path(temporary)
+            (model_root / "custom-1.7b").mkdir()
+            with (
+                patch.dict(sys.modules, {"torch": FakeTorch, "qwen_tts": SimpleNamespace(Qwen3TTSModel=FakeModel)}),
+                patch.object(worker, "best_accelerator", return_value=SimpleNamespace(
+                    supported=False, backend="cpu", device="cpu", name="CPU", reason=""
+                )),
+            ):
+                _model, device = worker._load_model("custom-1.7b", "cpu", model_root, low_memory=True)
+        self.assertEqual(device, "cpu")
+        self.assertEqual(calls[0][0], str(model_root / "custom-1.7b"))
+        self.assertTrue(calls[0][1].get("low_cpu_mem_usage"))
 
     def test_stdout_drain_uses_captured_queue_after_close_clears_provider_state(self):
         import queue
@@ -111,6 +251,45 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
         self.assertFalse(reader.is_alive(), "Qwen stdout reader did not terminate.")
         self.assertEqual(output_queue.get_nowait(), '{"ready": true}')
         self.assertIsNone(output_queue.get_nowait())
+
+    def test_qwen_provider_persists_verified_last_inference_device(self):
+        import json
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from app.tts.providers import qwen_character
+
+        provider = qwen_character.QwenCharacterProvider(
+            voice_id="telemetry-test", backend="automatic", model_kind="custom-1.7b"
+        )
+        with TemporaryDirectory() as temporary:
+            with patch.object(qwen_character, "settings_root", return_value=Path(temporary)):
+                provider._record_execution_context({
+                    "ok": True, "device": "cuda:0", "backend": "rocm",
+                    "kind": "custom-1.7b", "task": "custom"
+                })
+            record = json.loads((Path(temporary) / "qwen_last_inference.json").read_text(encoding="utf-8"))
+        self.assertTrue(record["verified_inference"])
+        self.assertEqual(record["backend"], "rocm")
+        self.assertEqual(record["device"], "cuda:0")
+        self.assertEqual(record["model_kind"], "custom-1.7b")
+
+    def test_qwen_provider_does_not_record_worker_ready_as_actual_inference(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from app.tts.providers import qwen_character
+
+        provider = qwen_character.QwenCharacterProvider(
+            voice_id="telemetry-ready-test", backend="automatic", model_kind="custom-0.6b"
+        )
+        with TemporaryDirectory() as temporary:
+            with patch.object(qwen_character, "settings_root", return_value=Path(temporary)):
+                provider._record_execution_context({
+                    "ready": True, "device": "cuda:0", "backend": "cuda",
+                    "kind": "custom-0.6b", "task": "custom",
+                })
+            self.assertFalse((Path(temporary) / "qwen_last_inference.json").exists())
 
     def test_close_tolerates_already_closed_qwen_streams(self):
         from types import SimpleNamespace
@@ -494,25 +673,26 @@ xpu=False""",
         self.assertIn("torch-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl", joined)
         self.assertEqual(result, ("rocm", "2.9.1+rocm7.2.1", "2.9.1+rocm7.2.1"))
 
-    def test_amd_windows_candidate_outside_official_matrix_fails_without_cpu_downgrade(self):
-        from pathlib import Path
-        from unittest.mock import patch
-        from app.tts import qwen_character_runtime as runtime
+    def test_amd_windows_candidate_outside_official_matrix_uses_cpu_compatibility_mode(self):
         from app.tts.qwen_accelerator import Accelerator
 
         adapter = Accelerator("rocm-candidate", "cpu", "AMD Radeon RX 9050", 16.0, False, "candidate")
-        with (
-            patch.object(runtime, "detect_accelerators", return_value=(adapter,)),
-            patch.object(runtime, "best_accelerator", return_value=adapter),
-            patch.object(runtime, "_has_nvidia_gpu", return_value=False),
-            patch.object(runtime, "windows_host_identity", return_value=(
-                "Microsoft Windows 11 Pro", "24H2", "AMD Ryzen 9 9950X"
-            )),
-            patch.object(runtime, "_run_capture", return_value=(0, "pip bootstrap ok")),
-            patch.object(runtime.os, "name", "nt"),
-        ):
-            with self.assertRaisesRegex(RuntimeError, "not listed for this Windows release"):
-                runtime._install_runtime_packages(Path("qwen-python.exe"))
+        commands, messages, result = self._run_install(
+            adapter,
+            "nt",
+            [(0, "CPU PyTorch installed")],
+            """torch=2.9.1+cpu
+torchaudio=2.9.1+cpu
+hip=None
+cuda=False
+xpu=False""",
+            "24H2",
+        )
+        joined = " ".join(str(value) for command in commands for value in command)
+        self.assertIn("https://download.pytorch.org/whl/cpu", joined)
+        self.assertNotIn("rocm-rel-", joined)
+        self.assertEqual(result[0], "cpu")
+        self.assertTrue(any("CPU compatibility mode" in message for message in messages))
 
     def test_intel_xpu_windows_uses_official_pytorch_xpu_index(self):
         from app.tts.qwen_accelerator import Accelerator
@@ -533,38 +713,45 @@ xpu=True""",
         self.assertEqual(result[0], "xpu")
         self.assertTrue(any("Intel XPU" in message for message in messages))
 
-    def test_amd_rocm_install_rejects_wheels_without_active_hip_runtime(self):
+    def test_amd_rocm_runtime_that_does_not_activate_uses_cpu_compatibility_mode(self):
         from app.tts.qwen_accelerator import Accelerator
 
         adapter = Accelerator("rocm-candidate", "cpu", "AMD Radeon RX 9070 GRE", 16.0, False, "candidate")
-        with self.assertRaisesRegex(RuntimeError, "AMD ROCm packages installed but PyTorch did not activate HIP"):
-            self._run_install(
-                adapter,
-                "nt",
-                [(0, "ROCm packages installed")],
-                """torch=2.14.0+rocm10.1.0
+        commands, messages, result = self._run_install(
+            adapter,
+            "nt",
+            [(0, "ROCm packages installed"), (0, "CPU fallback installed")],
+            """torch=2.14.0+rocm10.1.0
 torchaudio=2.11.0.3+rocm10.1.0
 hip=None
 cuda=False
 xpu=False""",
-            )
+        )
+        joined = " ".join(str(value) for command in commands for value in command)
+        self.assertIn("https://download.pytorch.org/whl/cpu", joined)
+        self.assertEqual(result[0], "cpu")
+        self.assertTrue(any("CPU compatibility mode" in message for message in messages))
 
-    def test_intel_xpu_install_rejects_if_xpu_is_not_available(self):
+    def test_intel_xpu_runtime_that_does_not_activate_uses_cpu_compatibility_mode(self):
         from app.tts.qwen_accelerator import Accelerator
 
         adapter = Accelerator("xpu-candidate", "cpu", "Intel Arc Graphics", 8.0, False, "candidate")
-        with self.assertRaisesRegex(RuntimeError, "Intel XPU packages installed but torch.xpu.is_available"):
-            self._run_install(
-                adapter,
-                "nt",
-                [(0, "XPU wheels installed")],
-                """torch=2.9.1
+        commands, messages, result = self._run_install(
+            adapter,
+            "nt",
+            [(0, "XPU wheels installed"), (0, "CPU fallback installed")],
+            """torch=2.9.1
 torchaudio=2.9.1
 hip=None
 cuda=False
 xpu=False""",
-            )
+        )
+        joined = " ".join(str(value) for command in commands for value in command)
+        self.assertIn("https://download.pytorch.org/whl/cpu", joined)
+        self.assertEqual(result[0], "cpu")
+        self.assertTrue(any("CPU compatibility mode" in message for message in messages))
 
 
 if __name__ == "__main__":
     unittest.main()
+

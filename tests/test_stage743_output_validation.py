@@ -6,6 +6,7 @@ replace playback tests in a desktop audiobook player.
 from __future__ import annotations
 
 import math
+import re
 import struct
 import subprocess
 import tempfile
@@ -79,8 +80,13 @@ class Stage743OutputValidationTests(unittest.TestCase):
                     "title": "Stage 7.4.3 Test Book",
                     "author": "Ryu Test Author",
                     "narrator": "Local Test Voice",
+                    "publisher": "Ryu Test Press",
+                    "series": "Dragon Archive",
+                    "series_number": "3",
                     "language": "en",
+                    "year": "2026",
                     "genre": "Fantasy",
+                    "description": "Two chapter M4B metadata validation fixture",
                 },
                 bitrate=128,
             )
@@ -102,11 +108,50 @@ class Stage743OutputValidationTests(unittest.TestCase):
             report = (probe.stderr or "") + "\n" + (probe.stdout or "")
             self.assertIn("Stage 7.4.3 Test Book", report)
             self.assertIn("Ryu Test Author", report)
+            self.assertRegex(report, r"Stream #\d+:\d+(?:\[[^\]]+\])?\(eng\): Audio:")
+            from mutagen.mp4 import MP4
+            tags = MP4(str(output)).tags or {}
+            self.assertEqual(tags["----:com.apple.iTunes:narrator"][0].decode("utf-8"), "Local Test Voice")
+            self.assertEqual(tags["----:com.apple.iTunes:publisher"][0].decode("utf-8"), "Ryu Test Press")
+            self.assertEqual(tags["----:com.apple.iTunes:series"][0].decode("utf-8"), "Dragon Archive")
+            self.assertEqual(tags["----:com.apple.iTunes:series_number"][0].decode("utf-8"), "3")
+            self.assertEqual(tags["©day"][0], "2026")
+            self.assertEqual(tags["©gen"][0], "Fantasy")
+            self.assertEqual(tags["desc"][0], "Two chapter M4B metadata validation fixture")
             self.assertIn("Opening Chapter", report)
             self.assertIn("Final Chapter", report)
             self.assertIn("Chapter #0:0", report)
             self.assertIn("Chapter #0:1", report)
-            self.assertRegex(report, r"Video: mjpeg.*attached pic|attached pic.*Video: mjpeg")
+            report_lines = report.splitlines()
+            stream_lines = [
+                (index, line.strip())
+                for index, line in enumerate(report_lines)
+                if "stream #" in line.casefold()
+            ]
+            cover_stream_index = next(
+                (
+                    index for index, line in stream_lines
+                    if "video:" in line.casefold() and "mjpeg" in line.casefold()
+                ),
+                None,
+            )
+            self.assertIsNotNone(cover_stream_index, report)
+            next_stream_index = next(
+                (index for index, _line in stream_lines if index > cover_stream_index),
+                len(report_lines),
+            )
+            cover_stream_block = report_lines[cover_stream_index:next_stream_index]
+            self.assertIn("(attached pic)", report_lines[cover_stream_index].casefold())
+            chapter_ranges = re.findall(
+                r"Chapter #\d+:\d+:\s*start\s+([0-9.]+),\s*end\s+([0-9.]+)",
+                report,
+            )
+            self.assertEqual(len(chapter_ranges), 2, report)
+            parsed_ranges = [(float(start), float(end)) for start, end in chapter_ranges]
+            self.assertAlmostEqual(parsed_ranges[0][0], 0.0, delta=0.15)
+            self.assertGreater(parsed_ranges[0][1], parsed_ranges[0][0])
+            self.assertAlmostEqual(parsed_ranges[1][0], parsed_ranges[0][1], delta=1.5)
+            self.assertGreater(parsed_ranges[1][1], parsed_ranges[1][0])
 
             # FFmpeg must be able to decode the complete primary audio stream from the final packaged file.
             decode = subprocess.run(

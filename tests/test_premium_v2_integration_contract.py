@@ -94,8 +94,9 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn('"models.list": self._models_list', self.host)
         self.assertIn('"models.list": True', self.host)
         self.assertIn('def _models_list(', self.host)
-        self.assertIn('PiperProvider.model_paths()', self.host)
-        self.assertIn('qwen_model_installed(kind)', self.host)
+        registry = (ROOT / "app" / "tts" / "model_registry.py").read_text(encoding="utf-8")
+        self.assertIn('PiperProvider.model_paths()', registry)
+        self.assertIn('qwen_model_installed(kind)', registry)
         self.assertIn('def _assert_no_active_model_lifecycle(', self.host)
         self.assertIn("Confirm that you have permission", self.host)
         self.assertIn("def _voice_save(", self.host)
@@ -456,15 +457,42 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("chapter_bgm_strategy=self.chapter_bgm_strategy", manager)
         self.assertNotIn("scene_transition_cue_path=self.scene_transition_cue_path", manager)
 
+    def test_production_preview_ready_state_must_match_the_selected_production_chapter(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("productionPreviewMatchesSelection=Boolean(", adapter)
+        self.assertIn("voicePreviewValid && productionPreviewJobId && selectedNumber>0", adapter)
+        self.assertIn("previewChapterNumber===selectedNumber", adapter)
+        self.assertIn("'Preview ready · Chapter '+selectedNumber", adapter)
+
+    def test_performance_center_exposes_a_real_tts_benchmark_separately_from_hardware_scan(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn("function wireTtsBenchmarkButton()", adapter)
+        self.assertIn("button.id = 'runTtsBenchmark'", adapter)
+        self.assertIn("call('performance.benchmark'", adapter)
+        self.assertIn("No real synthesis benchmark yet", adapter)
+        self.assertIn('"performance.benchmark": self._performance_benchmark', host)
+        self.assertIn('"performance.benchmark": True', host)
+        self.assertIn("benchmark_provider(", host)
+        self.assertIn('state="completed"', host)
+
     def test_performance_screen_never_displays_unmeasured_hardware_as_fact(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("async function refreshPerformance()", adapter)
         self.assertNotIn("await refreshPerformance().catch(()=>{});", adapter)
         self.assertIn("CPU telemetry unavailable", adapter)
         self.assertIn("GPU / VRAM telemetry unavailable", adapter)
-        self.assertIn("section?.querySelectorAll('.ready-list .ready b').forEach(node => { node.textContent = 'Not measured'; });", adapter)
-        self.assertIn("const result=await refreshPerformance();", adapter)
-        self.assertIn('"performance.info": False', (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8"))
+        self.assertIn("runHardwareBenchmark", adapter)
+        refresh_start = adapter.index("async function refreshPerformance()")
+        refresh_end = adapter.index("async function runHardwareBenchmark()", refresh_start)
+        refresh_contract = adapter[refresh_start:refresh_end]
+        self.assertIn("call('performance.info', {refresh:false})", refresh_contract)
+        benchmark_start = refresh_end
+        benchmark_end = adapter.index("const benchmarkButton", benchmark_start) if "const benchmarkButton" in adapter[benchmark_start:] else benchmark_start + 2500
+        benchmark_contract = adapter[benchmark_start:benchmark_end]
+        self.assertIn("call('performance.info', {refresh:true})", benchmark_contract)
+        self.assertIn("await refreshPerformance()", benchmark_contract)
+        self.assertIn('"performance.info": True', (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8"))
 
     def test_cue_feedback_matches_current_three_slot_assignment_contract(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
@@ -523,7 +551,10 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         history_end = host.index("def _project_rename(", history_start)
         history = host[history_start:history_end]
         self.assertIn("self._history.values()", history)
-        self.assertNotIn("self._jobs.values()", history)
+        self.assertIn("for current in self._jobs.values()", history)
+        self.assertIn("if not job_id or job_id in rows_by_id", history)
+        self.assertIn("rows_by_id[job_id] = dict(current)", history)
+        self.assertIn("A journaled terminal record always wins over its queue copy.", history)
         clear_start = host.index("def _job_clear_completed(")
         clear_end = host.index("def _player_get_active(", clear_start)
         clear = host[clear_start:clear_end]
@@ -573,7 +604,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             "call('character.update'",
             "call('character.delete'",
             "Automatic per-line AI speaker suggestions remain prototype-only",
-            "Custom project-library and audio-assets root selection is not implemented",
+            "Manage supported project, audio asset and model storage locations in Settings > Storage.",
+            "call('storage.choose_root'",
             "call('diagnostics.export_logs')",
             "function renderPronunciationRows()",
             "call('pronunciation.list')",
@@ -594,15 +626,14 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         performance = adapter[start:end]
         self.assertIn("if (!result?.available)", performance)
         self.assertIn("['Not tested', 'Generation performance']", performance)
-        self.assertIn("node.textContent = 'Not measured'", performance)
         self.assertIn("result.cpu_percent", performance)
         self.assertIn("result.gpu_percent", performance)
         self.assertIn("result.vram_used_mb", performance)
         self.assertIn("result.generation_seconds", performance)
-        self.assertIn("duration === null ? 'Not tested'", performance)
+        self.assertIn("duration===null?'Not tested'", performance)
         self.assertNotIn("Math.random", performance)
         self.assertNotIn("setInterval", performance)
-        self.assertIn("Live hardware telemetry and repeatable benchmark execution are not implemented", adapter)
+        self.assertIn("Hardware scan complete.", adapter)
 
     def test_stage829_pronunciation_matrix_and_model_registry_never_fake_success(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
@@ -785,9 +816,14 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         )
         self.assertEqual(
             capabilities.get("performance.info"),
-            "False",
-            "Unmeasured hardware telemetry must remain truthfully unavailable.",
+            "True",
+            "Live host telemetry is connected and must remain advertised.",
         )
+        self.assertEqual(capabilities.get("performance.history.clear"), "True")
+        self.assertEqual(capabilities.get("performance.qwen_benchmark"), "True")
+        self.assertEqual(capabilities.get("performance.history.export"), "True")
+        self.assertEqual(capabilities.get("performance.history.import"), "True")
+        self.assertEqual(capabilities.get("performance.history.compare"), "True")
 
 
     def test_dashboard_recent_project_cards_open_real_local_project(self):
@@ -873,8 +909,12 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertNotIn("return false;", lifecycle)
         self.assertIn("await refreshModels()", lifecycle)
         self.assertIn("await refreshProviderCatalog(providerKey, false)", lifecycle)
-        self.assertIn("disk_free_bytes", host)
-        self.assertIn("installed_voice_names", host)
+        registry = (ROOT / "app" / "tts" / "model_registry.py").read_text(encoding="utf-8")
+        self.assertIn("disk_free_bytes", registry)
+        self.assertIn("component_file_inventory", registry)
+        self.assertIn("normalize_inventory_status", registry)
+        self.assertIn("installed_voice_names", registry)
+        self.assertIn("storage_bytes", registry)
         self.assertIn("const managedStorageBytes = rows.reduce", adapter)
         self.assertIn("storageLabel.textContent = 'Managed model files'", adapter)
         self.assertIn("formatModelBytes(liveFreeBytes) + ' free on drive at model location'", adapter)
@@ -883,8 +923,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("model.requirements", adapter)
         self.assertIn("function modelNeedsAttention(model)", adapter)
         self.assertIn("if (filter === 'attention' && !modelNeedsAttention(model)) return false;", adapter)
-        self.assertIn("if (filter === 'ready' && (!model.installed || modelNeedsAttention(model))) return false;", adapter)
-        self.assertIn("const ready = managed.filter(model => model.installed && !modelNeedsAttention(model)).length;", adapter)
+        self.assertIn("if (filter === 'ready' && String(model.status || '') !== 'Ready') return false;", adapter)
+        self.assertIn("const ready = managed.filter(model => model.status === 'Ready').length;", adapter)
         self.assertIn("const problem = modelNeedsAttention({...model,status});", adapter)
         self.assertIn("runtime required", adapter)
         self.assertNotIn("Per-model update, repair, and uninstall are not implemented", adapter)
@@ -908,10 +948,20 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("document.querySelector('#soundSourceFilter [data-source].active')", adapter)
         self.assertIn("box.innerHTML = jobs.map(j =>", adapter)
         self.assertIn("dataset.jobAction", adapter)
-        # Player transport controls intentionally use visible labels; bind them to the real Audio element.
-        self.assertIn("playerAudio.playbackRate = Number(audioLabel.replace('×',''))", adapter)
-        self.assertIn("playerAudio.currentTime = Math.max(0, playerAudio.currentTime - 15)", adapter)
-        self.assertIn("playerAudio.currentTime = Math.min(playerAudio.duration || Infinity, playerAudio.currentTime + 15)", adapter)
+        # Player transport controls are bound directly; no capture-phase glyph
+        # handler may confuse the identical main Play and Next Chapter symbols.
+        self.assertNotIn("if (button.closest('#player')) {", adapter)
+        player_start = adapter.index("function bindAudiobookPlayerControls(")
+        player_end = adapter.index("async function openPlayer(", player_start)
+        player_bindings = adapter[player_start:player_end]
+        self.assertIn("buttons[0].onclick = () => seekPlayerBy(-15)", player_bindings)
+        self.assertIn("buttons[1].onclick = () => jumpPlayerChapter('previous')", player_bindings)
+        self.assertIn("buttons[3].onclick = () => jumpPlayerChapter('next')", player_bindings)
+        self.assertIn("buttons[4].onclick = () => seekPlayerBy(15)", player_bindings)
+        self.assertIn("void applyPlayerRate(rate, true);", player_bindings)
+        self.assertIn("return savePlayerPreferences({player_rate:rate})", adapter)
+        self.assertIn("playerAudio.currentTime = Math.max(0, Math.min(playerAudio.duration, playerAudio.currentTime + Number(seconds || 0)))", adapter)
+        self.assertIn("if ($('mainPlay')) $('mainPlay').onclick = playSelectedAudiobook;", adapter)
         self.assertIn("const lengthGroup = [...document.querySelectorAll('#voices .toolbar')]", adapter)
         self.assertIn("const duration = lengthGroup?.querySelector('.seg button.active')?.textContent.match(/\\d+/)?.[0] || '30'", adapter)
         # Chapter context actions and track selection have source-backed host calls.
@@ -1219,8 +1269,13 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         start = adapter.index("async function refreshJobs()")
         end = adapter.index("async function monitorJob(", start)
         refresh = adapter[start:end]
+        self.assertIn("jobsRefreshRequested = true;", refresh)
         self.assertIn("if (jobsRefreshPromise) return jobsRefreshPromise;", refresh)
-        self.assertIn("const refreshPromise = refreshJobsImpl();", refresh)
+        self.assertIn("const refreshPromise = (async () => {", refresh)
+        self.assertIn("while (jobsRefreshRequested)", refresh)
+        self.assertIn("jobsRefreshRequested = false;", refresh)
+        self.assertIn("latestJobs = await refreshJobsImpl();", refresh)
+        self.assertIn("jobsRefreshPromise = refreshPromise;", refresh)
         self.assertIn("finally { if (jobsRefreshPromise === refreshPromise) jobsRefreshPromise = null; }", refresh)
         self.assertIn("async function refreshJobsImpl()", refresh)
         self.assertIn("return allJobs;", refresh)
@@ -1297,20 +1352,58 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("writeStyleIfChanged(progress, 'width', pct + '%')", refresh_jobs)
 
 
-    def test_only_unimplemented_prototype_actions_are_disabled(self):
+    def test_release_artifact_includes_package_size_breakdown_without_pruning_assets(self):
+        workflow = (ROOT / ".github" / "workflows" / "build-windows.yml").read_text(encoding="utf-8")
+        reporter = (ROOT / "package_size_report.py").read_text(encoding="utf-8")
+        self.assertIn("Generate package size breakdown", workflow)
+        self.assertIn("package_size_report.py", workflow)
+        self.assertIn("package-size-report.json", workflow)
+        self.assertIn("release-sha256-manifest.json", workflow)
+        self.assertIn('"piper_models"', reporter)
+        self.assertIn('"kokoro_models"', reporter)
+        self.assertIn('"starter_audio"', reporter)
+        self.assertIn("The report does not mutate assets.", reporter)
+        self.assertIn("html_wrapper_overhead_bytes", reporter)
+        self.assertIn("largest_files", reporter)
+
+    def test_help_guide_covers_stage8_workflows_and_current_limitations(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("function renderHelpGuide()", adapter)
+        self.assertIn("renderHelpGuide();", adapter)
+        self.assertIn("helpGuideSearch", adapter)
+        for topic in (
+            "Getting started", "Dashboard and Library", "Import Studio", "Chapter Studio",
+            "Voice Studio", "Character Studio", "Character Library", "Pronunciation Studio",
+            "Sound Design Studio", "Music Library", "Production Studio", "Audiobooks",
+            "History and Background Jobs", "Models Center", "Performance Center",
+            "Settings and Storage", "Troubleshooting",
+        ):
+            self.assertIn(topic, adapter)
+        for current_rule in (
+            "Same BGM", "Chapter-Based", "No BGM", "Voice Only",
+            "10, 30, 60 or 90 seconds", "M4B", "Scanned/image-only PDF",
+            "Settings > Storage", "After first paragraph", "0.6B or 1.7B",
+            "VoiceDesign itself uses its 1.7B model",
+        ):
+            self.assertIn(current_rule, adapter)
+        self.assertIn("Known limitations", adapter)
+        self.assertIn("Do not unplug", adapter)
+
+    def test_source_less_queue_placeholders_are_hidden_and_storage_is_navigable(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         start = adapter.index("function applyUnavailableControlStates()")
         end = adapter.index("async function wire()", start)
         guard = adapter[start:end]
         for selector in (
-            "#aiQueue [data-ai-line]:not([data-dialogue-id])",
-            "#settings button", "$('runBenchmark')",
+            "#aiQueue [data-ai-line]:not([data-dialogue-id])", "$('runBenchmark')",
         ):
             self.assertIn(selector, guard)
-        self.assertIn("element.disabled = true", guard)
-        self.assertIn("element.setAttribute('aria-disabled', 'true')", guard)
+        self.assertIn("element.hidden = true", guard)
+        self.assertIn("element.setAttribute('aria-hidden', 'true')", guard)
         self.assertIn("element.title = reason", guard)
+        self.assertNotIn("#settings button", guard)
+        self.assertNotIn("Changing the application storage root is not implemented", guard)
         self.assertNotIn("#acceptHighConfidence", guard)
         self.assertNotIn("#skipAiSuggestion", guard)
         self.assertNotIn("#aiUseLibrary", guard)
@@ -1319,8 +1412,25 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("async function acceptHighConfidenceDialogues()", adapter)
         self.assertIn("async function skipCurrentDialogueSuggestion()", adapter)
         self.assertIn("character.dialogue.suggestion.skip", host)
-        self.assertIn("Changing the application storage root is not implemented", guard)
-        self.assertIn("performance is intentionally marked Not tested", guard)
+        storage_start = adapter.index("function wireStorageControls()")
+        storage_end = adapter.index("async function loadSettings()", storage_start)
+        storage = adapter[storage_start:storage_end]
+        self.assertIn("button.textContent = 'Manage storage locations'", storage)
+        self.assertIn("storageTab.click()", storage)
+        self.assertIn("button.dataset.ryuStorageNavigationBound", storage)
+        self.assertIn("storage.choose_root", storage)
+        self.assertIn("document.querySelectorAll('#aiQueue [data-ai-line]:not([data-dialogue-id])')", adapter)
+        self.assertNotIn("button.matches('[data-ai-line]')", adapter)
+        self.assertNotIn("Bulk acceptance and queue predictions are not connected", adapter)
+        self.assertIn("if (button.id === 'acceptHighConfidence') { handle(() => acceptHighConfidenceDialogues()); return; }", adapter)
+        self.assertIn("if (button.id === 'skipAiSuggestion') { handle(() => skipCurrentDialogueSuggestion()); return; }", adapter)
+        self.assertIn("if (button.id === 'aiUseLibrary')", adapter)
+        self.assertIn("if (button.id === 'aiCreateNew')", adapter)
+        self.assertIn("if (button.id === 'createCharacterQuick')", adapter)
+        self.assertNotIn("Custom project-library and audio-assets root selection is not implemented", adapter)
+        self.assertIn("Manage supported project, audio asset and model storage locations in Settings > Storage.", adapter)
+        self.assertIn("benchmarkButton.disabled = false", guard)
+        self.assertNotIn("performance is intentionally marked Not tested", guard)
         self.assertNotIn("[data-model-repair]", guard)
         self.assertNotIn("[data-model-uninstall]", guard)
         self.assertIn("models.repair", host)
@@ -1447,7 +1557,12 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("previewStatus.id = 'productionPreviewStatus';", selector)
         self.assertIn("previewStatus.setAttribute('aria-live', 'polite');", selector)
         self.assertIn("productionPreviewSelectedChapter = chapterNumber;", selector)
-        self.assertIn("productionPreviewSelectedChapterId = String(chapter.chapter_id || chapter.id || '');", selector)
+        self.assertIn("const chapterId = String(chapter.chapter_id || chapter.id || '');", selector)
+        self.assertIn("productionPreviewSelectedChapterId = chapterId;", selector)
+        self.assertIn("const selectionChanged =", selector)
+        self.assertIn("chapterId !== productionPreviewSelectedChapterId", selector)
+        self.assertIn("chapterSignature !== productionPreviewSelectedChapterSignature", selector)
+        self.assertIn("if (!voicePreviewValid && $('productionPreviewStatus'))", selector)
         self.assertIn("const selectedNumber=Number(productionPreviewSelectedChapter||0);", preview_controls)
         self.assertIn("'Chapter '+selectedNumber+' selected. Generate a new preview for this chapter.'", preview_controls)
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from pathlib import Path
 import wave
 import re
@@ -261,6 +262,298 @@ def _probe_audio_bitrate_kbps(path: Path) -> int:
     if not match:
         raise RuntimeError(f"Could not determine audio bitrate of {path.name}")
     return int(match.group(1))
+
+
+def _iso639_2_language_code(value: str) -> str:
+    """Normalize common ISO-639-1 codes and language names for an audio-track header."""
+    raw = str(value or "").strip().casefold()
+    base = re.split(r"[-_\s]", raw, maxsplit=1)[0]
+    codes = {
+        "en": "eng", "english": "eng",
+        "hi": "hin", "hindi": "hin",
+        "ta": "tam", "tamil": "tam",
+        "te": "tel", "telugu": "tel",
+        "ml": "mal", "malayalam": "mal",
+        "kn": "kan", "kannada": "kan",
+        "bn": "ben", "bengali": "ben",
+        "mr": "mar", "marathi": "mar",
+        "gu": "guj", "gujarati": "guj",
+        "pa": "pan", "punjabi": "pan",
+        "ur": "urd", "urdu": "urd",
+        "fr": "fra", "french": "fra",
+        "es": "spa", "spanish": "spa",
+        "de": "deu", "german": "deu",
+        "it": "ita", "italian": "ita",
+        "ja": "jpn", "japanese": "jpn",
+        "ko": "kor", "korean": "kor",
+        "zh": "zho", "chinese": "zho",
+        "ar": "ara", "arabic": "ara",
+        "pt": "por", "portuguese": "por",
+        "ru": "rus", "russian": "rus",
+        "tr": "tur", "turkish": "tur",
+        "nl": "nld", "dutch": "nld",
+        "sv": "swe", "swedish": "swe",
+        "pl": "pol", "polish": "pol",
+        "th": "tha", "thai": "tha",
+        "id": "ind", "indonesian": "ind",
+        "vi": "vie", "vietnamese": "vie",
+        "he": "heb", "hebrew": "heb",
+        "fa": "fas", "persian": "fas",
+    }
+    if raw in codes:
+        return codes[raw]
+    if base in codes:
+        return codes[base]
+    if len(base) == 3 and base.isalpha():
+        return base
+    return ""
+
+
+def _m4b_text_value(value) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace").strip()
+    return " ".join(str(value).split())
+
+
+def _write_m4b_metadata_tags(path: Path, metadata: dict[str, str]) -> None:
+    """Write standard and iTunes freeform audiobook tags without remuxing media streams."""
+    from mutagen.mp4 import MP4, MP4FreeForm
+
+    audio_file = MP4(str(path))
+    if audio_file.tags is None:
+        audio_file.add_tags()
+    tags = audio_file.tags
+    if tags is None:
+        raise RuntimeError("Could not create the final audiobook MP4 metadata container.")
+
+    title = _safe_title(metadata.get("title") or path.stem)
+    standard_tags = {
+        "©nam": title,
+        "©alb": title,
+        "©ART": sanitize_metadata(metadata.get("author")),
+        "©gen": sanitize_metadata(metadata.get("genre"), "Audiobook"),
+        "©day": sanitize_metadata(metadata.get("year")),
+        "desc": sanitize_metadata(metadata.get("description")),
+        "cprt": sanitize_metadata(metadata.get("publisher")),
+        "©grp": sanitize_metadata(metadata.get("series")),
+    }
+    for atom, value in standard_tags.items():
+        if value:
+            tags[atom] = [value]
+
+    freeform_tags = {
+        "narrator": sanitize_metadata(metadata.get("narrator")),
+        "publisher": sanitize_metadata(metadata.get("publisher")),
+        "series": sanitize_metadata(metadata.get("series")),
+        "series_number": sanitize_metadata(metadata.get("series_number")),
+    }
+    for name, value in freeform_tags.items():
+        if value:
+            tags[f"----:com.apple.iTunes:{name}"] = [
+                MP4FreeForm(value.encode("utf-8"))
+            ]
+    audio_file.save()
+
+
+def _validate_m4b_metadata_tags(path: Path, metadata: dict[str, str]) -> None:
+    """Read the saved MP4 atoms back and fail if any supplied book tag was lost."""
+    from mutagen.mp4 import MP4
+
+    audio_file = MP4(str(path))
+    tags = audio_file.tags or {}
+
+    expected_atoms = {
+        "title": ("©nam", _safe_title(metadata.get("title") or path.stem)),
+        "album": ("©alb", _safe_title(metadata.get("title") or path.stem)),
+        "artist": ("©ART", sanitize_metadata(metadata.get("author"))),
+        "genre": ("©gen", sanitize_metadata(metadata.get("genre"), "Audiobook")),
+        "date": ("©day", sanitize_metadata(metadata.get("year"))),
+        "description": ("desc", sanitize_metadata(metadata.get("description"))),
+        "publisher": ("----:com.apple.iTunes:publisher", sanitize_metadata(metadata.get("publisher"))),
+        "series": ("----:com.apple.iTunes:series", sanitize_metadata(metadata.get("series"))),
+        "series_number": ("----:com.apple.iTunes:series_number", sanitize_metadata(metadata.get("series_number"))),
+        "narrator": ("----:com.apple.iTunes:narrator", sanitize_metadata(metadata.get("narrator"))),
+    }
+    for label, (atom, expected) in expected_atoms.items():
+        if not expected:
+            continue
+        values = tags.get(atom) or []
+        actual_values = [_m4b_text_value(value) for value in values]
+        normalized_expected = " ".join(str(expected).split())
+        if not any(
+            " ".join(actual.split()).casefold() == normalized_expected.casefold()
+            for actual in actual_values
+        ):
+            raise RuntimeError(
+                f"Final M4B metadata tag '{label}' is missing or incorrect. "
+                f"Expected {normalized_expected!r}; received {actual_values!r}."
+            )
+
+
+def _ffmpeg_probe_report(path: Path) -> str:
+    """Return the final container report emitted by FFmpeg for a finished file."""
+    result = subprocess.run(
+        [ffmpeg_path(), "-hide_banner", "-i", str(path)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+        check=False,
+    )
+    report = str(result.stderr or "") + "\n" + str(result.stdout or "")
+    if not report.strip():
+        raise RuntimeError(f"FFmpeg could not inspect the final audiobook: {path.name}")
+    return report
+
+
+def _validate_m4b_container(
+    path: Path,
+    *,
+    chapter_titles: list[str],
+    metadata: dict[str, str],
+    cover: Path | None,
+) -> None:
+    """Reject a final, cover-bearing M4B if its tags or chapter markers are incomplete.
+
+    Coverless M4A/M4B assemblies are used for Production preview parity and are
+    intentionally outside the final-book metadata/cover acceptance contract.
+    Production's required-metadata gate guarantees the final generation path
+    supplies a saved, project-local cover before invoking this check.
+    """
+    if cover is None:
+        return
+    report = _ffmpeg_probe_report(path)
+    chapter_start = re.search(r"(?im)^\s*Chapter #", report)
+    global_section = report[:chapter_start.start()] if chapter_start else report
+
+    _validate_m4b_metadata_tags(path, metadata)
+
+    language = sanitize_metadata(metadata.get("language"))
+    if language:
+        expected_language_code = _iso639_2_language_code(language)
+        global_language = re.search(
+            r"(?im)^\s*language\s*:\s*(.*?)\s*$",
+            report,
+        )
+        stream_language = re.search(
+            r"(?im)^\s*Stream #\d+:\d+(?:\[[^\]]+\])?\(([^)]+)\):\s*Audio:",
+            report,
+        )
+        actual_language = (
+            stream_language.group(1).strip().casefold()
+            if stream_language else
+            (" ".join(global_language.group(1).split()).casefold() if global_language else "")
+        )
+        expected_language = expected_language_code or language.casefold()
+        if actual_language != expected_language and not (
+            global_language and global_language.group(1).strip().casefold() == language.casefold()
+        ):
+            raise RuntimeError(
+                "Final M4B audio-track language is missing or incorrect. "
+                f"Expected ISO-639-2 code {expected_language!r}; "
+                f"received {actual_language or 'no language marker'!r}."
+            )
+
+    chapter_pattern = re.compile(
+        r"(?m)^\s*Chapter #\d+:(\d+):\s*start\s+([0-9]+(?:\.[0-9]+)?),\s*end\s+([0-9]+(?:\.[0-9]+)?)"
+    )
+    matches = list(chapter_pattern.finditer(report))
+    if len(matches) != len(chapter_titles):
+        raise RuntimeError(
+            f"Final M4B contains {len(matches)} chapter marker(s); "
+            f"{len(chapter_titles)} were expected."
+        )
+
+    previous_end = 0.0
+    for index, match in enumerate(matches):
+        block_end = matches[index + 1].start() if index + 1 < len(matches) else len(report)
+        block = report[match.start():block_end]
+        title_match = re.search(r"(?im)^\s*title\s*:\s*(.*?)\s*$", block)
+        actual_title = " ".join(title_match.group(1).split()) if title_match else ""
+        expected_title = " ".join(str(chapter_titles[index]).split())
+        try:
+            start_seconds = float(match.group(2))
+            end_seconds = float(match.group(3))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise RuntimeError(f"Final M4B chapter {index + 1} has invalid timing metadata.") from exc
+        if not math.isfinite(start_seconds) or not math.isfinite(end_seconds):
+            raise RuntimeError(f"Final M4B chapter {index + 1} has non-finite timing metadata.")
+        if start_seconds < 0 or end_seconds <= start_seconds:
+            raise RuntimeError(f"Final M4B chapter {index + 1} has an invalid start/end range.")
+        if index == 0 and start_seconds > 0.15:
+            raise RuntimeError("The first final M4B chapter marker does not begin at the start of the audiobook.")
+        if index > 0 and abs(start_seconds - previous_end) > 1.5:
+            raise RuntimeError(
+                f"Final M4B chapter {index + 1} does not begin at the preceding chapter boundary."
+            )
+        if not title_match or actual_title.casefold() != expected_title.casefold():
+            raise RuntimeError(
+                f"Final M4B chapter {index + 1} title is missing or incorrect. "
+                f"Expected {expected_title!r}; received {actual_title or 'no title'!r}."
+            )
+        previous_end = end_seconds
+
+    if cover is not None:
+        report_lines = report.splitlines()
+        stream_headers = [
+            (index, line.strip())
+            for index, line in enumerate(report_lines)
+            if "stream #" in line.casefold()
+        ]
+        cover_stream_index = next(
+            (
+                index for index, line in stream_headers
+                if "video:" in line.casefold() and "mjpeg" in line.casefold()
+            ),
+            None,
+        )
+        if cover_stream_index is None:
+            raise RuntimeError(
+                "The final M4B does not contain an embedded MJPEG cover stream. "
+                f"FFmpeg reported streams: {[line for _, line in stream_headers]!r}"
+            )
+        next_stream_index = next(
+            (
+                index for index, _line in stream_headers
+                if index > cover_stream_index
+            ),
+            len(report_lines),
+        )
+        cover_stream_block = report_lines[cover_stream_index:next_stream_index]
+
+        def cover_stream_tag(tag_name: str) -> str:
+            for line in cover_stream_block:
+                if ":" not in line:
+                    continue
+                key, value = line.split(":", 1)
+                if key.strip().casefold() == tag_name.casefold():
+                    return value.strip()
+            return ""
+
+        cover_stream_header = report_lines[cover_stream_index].casefold()
+        if "(attached pic)" not in cover_stream_header:
+            raise RuntimeError(
+                "The final M4B MJPEG stream is not marked as attached cover art. "
+                f"Stream report: {report_lines[cover_stream_index]!r}"
+            )
+        decoded_cover = subprocess.run(
+            [
+                ffmpeg_path(), "-v", "error", "-i", str(path),
+                "-map", "0:v:0", "-frames:v", "1", "-f", "null", "-",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            check=False,
+        )
+        if decoded_cover.returncode != 0:
+            detail = (decoded_cover.stderr or decoded_cover.stdout or "").strip()
+            raise RuntimeError(
+                "The embedded M4B cover stream could not be decoded. " + detail
+            )
 
 
 def _selected_music_recipe(
@@ -593,6 +886,10 @@ def assemble_m4b(
 
         if effective_audio_mode == "auto":
             processed_chapters: list[Path] = []
+            # Same BGM is a book-level choice. Resolve automatic legacy-mode
+            # music once and reuse that exact track for every chapter.
+            same_auto_music_path = None
+            same_auto_music_resolved = False
             for index, (chapter_file, chapter_dir, chapter_title) in enumerate(
                 zip(chapters, chapter_dirs, names), start=1
             ):
@@ -622,10 +919,18 @@ def assemble_m4b(
                 duration_ms = _duration_ms(current_audio)
                 duration_seconds = max(0.1, duration_ms / 1000.0)
                 music_gain = max(0.0, min(0.50, float(background_audio_volume)))
-                music_path = resolve_music_track(
-                    mood, selected_track=auto_music_variation,
-                    seed_text=f"{chapter_title}|{narration_text}|{index}",
-                )
+                # Chapter-Based is explicit-only. Same BGM resolves one
+                # book-level track on the first eligible chapter and reuses it.
+                if effective_bgm_strategy == "chapter-based":
+                    music_path = None
+                else:
+                    if not same_auto_music_resolved:
+                        same_auto_music_path = resolve_music_track(
+                            mood, selected_track=auto_music_variation,
+                            seed_text=f"book-default|{chapter_title}|{narration_text}",
+                        )
+                        same_auto_music_resolved = True
+                    music_path = same_auto_music_path
                 if music_path is not None and music_gain > 0.0:
                     fade_in = min(max(0.0, float(background_audio_fade_in)), duration_seconds)
                     fade_out = min(max(0.0, float(background_audio_fade_out)), duration_seconds)
@@ -860,7 +1165,7 @@ def assemble_m4b(
         effective_overrides = chapter_bgm_overrides if isinstance(chapter_bgm_overrides, dict) else {}
         chapter_scoped_bgm = (
             effective_bgm_strategy == "chapter-based"
-            and effective_audio_mode == "manual"
+            and effective_audio_mode != "off"
         )
         if chapter_scoped_bgm:
             chapter_music_files: list[Path] = []
@@ -988,13 +1293,17 @@ def assemble_m4b(
         if progress:
             progress(len(chapters), len(chapters), "joined-audio")
 
-        # Stage 1 audio beds: independently mix optional user-owned/licensed
-        # music and ambience only after narration has been assembled. Tracks
-        # therefore remain continuous across chapter boundaries. FFmpeg/CPU
-        # does the work; no GPU memory is needed.
+        # Version 1 permits one book-level BGM bed. Preserve legacy ambience
+        # projects by treating ambience as the old alternate default only when
+        # no book-default track is selected. Chapter-Based suppresses both.
+        legacy_book_bgm_path = (
+            None if chapter_scoped_bgm else (background_audio_path or ambience_audio_path)
+        )
+        legacy_book_bgm_volume = (
+            background_audio_volume if background_audio_path else ambience_audio_volume
+        )
         audio_layers: list[tuple[str, Path | str | None, float]] = [
-            ("music", None if chapter_scoped_bgm else background_audio_path, background_audio_volume),
-            ("ambience", ambience_audio_path, ambience_audio_volume),
+            ("music", legacy_book_bgm_path, legacy_book_bgm_volume),
         ]
         active_layers = [
             (name, Path(path).expanduser(), max(0.0, min(1.0, float(volume))))
@@ -1068,15 +1377,46 @@ def assemble_m4b(
             if progress:
                 progress(len(chapters), len(chapters), "mixed-background-audio")
 
-        base_m4b = temp_dir / "audiobook-base.m4b"
+        cover_jpg = None
+        if cover:
+            cover_jpg = temp_dir / "cover.jpg"
+            _run([
+                "-i", str(cover),
+                "-frames:v", "1",
+                "-c:v", "mjpeg",
+                "-q:v", "3",
+                str(cover_jpg),
+            ])
+            if not cover_jpg.exists() or cover_jpg.stat().st_size == 0:
+                raise RuntimeError("Cover image could not be converted to JPEG.")
+
+        # Build the final M4B in one mux operation. A second MP4 remux can
+        # reinterpret/drop an attached picture stream as generic data on some
+        # FFmpeg builds, even when -disposition:v:0 attached_pic was requested.
+        # Audio, FFmetadata (tags + chapter markers), and the JPEG cover are
+        # therefore mapped into the final container together.
         args = [
             "-i", str(audio_only),
             "-f", "ffmetadata", "-i", str(metadata_path),
-            "-map", "0:a:0",
+        ]
+        if cover_jpg is not None:
+            args += ["-i", str(cover_jpg)]
+        args += ["-map", "0:a:0"]
+        if cover_jpg is not None:
+            args += [
+                "-map", "2:v:0",
+                "-disposition:v:0", "attached_pic",
+                "-metadata:s:v:0", "title=Cover",
+                "-metadata:s:v:0", "comment=Cover Art",
+                "-metadata:s:v:0", "mimetype=image/jpeg",
+                "-metadata:s:v:0", "filename=cover.jpg",
+                "-c:v", "copy",
+            ]
+        args += [
             "-map_metadata", "1",
             "-map_chapters", "1",
             "-c:a", "copy",
-            "-movflags", "+faststart+use_metadata_tags",
+            "-movflags", "+faststart",
             "-metadata", f"title={_metadata_value(clean_title)}",
             "-metadata", f"album={_metadata_value(clean_title)}",
             "-metadata", f"comment=Ryu's Audiobook • AAC {audio_bitrate}",
@@ -1093,48 +1433,34 @@ def assemble_m4b(
             args += ["-metadata", f"series_number={series_number}"]
         if language:
             args += ["-metadata", f"language={language}"]
+            stream_language_code = _iso639_2_language_code(language)
+            if stream_language_code:
+                args += ["-metadata:s:a:0", f"language={stream_language_code}"]
         if year:
             args += ["-metadata", f"date={year}"]
         if genre:
             args += ["-metadata", f"genre={genre}"]
         if description:
             args += ["-metadata", f"description={description}"]
-        args.append(str(base_m4b))
+        args.append(str(output_path))
         _run(args)
 
-        if not base_m4b.exists() or base_m4b.stat().st_size == 0:
-            raise RuntimeError("FFmpeg created no base M4B before cover embedding.")
-
-        if cover:
-            cover_jpg = temp_dir / "cover.jpg"
-            _run([
-                "-i", str(cover),
-                "-frames:v", "1",
-                "-c:v", "mjpeg",
-                "-q:v", "3",
-                str(cover_jpg),
-            ])
-            if not cover_jpg.exists() or cover_jpg.stat().st_size == 0:
-                raise RuntimeError("Cover image could not be converted to JPEG.")
-
-            _run([
-                "-i", str(base_m4b),
-                "-i", str(cover_jpg),
-                "-map", "0:a:0",
-                "-map", "1:v:0",
-                "-map_chapters", "0",
-                "-c", "copy",
-                "-disposition:v:0", "attached_pic",
-                "-metadata:s:v:0", "title=Cover",
-                "-metadata:s:v:0", "comment=Cover Art",
-                "-metadata:s:v:0", "mimetype=image/jpeg",
-                "-metadata:s:v:0", "filename=cover.jpg",
-                "-movflags", "+faststart",
-                str(output_path),
-            ])
-        else:
-            import shutil
-            shutil.copy2(base_m4b, output_path)
+    if cover is not None:
+        _write_m4b_metadata_tags(
+            output_path,
+            {
+                "title": clean_title,
+                "author": clean_artist,
+                "narrator": narrator,
+                "publisher": publisher,
+                "series": series,
+                "series_number": series_number,
+                "language": language,
+                "year": year,
+                "genre": genre,
+                "description": description,
+            },
+        )
 
     if not output_path.exists() or output_path.stat().st_size == 0:
         raise RuntimeError("FFmpeg completed but the final M4B is missing.")
@@ -1162,5 +1488,23 @@ def assemble_m4b(
             f"Final audiobook bitrate is only {detected_kbps} kbps. "
             f"Ryu's Audiobook requires at least {MIN_AUDIO_BITRATE_KBPS} kbps."
         )
+
+    _validate_m4b_container(
+        output_path,
+        chapter_titles=names,
+        metadata={
+            "title": clean_title,
+            "author": clean_artist,
+            "narrator": narrator,
+            "publisher": publisher,
+            "series": series,
+            "series_number": series_number,
+            "language": language,
+            "year": year,
+            "genre": genre,
+            "description": description,
+        },
+        cover=cover,
+    )
 
     return output_path

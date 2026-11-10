@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import hashlib
 from pathlib import Path
 import json
 import shutil
@@ -39,6 +40,58 @@ class VoiceProfile:
     # profiles migrate automatically on load; this prevents stale generated
     # reference audio from being reused by a newly saved voice.
     qwen_profile_id: str = ""
+
+
+def stable_qwen_profile_id(
+    *,
+    mode: str,
+    voice_id: str,
+    language: str = "English",
+    prompt: str = "",
+    seed: int | None = None,
+    sample_path: str | None = None,
+    reference_text: str = "",
+    anchor_text: str = "",
+) -> str:
+    """Return the same Qwen identity for a live draft preview and its saved profile.
+
+    A new VoiceDesign draft is previewed before it is saved. Generating a random
+    profile ID independently in those two paths makes the preview's canonical
+    voice anchor differ from the saved profile used by audiobook generation.
+    Derive the ID only from voice-defining settings so a profile rename does not
+    change its acoustic identity.
+    """
+    normalized_mode = str(mode or "custom").strip().casefold()
+    normalized_voice = str(voice_id or "").strip()
+    sample_signature = ""
+    if sample_path:
+        candidate = Path(str(sample_path)).expanduser()
+        try:
+            candidate = candidate.resolve()
+        except OSError:
+            candidate = candidate.absolute()
+        try:
+            stat = candidate.stat()
+            sample_signature = f"{candidate}:{stat.st_size}:{stat.st_mtime_ns}"
+        except OSError:
+            sample_signature = f"{candidate}:missing"
+    try:
+        normalized_seed = int(seed) if seed not in (None, "") else None
+    except (TypeError, ValueError, OverflowError):
+        normalized_seed = None
+    identity = {
+        "schema": "ryu-qwen-profile-identity-v1",
+        "mode": normalized_mode,
+        "voice_id": normalized_voice,
+        "language": str(language or "English").strip().casefold(),
+        "prompt": str(prompt or "").strip(),
+        "seed": normalized_seed,
+        "sample": sample_signature,
+        "reference_text": str(reference_text or "").strip(),
+        "anchor_text": str(anchor_text or "").strip(),
+    }
+    payload = json.dumps(identity, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
 
 
 def profiles_file() -> Path:
@@ -183,21 +236,44 @@ def load_saved_profiles() -> list[VoiceProfile]:
     if not isinstance(records, list):
         return []
     migrated = False
+    # Keep legacy Qwen compute-backend values out of the persisted profile
+    # catalogue. Older builds stored the provider ID ("qwen-character") in
+    # this field; the worker accepts only a compute backend. Invalid/unknown
+    # values migrate to Automatic, while explicit supported choices survive.
+    from app.tts.qwen_model_preference import normalize_qwen_backend_preference
+
     for record in records:
-        if (
-            isinstance(record, dict)
-            and record.get("provider") == "qwen-character"
-            and not record.get("qwen_profile_id")
-        ):
+        if not isinstance(record, dict) or record.get("provider") != "qwen-character":
+            continue
+        normalized_backend = normalize_qwen_backend_preference(record.get("backend"))
+        if record.get("backend") != normalized_backend:
+            record["backend"] = normalized_backend
+            migrated = True
+        if not record.get("qwen_profile_id"):
             record["qwen_profile_id"] = uuid.uuid4().hex
             migrated = True
+
     if migrated:
+        # This read path must not call save_profiles(), which scans installed
+        # voice engines. Replace the legacy catalogue atomically so a crash
+        # cannot truncate voices.json during one-time profile migration.
+        temporary = path.with_suffix(path.suffix + ".migration.tmp")
         try:
-            # Persist IDs without calling save_profiles(), which scans every
-            # installed engine and is too much work for a simple profile read.
-            path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+            payload = json.dumps(records, ensure_ascii=False, indent=2)
+            temporary.write_text(payload, encoding="utf-8")
+            written = json.loads(temporary.read_text(encoding="utf-8"))
+            if written != records:
+                raise IOError("Legacy Qwen profile migration verification failed.")
+            temporary.replace(path)
         except OSError:
+            # The loaded in-memory records are still normalized. A later read
+            # will retry persistence if the catalogue remains writable.
             pass
+        finally:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
     saved: list[VoiceProfile] = []
     for record in records:
         if not isinstance(record, dict):
@@ -287,9 +363,12 @@ def load_profiles() -> list[VoiceProfile]:
 
 def save_profiles(profiles: list[VoiceProfile]) -> None:
     voices_root().mkdir(parents=True, exist_ok=True)
+    from app.tts.qwen_model_preference import normalize_qwen_backend_preference
     for profile in profiles:
-        if profile.provider == "qwen-character" and not profile.qwen_profile_id:
-            profile.qwen_profile_id = uuid.uuid4().hex
+        if profile.provider == "qwen-character":
+            profile.backend = normalize_qwen_backend_preference(profile.backend)
+            if not profile.qwen_profile_id:
+                profile.qwen_profile_id = uuid.uuid4().hex
     builtin_names_by_identity = {
         (p.provider, p.voice_id.casefold()): p.name.casefold()
         for p in builtin_voice_profiles()

@@ -836,10 +836,11 @@ class UiStabilityRegressions(unittest.TestCase):
         self.assertIn("on_before_delete", library)
         self.assertIn("on_deleted", library)
 
-    def test_application_version_remains_111(self):
+    def test_application_version_is_120_candidate(self):
         source = (ROOT / "app/version.py").read_text(encoding="utf-8")
-        self.assertIn('APP_VERSION = "1.1.1"', source)
+        self.assertIn('APP_VERSION = "1.2.0"', source)
 
 
 if __name__ == "__main__":
     unittest.main()
+

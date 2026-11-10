@@ -1,5 +1,7 @@
 """Acceptance tests for selectable project/audio storage roots and disk capacity."""
 from pathlib import Path
+import os
+import subprocess
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
@@ -105,6 +107,151 @@ class StorageRootSelectionTests(unittest.TestCase):
         self.assertIn("if saved:", generation_source)
         self.assertIn("for root in project_library_roots()", project_source)
         self.assertIn("allowed_roots", project_source)
+
+    def test_model_runtime_cache_and_temporary_roots_are_independently_configurable(self):
+        with TemporaryDirectory() as temp:
+            base = Path(temp)
+            app_data = base / "Ryu's Audiobook"
+            selected = {
+                "storage/models_root": str(base / "drive-a" / "Models"),
+                "storage/runtime_root": str(base / "drive-b" / "Runtimes"),
+                "storage/model_cache_root": str(base / "drive-c" / "ModelCache"),
+                "storage/temporary_root": str(base / "drive-d" / "Temp"),
+            }
+            with patch("app.core.paths.app_root", return_value=app_data), patch(
+                "app.core.paths._setting_value", side_effect=lambda key: selected.get(key, "")
+            ):
+                self.assertEqual(paths.models_root(), Path(selected["storage/models_root"]))
+                self.assertEqual(paths.runtimes_root(), Path(selected["storage/runtime_root"]))
+                self.assertEqual(paths.model_cache_root(), Path(selected["storage/model_cache_root"]))
+                self.assertEqual(paths.temporary_root(), Path(selected["storage/temporary_root"]))
+
+    @unittest.skipUnless(os.name == "nt", "Windows drive-letter disconnect simulation")
+    def test_windows_subst_drive_disconnect_and_reconnect_preserves_root_availability(self):
+        from app.tts.model_registry import _storage_location_available
+
+        with TemporaryDirectory() as temporary:
+            letter = next(
+                (value for value in "ZYXWVUTSRQPONMLKJIHGFED"
+                 if not Path(value + ":\\").exists()),
+                None,
+            )
+            if letter is None:
+                self.skipTest("No unused drive letter is available for the Windows disconnect simulation.")
+            drive = letter + ":"
+            root = Path(drive + "\\Models")
+            mapped = False
+            try:
+                try:
+                    subprocess.run(["subst", drive, temporary], check=True, capture_output=True, text=True)
+                except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+                    self.skipTest("Windows SUBST drive mapping is unavailable: " + str(exc))
+                mapped = True
+                root.mkdir(parents=True, exist_ok=True)
+                self.assertTrue(_storage_location_available(root))
+                subprocess.run(["subst", drive, "/D"], check=True, capture_output=True, text=True)
+                mapped = False
+                self.assertFalse(_storage_location_available(root))
+                subprocess.run(["subst", drive, temporary], check=True, capture_output=True, text=True)
+                mapped = True
+                self.assertTrue(_storage_location_available(root))
+            finally:
+                if mapped:
+                    subprocess.run(["subst", drive, "/D"], check=False, capture_output=True, text=True)
+
+    def test_configured_temporary_root_is_inherited_by_provider_child_processes(self):
+        import tempfile
+        from app.core import paths
+
+        with TemporaryDirectory() as temporary:
+            selected = Path(temporary) / "SelectedTemp"
+            with (
+                patch("app.core.paths.temporary_root", return_value=selected),
+                patch.dict(os.environ, {"TEMP": "old-temp", "TMP": "old-tmp", "TMPDIR": "old-tmpdir"}),
+            ):
+                previous = tempfile.tempdir
+                try:
+                    paths.configure_temporary_root()
+                    self.assertEqual(tempfile.tempdir, str(selected))
+                    self.assertEqual(os.environ["TEMP"], str(selected))
+                    self.assertEqual(os.environ["TMP"], str(selected))
+                    self.assertEqual(os.environ["TMPDIR"], str(selected))
+                    from app.tts.qwen_character_runtime import runtime_environment as qwen_environment
+                    from app.tts.chatterbox_runtime import runtime_environment as chatterbox_environment
+                    with (
+                        patch("app.tts.qwen_character_runtime.model_cache_root", return_value=Path(temporary) / "cache"),
+                        patch("app.tts.chatterbox_runtime.model_cache_root", return_value=Path(temporary) / "cache"),
+                        patch("app.tts.qwen_character_runtime.temporary_root", return_value=selected),
+                        patch("app.tts.chatterbox_runtime.temporary_root", return_value=selected),
+                    ):
+                        for environment in (qwen_environment(), chatterbox_environment()):
+                            self.assertEqual(environment["TEMP"], str(selected))
+                            self.assertEqual(environment["TMP"], str(selected))
+                            self.assertEqual(environment["TMPDIR"], str(selected))
+                finally:
+                    tempfile.tempdir = previous
+
+    def test_chatterbox_bootstrap_installer_uses_configured_temporary_root(self):
+        source = (Path(__file__).resolve().parents[1] / "app" / "tts" / "chatterbox_runtime.py").read_text(encoding="utf-8")
+        self.assertIn("temporary_root", source)
+        self.assertIn('installer = temporary_root() / "ryu-python-3.11.9-amd64.exe"', source)
+        self.assertNotIn('installer = local_app_data / "Temp" / "ryu-python-3.11.9-amd64.exe"', source)
+
+    def test_model_related_defaults_preserve_existing_installation_layout(self):
+        with TemporaryDirectory() as temp:
+            app_data = Path(temp) / "Ryu's Audiobook"
+            with patch("app.core.paths.app_root", return_value=app_data), patch(
+                "app.core.paths._setting_value", return_value=""
+            ):
+                legacy_models = app_data / "Models"
+                self.assertEqual(paths.models_root(), legacy_models)
+                self.assertEqual(paths.runtimes_root(), legacy_models)
+                self.assertEqual(paths.model_cache_root(), legacy_models / "huggingface")
+                self.assertEqual(paths.temporary_root(), app_data / "Temp")
+
+    def test_relative_model_related_roots_fall_back_to_legacy_defaults(self):
+        with TemporaryDirectory() as temp:
+            app_data = Path(temp) / "Ryu's Audiobook"
+            values = {
+                "storage/models_root": "relative/models",
+                "storage/runtime_root": "relative/runtime",
+                "storage/model_cache_root": "relative/cache",
+                "storage/temporary_root": "relative/temp",
+            }
+            with patch("app.core.paths.app_root", return_value=app_data), patch(
+                "app.core.paths._setting_value", side_effect=lambda key: values.get(key, "")
+            ):
+                self.assertEqual(paths.models_root(), app_data / "Models")
+                self.assertEqual(paths.runtimes_root(), app_data / "Models")
+                self.assertEqual(paths.model_cache_root(), app_data / "Models" / "huggingface")
+                self.assertEqual(paths.temporary_root(), app_data / "Temp")
+
+    def test_capacity_summary_reports_used_free_and_total(self):
+        from app.ui.settings_page import _storage_capacity_summary
+        with TemporaryDirectory() as temp:
+            usage = SimpleNamespace(free=50 * 1024**3, total=100 * 1024**3)
+            with patch("app.ui.settings_page.shutil.disk_usage", return_value=usage):
+                self.assertEqual(_storage_capacity_summary(Path(temp)), "50.0 GB used · 50.0 GB free · 100.0 GB total")
+            self.assertIn("Unavailable", _storage_capacity_summary(Path(temp) / "missing"))
+
+    def test_nonempty_storage_root_cannot_be_switched_without_migration(self):
+        from app.ui.settings_page import _storage_root_change_error
+        with TemporaryDirectory() as temp:
+            source = Path(temp) / "Models"
+            destination = Path(temp) / "NewModels"
+            source.mkdir()
+            destination.mkdir()
+            (source / "weights.bin").write_bytes(b"model weights")
+            self.assertIn("verified copy", _storage_root_change_error(source, destination))
+            self.assertEqual(_storage_root_change_error(source, source), "")
+
+    def test_unavailable_storage_root_cannot_be_silently_replaced(self):
+        from app.ui.settings_page import _storage_root_change_error
+        with TemporaryDirectory() as temp:
+            source = Path(temp) / "disconnected-drive" / "Models"
+            destination = Path(temp) / "NewModels"
+            destination.mkdir()
+            self.assertIn("Reconnect its drive", _storage_root_change_error(source, destination))
 
 
 if __name__ == "__main__":

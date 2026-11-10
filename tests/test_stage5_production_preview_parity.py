@@ -6,7 +6,7 @@ import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from app.ui import premium_v2_host
 
@@ -29,6 +29,10 @@ class ProductionPreviewSavedNarratorTests(unittest.TestCase):
                 "profile_available": True,
             },
             _find_profile=lambda name: saved_profile if name == saved_profile.name else None,
+            _resolve_narrator_for_generation=lambda _project, _state, _chapters: (
+                saved_profile,
+                {"narrator_only": False, "generation_mode": "character_cast"},
+            ),
             _voice_preview=lambda payload: captured.update(payload) or {
                 "job_id": "production-preview-1",
                 "profile_name": saved_profile.name,
@@ -45,7 +49,12 @@ class ProductionPreviewSavedNarratorTests(unittest.TestCase):
             "apply_pronunciation_rules": False,
             "include_sound_design": False,
         }
-        with patch.object(premium_v2_host, "load_state", return_value={"voice_profile": "Old Project Snapshot"}):
+        # The saved flag is stale: preview routing must follow the shared
+        # resolver's effective mode after cast-profile reconciliation.
+        with patch.object(
+            premium_v2_host, "load_state",
+            return_value={"voice_profile": "Old Project Snapshot", "narrator_only_generation": True},
+        ):
             result = premium_v2_host.PremiumV2Bridge._production_preview(bridge, transient_payload)
 
         self.assertEqual(result["profile_name"], saved_profile.name)
@@ -90,14 +99,14 @@ class ProductionPreviewSavedNarratorTests(unittest.TestCase):
         chapter = SimpleNamespace(number=1, title="Opening", text="Saved text.", chapter_id="ch-1")
         project = SimpleNamespace(folder=Path("project-A"), chapters=[chapter])
         called = []
+        def fail_narrator_resolution(_project, _state, _chapters):
+            raise ValueError(
+                "The effective narrator profile 'Unavailable narrator' is unavailable."
+            )
+
         bridge = SimpleNamespace(
             _active_project=lambda: project,
-            _project_series_name=lambda _project, _state: "Series A",
-            _narrator_series_default_read=lambda _project, _state, _series: {
-                "effective_profile_name": "Unavailable narrator",
-                "profile_available": False,
-            },
-            _find_profile=lambda _name: None,
+            _resolve_narrator_for_generation=fail_narrator_resolution,
             _voice_preview=lambda _payload: called.append(True),
         )
         with patch.object(premium_v2_host, "load_state", return_value={}):
@@ -106,6 +115,57 @@ class ProductionPreviewSavedNarratorTests(unittest.TestCase):
                     bridge, {"chapter_number": 1, "profile_name": "Transient"}
                 )
         self.assertEqual(called, [])
+
+
+    def test_production_preview_uses_saved_narrator_only_mode_and_disables_cast_routing(self):
+        chapter = SimpleNamespace(
+            number=1,
+            title="Narrator-only opening",
+            text='“The journey begins,” Mira said.',
+            chapter_id="chapter-narrator-only-1",
+        )
+        project = SimpleNamespace(folder=Path("project-narrator-only"), chapters=[chapter])
+        saved_profile = SimpleNamespace(name="Saved Narrator")
+        captured = {}
+        resolver = Mock(return_value=(
+            saved_profile,
+            {
+                "generation_mode": "narrator_only",
+                "narrator_only": True,
+                "character_voice_profile_count": 0,
+                "dialogue_routing": "narrator_for_all_passages",
+            },
+        ))
+        bridge = SimpleNamespace(
+            _active_project=lambda: project,
+            _resolve_narrator_for_generation=resolver,
+            _voice_preview=lambda payload: captured.update(payload) or {
+                "job_id": "narrator-only-preview",
+                "profile_name": saved_profile.name,
+            },
+        )
+        with patch.object(
+            premium_v2_host, "load_state",
+            return_value={"narrator_only_generation": True, "characters": []},
+        ):
+            result = premium_v2_host.PremiumV2Bridge._production_preview(
+                bridge,
+                {
+                    "chapter_number": 1,
+                    "chapter_id": chapter.chapter_id,
+                    "profile_name": "Transient Voice",
+                    "provider": "wrong-provider",
+                    "voice_id": "wrong-voice",
+                    "duration_seconds": 30,
+                },
+            )
+
+        self.assertEqual(result["profile_name"], saved_profile.name)
+        self.assertIs(captured["route_character_cast"], False)
+        self.assertEqual(captured["profile_name"], saved_profile.name)
+        self.assertEqual(captured["chapter_id"], chapter.chapter_id)
+        self.assertTrue(captured["_production_preview"])
+        resolver.assert_called_once_with(project, {"narrator_only_generation": True, "characters": []}, [chapter])
 
 
 class ProductionPreviewOwnershipTests(unittest.TestCase):

@@ -41,6 +41,100 @@ class QwenGlobalModelPreferenceTests(unittest.TestCase):
             (None, None),
         )
 
+    def test_legacy_qwen_backend_values_are_migrated_and_persisted(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        import app.tts.voice_profile as voice_profiles
+
+        legacy_records = [
+            {
+                "name": "Legacy Provider Backend",
+                "provider": "qwen-character",
+                "voice_id": "Ryan",
+                "backend": "qwen-character",
+                "qwen_mode": "custom",
+            },
+            {
+                "name": "Legacy Unknown Backend",
+                "provider": "qwen-character",
+                "voice_id": "Aiden",
+                "backend": "not-a-compute-backend",
+                "qwen_mode": "custom",
+            },
+            {
+                "name": "Explicit CUDA Backend",
+                "provider": "qwen-character",
+                "voice_id": "Vivian",
+                "backend": "cuda",
+                "qwen_mode": "custom",
+            },
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            profile_file = Path(temporary) / "voices.json"
+            profile_file.write_text(json.dumps(legacy_records), encoding="utf-8")
+            with patch.object(voice_profiles, "profiles_file", return_value=profile_file):
+                loaded = voice_profiles.load_saved_profiles()
+
+            by_name = {profile.name: profile for profile in loaded}
+            self.assertEqual(by_name["Legacy Provider Backend"].backend, "automatic")
+            self.assertEqual(by_name["Legacy Unknown Backend"].backend, "automatic")
+            self.assertEqual(by_name["Explicit CUDA Backend"].backend, "cuda")
+            self.assertTrue(all(profile.qwen_profile_id for profile in loaded))
+
+            persisted = json.loads(profile_file.read_text(encoding="utf-8"))
+            persisted_by_name = {record["name"]: record for record in persisted}
+            self.assertEqual(persisted_by_name["Legacy Provider Backend"]["backend"], "automatic")
+            self.assertEqual(persisted_by_name["Legacy Unknown Backend"]["backend"], "automatic")
+            self.assertEqual(persisted_by_name["Explicit CUDA Backend"]["backend"], "cuda")
+            self.assertTrue(all(record.get("qwen_profile_id") for record in persisted))
+
+    def test_global_hardware_preference_and_low_memory_apply_to_auto_profiles(self):
+        saved_profile = VoiceProfile(
+            "Saved Hero", "qwen-character", "Ryan",
+            model_id="custom-1.7b", qwen_mode="custom", backend="automatic",
+        )
+        with (
+            patch("app.tts.profile_provider.get_qwen_model_preference", return_value="1.7b"),
+            patch("app.tts.profile_provider.get_qwen_backend_preference", return_value="cpu"),
+            patch("app.tts.profile_provider.get_qwen_low_memory_mode", return_value=True),
+        ):
+            provider, _voice = provider_from_profile(saved_profile)
+        self.assertEqual(provider.backend, "cpu")
+        self.assertTrue(provider.low_memory)
+
+    def test_saved_profile_backend_is_portable_and_current_global_preference_wins(self):
+        # A voice profile is portable across machines. Its voice identity is
+        # preserved, while compute policy comes from this installation's
+        # current global preference.
+        for saved_backend in ("automatic", "cpu", "cuda", "rocm", "xpu"):
+            saved_profile = VoiceProfile(
+                "Saved Hero", "qwen-character", "Ryan",
+                model_id="custom-1.7b", qwen_mode="custom", backend=saved_backend,
+            )
+            with (
+                self.subTest(saved_backend=saved_backend),
+                patch("app.tts.profile_provider.get_qwen_model_preference", return_value="1.7b"),
+                patch("app.tts.profile_provider.get_qwen_backend_preference", return_value="automatic"),
+                patch("app.tts.profile_provider.get_qwen_low_memory_mode", return_value=False),
+            ):
+                provider, _voice = provider_from_profile(saved_profile)
+                self.assertEqual(provider.backend, "automatic")
+
+    def test_explicit_global_cpu_preference_still_applies_to_saved_gpu_profile(self):
+        saved_profile = VoiceProfile(
+            "Saved Hero", "qwen-character", "Ryan",
+            model_id="custom-1.7b", qwen_mode="custom", backend="cuda",
+        )
+        with (
+            patch("app.tts.profile_provider.get_qwen_model_preference", return_value="1.7b"),
+            patch("app.tts.profile_provider.get_qwen_backend_preference", return_value="cpu"),
+            patch("app.tts.profile_provider.get_qwen_low_memory_mode", return_value=False),
+        ):
+            provider, _voice = provider_from_profile(saved_profile)
+        self.assertEqual(provider.backend, "cpu")
+
     def test_existing_custom_profile_uses_global_override_at_provider_creation(self):
         saved_profile = VoiceProfile(
             "Saved Hero", "qwen-character", "Ryan",

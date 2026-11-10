@@ -1,8 +1,7 @@
 # Known Limitations — Ryu's Audiobook Dragon Studio
 
-**Audited:** 24 October 2026 (Models Center/job-monitor follow-up)
-**Current code baseline:** `eca9cf1a8330e2dcfce697f66233a73740e25ae0` on `fix/import-qa-speaker-hover-hardware`
-**Open PR:** [#15](https://github.com/RyuBlanc/ryu-audiobook-build/pull/15), open and unmerged.
+**Audited:** 7 November 2026 (Stage 8 regression and UI capability audit)
+**Current code baseline:** Stage 8 candidate branch `stage-7/step-6-safe-auto-fallback`; use the live branch HEAD and matching Actions run as the exact revision authority.
 
 This document records actual source-level limitations. A supported bridge handler does not imply all related UI controls have passed runtime acceptance.
 
@@ -11,13 +10,13 @@ This document records actual source-level limitations. A supported bridge handle
 | Area | Current behavior | Acceptance implication |
 |---|---|---|
 | Project creation | `project.create` is advertised as unavailable and has no dispatcher handler. The supported path is importing source material, which creates/opens a local project. | Do not describe a standalone New Project action as connected. |
-| Hardware telemetry | `performance.info` is marked unavailable. Do not invent CPU, GPU, VRAM or benchmark values. Legacy HTML benchmark behavior still requires protection from fake-success paths. | Live telemetry and benchmarking remain unaccepted. |
+| Hardware telemetry | Premium V2 `performance.info` now reports live CPU/RAM and accelerator inventory from the host. GPU runtime activation is distinguished from a detected-but-not-active candidate. GPU utilization/VRAM telemetry is reported only where the active backend exposes a real measurement; no synthetic values are supplied. | Live telemetry is connected and regression-covered. Repeatable audio-generation benchmarking remains separate and must use a real local provider/model, report model/provider/device/settings and elapsed time, and never label a hardware scan as a benchmark. |
 | Secure provider credentials | ElevenLabs API-key setup is connected and stores the key in app-owned local settings (`elevenlabs.json`) or reads `ELEVENLABS_API_KEY` from the environment. A Windows secure provider-specific credential store is not integrated, so the key is not stored in the Windows Credential Manager or another OS-backed secret vault. | The key persists locally, but users should protect their Windows account and app data; do not describe this as OS-vault-backed secret storage. |
 | Premium cloud candidate generation | ElevenLabs Voice Design candidate generation and creation use real provider endpoints when a valid API key and online access are available. This is a provider-specific integration, not a universal cloud voice-design API; local Qwen VoiceDesign uses the installed Qwen runtime. | Show provider-specific setup/error status and never invent candidates when the provider is unavailable. Online calls may consume provider quota. |
 | Chapter review and generation inclusion | Review status is persisted in `chapters.json`; older chapter records default to `needs_review`. A separate `skip_for_generation` flag defaults to false and is persisted per chapter. The Review filter uses review state; the contextual chapter action can toggle review or skip state. Generation excludes flagged chapters while preserving their text. Project state, job result data and progress messages distinguish empty chapters from intentionally excluded chapters. | Backend plumbing and regression contract are in place; interactive Windows save/reload and generated-output acceptance remain pending. Review status never implicitly skips a chapter. |
 | Automatic per-line AI speaker suggestions | Automatic per-line AI speaker suggestions remain prototype-only; confidence labels and bulk acceptance are not treated as verified evidence. | Do not treat an AI suggestion as a confirmed speaker assignment. |
 | Manual dialogue-line speaker assignment | Manual source-backed dialogue speaker assignments are persisted after exact passage validation against saved chapter text. | Assignments require an unambiguous source passage and saved character; synthesis integration and interactive Windows acceptance remain to be verified. |
-| Custom storage roots | Custom project-library and audio-assets root selection is not implemented. | Current roots remain the configured local storage locations. |
+| Configurable storage roots | Settings > Storage supports choosing, resetting to default, opening and migrating supported project-library, audio-asset and model roots. Migration uses journaled progress, checksum verification and interrupted-migration recovery. | Keep external drives connected until migration and verification complete. Physical Windows drive migration/reconnect acceptance remains pending; CI does not replace interactive Windows acceptance. |
 | Per-model actions | Inventory, install, verify, repair and uninstall are connected for supported app-managed local components. Install/repair/uninstall use real background jobs and refresh model/voice catalogues at completion. Remote model update checks, universal default-selection and model test-generation are not established as connected; the Check Updates button only refreshes the local catalogue. | Do not show remote-update success or fake test-generation; complete actual Windows model/voice/narration acceptance. |
 | SQLite | `docs/PREMIUM_V2_DATABASE_SCHEMA.md` describes a target schema, not a deployed migration. Project data/state and Premium V2 job records currently use existing project/state files, QSettings and `premium_v2_jobs.json`. | Do not claim SQLite persistence or migrations are complete. |
 | Durable jobs/history | Job rows persist and unfinished rows are marked recoverable/failed on restart. `history.list` currently reads the same job rows, not a separate immutable history store. | Restart recovery, checkpoint reuse and history independence still require test coverage. |
@@ -52,9 +51,17 @@ CI does not replace interactive Windows acceptance. The following remain pending
 - The current branch implements `models.list/install/verify/repair/uninstall` for supported managed components. Lifecycle operations run as background jobs, prevent conflicting model/audio operations, and refresh the inventory and relevant Voice Studio catalogues when they finish.
 - Storage accounting now includes nested Chatterbox files and the Qwen isolated Python runtime/metadata while keeping each Qwen model-weight directory separately counted. Build #1162 passed 530 automated tests for this change; its package job was superseded by the follow-up job-monitor fix, so its artifact is not the final acceptance candidate.
 - A regression guard was added for the race where a background job is already terminal during the first poll. The current branch workflow must validate this follow-up before that latest package can be considered passed.
-- Still unsupported: true live CPU/GPU/VRAM telemetry. Still requiring target-PC acceptance: install/repair/remove models; provider selector refresh; real preview, audiobook narration and playback; installer and portable first-run.
+- Live CPU/RAM and accelerator inventory is connected in Premium V2; GPU utilization/VRAM are exposed only by supported active backends. Repeatable audio benchmarking and target-PC acceptance remain separate open gates. Still requiring target-PC acceptance: install/repair/remove models; provider selector refresh; real preview, audiobook narration and playback; installer and portable first-run.
 
 
 ## 2026-10-24 validation boundary
 
 Build #1164 previously passed 531 tests and produced installer/portable/SHA-256 artifacts for its older commit; that artifact does not certify this newer source. Use the workflow run whose head SHA matches the current branch. Packaged Windows visual, crash, real-provider and audio acceptance remains separate from CI.
+
+
+## Stage 7 Step 4 update — 6 November 2026
+
+- Premium V2's hardware endpoint is now connected to CPU and memory telemetry plus the existing Qwen accelerator discovery for CUDA, ROCm and XPU adapters/candidates.
+- The Performance Center scan action now refreshes hardware discovery and displays backend/runtime status rather than remaining disabled.
+- Active GPU, candidate GPU, and unsupported GPU states are distinct. Dedicated VRAM is never inferred from shared system memory. GPU utilization/VRAM figures remain unavailable on adapters where a supported telemetry source is not exposed.
+- Real audio benchmark execution, repeated measurements, provider/model/precision/device capture, Qwen timing acceptance and hardware optimization remain open; no benchmark success is claimed from a telemetry refresh.

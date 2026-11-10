@@ -7,6 +7,7 @@ const componentData=[
 {id:'qwen',icon:'◇',name:'Qwen Voice Studio Support',desc:'CustomVoice, VoiceDesign and authorized voice-reference workflows'}
 ];
 let step=0,installing=false,bridge=null,bridgeReady=false,environment={},environmentChecked=false,environmentRequest=0,lastStatus='idle',pollTimer=null;
+window.__ryuInstallerBridgeReady = false;
 const $=id=>document.getElementById(id),screens=[...document.querySelectorAll('.screen')];
 function formatBytes(bytes){if(bytes===null||bytes===undefined||bytes==='')return'Checking…';const n=Number(bytes);if(!Number.isFinite(n)||n<0)return'Unavailable';if(n===0)return'0 B';const units=['B','KB','MB','GB','TB'];let v=n,i=0;while(v>=1024&&i<units.length-1){v/=1024;i++}return(i===0?String(Math.round(v)):v.toFixed(1))+' '+units[i]}
 function renderSteps(){$('steps').innerHTML=labels.map((x,i)=>'<div class="step '+(i===step?'active':i<step?'done':'')+'"><div class="step-no">'+(i<step?'✓':i+1)+'</div><div><strong>'+x[0]+'</strong><small>'+x[1]+'</small></div></div>').join('')}
@@ -66,7 +67,7 @@ function pollStatus(){if(!bridgeReady||!bridge)return;bridge.getStatus(function(
 function connectBridge(){
  if(!window.QWebChannel||!window.qt||!qt.webChannelTransport){$('phaseText').textContent='Native setup bridge is unavailable. Close this window and restart Setup.';showError('The native setup service did not connect. Close and restart Setup.');update();return}
  new QWebChannel(qt.webChannelTransport,function(channel){
-  bridge=channel.objects.ryuInstaller;bridgeReady=true;
+  bridge=channel.objects.ryuInstaller;bridgeReady=true;window.__ryuInstallerBridgeReady=true;
   if(bridge.statusChanged)bridge.statusChanged.connect(function(raw){try{consumeStatus(JSON.parse(raw||'{}'))}catch(e){}});
   bridge.getEnvironment(function(raw){
    try{environment=JSON.parse(raw||'{}');$('installPath').value=environment.default_dir||$('installPath').value;
