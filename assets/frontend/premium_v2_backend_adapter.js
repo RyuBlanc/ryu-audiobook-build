@@ -16,17 +16,44 @@
       '#backgroundJobsModal .jobs-modal,',
       '.modal-back .jobs-modal {',
       'box-sizing:border-box!important;',
-      'width:min(780px,100%)!important;',
+      'width:min(780px,calc(100vw - 40px))!important;',
+      'min-width:0!important;',
+      'max-width:calc(100vw - 40px)!important;',
+      'margin-left:auto!important;',
+      'margin-right:auto!important;',
+      '}',
+      '#jobDetailsModal {',
+      'box-sizing:border-box!important;',
+      'padding:18px 20px!important;',
+      '}',
+      '#jobDetailsModal .modal {',
+      'box-sizing:border-box!important;',
+      'width:min(760px,calc(100vw - 40px))!important;',
+      'min-width:0!important;',
+      'max-width:calc(100vw - 40px)!important;',
+      'margin-left:auto!important;',
+      'margin-right:auto!important;',
+      '}',
+      '#jobDetailsModal .modal-title,',
+      '#jobDetailsModal #jobDetailsFields,',
+      '#jobDetailsModal #jobDetailsActions {',
       'min-width:0!important;',
       'max-width:100%!important;',
-      'margin-left:auto;',
-      'margin-right:auto;',
+      '}',
+      '#jobDetailsModal #jobDetailsFields {',
+      'grid-template-columns:repeat(auto-fit,minmax(min(210px,100%),1fr))!important;',
+      '}',
+      '@media(max-width:640px) {',
+      '#jobDetailsModal { padding:12px!important; }',
+      '#jobDetailsModal .modal { width:100%!important;max-width:100%!important; }',
+      '#jobDetailsModal .modal-title { gap:8px!important;align-items:flex-start!important; }',
+      '#jobDetailsModal .modal-title h2 { overflow-wrap:anywhere!important; }',
+      '#jobDetailsModal #jobDetailsFields > div { overflow-wrap:anywhere!important; }',
       '}'
     ].join(' ');
     (document.head || document.documentElement).appendChild(style);
   }
   ensureTaskManagerResponsiveStyles();
-
   let narratorOnlySavePromise = Promise.resolve();
 
   // Job polling runs every 1.5 seconds. Avoid writing the same values back to
