@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TaskManagerResponsiveStylesTests(unittest.TestCase):
-    def test_task_manager_width_rule_is_installed_at_frontend_startup(self):
+    def test_task_manager_width_rule_uses_parent_constraint_and_is_installed_at_startup(self):
         source = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         helper_start = source.index("function ensureTaskManagerResponsiveStyles()")
         helper_end = source.index("\n  let narratorOnlySavePromise", helper_start)
