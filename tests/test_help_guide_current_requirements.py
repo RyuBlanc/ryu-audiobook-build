@@ -36,6 +36,19 @@ class CurrentHelpGuideRequirements(unittest.TestCase):
         self.assertIn("Character Analysis can be cancelled at a safe inference or chapter boundary", self.guide)
         self.assertIn("does not replace the saved cast with partial results", self.guide)
 
+    def test_full_help_topics_always_replace_the_abbreviated_prototype_placeholder(self):
+        self.assertNotIn("root.children.length && String(root.textContent || '').trim()", self.guide)
+        self.assertIn("Replace the abbreviated base prototype sample with the complete guide", self.guide)
+        for topic in (
+            "Narrator-only audiobook generation (GEN-07)",
+            "History and Background Jobs",
+            "Models Center",
+            "Performance Center",
+            "Known limitations",
+            "Troubleshooting",
+        ):
+            self.assertIn(topic, self.guide)
+
     def test_qwen_help_distinguishes_adapter_detection_from_verified_inference(self):
         self.assertIn("real inference reports that device", self.guide)
         self.assertIn("compute backend can be Automatic", self.guide)
