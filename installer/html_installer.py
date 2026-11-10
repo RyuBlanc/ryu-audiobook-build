@@ -24,6 +24,23 @@ CORE_INSTALLER_NAME = "Ryu's Audiobook Core Setup.exe"
 APP_EXE_NAME = "Ryu's Audiobook.exe"
 BACKGROUND = "#05060A"
 
+def _set_windows_app_user_model_id(app_id: str) -> None:
+    """Keep the setup process grouped under its own Windows taskbar identity."""
+    if os.name != "nt":
+        return
+    try:
+        shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+        setter = shell32.SetCurrentProcessExplicitAppUserModelID
+        setter.argtypes = [ctypes.c_wchar_p]
+        setter.restype = ctypes.c_long
+        result = int(setter(app_id))
+        if result != 0:
+            raise OSError(f"SetCurrentProcessExplicitAppUserModelID failed: 0x{result & 0xFFFFFFFF:08X}")
+    except (AttributeError, OSError) as exc:
+        # Do not block installation if the Windows shell API is unavailable.
+        print(f"Could not set Windows setup taskbar identity: {exc}", file=sys.stderr)
+
+
 # Fit the visible wizard surface to the actual WebEngine viewport. The page is
 # authored as a card; on some Windows DPI/display combinations Chromium lays it
 # out much smaller than the host window, while on others it overflows and adds
@@ -540,8 +557,14 @@ class InstallerWindow(QMainWindow):
 def main() -> int:
     if os.name != "nt":
         raise RuntimeError("Ryu's Audiobook Setup is a Windows-only installer.")
+    _set_windows_app_user_model_id("RyuBlanc.RyuAudiobook.Setup")
     app = QApplication(sys.argv)
     app.setApplicationName(APP_TITLE)
+    app.setOrganizationName("RyuBlanc")
+    app_icon_path = resource_path("assets/ryu_audiobook_logo.ico")
+    app_icon = QIcon(str(app_icon_path)) if app_icon_path.is_file() else QIcon()
+    if not app_icon.isNull():
+        app.setWindowIcon(app_icon)
     window = InstallerWindow()
     # Filter mouse events for the WebEngine's internal child widgets too.
     # This keeps the custom frameless installer draggable from its top strip.
