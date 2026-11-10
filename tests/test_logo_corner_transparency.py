@@ -59,7 +59,7 @@ class LogoCornerTransparencyTests(unittest.TestCase):
             self.assertEqual(result.getpixel(point)[3], 0, f"White square matte remained at {point}")
         self.assertEqual(result.getpixel((100, 100))[3], 255)
         self.assertEqual(result.getpixel((100, 80))[3], 255)
-        self.assertEqual(result.getpixel((50, 50))[3], 255)
+        self.assertEqual(result.getpixel((100, 50))[3], 255)
 
     def test_legitimate_center_art_and_edge_accents_are_preserved(self):
         clean_logo = _load_logo_cleanup()
