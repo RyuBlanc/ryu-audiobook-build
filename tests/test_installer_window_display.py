@@ -82,6 +82,14 @@ class InstallerWindowDisplayTests(unittest.TestCase):
             )
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
 
+    def test_window_supports_native_resize_and_refits_after_resize(self):
+        source, _tree = _source_nodes()
+        self.assertIn("def _resize_edges_at", source)
+        self.assertIn("handle.startSystemResize(edges)", source)
+        self.assertIn("Qt.CursorShape.SizeFDiagCursor", source)
+        self.assertIn("QTimer.singleShot(60, self._fit_page_to_viewport)", source)
+
+
     def test_browser_zoom_shortcuts_are_intercepted_by_native_window(self):
         source, _tree = _source_nodes()
         self.assertIn("self.web.setZoomFactor(1.0)", source)
