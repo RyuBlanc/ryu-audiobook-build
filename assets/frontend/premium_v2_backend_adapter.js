@@ -16,9 +16,9 @@
       '#backgroundJobsModal .jobs-modal,',
       '.modal-back .jobs-modal {',
       'box-sizing:border-box!important;',
-      'width:min(780px,calc(100vw - 40px))!important;',
+      'width:min(780px,100%)!important;',
       'min-width:0!important;',
-      'max-width:calc(100vw - 40px)!important;',
+      'max-width:100%!important;',
       'margin-left:auto;',
       'margin-right:auto;',
       '}'
