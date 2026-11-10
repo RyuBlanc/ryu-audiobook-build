@@ -1210,12 +1210,17 @@
       ]) {
         must(helpText.includes(topic), "The preserved Help & Guide is missing required topic: " + topic);
       }
+      // The static seven-stage guide uses its own approved wording. Do not
+      // demand adapter-fallback-only phrases ("After first paragraph" and
+      // "GPU acceleration") from this page: the packaged Sound Design checks
+      // below independently verify the exact paragraph-offset option and
+      // persisted after_first_paragraph behavior, while this guide documents
+      // real-inference verification for Qwen hardware.
       for (const requirement of [
         "M4B",
-        "After first paragraph",
-        "GPU acceleration",
-        "Narrator-only audiobook generation (GEN-07)",
+        "Narrator-only Generation (GEN-07)",
         "zero valid character voice profiles are configured",
+        "Windows adapter detection alone is not proof of Qwen acceleration",
         "isolated Qwen runtime self-test",
         "explicit GPU selection must report failure"
       ]) {
