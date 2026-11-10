@@ -34,70 +34,35 @@ INSTALLER_VIEWPORT_FIT_JS = r"""
   const body = document.body;
   if (!html || !body) return;
 
-  const viewportWidth = Math.max(320, window.innerWidth || html.clientWidth);
-  const viewportHeight = Math.max(240, window.innerHeight || html.clientHeight);
+  // Keep the document itself inside the native window. The HTML/CSS layout
+  // sizes the wizard, keeps the footer visible and scrolls only overflowing
+  // content panes; do not scale the whole card and shrink its text.
   html.style.width = "100%";
   html.style.height = "100%";
   html.style.margin = "0";
   html.style.overflow = "hidden";
   body.style.width = "100%";
-  body.style.height = "100%";
+  body.style.height = "100vh";
+  body.style.minHeight = "0";
   body.style.margin = "0";
+  body.style.padding = "8px";
   body.style.overflow = "hidden";
-  body.style.position = "relative";
 
-  let fitStyle = document.getElementById("__ryuInstallerViewportFitStyle");
-  if (!fitStyle) {
-    fitStyle = document.createElement("style");
-    fitStyle.id = "__ryuInstallerViewportFitStyle";
-    document.head.appendChild(fitStyle);
-  }
-  fitStyle.textContent =
+  const style = document.getElementById("__ryuInstallerViewportFitStyle") ||
+    document.createElement("style");
+  style.id = "__ryuInstallerViewportFitStyle";
+  style.textContent =
     "html,body{overflow:hidden!important}" +
+    ".sidebar,.screens{scrollbar-width:none}" +
+    ".sidebar::-webkit-scrollbar,.screens::-webkit-scrollbar," +
     "::-webkit-scrollbar{width:0!important;height:0!important}";
+  if (!style.parentNode) document.head.appendChild(style);
 
-  const visible = Array.from(body.querySelectorAll("*")).filter((element) => {
-    const rect = element.getBoundingClientRect();
-    const style = window.getComputedStyle(element);
-    return style.display !== "none" && style.visibility !== "hidden" &&
-      rect.width > 0 && rect.height > 0;
-  });
-  const minWidth = Math.min(360, viewportWidth * 0.35);
-  const minHeight = Math.min(220, viewportHeight * 0.35);
-  const roundedSurfaces = visible.filter((element) => {
-    const rect = element.getBoundingClientRect();
-    const style = window.getComputedStyle(element);
-    const radius = parseFloat(style.borderTopLeftRadius) || 0;
-    const border = parseFloat(style.borderTopWidth) || 0;
-    return radius >= 10 && border > 0 &&
-      rect.width >= minWidth && rect.height >= minHeight;
-  });
-  const area = (element) => {
-    const rect = element.getBoundingClientRect();
-    return rect.width * rect.height;
-  };
-  const directChildren = visible.filter((element) => element.parentElement === body);
-  const wizard = roundedSurfaces.sort((a, b) => area(b) - area(a))[0] ||
-    directChildren.sort((a, b) => area(b) - area(a))[0] ||
-    body.firstElementChild;
-
-  if (!wizard || wizard === body) return;
-  const rect = wizard.getBoundingClientRect();
-  const width = Math.max(wizard.offsetWidth, wizard.scrollWidth, Math.ceil(rect.width));
-  const height = Math.max(wizard.offsetHeight, wizard.scrollHeight, Math.ceil(rect.height));
-  if (!width || !height) return;
-
-  const scale = Math.max(0.25, Math.min(
-    (viewportWidth - 24) / width,
-    (viewportHeight - 24) / height,
-    2.5
-  ));
-  wizard.style.position = "fixed";
-  wizard.style.left = "50%";
-  wizard.style.top = "50%";
-  wizard.style.margin = "0";
-  wizard.style.transformOrigin = "center center";
-  wizard.style.transform = "translate(-50%, -50%) scale(" + scale + ")";
+  const wizard = body.querySelector(".installer");
+  if (wizard) {
+    wizard.style.minHeight = "0";
+    wizard.style.maxHeight = "100%";
+  }
   window.__ryuInstallerFitApplied = true;
 })();
 """
@@ -111,12 +76,12 @@ ERROR_CANCELLED = 1223
 def _installer_window_geometry(
     available_bounds: tuple[int, int, int, int],
 ) -> tuple[int, int, int, int]:
-    """Return a centered setup-window rectangle that fits the current screen."""
+    """Return a compact, centered setup window with a small visible screen margin."""
     screen_x, screen_y, screen_width, screen_height = (int(value) for value in available_bounds)
     if screen_width <= 0 or screen_height <= 0:
         return screen_x, screen_y, 1180, 760
-    width = min(1180, max(720, int(screen_width * 0.92)))
-    height = min(760, max(540, int(screen_height * 0.90)))
+    width = min(1180, max(720, int(screen_width * 0.96)))
+    height = min(760, max(540, int(screen_height * 0.94)))
     width = min(width, screen_width)
     height = min(height, screen_height)
     return (
@@ -125,7 +90,6 @@ def _installer_window_geometry(
         width,
         height,
     )
-
 
 def resource_path(relative: str) -> Path:
     return Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1])) / relative
