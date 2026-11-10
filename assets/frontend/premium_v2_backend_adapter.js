@@ -6340,7 +6340,8 @@ function renderProductionMetadataGate(active) {
     const ring = $('genRing');
     if (ring?.style) {
       ring.style.setProperty('--progress', fullPercent + '%');
-      ring.dataset.active = fullActive ? 'true' : 'false';
+      ring.dataset.active = ['queued','running','pause_requested','cancel_requested','retrying'].includes(fullState)
+        ? 'true' : 'false';
       ring.setAttribute('data-state', fullState || 'idle');
       ring.setAttribute('role', 'progressbar');
       ring.setAttribute('aria-valuemin', '0');
@@ -7138,13 +7139,9 @@ function renderProductionMetadataGate(active) {
         // A background job must never write progress into an unrelated screen.
         // Dedicated progress widgets are only updated while their owning screen
         // is visible; the shared Background Jobs and History views remain global.
-        const fullOwner = String(productionFullJobId || productionJobSnapshots.full?.job_id || '');
-        if (originVisible && originPage === 'generate' && job.type === 'audiobook-generation' &&
-            fullOwner && String(job.job_id || '') === fullOwner) {
-          writeTextIfChanged($('genPercent'), Math.round(pct) + '%');
-          writeCssVariableIfChanged($('genRing'), '--progress', pct + '%');
-          writeTextIfChanged($('genStage'), job.stage || job.message || job.state);
-        }
+        // Production's dedicated monitor owns the generation ring, percentage
+        // and ARIA progress value as one snapshot. Generic job polling must not
+        // overwrite them with a late or out-of-order response.
         if (originVisible && originPage === 'import' && job.type === 'import') {
           writeStyleIfChanged($('importBar'), 'width', pct + '%');
           writeTextIfChanged($('importStatus'), job.message || job.stage || job.state);
