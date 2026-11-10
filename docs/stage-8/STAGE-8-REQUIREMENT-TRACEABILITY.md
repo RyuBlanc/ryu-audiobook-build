@@ -786,3 +786,13 @@ Build #3014 stopped in the test job before packaging because the new Models Cent
 ## 9 November 2026 — Build #3015 adjacent-card overlap
 
 Build #3015 passed 1,443 tests, frozen executable checks, bundled assets, project restart, recovery, and real generation fixtures. Packaged responsive acceptance still failed at 1366×768: controls from `custom-0.6b` and `windows-sapi` cards overlapped 82×29 and 80×29 px. The overlap guard remains intact; its diagnostics now include enclosing model-card and grid bounds so the next fix can distinguish card overlap from child overflow. The 1.2.0 package is not yet accepted.
+
+## Qwen runtime and actual-device telemetry checkpoint — 2026-11-10
+
+- The standalone Qwen worker no longer reports `ready=true` with a placeholder `device=pending`.
+- CustomVoice and Clone readiness is emitted only after the selected model is loaded; VoiceDesign readiness is emitted only after the first VoiceDesign model load.
+- The desktop provider rejects missing/pending devices and records actual backend/device telemetry only from a successful audio-generation response.
+- Regression tests cover physical `app/core` packaging for the external Qwen venv, GPU-first Automatic selection, portable saved-profile backend policy, and the readiness/verified-inference distinction.
+- Candidate source commit: `1cfd6866a869203647799cd90c1d36c0412dd1a5`.
+- Windows source regression run #3077: **SUCCESS** — 1,437 tests and 45 Stage 6 preflight tests.
+- Next: exact-head `[artifact-checkpoint]` Windows package validation, then real-device acceptance on NVIDIA/AMD/Intel hardware. Hosted CI does not constitute physical GPU synthesis proof.
