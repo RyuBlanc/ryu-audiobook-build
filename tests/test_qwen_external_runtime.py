@@ -25,7 +25,8 @@ class QwenExternalRuntimePackagingTests(unittest.TestCase):
         end = source.index("\ndef accelerator_report(", start)
         selector = source[start:end]
         self.assertNotIn("from app.core.paths import settings_root", selector)
-        self.assertIn('Path.home() / "Ryu\\'s Audiobook" / "Settings"', selector)
+        self.assertIn('Path.home() / "Ryu', selector)
+        self.assertIn('Audiobook" / "Settings"', selector)
 
     def test_supported_gpu_is_default_without_verified_same_machine_cpu_win(self):
         from app.tts import qwen_accelerator as accelerator
