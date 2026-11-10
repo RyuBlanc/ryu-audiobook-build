@@ -379,6 +379,8 @@ class ProductionPreviewParitySourceContracts(unittest.TestCase):
             "move($('narratorOnlyGenerationControl'),settings)",
             "move(generateButton,actions)",
             "move($('pauseGenerate'),actions)",
+            "originalActionToolbar.hidden = true",
+            "!originalActionToolbar.querySelector('button')",
         ):
             self.assertIn(required, helper)
         self.assertLess(helper.index("ryuProductionPreviewSection"), helper.index("ryuProductionOptionsSection"))
