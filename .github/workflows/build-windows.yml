@@ -694,7 +694,8 @@ jobs:
           $previousPythonPath = $env:PYTHONPATH
           try {
             $env:PYTHONPATH = $frozenPythonRoot
-            $qwenProbe = "from pathlib import Path; from app.core.paths import settings_root; from app.tts import qwen_accelerator as accelerator; accelerator.best_accelerator = lambda: accelerator.Accelerator('cuda', 'cuda:0', 'CI NVIDIA GPU', 8.0, True, 'CI GPU import-path probe'); selected, _reason = accelerator.automatic_accelerator('custom-0.6b', history_path=Path.home() / 'Ryu Qwen Missing CI History.json'); assert selected.backend == 'cuda' and selected.device == 'cuda:0', selected; print('External Qwen app.core import OK: ' + str(settings_root())); print('External Qwen automatic GPU selection OK: ' + selected.backend + ' / ' + selected.device)"            $qwenOutput = & $qwenRuntimePython -B -c $qwenProbe 2>&1
+            $qwenProbe = "from pathlib import Path; from app.core.paths import settings_root; from app.tts import qwen_accelerator as accelerator; accelerator.best_accelerator = lambda: accelerator.Accelerator('cuda', 'cuda:0', 'CI NVIDIA GPU', 8.0, True, 'CI GPU import-path probe'); selected, _reason = accelerator.automatic_accelerator('custom-0.6b', history_path=Path.home() / 'Ryu Qwen Missing CI History.json'); assert selected.backend == 'cuda' and selected.device == 'cuda:0', selected; print('External Qwen app.core import OK: ' + str(settings_root())); print('External Qwen automatic GPU selection OK: ' + selected.backend + ' / ' + selected.device)"
+            $qwenOutput = & $qwenRuntimePython -B -c $qwenProbe 2>&1
             $qwenExit = $LASTEXITCODE
             $qwenOutput | Write-Host
             if ($qwenExit -ne 0) { throw "External Qwen runtime import/GPU-selection smoke failed with exit code $qwenExit." }
