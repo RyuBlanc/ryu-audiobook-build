@@ -696,6 +696,11 @@ def _run(args: argparse.Namespace) -> int:
             "chapter_bgm_strategy": "same",
             "chapter_bgm_overrides": {},
             "sound_cues": {"opening": None, "chapter": None, "closing": None},
+            # This dedicated zero-character fixture exercises real generation
+            # job controls using the saved narrator. The application default
+            # remains OFF; this test explicitly opts into narrator-only mode
+            # because no character profiles/dialogue assignments exist.
+            "narrator_only_generation": True,
             "characters": [],
         }, ensure_ascii=False, indent=2), encoding="utf-8")
 
