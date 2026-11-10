@@ -122,6 +122,10 @@ class InstallerBrandingContractTests(unittest.TestCase):
         self.assertIn("draw.rectangle((width - corner, height - corner, width - 1, height - 1), fill=255)", build_script)
         self.assertIn("halo = ImageChops.multiply(ImageChops.multiply(bright, neutral), corners)", build_script)
         self.assertIn("rgba = _remove_outer_neutral_logo_halo(rgba)", build_script)
+        self.assertLess(
+            build_script.index("rgba = _remove_outer_neutral_logo_halo(rgba)"),
+            build_script.index("rgba.putalpha(ImageChops.multiply(alpha, clip_mask))"),
+        )
         self.assertIn("ImageChops.subtract(rgba.getchannel(\"A\"), halo)", build_script)
         self.assertNotIn("band = max(12, round(min(width, height) * 0.06))", build_script)
 
