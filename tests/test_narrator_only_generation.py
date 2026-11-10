@@ -255,6 +255,10 @@ class NarratorOnlyGenerationTests(unittest.TestCase):
             adapter,
         )
         self.assertIn(
+            "Automatically enabled because this book has no configured character voice profiles",
+            adapter,
+        )
+        self.assertIn(
             "adding a character voice profile returns production to multi-character routing.",
             adapter,
         )
