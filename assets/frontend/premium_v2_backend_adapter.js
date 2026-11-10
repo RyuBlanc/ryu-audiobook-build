@@ -387,6 +387,12 @@
     const error = String(kind || '').trim().toLowerCase() === 'error';
     message(text, error);
   };
+  // Replace the prototype's global toast() helper and its short-lived demo
+  // stack with the real deduplicated notification path.
+  window.toast = (text, kind = '') => {
+    const error = String(kind || '').trim().toLowerCase() === 'error';
+    message(text, error);
+  };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
   let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, profileEditOriginalName = '', activeJob = null, activeJobType = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, jobsRefreshRequested = false, chapterListEpoch = 0, chapterSelectionEpoch = 0, cueListEpoch = 0, cueSearchTimer = null, previewAudio = null, lastVoicePreviewPath = null, lastVoicePreviewProfileName = '', lastVoicePreviewChapterNumber = null, lastVoicePreviewChapterTitle = '', voicePreviewValid = false, voicePreviewEpoch = 0, previewVolume = 0.85, voiceAssignmentEpoch = 0, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8, productionFullJobId = null, productionPreviewJobId = null, productionJobSnapshots = {full:null,preview:null}, productionJobMonitors = {full:null,preview:null}, productionMonitorEpochs = {full:0,preview:0}, productionPreviewRequestProjectFolder = '', productionPreviewSelectionProjectFolder = '', productionPreviewSelectedChapter = null, productionPreviewSelectedChapterId = '', productionPreviewSelectedChapterSignature = '', productionPreviewRequestChapterNumber = 0, productionPreviewRequestChapterId = '';
   let elevenCandidates = [], selectedElevenCandidate = null, elevenDesignSeed = 7300;
@@ -6220,6 +6226,7 @@ function renderProductionMetadataGate(active) {
     }
     syncProductionPreviewChapterSelector();
     syncProductionPreviewControls();
+    ensureProductionEngineLayout();
   }
   function monitorProductionJob(jobId, operation, done) {
     if (!['full','preview'].includes(operation)) return Promise.reject(new Error('Unknown Production Studio job operation.'));
@@ -6333,6 +6340,8 @@ function renderProductionMetadataGate(active) {
     const ring = $('genRing');
     if (ring?.style) {
       ring.style.setProperty('--progress', fullPercent + '%');
+      ring.dataset.active = fullActive ? 'true' : 'false';
+      ring.setAttribute('data-state', fullState || 'idle');
       ring.setAttribute('role', 'progressbar');
       ring.setAttribute('aria-valuemin', '0');
       ring.setAttribute('aria-valuemax', '100');
@@ -8153,8 +8162,18 @@ function renderProductionMetadataGate(active) {
       '#voices .content,#voices .layout,#voiceWorkspace,#voiceWorkspace .panel{overflow-anchor:none!important}',
       '#voices #previewState{min-height:1.25em;white-space:nowrap;max-width:170px;overflow:hidden;text-overflow:ellipsis;flex:0 0 auto}',
       '#voices #validation{min-height:3em;box-sizing:border-box;overflow-wrap:anywhere}',
-      '.book-cover.has-project-cover::before,.book-cover.has-project-cover::after,.project-cover.has-project-cover::before,.project-cover.has-project-cover::after,[data-project-cover].has-project-cover::before,[data-project-cover].has-project-cover::after{content:none!important;display:none!important;background:none!important;opacity:0!important}',
-      '#genRing{transition:background .28s linear,filter .28s ease;will-change:background}',
+      '.has-project-cover::before,.has-project-cover::after{content:none!important;display:none!important;background:none!important;opacity:0!important}',
+      '.has-project-cover .cover-watermark,.has-project-cover .cover-placeholder,.has-project-cover .cover-branding{display:none!important}',
+      '#genRing{background:conic-gradient(var(--red2,#d4375d) 0 var(--progress,0%),var(--border,#353c49) var(--progress,0%) 100%)!important;transition:filter .2s ease;will-change:filter}',
+      '#genRing[data-active="true"]{filter:drop-shadow(0 0 8px rgba(212,55,93,.35))}',
+      '#genRing[data-active="true"]::after{content:"";position:absolute;inset:-4px;border:2px solid transparent;border-top-color:var(--red2,#d4375d);border-right-color:rgba(212,55,93,.16);border-radius:50%;pointer-events:none;animation:ryuGenerationRingSpin 1.8s linear infinite}',
+      '@keyframes ryuGenerationRingSpin{to{transform:rotate(360deg)}}',
+      'html[data-ryu-reduce-motion="1"] #genRing[data-active="true"]::after{animation:none}',
+      '.page#generate .ready{display:grid!important;grid-template-columns:minmax(86px,.85fr) minmax(0,1.15fr)!important;gap:8px!important;align-items:start!important;min-width:0!important;max-width:100%!important}',
+      '.page#generate .ready>*{min-width:0!important;max-width:100%!important;white-space:normal!important;overflow-wrap:anywhere!important;word-break:normal!important}',
+      '.page#generate .ready b{text-align:right!important;font-weight:700}',
+      '@media(max-width:720px){.page#generate .ready{grid-template-columns:minmax(0,1fr)!important;gap:3px!important}.page#generate .ready b{text-align:left!important}}',
+      '#productionBookMetadata,#productionNarrator,#productionVoiceCastCount,#productionOutputSummary{min-width:0;max-width:100%;white-space:normal;overflow-wrap:anywhere;word-break:normal}',
       '#productionBookImported,#productionChaptersReady,#productionNarratorReady,#productionCharacterVoices,#productionPronunciationReady,#productionOutputReady{min-width:0;max-width:100%;overflow-wrap:anywhere;white-space:normal;line-height:1.45;word-break:normal}',
       '.ryu-readiness-row{display:grid!important;grid-template-columns:minmax(88px,.85fr) minmax(0,1.15fr)!important;align-items:start!important;gap:10px!important;min-width:0!important;max-width:100%!important}',
       '.ryu-readiness-row>*{min-width:0!important;max-width:100%!important;white-space:normal!important;overflow-wrap:anywhere!important}',
@@ -9724,10 +9743,8 @@ function renderProductionMetadataGate(active) {
   function renderHelpGuide() {
     const root = document.getElementById('help');
     if (!root || root.dataset.ryuHelpGuideRendered === 'true') return;
-    if (root.children.length && String(root.textContent || '').trim()) {
-      root.dataset.ryuHelpGuideRendered = 'preserved-static-guide';
-      return;
-    }
+    // Replace the abbreviated base prototype sample with the complete guide
+    // topics below, even when the page initially contains placeholder content.
     root.dataset.ryuHelpGuideRendered = 'true';
 
     const topics = [
