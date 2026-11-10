@@ -82,6 +82,12 @@ class InstallerWindowDisplayTests(unittest.TestCase):
             )
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
 
+    def test_user_resizing_has_reasonable_responsive_minimums(self):
+        source, _tree = _source_nodes()
+        self.assertIn("min(900, window_width)", source)
+        self.assertIn("min(560, window_height)", source)
+
+
     def test_window_supports_native_resize_and_refits_after_resize(self):
         source, _tree = _source_nodes()
         self.assertIn("def _resize_edges_at", source)
