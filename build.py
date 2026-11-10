@@ -89,12 +89,12 @@ DRAGON_CURSOR_PNG = ASSETS / "dragon_cursor.png"
 
 
 def _remove_outer_neutral_logo_halo(image: Image.Image) -> Image.Image:
-    """Clear a narrow neutral-white fringe at the outer canvas edge only.
+    """Remove pale square pads from the four outer corners of the logo.
 
-    The interior of the logo contains legitimate ivory pages and gold highlights;
-    those pixels are intentionally untouched. This targets only near-neutral
-    light pixels within the outer 6% edge band that produced the unwanted pale
-    tile around the transparent artwork in Windows icons and the HTML installer.
+    Ivory book pages and gold highlights in the logo's center are retained.
+    Only near-neutral bright pixels inside the four outer corner zones are
+    removed, preventing the JPEG-backed rounded logo from showing white square
+    pads when rendered on transparent backgrounds in Windows icons and UI.
     """
     rgba = image.convert("RGBA")
     red, green, blue = rgba.convert("RGB").split()
@@ -113,17 +113,16 @@ def _remove_outer_neutral_logo_halo(image: Image.Image) -> Image.Image:
         ImageChops.difference(red, blue).point(lambda value: 255 if value <= 36 else 0),
     )
     width, height = rgba.size
-    band = max(12, round(min(width, height) * 0.06))
-    edge = Image.new("L", rgba.size, 0)
-    draw = ImageDraw.Draw(edge)
-    draw.rectangle((0, 0, width - 1, band - 1), fill=255)
-    draw.rectangle((0, height - band, width - 1, height - 1), fill=255)
-    draw.rectangle((0, 0, band - 1, height - 1), fill=255)
-    draw.rectangle((width - band, 0, width - 1, height - 1), fill=255)
-    halo = ImageChops.multiply(ImageChops.multiply(bright, neutral), edge)
+    corner = max(12, round(min(width, height) * 0.14))
+    corners = Image.new("L", rgba.size, 0)
+    draw = ImageDraw.Draw(corners)
+    draw.rectangle((0, 0, corner - 1, corner - 1), fill=255)
+    draw.rectangle((width - corner, 0, width - 1, corner - 1), fill=255)
+    draw.rectangle((0, height - corner, corner - 1, height - 1), fill=255)
+    draw.rectangle((width - corner, height - corner, width - 1, height - 1), fill=255)
+    halo = ImageChops.multiply(ImageChops.multiply(bright, neutral), corners)
     rgba.putalpha(ImageChops.subtract(rgba.getchannel("A"), halo))
     return rgba
-
 
 def build_logo_assets() -> None:
     ASSETS.mkdir(parents=True, exist_ok=True)
