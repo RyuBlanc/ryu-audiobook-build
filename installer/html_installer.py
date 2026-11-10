@@ -23,11 +23,90 @@ APP_TITLE = "Ryu's Audiobook Setup"
 CORE_INSTALLER_NAME = "Ryu's Audiobook Core Setup.exe"
 APP_EXE_NAME = "Ryu's Audiobook.exe"
 BACKGROUND = "#05060A"
+
+def _set_windows_app_user_model_id(app_id: str) -> None:
+    """Keep the setup process grouped under its own Windows taskbar identity."""
+    if os.name != "nt":
+        return
+    try:
+        shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+        setter = shell32.SetCurrentProcessExplicitAppUserModelID
+        setter.argtypes = [ctypes.c_wchar_p]
+        setter.restype = ctypes.c_long
+        result = int(setter(app_id))
+        if result != 0:
+            raise OSError(f"SetCurrentProcessExplicitAppUserModelID failed: 0x{result & 0xFFFFFFFF:08X}")
+    except (AttributeError, OSError) as exc:
+        # Do not block installation if the Windows shell API is unavailable.
+        print(f"Could not set Windows setup taskbar identity: {exc}", file=sys.stderr)
+
+
+# Fit the visible wizard surface to the actual WebEngine viewport. The page is
+# authored as a card; on some Windows DPI/display combinations Chromium lays it
+# out much smaller than the host window, while on others it overflows and adds
+# browser scrollbars. Fit the card itself instead of changing the UI workflow.
+INSTALLER_VIEWPORT_FIT_JS = r"""
+(() => {
+  const html = document.documentElement;
+  const body = document.body;
+  if (!html || !body) return;
+
+  // Keep the document itself inside the native window. The HTML/CSS layout
+  // sizes the wizard, keeps the footer visible and scrolls only overflowing
+  // content panes; do not scale the whole card and shrink its text.
+  html.style.width = "100%";
+  html.style.height = "100%";
+  html.style.margin = "0";
+  html.style.overflow = "hidden";
+  body.style.width = "100%";
+  body.style.height = "100vh";
+  body.style.minHeight = "0";
+  body.style.margin = "0";
+  body.style.padding = "8px";
+  body.style.overflow = "hidden";
+
+  const style = document.getElementById("__ryuInstallerViewportFitStyle") ||
+    document.createElement("style");
+  style.id = "__ryuInstallerViewportFitStyle";
+  style.textContent =
+    "html,body{overflow:hidden!important}" +
+    ".sidebar,.screens{scrollbar-width:none}" +
+    ".sidebar::-webkit-scrollbar,.screens::-webkit-scrollbar," +
+    "::-webkit-scrollbar{width:0!important;height:0!important}";
+  if (!style.parentNode) document.head.appendChild(style);
+
+  const wizard = body.querySelector(".installer");
+  if (wizard) {
+    wizard.style.minHeight = "0";
+    wizard.style.maxHeight = "100%";
+  }
+  window.__ryuInstallerFitApplied = true;
+})();
+"""
+
 SEE_MASK_NOCLOSEPROCESS = 0x00000040
 WAIT_OBJECT_0 = 0
 WAIT_TIMEOUT = 0x102
 ERROR_CANCELLED = 1223
 
+
+def _installer_window_geometry(
+    available_bounds: tuple[int, int, int, int],
+) -> tuple[int, int, int, int]:
+    """Return a compact, centered setup window with a small visible screen margin."""
+    screen_x, screen_y, screen_width, screen_height = (int(value) for value in available_bounds)
+    if screen_width <= 0 or screen_height <= 0:
+        return screen_x, screen_y, 1180, 760
+    width = min(1180, max(720, int(screen_width * 0.96)))
+    height = min(760, max(540, int(screen_height * 0.94)))
+    width = min(width, screen_width)
+    height = min(height, screen_height)
+    return (
+        screen_x + (screen_width - width) // 2,
+        screen_y + (screen_height - height) // 2,
+        width,
+        height,
+    )
 
 def resource_path(relative: str) -> Path:
     return Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1])) / relative
@@ -313,29 +392,51 @@ class InstallerWindow(QMainWindow):
             self.setWindowIcon(QIcon(str(icon)))
         self.setWindowTitle(APP_TITLE)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
-        self.resize(1180, 760)
-        self.setMinimumSize(960, 680)
+        primary_screen = QApplication.primaryScreen()
+        available = primary_screen.availableGeometry() if primary_screen else None
+        screen_bounds = (
+            (available.x(), available.y(), available.width(), available.height())
+            if available is not None else (0, 0, 1180, 760)
+        )
+        window_x, window_y, window_width, window_height = _installer_window_geometry(screen_bounds)
+        self.setMinimumSize(min(900, window_width), min(560, window_height))
+        self.resize(window_width, window_height)
         self.setStyleSheet("QMainWindow{background:" + BACKGROUND + ";}")
         self.web = QWebEngineView(self)
+        # The setup UI is fitted by the host below; browser-style zoom changes
+        # otherwise make the page too small or introduce page-level scrollbars.
+        self.web.setZoomFactor(1.0)
         settings = self.web.settings()
         settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
         settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, False)
+        pinch_to_zoom = getattr(QWebEngineSettings.WebAttribute, "PinchToZoomEnabled", None)
+        if pinch_to_zoom is not None:
+            settings.setAttribute(pinch_to_zoom, False)
         self.setCentralWidget(self.web)
         self.channel = QWebChannel(self.web.page())
         self.bridge = InstallerBridge(self)
         self.channel.registerObject("ryuInstaller", self.bridge)
         self.web.page().setWebChannel(self.channel)
         self.bridge.closeRequested.connect(self.close)
+        self.web.loadFinished.connect(self._fit_page_to_viewport)
         self._drag_offset = None
         self._startup_smoke_marker = os.environ.get("RYU_INSTALLER_STARTUP_SMOKE_MARKER", "").strip()
         self._startup_smoke_attempts = 0
         if self._startup_smoke_marker:
             self.web.loadFinished.connect(self._on_startup_smoke_page_loaded)
         self.web.load(QUrl.fromLocalFile(str(page.resolve())))
-        screen = QApplication.primaryScreen().availableGeometry()
-        self.move(screen.x() + (screen.width() - self.width()) // 2,
-                  screen.y() + (screen.height() - self.height()) // 2)
+        self.move(window_x, window_y)
 
+    def _fit_page_to_viewport(self, loaded: bool = True) -> None:
+        if not loaded or not hasattr(self, "web"):
+            return
+        self.web.setZoomFactor(1.0)
+        self.web.page().runJavaScript(INSTALLER_VIEWPORT_FIT_JS)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "web"):
+            QTimer.singleShot(60, self._fit_page_to_viewport)
 
     def _write_startup_smoke_marker(self, status: str, detail: str) -> None:
         marker_value = getattr(self, "_startup_smoke_marker", "")
@@ -367,14 +468,47 @@ class InstallerWindow(QMainWindow):
             return
         QTimer.singleShot(100, self._probe_startup_smoke_bridge)
 
+    @staticmethod
+    def _resize_edges_at(x: int, y: int, width: int, height: int, margin: int = 9) -> Qt.Edge:
+        edges = Qt.Edge(0)
+        if x <= margin:
+            edges |= Qt.Edge.LeftEdge
+        elif x >= width - margin:
+            edges |= Qt.Edge.RightEdge
+        if y <= margin:
+            edges |= Qt.Edge.TopEdge
+        elif y >= height - margin:
+            edges |= Qt.Edge.BottomEdge
+        return edges
+
     def eventFilter(self, obj, event):
         # WebEngine sends mouse events to Chromium child widgets, not reliably
         # to QWebEngineView itself. Filter at QApplication level (installed in
-        # main()) and begin native movement only in the empty top strip.
+        # main()) for window dragging and native resize gestures.
         if isinstance(obj, QWidget) and obj.window() is self:
             event_type = event.type()
-            if event_type == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+            if event_type == QEvent.Type.Wheel:
+                if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                    return True
+            elif event_type == QEvent.Type.KeyPress:
+                zoom_keys = {
+                    Qt.Key.Key_Plus, Qt.Key.Key_Equal, Qt.Key.Key_Minus,
+                    Qt.Key.Key_Underscore, Qt.Key.Key_0,
+                }
+                if (
+                    event.modifiers() & Qt.KeyboardModifier.ControlModifier
+                    and event.key() in zoom_keys
+                ):
+                    return True
+            elif event_type == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
                 point = self.mapFromGlobal(event.globalPosition().toPoint())
+                edges = self._resize_edges_at(point.x(), point.y(), self.width(), self.height())
+                if edges:
+                    handle = self.windowHandle()
+                    if handle is not None:
+                        handle.startSystemResize(edges)
+                    self._drag_offset = None
+                    return True
                 in_drag_strip = 0 <= point.y() <= 46 and 285 <= point.x() < self.width() - 112
                 if in_drag_strip:
                     handle = self.windowHandle()
@@ -383,12 +517,32 @@ class InstallerWindow(QMainWindow):
                         return True
                     self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
                     return True
-            elif event_type == QEvent.Type.MouseMove and self._drag_offset is not None:
-                if event.buttons() & Qt.MouseButton.LeftButton:
+            elif event_type == QEvent.Type.MouseMove:
+                point = self.mapFromGlobal(event.globalPosition().toPoint())
+                edges = self._resize_edges_at(point.x(), point.y(), self.width(), self.height())
+                if edges and self._drag_offset is None:
+                    left = bool(edges & Qt.Edge.LeftEdge)
+                    right = bool(edges & Qt.Edge.RightEdge)
+                    top = bool(edges & Qt.Edge.TopEdge)
+                    bottom = bool(edges & Qt.Edge.BottomEdge)
+                    if (left and top) or (right and bottom):
+                        cursor = Qt.CursorShape.SizeFDiagCursor
+                    elif (right and top) or (left and bottom):
+                        cursor = Qt.CursorShape.SizeBDiagCursor
+                    elif left or right:
+                        cursor = Qt.CursorShape.SizeHorCursor
+                    else:
+                        cursor = Qt.CursorShape.SizeVerCursor
+                    self.setCursor(cursor)
+                    return True
+                elif self._drag_offset is not None and event.buttons() & Qt.MouseButton.LeftButton:
                     self.move(event.globalPosition().toPoint() - self._drag_offset)
                     return True
+                elif not edges:
+                    self.unsetCursor()
             elif event_type == QEvent.Type.MouseButtonRelease:
                 self._drag_offset = None
+                self.unsetCursor()
         return super().eventFilter(obj, event)
 
     def closeEvent(self, event) -> None:
@@ -403,8 +557,14 @@ class InstallerWindow(QMainWindow):
 def main() -> int:
     if os.name != "nt":
         raise RuntimeError("Ryu's Audiobook Setup is a Windows-only installer.")
+    _set_windows_app_user_model_id("RyuBlanc.RyuAudiobook.Setup")
     app = QApplication(sys.argv)
     app.setApplicationName(APP_TITLE)
+    app.setOrganizationName("RyuBlanc")
+    app_icon_path = resource_path("assets/ryu_audiobook_logo.ico")
+    app_icon = QIcon(str(app_icon_path)) if app_icon_path.is_file() else QIcon()
+    if not app_icon.isNull():
+        app.setWindowIcon(app_icon)
     window = InstallerWindow()
     # Filter mouse events for the WebEngine's internal child widgets too.
     # This keeps the custom frameless installer draggable from its top strip.

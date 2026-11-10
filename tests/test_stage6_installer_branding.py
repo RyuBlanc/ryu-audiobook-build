@@ -49,14 +49,11 @@ class InstallerBrandingContractTests(unittest.TestCase):
         self.assertIn('clip-path="url(#roundedBrandTile)"', logo_svg)
         self.assertNotIn("QImage(1024, 1024", build_script)
 
-        # The main window and legacy Import control must prefer the PNG asset,
-        # retaining SVG only as a source-checkout fallback.
-        for relative_path in ("app/main.py", "app/ui/workflow.py"):
-            source = (ROOT / relative_path).read_text(encoding="utf-8")
-            self.assertLess(
-                source.index("ryu_audiobook_logo.png"),
-                source.index("ryu_audiobook_logo.svg"),
-            )
+        # The installed main window prefers the multi-size ICO for the
+        # Windows shell, with PNG/SVG retained as UI/source-checkout fallbacks.
+        main_source = (ROOT / "app/main.py").read_text(encoding="utf-8")
+        self.assertLess(main_source.index("ryu_audiobook_logo.ico"), main_source.index("ryu_audiobook_logo.png"))
+        self.assertLess(main_source.index("ryu_audiobook_logo.png"), main_source.index("ryu_audiobook_logo.svg"))
 
     def test_setup_keeps_standard_install_launch_and_shortcut_paths(self):
         self.assertIn('DefaultDirName={autopf}\\Ryu\'s Audiobook', self.script)
@@ -112,12 +109,21 @@ class InstallerBrandingContractTests(unittest.TestCase):
         self.assertIn("handle.startSystemMove()", bridge)
         self.assertIn("QFileDialog.getExistingDirectory", bridge)
 
-    def test_logo_pipeline_clears_only_the_outer_neutral_halo(self):
+    def test_logo_pipeline_removes_boundary_connected_white_matte(self):
         build_script = (ROOT / "build.py").read_text(encoding="utf-8")
         self.assertIn("def _remove_outer_neutral_logo_halo(image: Image.Image)", build_script)
-        self.assertIn("band = max(12, round(min(width, height) * 0.06))", build_script)
+        self.assertIn("ImageDraw.floodfill(connected_background", build_script)
+        self.assertIn("for x in range(width):", build_script)
+        self.assertIn("for y in range(height):", build_script)
+        self.assertIn("corner = max(12, round(min(width, height) * 0.14))", build_script)
+        self.assertIn("matte = connected_background.point", build_script)
         self.assertIn("rgba = _remove_outer_neutral_logo_halo(rgba)", build_script)
-        self.assertIn("ImageChops.subtract(rgba.getchannel(\"A\"), halo)", build_script)
+        self.assertLess(
+            build_script.index("rgba = _remove_outer_neutral_logo_halo(rgba)"),
+            build_script.index("rgba.putalpha(ImageChops.multiply(alpha, clip_mask))"),
+        )
+        self.assertIn("ImageChops.subtract(rgba.getchannel(\"A\"), matte)", build_script)
+
 
 
     def test_html_setup_bridge_runs_the_actual_windows_installer(self):

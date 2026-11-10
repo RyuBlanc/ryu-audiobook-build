@@ -146,6 +146,40 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
         self.assertTrue(any("CPU compatibility mode" in message for message in messages))
         self.assertEqual(runner.call_count, 6)
 
+    def test_explicit_cuda_selection_does_not_silently_fall_back_to_cpu(self):
+        from pathlib import Path
+        from unittest.mock import patch
+        from app.tts import qwen_character_runtime as runtime
+
+        results = [
+            (0, "pip bootstrap ready"),
+            (1, "CUDA 12.8 wheel unavailable"),
+            (1, "CUDA 12.6 wheel unavailable"),
+        ]
+        candidate = type("Candidate", (), {"backend": "cuda-candidate", "name": "NVIDIA GPU"})()
+        with (
+            patch.object(runtime, "_has_nvidia_gpu", return_value=True),
+            patch.object(runtime, "best_accelerator", return_value=candidate),
+            patch.object(runtime, "_run_capture", side_effect=results) as runner,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Could not install a validated Qwen runtime"):
+                runtime._install_runtime_packages(
+                    Path("python.exe"), preferred_backend="cuda"
+                )
+
+        commands = [entry.args[0] for entry in runner.call_args_list]
+        index_urls = [
+            commands[index][commands[index].index("--index-url") + 1]
+            for index in range(len(commands))
+            if "--index-url" in commands[index]
+        ]
+        self.assertEqual(index_urls, [
+            "https://download.pytorch.org/whl/cu128",
+            "https://download.pytorch.org/whl/cu126",
+        ])
+        self.assertNotIn("https://download.pytorch.org/whl/cpu", index_urls)
+        self.assertEqual(runner.call_count, 3)
+
     def test_preflight_gpu_memory_guard_rejects_model_that_exceeds_free_vram(self):
         from pathlib import Path
         from tempfile import TemporaryDirectory

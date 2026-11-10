@@ -89,12 +89,13 @@ DRAGON_CURSOR_PNG = ASSETS / "dragon_cursor.png"
 
 
 def _remove_outer_neutral_logo_halo(image: Image.Image) -> Image.Image:
-    """Clear a narrow neutral-white fringe at the outer canvas edge only.
+    """Remove a pale square matte around the logo while preserving isolated art.
 
-    The interior of the logo contains legitimate ivory pages and gold highlights;
-    those pixels are intentionally untouched. This targets only near-neutral
-    light pixels within the outer 6% edge band that produced the unwanted pale
-    tile around the transparent artwork in Windows icons and the HTML installer.
+    The old corner-only cleanup left white strips along the middle of each
+    edge. Build a mask of bright, near-neutral pixels, then remove only
+    components connected to the image boundary (plus the four outer corner
+    pads used by older source exports). Ivory pages and highlights inside the
+    red/gold artwork are disconnected from the boundary and remain intact.
     """
     rgba = image.convert("RGBA")
     red, green, blue = rgba.convert("RGB").split()
@@ -112,18 +113,37 @@ def _remove_outer_neutral_logo_halo(image: Image.Image) -> Image.Image:
         ),
         ImageChops.difference(red, blue).point(lambda value: 255 if value <= 36 else 0),
     )
+    candidates = ImageChops.multiply(bright, neutral)
+    connected_background = candidates.copy()
     width, height = rgba.size
-    band = max(12, round(min(width, height) * 0.06))
-    edge = Image.new("L", rgba.size, 0)
-    draw = ImageDraw.Draw(edge)
-    draw.rectangle((0, 0, width - 1, band - 1), fill=255)
-    draw.rectangle((0, height - band, width - 1, height - 1), fill=255)
-    draw.rectangle((0, 0, band - 1, height - 1), fill=255)
-    draw.rectangle((width - band, 0, width - 1, height - 1), fill=255)
-    halo = ImageChops.multiply(ImageChops.multiply(bright, neutral), edge)
-    rgba.putalpha(ImageChops.subtract(rgba.getchannel("A"), halo))
-    return rgba
 
+    def remove_candidate_component(x: int, y: int) -> None:
+        if connected_background.getpixel((x, y)) == 255:
+            # ImageDraw performs the connected flood fill in native code.
+            # The marker prevents a component from being visited repeatedly.
+            ImageDraw.floodfill(connected_background, (x, y), 128, thresh=0)
+
+    # Remove neutral-white matte touching any outer edge, not just the corners.
+    for x in range(width):
+        remove_candidate_component(x, 0)
+        remove_candidate_component(x, height - 1)
+    for y in range(height):
+        remove_candidate_component(0, y)
+        remove_candidate_component(width - 1, y)
+
+    # Some source exports put four disconnected pale pads just inside a
+    # transparent canvas. Continue clearing these outer-corner components.
+    corner = max(12, round(min(width, height) * 0.14))
+    for y in range(corner):
+        for x in range(corner):
+            remove_candidate_component(x, y)
+            remove_candidate_component(width - 1 - x, y)
+            remove_candidate_component(x, height - 1 - y)
+            remove_candidate_component(width - 1 - x, height - 1 - y)
+
+    matte = connected_background.point(lambda value: 255 if value == 128 else 0)
+    rgba.putalpha(ImageChops.subtract(rgba.getchannel("A"), matte))
+    return rgba
 
 def build_logo_assets() -> None:
     ASSETS.mkdir(parents=True, exist_ok=True)
@@ -439,6 +459,7 @@ args = [
     f"--additional-hooks-dir={HOOKS}",
     f"--add-data={ROOT / "requirements-voice-cloning.txt"};.",
     f"--add-data={LOGO_PNG};assets",
+    f"--add-data={LOGO_ICO};assets",
     f"--add-data={DRAGON_CROSS_PNG};assets",
     f"--add-data={DRAGON_CURSOR_PNG};assets",
     f"--add-data={ROOT / 'assets' / 'frontend' / 'ryu_audiobook_premium_v2.html'};assets/frontend",

@@ -8470,6 +8470,7 @@ class PremiumV2Bridge(QObject):
                    "effects": "ui/effects", "reduce_motion": "ui/reduce_motion",
                    "preview_seconds": "audio/preview_seconds", "bitrate": "production/bitrate",
                    "concurrency": "production/concurrency", "qwen_backend": "qwen/backend_preference",
+                   "qwen_model_size": "qwen/model_size_preference",
                    "qwen_low_memory": "qwen/low_memory_mode", "local_first": "privacy/local_first",
                    "output_folder": "paths/output_folder",
                    "player_rate": "player/playback_rate",
@@ -8517,9 +8518,18 @@ class PremiumV2Bridge(QObject):
                     raise ValueError("Choose Automatic, CPU, NVIDIA CUDA, AMD ROCm, or Intel XPU.")
                 if value in {"cuda", "rocm", "xpu"}:
                     from app.tts.qwen_accelerator import detect_accelerators
-                    active = detect_accelerators(refresh=True)
-                    if not any(item.backend == value and item.supported for item in active):
-                        raise ValueError(f"The {value.upper()} backend is not currently validated on this device.")
+                    detected = detect_accelerators(refresh=True)
+                    active = any(item.backend == value and item.supported for item in detected)
+                    candidate = any(item.backend == value + "-candidate" for item in detected)
+                    if not active and not candidate:
+                        raise ValueError(
+                            f"No compatible {value.upper()} adapter is currently detected. "
+                            "Refresh Performance Center and choose Automatic, or check the driver."
+                        )
+            if key == "qwen_model_size":
+                value = str(value or "auto").strip().casefold()
+                if value not in {"auto", "0.6b", "1.7b"}:
+                    raise ValueError("Qwen model size must be Automatic, 0.6B or 1.7B.")
             if key == "qwen_low_memory" and not isinstance(value, bool):
                 raise ValueError("Low-memory mode must be enabled or disabled.")
             if key == "player_rate":
@@ -9872,6 +9882,106 @@ class PremiumV2Bridge(QObject):
                     last_inference = candidate
         except (OSError, ValueError, TypeError):
             last_inference = {}
+
+        # The desktop host and Qwen worker use separate Python environments.
+        # A CPU-only host torch can therefore report an NVIDIA adapter as a
+        # candidate even after the private Qwen venv has installed CUDA. Only
+        # promote that adapter when the private runtime marker and an actual
+        # successful worker inference independently agree on the backend.
+        qwen_runtime = {
+            "ready": False,
+            "backend": "",
+            "torch": "",
+            "reason": "No verified private Qwen GPU runtime is active.",
+        }
+        try:
+            from app.tts.qwen_character_runtime import MARKER as QWEN_RUNTIME_MARKER, runtime_ready as qwen_runtime_ready
+            if qwen_runtime_ready() and QWEN_RUNTIME_MARKER.is_file():
+                marker = json.loads(QWEN_RUNTIME_MARKER.read_text(encoding="utf-8"))
+                private_backend = str(marker.get("accelerator") or "cpu").strip().casefold()
+                observed_backend = str(last_inference.get("backend") or "").strip().casefold()
+                private_ready = (
+                    marker.get("ready") is True
+                    and private_backend in {"cuda", "rocm", "xpu"}
+                    and last_inference.get("verified_inference") is True
+                    and observed_backend == private_backend
+                )
+                qwen_runtime.update({
+                    "ready": bool(private_ready),
+                    "backend": private_backend,
+                    "torch": str(marker.get("torch") or ""),
+                    "reason": (
+                        f"Qwen's isolated PyTorch runtime is active ({private_backend.upper()}); "
+                        "the latest successful model inference confirms this device."
+                        if private_ready else
+                        "The private Qwen runtime and last successful inference do not yet confirm the same GPU backend."
+                    ),
+                })
+                if private_ready:
+                    from app.tts.qwen_accelerator import Accelerator
+                    matching = next(
+                        (item for item in accelerators
+                         if item.backend in {private_backend, private_backend + "-candidate"}
+                         and (not item.name or item.name.casefold() == str(last_inference.get("gpu_name") or item.name).casefold())),
+                        None,
+                    )
+                    if matching is None:
+                        matching = next(
+                            (item for item in accelerators
+                             if item.backend in {private_backend, private_backend + "-candidate"}),
+                            None,
+                        )
+                    adapter_name = (
+                        str(getattr(matching, "name", "") or "").strip()
+                        or str(last_inference.get("device") or private_backend.upper())
+                    )
+                    memory_gb = float(getattr(matching, "memory_gb", 0.0) or 0.0)
+                    private_accelerator = Accelerator(
+                        backend=private_backend,
+                        device=str(last_inference.get("device") or ("xpu:0" if private_backend == "xpu" else "cuda:0")),
+                        name=adapter_name,
+                        memory_gb=memory_gb,
+                        supported=True,
+                        reason=qwen_runtime["reason"],
+                    )
+                    devices = [
+                        item for item in devices
+                        if not (
+                            str(item.get("backend") or "") in {
+                                private_backend + "-candidate", private_backend + "-unsupported"
+                            }
+                        )
+                    ]
+                    devices.append({
+                        "backend": private_accelerator.backend,
+                        "device": private_accelerator.device,
+                        "name": private_accelerator.name,
+                        "memory_gb": round(float(private_accelerator.memory_gb), 2),
+                        "supported": True,
+                        "reason": private_accelerator.reason,
+                    })
+                    recommended = private_accelerator
+                    gpu_name = adapter_name
+                    backend = private_backend
+                    backend_active = True
+                    recommendation = backend.upper() + " · Qwen runtime active"
+                    reason = private_accelerator.reason
+                    if private_backend == "cuda":
+                        metrics = self._safe_command_output([
+                            "nvidia-smi", "--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu",
+                            "--format=csv,noheader,nounits"
+                        ], timeout=2.0)
+                        if metrics:
+                            try:
+                                vals = [part.strip() for part in metrics.splitlines()[0].split(",")]
+                                gpu_percent = float(vals[0]) if vals[0] not in {"[N/A]", ""} else None
+                                vram_used_mb = float(vals[1]) if vals[1] not in {"[N/A]", ""} else None
+                                vram_total_mb = float(vals[2]) if vals[2] not in {"[N/A]", ""} else None
+                                gpu_temperature_c = float(vals[3]) if len(vals) > 3 and vals[3] not in {"[N/A]", ""} else None
+                            except (ValueError, IndexError):
+                                pass
+        except (OSError, ValueError, TypeError, ImportError):
+            log.debug("Could not reconcile the isolated Qwen runtime marker with host hardware telemetry.", exc_info=True)
         return {
             "available": cpu_percent is not None or memory_total is not None or bool(devices),
             "cpu_percent": cpu_percent, "memory_total_bytes": memory_total,
@@ -9881,6 +9991,7 @@ class PremiumV2Bridge(QObject):
             "gpu_name": gpu_name, "accelerators": devices,
             "recommended_backend": recommendation, "backend_active": backend_active,
             "backend": backend, "reason": reason,
+            "qwen_runtime": qwen_runtime,
             "platform": platform.platform(), "processor": platform.processor() or "Not reported",
             "generation_seconds": generation_seconds,
             "benchmark_audio_seconds": latest_benchmark.get("audio_seconds"),
@@ -11341,6 +11452,7 @@ class PremiumV2Bridge(QObject):
             ) or 256),
             "concurrency": max(1, min(3, int(self.settings.value("production/concurrency", 1) or 1))),
             "qwen_backend": str(self.settings.value("qwen/backend_preference", "automatic") or "automatic"),
+            "qwen_model_size": str(self.settings.value("qwen/model_size_preference", "auto") or "auto"),
             "qwen_low_memory": bool(self.settings.value("qwen/low_memory_mode", False, type=bool)),
         }
 
