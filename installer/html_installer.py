@@ -23,10 +23,108 @@ APP_TITLE = "Ryu's Audiobook Setup"
 CORE_INSTALLER_NAME = "Ryu's Audiobook Core Setup.exe"
 APP_EXE_NAME = "Ryu's Audiobook.exe"
 BACKGROUND = "#05060A"
+
+# Fit the visible wizard surface to the actual WebEngine viewport. The page is
+# authored as a card; on some Windows DPI/display combinations Chromium lays it
+# out much smaller than the host window, while on others it overflows and adds
+# browser scrollbars. Fit the card itself instead of changing the UI workflow.
+INSTALLER_VIEWPORT_FIT_JS = r"""
+(() => {
+  const html = document.documentElement;
+  const body = document.body;
+  if (!html || !body) return;
+
+  const viewportWidth = Math.max(320, window.innerWidth || html.clientWidth);
+  const viewportHeight = Math.max(240, window.innerHeight || html.clientHeight);
+  html.style.width = "100%";
+  html.style.height = "100%";
+  html.style.margin = "0";
+  html.style.overflow = "hidden";
+  body.style.width = "100%";
+  body.style.height = "100%";
+  body.style.margin = "0";
+  body.style.overflow = "hidden";
+  body.style.position = "relative";
+
+  let fitStyle = document.getElementById("__ryuInstallerViewportFitStyle");
+  if (!fitStyle) {
+    fitStyle = document.createElement("style");
+    fitStyle.id = "__ryuInstallerViewportFitStyle";
+    document.head.appendChild(fitStyle);
+  }
+  fitStyle.textContent =
+    "html,body{overflow:hidden!important}" +
+    "::-webkit-scrollbar{width:0!important;height:0!important}";
+
+  const visible = Array.from(body.querySelectorAll("*")).filter((element) => {
+    const rect = element.getBoundingClientRect();
+    const style = window.getComputedStyle(element);
+    return style.display !== "none" && style.visibility !== "hidden" &&
+      rect.width > 0 && rect.height > 0;
+  });
+  const minWidth = Math.min(360, viewportWidth * 0.35);
+  const minHeight = Math.min(220, viewportHeight * 0.35);
+  const roundedSurfaces = visible.filter((element) => {
+    const rect = element.getBoundingClientRect();
+    const style = window.getComputedStyle(element);
+    const radius = parseFloat(style.borderTopLeftRadius) || 0;
+    const border = parseFloat(style.borderTopWidth) || 0;
+    return radius >= 10 && border > 0 &&
+      rect.width >= minWidth && rect.height >= minHeight;
+  });
+  const area = (element) => {
+    const rect = element.getBoundingClientRect();
+    return rect.width * rect.height;
+  };
+  const directChildren = visible.filter((element) => element.parentElement === body);
+  const wizard = roundedSurfaces.sort((a, b) => area(b) - area(a))[0] ||
+    directChildren.sort((a, b) => area(b) - area(a))[0] ||
+    body.firstElementChild;
+
+  if (!wizard || wizard === body) return;
+  const rect = wizard.getBoundingClientRect();
+  const width = Math.max(wizard.offsetWidth, wizard.scrollWidth, Math.ceil(rect.width));
+  const height = Math.max(wizard.offsetHeight, wizard.scrollHeight, Math.ceil(rect.height));
+  if (!width || !height) return;
+
+  const scale = Math.max(0.25, Math.min(
+    (viewportWidth - 24) / width,
+    (viewportHeight - 24) / height,
+    2.5
+  ));
+  wizard.style.position = "fixed";
+  wizard.style.left = "50%";
+  wizard.style.top = "50%";
+  wizard.style.margin = "0";
+  wizard.style.transformOrigin = "center center";
+  wizard.style.transform = "translate(-50%, -50%) scale(" + scale + ")";
+  window.__ryuInstallerFitApplied = true;
+})();
+"""
+
 SEE_MASK_NOCLOSEPROCESS = 0x00000040
 WAIT_OBJECT_0 = 0
 WAIT_TIMEOUT = 0x102
 ERROR_CANCELLED = 1223
+
+
+def _installer_window_geometry(
+    available_bounds: tuple[int, int, int, int],
+) -> tuple[int, int, int, int]:
+    """Return a centered setup-window rectangle that fits the current screen."""
+    screen_x, screen_y, screen_width, screen_height = (int(value) for value in available_bounds)
+    if screen_width <= 0 or screen_height <= 0:
+        return screen_x, screen_y, 1180, 760
+    width = min(1180, max(720, int(screen_width * 0.92)))
+    height = min(760, max(540, int(screen_height * 0.90)))
+    width = min(width, screen_width)
+    height = min(height, screen_height)
+    return (
+        screen_x + (screen_width - width) // 2,
+        screen_y + (screen_height - height) // 2,
+        width,
+        height,
+    )
 
 
 def resource_path(relative: str) -> Path:
@@ -313,29 +411,51 @@ class InstallerWindow(QMainWindow):
             self.setWindowIcon(QIcon(str(icon)))
         self.setWindowTitle(APP_TITLE)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
-        self.resize(1180, 760)
-        self.setMinimumSize(960, 680)
+        primary_screen = QApplication.primaryScreen()
+        available = primary_screen.availableGeometry() if primary_screen else None
+        screen_bounds = (
+            (available.x(), available.y(), available.width(), available.height())
+            if available is not None else (0, 0, 1180, 760)
+        )
+        window_x, window_y, window_width, window_height = _installer_window_geometry(screen_bounds)
+        self.setMinimumSize(min(960, window_width), min(680, window_height))
+        self.resize(window_width, window_height)
         self.setStyleSheet("QMainWindow{background:" + BACKGROUND + ";}")
         self.web = QWebEngineView(self)
+        # The setup UI is fitted by the host below; browser-style zoom changes
+        # otherwise make the page too small or introduce page-level scrollbars.
+        self.web.setZoomFactor(1.0)
         settings = self.web.settings()
         settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
         settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, False)
+        pinch_to_zoom = getattr(QWebEngineSettings.WebAttribute, "PinchToZoomEnabled", None)
+        if pinch_to_zoom is not None:
+            settings.setAttribute(pinch_to_zoom, False)
         self.setCentralWidget(self.web)
         self.channel = QWebChannel(self.web.page())
         self.bridge = InstallerBridge(self)
         self.channel.registerObject("ryuInstaller", self.bridge)
         self.web.page().setWebChannel(self.channel)
         self.bridge.closeRequested.connect(self.close)
+        self.web.loadFinished.connect(self._fit_page_to_viewport)
         self._drag_offset = None
         self._startup_smoke_marker = os.environ.get("RYU_INSTALLER_STARTUP_SMOKE_MARKER", "").strip()
         self._startup_smoke_attempts = 0
         if self._startup_smoke_marker:
             self.web.loadFinished.connect(self._on_startup_smoke_page_loaded)
         self.web.load(QUrl.fromLocalFile(str(page.resolve())))
-        screen = QApplication.primaryScreen().availableGeometry()
-        self.move(screen.x() + (screen.width() - self.width()) // 2,
-                  screen.y() + (screen.height() - self.height()) // 2)
+        self.move(window_x, window_y)
 
+    def _fit_page_to_viewport(self, loaded: bool = True) -> None:
+        if not loaded or not hasattr(self, "web"):
+            return
+        self.web.setZoomFactor(1.0)
+        self.web.page().runJavaScript(INSTALLER_VIEWPORT_FIT_JS)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "web"):
+            QTimer.singleShot(60, self._fit_page_to_viewport)
 
     def _write_startup_smoke_marker(self, status: str, detail: str) -> None:
         marker_value = getattr(self, "_startup_smoke_marker", "")
@@ -373,6 +493,19 @@ class InstallerWindow(QMainWindow):
         # main()) and begin native movement only in the empty top strip.
         if isinstance(obj, QWidget) and obj.window() is self:
             event_type = event.type()
+            if event_type == QEvent.Type.Wheel:
+                if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                    return True
+            elif event_type == QEvent.Type.KeyPress:
+                zoom_keys = {
+                    Qt.Key.Key_Plus, Qt.Key.Key_Equal, Qt.Key.Key_Minus,
+                    Qt.Key.Key_Underscore, Qt.Key.Key_0,
+                }
+                if (
+                    event.modifiers() & Qt.KeyboardModifier.ControlModifier
+                    and event.key() in zoom_keys
+                ):
+                    return True
             if event_type == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
                 point = self.mapFromGlobal(event.globalPosition().toPoint())
                 in_drag_strip = 0 <= point.y() <= 46 and 285 <= point.x() < self.width() - 112
