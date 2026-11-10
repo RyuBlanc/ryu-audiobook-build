@@ -9,7 +9,7 @@ class TaskManagerResponsiveStylesTests(unittest.TestCase):
     def test_task_manager_and_job_details_use_viewport_bounded_widths(self):
         source = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         helper_start = source.index("function ensureTaskManagerResponsiveStyles()")
-        helper_end = source.index("\\n  let narratorOnlySavePromise", helper_start)
+        helper_end = source.index("\n  let narratorOnlySavePromise", helper_start)
         helper = source[helper_start:helper_end]
 
         self.assertIn("#backgroundJobsModal .jobs-modal", helper)
@@ -35,7 +35,7 @@ class TaskManagerResponsiveStylesTests(unittest.TestCase):
     def test_dynamic_job_details_inline_width_is_overridden_by_bounded_rule(self):
         source = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn('style="width:min(760px,calc(100vw - 28px));max-height:calc(100vh - 36px);overflow:auto"', source)
-        helper = source[source.index("function ensureTaskManagerResponsiveStyles()"):source.index("\\n  let narratorOnlySavePromise")]
+        helper = source[source.index("function ensureTaskManagerResponsiveStyles()"):source.index("\n  let narratorOnlySavePromise")]
         self.assertIn("!important", helper)
         self.assertIn("#jobDetailsModal .modal", helper)
 
