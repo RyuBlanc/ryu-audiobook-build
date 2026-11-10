@@ -86,6 +86,33 @@ class QwenBackendRegressionTests(unittest.TestCase):
 
         self.assertEqual(captured["backend"], "automatic")
 
+    def test_explicit_qwen_cpu_preference_is_preserved(self):
+        captured = {}
+
+        class FakeQwenProvider:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+        with (
+            patch.object(profile_provider, "QwenCharacterProvider", FakeQwenProvider),
+            patch.object(profile_provider, "get_qwen_backend_preference", return_value="cpu"),
+            patch.object(profile_provider, "get_qwen_model_preference", return_value="0.6b"),
+            patch.object(
+                profile_provider, "qwen_model_kinds_for_preference",
+                return_value=("custom-0.6b", "base-0.6b"),
+            ),
+        ):
+            profile = VoiceProfile(
+                name="Saved Qwen CPU preference",
+                provider="qwen-character",
+                voice_id="Ryan",
+                backend="automatic",
+                qwen_mode="custom",
+            )
+            profile_provider.provider_from_profile(profile)
+
+        self.assertEqual(captured["backend"], "cpu")
+
     def test_explicit_global_qwen_cpu_preference_is_preserved(self):
         captured = {}
 
