@@ -724,24 +724,20 @@ def server(args) -> int:
         locked_anchors = paths
         design_identity_cache[profile_key] = (locked_clone_prompts, paths, clone_kind)
 
-    print(
-        json.dumps(
-            {
-                "ready": True,
-                "device": "pending",
-                "model": MODEL_IDS.get(args.clone_kind if args.task in {"design", "design-preview"} else args.kind, args.kind),
-                "kind": args.clone_kind if args.task in {"design", "design-preview"} else args.kind,
-                "task": args.task,
-            }
-        ),
-        flush=True,
-    )
-
-    # Non-design providers still load immediately so the ready signal means
-    # the actual model is warm. Design workers intentionally defer the heavy
-    # load until the first request, as explained above.
+    # A ready response means the requested model has genuinely loaded on an
+    # actual device. Never report a placeholder "pending" device as a verified
+    # GPU/CPU selection; VoiceDesign remains pending until its first request.
     if active_task not in {"design", "design-preview"}:
         load_model(args.kind)
+        ready_kind = active_kind or args.kind
+        print(json.dumps({
+            "ready": True,
+            "device": device,
+            "backend": _actual_backend(device),
+            "model": MODEL_IDS.get(ready_kind, ready_kind),
+            "kind": ready_kind,
+            "task": args.task,
+        }), flush=True)
 
     for line in sys.stdin:
         line = line.strip()
@@ -760,6 +756,14 @@ def server(args) -> int:
                 # One-pass audition: load only VoiceDesign, without preparing
                 # multiple anchor recordings or swapping to a Base model.
                 load_model(args.kind)
+                print(json.dumps({
+                    "ready": True,
+                    "device": device,
+                    "backend": _actual_backend(device),
+                    "model": MODEL_IDS.get(active_kind or args.kind, active_kind or args.kind),
+                    "kind": active_kind or args.kind,
+                    "task": args.task,
+                }), flush=True)
 
             if isinstance(batch_texts, list):
                 if not isinstance(batch_outputs, list) or len(batch_texts) != len(batch_outputs):
