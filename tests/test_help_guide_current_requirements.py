@@ -11,6 +11,10 @@ class CurrentHelpGuideRequirements(unittest.TestCase):
         start = adapter.index("function renderHelpGuide()")
         end = adapter.index("\n  function ", start + 1)
         cls.guide = adapter[start:end]
+        html = (ROOT / "assets/frontend/ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
+        help_start = html.index('<section class="page" id="help">')
+        help_end = html.index("</main>", help_start)
+        cls.original_guide = html[help_start:help_end]
 
     def test_gen07_explains_zero_profile_gate_dialogue_routing_and_narrator_requirement(self):
         for phrase in (
@@ -36,18 +40,29 @@ class CurrentHelpGuideRequirements(unittest.TestCase):
         self.assertIn("Character Analysis can be cancelled at a safe inference or chapter boundary", self.guide)
         self.assertIn("does not replace the saved cast with partial results", self.guide)
 
-    def test_full_help_topics_always_replace_the_abbreviated_prototype_placeholder(self):
-        self.assertNotIn("root.children.length && String(root.textContent || '').trim()", self.guide)
-        self.assertIn("Replace the abbreviated base prototype sample with the complete guide", self.guide)
+    def test_original_detailed_seven_stage_help_guide_is_preserved(self):
+        self.assertIn("root.children.length && String(root.textContent || '').trim()", self.guide)
+        self.assertIn("preserved-static-guide", self.guide)
         for topic in (
-            "Narrator-only audiobook generation (GEN-07)",
-            "History and Background Jobs",
-            "Models Center",
-            "Performance Center",
-            "Known limitations",
-            "Troubleshooting",
+            "Learn Ryu's Audiobook",
+            "From book file to finished audiobook",
+            "How to create an audiobook",
+            "Import Studio",
+            "Chapter Studio",
+            "Voice Studio",
+            "Character Studio",
+            "Pronunciation Studio",
+            "Sound Design",
+            "Production Studio",
+            "What every menu is for",
+            "Qwen3 Voice Studio",
+            "I want to…",
+            "Your first successful audiobook",
+            "Recovery flow",
+            "Quality checklist",
+            "Frequently asked questions",
         ):
-            self.assertIn(topic, self.guide)
+            self.assertIn(topic, self.original_guide)
 
     def test_qwen_help_distinguishes_adapter_detection_from_verified_inference(self):
         self.assertIn("real inference reports that device", self.guide)
