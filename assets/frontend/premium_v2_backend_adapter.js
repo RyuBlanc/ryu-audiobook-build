@@ -338,7 +338,7 @@
     return open;
   }
   document.addEventListener('click', event => {
-    const button = event.target.closest('button[title="Notifications"],button[aria-label="Notifications"],button[data-action="notifications"]');
+    const button = event.target.closest('#notifyBtn,button[title="Notifications"],button[aria-label="Notifications"],button[data-action="notifications"]');
     if (button) {
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -380,6 +380,12 @@
       if ($('ryuNotificationsPanel')?.style.display !== 'none') renderRyuNotificationsPanel();
     }
     if (error) console.error('[Ryu backend]', content);
+  };
+  // Route legacy prototype notifications through the same deduplicated panel.
+  // This prevents an old toast helper from creating a second stack of popups.
+  window.showToast = (text, kind = 'success') => {
+    const error = String(kind || '').trim().toLowerCase() === 'error';
+    message(text, error);
   };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
   let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, profileEditOriginalName = '', activeJob = null, activeJobType = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, jobsRefreshRequested = false, chapterListEpoch = 0, chapterSelectionEpoch = 0, cueListEpoch = 0, cueSearchTimer = null, previewAudio = null, lastVoicePreviewPath = null, lastVoicePreviewProfileName = '', lastVoicePreviewChapterNumber = null, lastVoicePreviewChapterTitle = '', voicePreviewValid = false, voicePreviewEpoch = 0, previewVolume = 0.85, voiceAssignmentEpoch = 0, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8, productionFullJobId = null, productionPreviewJobId = null, productionJobSnapshots = {full:null,preview:null}, productionJobMonitors = {full:null,preview:null}, productionMonitorEpochs = {full:0,preview:0}, productionPreviewRequestProjectFolder = '', productionPreviewSelectionProjectFolder = '', productionPreviewSelectedChapter = null, productionPreviewSelectedChapterId = '', productionPreviewSelectedChapterSignature = '', productionPreviewRequestChapterNumber = 0, productionPreviewRequestChapterId = '';
@@ -11713,7 +11719,8 @@ function renderProductionMetadataGate(active) {
                 finished = true;
                 break;
               }
-              if (attempt % 4 === 0) message('Full-book mix preview · ' + Number(job.progress || 0) + '% · ' + (job.stage || 'Mixing saved chapters'));
+              // The Sound Design job row already carries live progress.
+              // Do not turn every polling tick into a new global notification.
             }
             if (!finished) throw new Error('Sound Design preview timed out. Check Generation History for its status.');
           }
