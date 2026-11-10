@@ -22,7 +22,7 @@
       'margin-left:auto;',
       'margin-right:auto;',
       '}'
-    ].join('\\n');
+    ].join(' ');
     (document.head || document.documentElement).appendChild(style);
   }
   ensureTaskManagerResponsiveStyles();
