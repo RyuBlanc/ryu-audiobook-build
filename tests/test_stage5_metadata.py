@@ -783,7 +783,10 @@ class ProductionReadinessUiTests(unittest.TestCase):
             "active.output_folder_ready !== true",
             "active.output_configured !== true",
             "active.dialogue_index_ready !== true",
-            "active.dialogue_review_complete !== true",
+            "active.unassigned_character_profile_available !== true",
+            "active.dialogue_routing_ready !== true",
+            "active.conflicting_dialogue_count",
+            "active.dialogue_index_issue_count",
             "active.character_assignment_issue_count",
             "active.pending_dialogue_count",
         ):
@@ -813,10 +816,13 @@ class ProductionReadinessUiTests(unittest.TestCase):
             "project.eligible_chapter_count ?? project.prepared_chapter_count ?? 0",
             "project.narrator_only_generation === true",
             "project.configured_character_voice_profile_count",
-            "const narratorOnlyEligibilityInvalid = narratorOnlyRequested && configuredCharacterVoiceCount > 0;",
-            "const charactersReady = !narratorOnlyEligibilityInvalid && (",
+            "const unassignedProfileReady = project.unassigned_character_profile_available === true;",
+            "pending dialogue passage(s) will use ",
+            "const narratorOnly = narratorOnlyRequested;",
+            "const charactersReady = narratorOnly || (",
             "project.dialogue_index_ready === true",
-            "project.dialogue_review_complete === true",
+            "project.dialogue_routing_ready === true",
+            "project.unassigned_character_profile_available === true",
             "project.character_assignment_issue_count",
             "project.narrator_profile_available === true",
             "project.output_folder_ready === true",
@@ -827,10 +833,11 @@ class ProductionReadinessUiTests(unittest.TestCase):
             self.assertIn(marker, flow)
         self.assertNotIn("{key:'import', ready:Boolean(project.source_exists)", flow)
         self.assertIn(
-            "0 configured character voice profiles · saved narrator reads all passages",
+            "Narrator-only · saved narrator reads all narration and dialogue",
             flow,
         )
         self.assertNotIn("Narrator-only · character voices bypassed", flow)
+        self.assertNotIn("narratorOnlyEligibilityInvalid", flow)
 
 
 class MetadataPremiumV2UiTests(unittest.TestCase):
