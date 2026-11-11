@@ -6838,7 +6838,9 @@ function renderProductionMetadataGate(active) {
         const voiceCount = Math.max(0,Number(project?.configured_character_voice_profile_count ?? project?.character_voice_count ?? 0));
         const narratorReadyForOnly = project?.narrator_voice_configured === true && project?.narrator_profile_available === true;
         status.textContent = input.checked
-          ? 'On · the saved narrator reads all passages, including dialogue. Character assignments are ignored for this book.'
+          ? (project?.narrator_only_generation_auto === true
+            ? 'Automatically enabled because this book has no configured character voice profiles. The saved narrator reads all narration and dialogue.'
+            : 'On · the saved narrator reads all passages, including dialogue. Character assignments are ignored for this book.')
           : (project?.narrator_only_generation_user_opt_out === true
             ? 'Off by your choice · assigned character profiles are used; other speakers use the global Unassigned Character profile.'
             : (!narratorReadyForOnly ? 'Unavailable · save an available narrator profile first.' : 'Off · available. You can enable it even when character profiles are assigned.'));
@@ -6858,7 +6860,9 @@ function renderProductionMetadataGate(active) {
         const voiceCount = Math.max(0,Number(project?.configured_character_voice_profile_count ?? project?.character_voice_count ?? 0));
         const narratorReadyForOnly = project?.narrator_voice_configured === true && project?.narrator_profile_available === true;
         status.textContent = savedValue
-          ? 'On · the saved narrator reads all passages, including dialogue. Character assignments are ignored for this book.'
+          ? (project?.narrator_only_generation_auto === true
+            ? 'Automatically enabled because this book has no configured character voice profiles. The saved narrator reads all narration and dialogue.'
+            : 'On · the saved narrator reads all passages, including dialogue. Character assignments are ignored for this book.')
           : (project?.narrator_only_generation_user_opt_out === true
             ? 'Off by your choice · assigned character profiles are used; other speakers use the global Unassigned Character profile.'
             : (!narratorReadyForOnly ? 'Unavailable · save an available narrator profile first.' : 'Off · available. You can enable it even when character profiles are assigned.'));
