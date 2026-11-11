@@ -33,6 +33,9 @@ class ProductionPronunciationConnectivityTests(unittest.TestCase):
             ],
         )
         profile = SimpleNamespace(name="Saved Narrator", voice_id="narrator-voice")
+        unassigned_profile = SimpleNamespace(
+            name="Global Unassigned Character", provider="piper", voice_id="unassigned-character"
+        )
         manager = Mock()
         bridge = SimpleNamespace(
             _effective_generation_character_rows=lambda state, series, **kwargs: host.PremiumV2Bridge._effective_generation_character_rows(
@@ -43,7 +46,13 @@ class ProductionPronunciationConnectivityTests(unittest.TestCase):
             close_preview_provider_cache=Mock(),
             _active_project=Mock(return_value=project),
             _resolve_narrator_for_generation=Mock(
-                return_value=(profile, {"source": "project_override", "profile_name": profile.name})
+                return_value=(profile, {
+                    "source": "project_override",
+                    "profile_name": profile.name,
+                    "narrator_only": False,
+                    "unassigned_character_profile_name": unassigned_profile.name,
+                    "unassigned_character_profile_required": True,
+                })
             ),
             _project_series_name=Mock(return_value="Slime"),
             _new_job=Mock(return_value="pronunciation-connectivity-job"),
@@ -76,7 +85,7 @@ class ProductionPronunciationConnectivityTests(unittest.TestCase):
         with patch.object(host, "load_state", return_value=state), \
              patch.object(host, "save_state"), \
              patch.object(host, "provider_from_profile", return_value=(object(), "narrator-voice")), \
-             patch.object(host, "load_profiles", return_value=[]), \
+             patch.object(host, "load_profiles", return_value=[unassigned_profile]), \
              patch.object(host, "audiobooks_root", return_value=output_root), \
              patch.object(host, "GenerationManager", return_value=manager) as manager_factory:
             result = host.PremiumV2Bridge._production_generate_book(bridge, {})
