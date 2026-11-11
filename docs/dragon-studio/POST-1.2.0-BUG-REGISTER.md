@@ -47,6 +47,17 @@ The current screenshot shows these failed Build Windows App push runs on the for
 
 These three runs are not considered diagnosed merely because their commit subjects are known. The exact failing job/step logs must be obtained before choosing a correction. The available connected Actions lookup in the current session cannot resolve these push-triggered runs by run number; #3200 is not the internal Actions run ID.
 
+## Follow-up diagnosis — Builds Windows App #3251–#3258
+
+The finite fake-clock defect was corrected, but validation still failed with two errors:
+
+- The timeout error's actual message starts with uppercase `Timed out`; the test pattern used a case-sensitive lowercase prefix.
+- Test cleanup called `provider.close()` on a deliberately minimal worker double without the `stdin` stream attribute, causing `AttributeError`. The timeout test must close only its log handle; the early-exit process double now supplies the process-stream attributes expected by provider cleanup.
+
+The hosted CPU Qwen workflow's focused 56-test group also failed on those errors, so real model execution did not start. The worker-log collection step ran, but no worker log existed because the real-preview step was skipped. The artifact uploader consequently had no files.
+
+The next correction addresses the assertion, realistic process double, targeted cleanup and PowerShell path separators. It does not change Qwen model behavior or relax performance/device acceptance.
+
 ## Diagnosed Qwen diagnostic-test regression — Builds Windows App #3245–#3250
 
 Affected head: `b29d9e162a32e149b5e51c16a172e30d46ded4aa`.
