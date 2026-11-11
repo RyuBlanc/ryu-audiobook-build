@@ -3,6 +3,7 @@ name: Qwen NVIDIA 30-second Preview Acceptance
 on:
   push:
     branches:
+      - 'dragon-studio/**'
       - 'stage-7/**'
       - 'stage-5/**'
     paths:

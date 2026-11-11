@@ -3,6 +3,7 @@ name: Stage 7 Qwen Real CPU Preview and Accelerator Contract Acceptance
 on:
   push:
     branches:
+      - 'dragon-studio/**'
       - 'stage-7/**'
     paths:
       - app/tts/preview.py

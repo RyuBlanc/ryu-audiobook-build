@@ -5,6 +5,7 @@ on:
   # performance path changes. Hosted CPU smoke cannot prove GPU performance.
   push:
     branches:
+      - 'dragon-studio/**'
       - 'stage-7/**'
       - 'stage-5/**'
     paths:
