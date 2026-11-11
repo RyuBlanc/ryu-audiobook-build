@@ -1050,6 +1050,7 @@ jobs:
           Write-Host 'Microsoft Defender completed all three release executable scans (application, HTML installer and core installer) without reporting a detection.'
 
       - name: Upload Windows installer artifact
+        if: ${{ github.event_name != 'pull_request' }}
         id: upload_installer
         uses: actions/upload-artifact@v4
         with:
@@ -1060,6 +1061,7 @@ jobs:
           retention-days: 30
 
       - name: Upload release SHA-256 manifest
+        if: ${{ github.event_name != 'pull_request' }}
         uses: actions/upload-artifact@v4
         with:
           name: Ryu-Audiobook-Release-SHA256-${{ github.run_number }}
@@ -1070,6 +1072,7 @@ jobs:
           retention-days: 30
 
       - name: Upload portable Windows application
+        if: ${{ github.event_name != 'pull_request' }}
         uses: actions/upload-artifact@v4
         with:
           name: Ryu-Audiobook-Portable-${{ github.run_number }}
@@ -1079,6 +1082,7 @@ jobs:
           retention-days: 30
 
       - name: Upload Stage 7 real Piper benchmark evidence
+        if: ${{ github.event_name != 'pull_request' }}
         uses: actions/upload-artifact@v4
         with:
           name: Ryu-Audiobook-Stage7-Piper-Benchmark-${{ github.run_number }}
