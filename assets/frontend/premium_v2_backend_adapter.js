@@ -954,35 +954,40 @@
     const configuredCharacterVoiceCount = Math.max(0, Number(
       project.configured_character_voice_profile_count ?? project.character_voice_count ?? 0
     ));
-    const narratorOnlyEligibilityInvalid = narratorOnlyRequested && configuredCharacterVoiceCount > 0;
-    const narratorOnly = narratorOnlyRequested && configuredCharacterVoiceCount === 0;
+    // Narrator-only is an explicit user-selected routing mode. Existing
+    // character assignments never disable it; the saved narrator reads every
+    // passage when the switch is on.
+    const narratorOnly = narratorOnlyRequested;
     const characterCount = Number(project.character_count || 0);
     const characterVoiceCount = Math.max(0, Number(project.character_voice_count || 0));
     const dialogueIndexReady = project.dialogue_index_ready === true;
-    const dialogueReviewComplete = project.dialogue_review_complete === true;
+    const dialogueRoutingReady = project.dialogue_routing_ready === true;
     const characterAssignmentIssues = Math.max(0, Number(project.character_assignment_issue_count || 0));
     const pendingDialogue = Math.max(0, Number(project.pending_dialogue_count || 0));
     const conflictingDialogue = Math.max(0, Number(project.conflicting_dialogue_count || 0));
     const dialogueIndexIssues = Math.max(0, Number(project.dialogue_index_issue_count || 0));
-    const charactersReady = !narratorOnlyEligibilityInvalid && (
-      narratorOnly || (
-        dialogueIndexReady && dialogueReviewComplete && characterAssignmentIssues === 0
-      )
+    const unassignedCharacters = Math.max(0, Number(project.unassigned_character_count || 0));
+    const unassignedProfileReady = project.unassigned_character_profile_available === true;
+    const unassignedProfileName = String(project.unassigned_character_profile_name || 'Unassigned Character');
+    const charactersReady = narratorOnly || (
+      dialogueRoutingReady &&
+      characterAssignmentIssues === 0 &&
+      unassignedProfileReady
     );
     const charactersDetail = narratorOnly
-      ? '0 configured character voice profiles · saved narrator reads all passages'
-      : (narratorOnlyRequested && configuredCharacterVoiceCount > 0
-        ? configuredCharacterVoiceCount + ' configured profile(s) · switch to multi-character review'
-        : (!dialogueIndexReady
-          ? 'Dialogue index unavailable · refresh Character Studio'
-          : (characterAssignmentIssues
-            ? characterAssignmentIssues + ' saved character assignment(s) need attention'
-            : (!dialogueReviewComplete
-              ? pendingDialogue + ' passage(s) need review · ' + conflictingDialogue
-                + ' conflict(s) · ' + dialogueIndexIssues + ' index issue(s)'
+      ? 'Narrator-only · saved narrator reads all narration and dialogue'
+      : (!dialogueIndexReady || conflictingDialogue > 0 || dialogueIndexIssues > 0
+        ? 'Dialogue source/index conflict · resolve in Character Studio'
+        : (characterAssignmentIssues > 0
+          ? characterAssignmentIssues + ' saved character assignment(s) need attention'
+          : (!unassignedProfileReady
+            ? 'Choose the global Unassigned Character profile in Voice Studio'
+            : (unassignedCharacters > 0 || pendingDialogue > 0
+              ? unassignedCharacters + ' unassigned character(s) · ' + pendingDialogue
+                + ' pending dialogue passage(s) will use ' + unassignedProfileName
               : (characterCount === 0
-                ? 'No character dialogue needs review'
-                : characterVoiceCount + ' / ' + characterCount + ' character voice assignment(s)')))));
+                ? 'No character dialogue · global fallback ready'
+                : characterVoiceCount + ' / ' + characterCount + ' assigned · ' + unassignedProfileName + ' fallback ready')))));
     const outputReady = project.output_configured === true &&
       project.output_folder_ready === true && project.output_format_supported === true;
     const canGenerate = chaptersReady && metadataComplete && narratorReady && outputReady && charactersReady;
