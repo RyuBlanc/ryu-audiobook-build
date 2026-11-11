@@ -84,7 +84,7 @@ class FunctionalCheckpoint20261111Tests(unittest.TestCase):
         bridge._job_update = Mock(side_effect=update)
         with patch(
             "app.ui.premium_v2_host.time.monotonic",
-            side_effect=[10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0],
+            side_effect=[float(value) for value in range(10, 40)],
         ):
             host.PremiumV2Bridge._generation_progress(
                 bridge, "generation-1", 0, 23, 0, "plan:2000:0:8"
@@ -97,14 +97,25 @@ class FunctionalCheckpoint20261111Tests(unittest.TestCase):
                     bridge, "generation-1", 1, 23, work,
                     f"chunk:{completed}/8:{work}/2000",
                 )
+                host.PremiumV2Bridge._generation_progress(
+                    bridge, "generation-1", 1, 23, work,
+                    f"chunk-timing:250:10.000:{work}:2000:{completed}:8",
+                )
             self.assertIsNone(bridge._jobs["generation-1"].get("eta_seconds"))
-            # Three usable samples are collected after the first completed
-            # chunk (which includes model warm-up) has been excluded.
+            # The first synthesis call is the warm-up sample. Three following
+            # measured provider calls establish the first steady-state ETA.
             host.PremiumV2Bridge._generation_progress(
                 bridge, "generation-1", 1, 23, 1000, "chunk:4/8:1000/2000"
             )
+            host.PremiumV2Bridge._generation_progress(
+                bridge, "generation-1", 1, 23, 1000,
+                "chunk-timing:250:10.000:1000:2000:4:8",
+            )
             self.assertIsNotNone(bridge._jobs["generation-1"].get("eta_seconds"))
-            self.assertIn("measured throughput", bridge._jobs["generation-1"].get("generation_eta_basis", ""))
+            self.assertIn(
+                "median measured synthesis-call duration",
+                bridge._jobs["generation-1"].get("generation_eta_basis", ""),
+            )
 
             host.PremiumV2Bridge._generation_progress(
                 bridge, "generation-1", 23, 23, 2000,
@@ -193,8 +204,9 @@ class FunctionalCheckpoint20261111Tests(unittest.TestCase):
     def test_qwen_preview_starts_at_zero_and_progress_is_completed_segment_based(self):
         adapter = (Path(__file__).resolve().parents[1] / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         backend = (Path(__file__).resolve().parents[1] / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
-        self.assertIn('stage = "Loading voice model" if int(timing.get("last_work") or 0) == 0', backend)
-        self.assertIn("changes[\"eta_seconds\"] = None", backend)
+        chunk_start = backend[backend.index('elif msg.startswith("chunk-start:"):'):backend.index('elif msg.startswith("chunk:")', backend.index('elif msg.startswith("chunk-start:"):'))]
+        self.assertIn('if not timing.get("warmup_chunk_skipped")', chunk_start)
+        self.assertNotIn('changes["eta_seconds"] = None', chunk_start)
         self.assertIn("actual_percent = min(95, max(0, round(95 * current / max(1, total))))", backend)
         self.assertIn("Loading voice model · 0%", adapter)
         self.assertIn("preview_completed_segments", backend)
