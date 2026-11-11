@@ -406,6 +406,30 @@ class QwenCharacterProvider(TTSProvider):
                 line = q.get(timeout=min(1.0, max(0.01, deadline - time.monotonic())))
             except queue.Empty:
                 now = time.monotonic()
+                # Distinguish a live model load from an exited worker. Some
+                # Windows failures close stdout before the queue sentinel is
+                # consumed; poll the process on every heartbeat.
+                worker = self._worker
+                exit_code = worker.poll() if worker is not None else None
+                if exit_code is not None:
+                    detail = ""
+                    try:
+                        if self._worker_log is not None:
+                            self._worker_log.flush()
+                            log_path = Path(self._worker_log.name)
+                            if log_path.exists():
+                                detail = log_path.read_text(
+                                    encoding="utf-8", errors="replace"
+                                )[-4000:].strip()
+                    except (OSError, ValueError):
+                        pass
+                    suffix = f" Exit code: {exit_code}."
+                    if detail:
+                        suffix += f" Worker log: {detail}"
+                    raise RuntimeError(
+                        "Offline character worker exited while waiting for a response."
+                        + suffix
+                    )
                 if heartbeat and now - last_heartbeat >= 2.0:
                     elapsed = int(now - started)
                     self._status(
@@ -423,8 +447,8 @@ class QwenCharacterProvider(TTSProvider):
                         if log_path.exists():
                             detail = log_path.read_text(
                                 encoding="utf-8", errors="replace"
-                            )[-2400:].strip()
-                except OSError:
+                            )[-4000:].strip()
+                except (OSError, ValueError):
                     pass
                 suffix = f" Exit code: {exit_code}."
                 if detail:
@@ -443,7 +467,26 @@ class QwenCharacterProvider(TTSProvider):
                     self._status(str(progress))
                     continue
                 return value
-        raise RuntimeError("Timed out waiting for the offline character worker.")
+        worker = self._worker
+        exit_code = worker.poll() if worker is not None else None
+        detail = ""
+        try:
+            if self._worker_log is not None:
+                self._worker_log.flush()
+                log_path = Path(self._worker_log.name)
+                if log_path.exists():
+                    detail = log_path.read_text(
+                        encoding="utf-8", errors="replace"
+                    )[-4000:].strip()
+        except (OSError, ValueError):
+            pass
+        suffix = f" Worker exit code: {exit_code}." if exit_code is not None else " Worker is still running."
+        if detail:
+            suffix += f" Worker log: {detail}"
+        raise RuntimeError(
+            f"Timed out waiting for the offline character worker after {timeout:.1f} seconds."
+            + suffix
+        )
 
     def synthesize(self, text: str, output_path: Path, voice: str | None = None) -> Path:
         self._start_worker()
