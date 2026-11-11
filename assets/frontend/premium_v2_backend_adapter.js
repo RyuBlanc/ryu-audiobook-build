@@ -351,7 +351,7 @@
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && $('ryuNotificationsPanel')?.style.display !== 'none') toggleRyuNotificationsPanel(false);
   });
-  const message = (text, error = false) => {
+  const message = (text, error = false, options = {}) => {
     const content = String(text ?? '').trim();
     if (!content) return;
     const activeValidation = document.querySelector('.page.active #validation');
@@ -369,13 +369,18 @@
         if (index >= 0) ryuNotificationHistory.splice(index, 1);
         if ($('ryuNotificationsPanel')?.style.display !== 'none') renderRyuNotificationsPanel();
       }, 30000);
-      const toasts = $('toasts');
-      if (toasts) {
-        writeTextIfChanged(toasts, text);
-        toasts.classList.add('show');
-        toasts.setAttribute('role', error ? 'alert' : 'status');
-        if (ryuToastTimer) clearTimeout(ryuToastTimer);
-        ryuToastTimer = setTimeout(() => { toasts.classList.remove('show'); ryuToastTimer = null; }, 30000);
+      // Notification history is authoritative. Selected informational events
+      // (such as loading a saved profile) can be retained there without putting
+      // a duplicate plain-text toast over the active Studio page.
+      if (options.toast !== false) {
+        const toasts = $('toasts');
+        if (toasts) {
+          writeTextIfChanged(toasts, text);
+          toasts.classList.add('show');
+          toasts.setAttribute('role', error ? 'alert' : 'status');
+          if (ryuToastTimer) clearTimeout(ryuToastTimer);
+          ryuToastTimer = setTimeout(() => { toasts.classList.remove('show'); ryuToastTimer = null; }, 30000);
+        }
       }
       if ($('ryuNotificationsPanel')?.style.display !== 'none') renderRyuNotificationsPanel();
     }
@@ -396,6 +401,7 @@
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
   let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, profileEditOriginalName = '', activeJob = null, activeJobType = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, jobsRefreshRequested = false, chapterListEpoch = 0, chapterSelectionEpoch = 0, cueListEpoch = 0, cueSearchTimer = null, previewAudio = null, lastVoicePreviewPath = null, lastVoicePreviewProfileName = '', lastVoicePreviewChapterNumber = null, lastVoicePreviewChapterTitle = '', voicePreviewValid = false, voicePreviewEpoch = 0, previewVolume = 0.85, voiceAssignmentEpoch = 0, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8, productionFullJobId = null, productionPreviewJobId = null, productionJobSnapshots = {full:null,preview:null}, productionJobMonitors = {full:null,preview:null}, productionMonitorEpochs = {full:0,preview:0}, productionPreviewRequestProjectFolder = '', productionPreviewSelectionProjectFolder = '', productionPreviewSelectedChapter = null, productionPreviewSelectedChapterId = '', productionPreviewSelectedChapterSignature = '', productionPreviewRequestChapterNumber = 0, productionPreviewRequestChapterId = '';
   let elevenCandidates = [], selectedElevenCandidate = null, elevenDesignSeed = 7300;
+  let productionUnassignedAcknowledgementKey = '';
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], pronunciationEnabled = true, activePronunciationSeries = '', lastPronunciationPreview = null, pronunciationRowPreviewState = new Map(), pronunciationSelectionKeys = new Set(), selectedSoundPath = null, selectedCuePath = null, pendingCueSlot = null, pendingCueAssignments = Object.create(null), cueChangesDirty = false, cueSaveError = '', cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null, chapterBgmDraftDirty = false, mixLevelsDirty = false, soundPreviewKind = null, soundPreviewPath = null;
   let chapterBgmCandidateTrackPath = null, chapterBgmCandidateChapter = null, chapterBgmSavePromise = null, cueSavePromise = null;
   let chapterStrategySavePromise = null;
@@ -2432,7 +2438,7 @@
     for(const [id,value] of Object.entries(detailValues))if($(id))$(id).textContent=String(value||'—');
     updateVoiceSummary(profile,{saved:true,previewReady:false,assignment:''});
     void refreshAssignedCharacterForProfile(profile);updateVoiceActionButtons();
-    if(announce)message('Loaded saved voice profile: '+profile.name+'. Provider, voice ID and saved settings are restored. Generate a fresh preview before playback or assignment.');
+    if(announce)message('Loaded saved voice profile: '+profile.name+'. Provider, voice ID and saved settings are restored. Generate a fresh preview before playback or assignment.', false, {toast:false});
     return true;
   }
 
@@ -2513,6 +2519,7 @@
     const loadedVoices = await call('voice.list');
     if (requestToken !== voiceListEpoch) return voices;
     voices = Array.isArray(loadedVoices) ? loadedVoices : [];
+    await refreshUnassignedCharacterDefaultControls();
     syncQwenModelSizeControls().catch(error => console.warn('[Ryu Qwen model preference]',error));
     const rows = voices.map(v => ({...v, label: v.name + ' · ' + v.provider}));
     renderSelect($('editCharacterVoice'), [{name:'',label:'Unassigned'}, ...rows], 'name', v => v.label || 'Unassigned');
@@ -3204,6 +3211,76 @@
     const provider = String(profile?.provider || '').trim();
     const model = String(profile?.model_id || profile?.model_name || profile?.model || '').trim();
     return [name, provider, model].filter(Boolean).join(' · ');
+  }
+  let unassignedCharacterDefaultProfileName = '';
+  let unassignedCharacterDefaultRefreshEpoch = 0;
+  async function refreshUnassignedCharacterDefaultControls() {
+    const panel = $('voices') || $('voice');
+    if (!panel) return null;
+    const requestEpoch = ++unassignedCharacterDefaultRefreshEpoch;
+    let saved = null;
+    try {
+      saved = await call('voice.unassigned_character.default.get', {});
+    } catch (error) {
+      console.warn('[Ryu Unassigned Character default]', error);
+      saved = {profile_name:null,profile_available:false};
+    }
+    if (requestEpoch !== unassignedCharacterDefaultRefreshEpoch) return saved;
+    unassignedCharacterDefaultProfileName = String(saved?.profile_name || '');
+    let card = $('unassignedCharacterDefaultCard');
+    if (!card) {
+      card = document.createElement('section');
+      card.id = 'unassignedCharacterDefaultCard';
+      card.className = 'card';
+      card.style.cssText = 'margin:14px 0;padding:14px;border:1px solid rgba(150,160,180,.22);border-radius:12px;';
+      const narratorCard = $('seriesNarratorDefaultCard');
+      if (narratorCard?.parentNode) narratorCard.insertAdjacentElement('afterend', card);
+      else panel.appendChild(card);
+    }
+    const savedProfiles = characterSavedProfiles();
+    const options = savedProfiles.map(profile =>
+      '<option value="' + esc(profile.name) + '"' +
+      (profile.name.toLowerCase() === unassignedCharacterDefaultProfileName.toLowerCase() ? ' selected' : '') +
+      '>' + esc(characterSavedProfileLabel(profile)) + '</option>'
+    ).join('');
+    const selectedAvailable = saved?.profile_available === true;
+    card.innerHTML =
+      '<div style="font-weight:750;margin-bottom:5px">Unassigned Character · Global Default</div>' +
+      '<div class="muted" style="font-size:12px;line-height:1.5;margin-bottom:10px">' +
+      'Used for detected characters and dialogue passages that do not have a valid saved character voice assignment. This profile applies across all books and series. The narrator remains a separate required profile.' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+      '<select id="unassignedCharacterDefaultProfile" class="input" style="min-width:220px;flex:1">' +
+      '<option value="">Choose a saved voice profile</option>' + options + '</select>' +
+      '<button class="btn small" type="button" id="saveUnassignedCharacterDefault">Save Global Default</button>' +
+      '</div>' +
+      '<div id="unassignedCharacterDefaultStatus" class="muted" style="font-size:12px;margin-top:9px;line-height:1.45">' +
+      (selectedAvailable
+        ? 'Saved global fallback: ' + esc(unassignedCharacterDefaultProfileName)
+        : 'Not configured · save a profile before generating books with unassigned characters or dialogue.') +
+      '</div>';
+    const select = $('unassignedCharacterDefaultProfile');
+    const save = $('saveUnassignedCharacterDefault');
+    if (select) select.value = unassignedCharacterDefaultProfileName;
+    if (save) save.onclick = async () => {
+      const profileName = String(select?.value || '').trim();
+      if (!profileName) {
+        message('Choose a saved Voice Studio profile for Unassigned Character.', true);
+        return;
+      }
+      save.disabled = true;
+      try {
+        const result = await call('voice.unassigned_character.default.save', {profile_name:profileName});
+        unassignedCharacterDefaultProfileName = String(result.profile_name || profileName);
+        await refreshUnassignedCharacterDefaultControls();
+        message('Global Unassigned Character profile saved: ' + unassignedCharacterDefaultProfileName);
+      } catch (error) {
+        message(error?.message || String(error), true);
+      } finally {
+        if (save.isConnected) save.disabled = false;
+      }
+    };
+    return saved;
   }
   function characterProfileByName(name) {
     const key = String(name || '').trim().toLowerCase();
@@ -5506,30 +5583,21 @@
 
   function productionGenerationBlockReason(active) {
     if (!active?.folder) return 'Open a saved project before starting full generation.';
-    const configuredCharacterVoiceCount = Math.max(0, Number(
-      active.configured_character_voice_profile_count ?? active.character_voice_count ?? 0
-    ));
     const narratorOnly = active.narrator_only_generation === true;
-    if (narratorOnly && configuredCharacterVoiceCount > 0) {
-      return 'Narrator-Only Generation is no longer available because '
-        + configuredCharacterVoiceCount
-        + ' valid character voice profile(s) are configured. Turn it off to use multi-character speaker review.';
-    }
     if (!narratorOnly && active.dialogue_index_ready !== true) {
       return 'The canonical dialogue index could not be verified. Refresh Character Studio and retry before generating.';
-    }
-    const assignmentIssues = Math.max(0, Number(active.character_assignment_issue_count || 0));
-    if (!narratorOnly && assignmentIssues > 0) {
-      return assignmentIssues + ' saved character voice assignment(s) need attention before generation.';
     }
     const pendingDialogue = Math.max(0, Number(active.pending_dialogue_count || 0));
     const conflictingDialogue = Math.max(0, Number(active.conflicting_dialogue_count || 0));
     const indexIssues = Math.max(0, Number(active.dialogue_index_issue_count || 0));
-    if (!narratorOnly && active.dialogue_review_complete !== true) {
-      return 'Generation is blocked until dialogue review is complete: '
-        + pendingDialogue + ' passage(s) need speaker review, '
-        + conflictingDialogue + ' conflict(s), and '
-        + indexIssues + ' source/index issue(s).';
+    const unassignedCharacters = Math.max(0, Number(active.unassigned_character_count || 0));
+    if (!narratorOnly && (conflictingDialogue > 0 || indexIssues > 0)) {
+      return 'Generation is blocked by ' + conflictingDialogue + ' conflicting dialogue assignment(s) and '
+        + indexIssues + ' source/index issue(s). Resolve these structural conflicts in Character Studio first.';
+    }
+    if (!narratorOnly && (unassignedCharacters > 0 || pendingDialogue > 0) &&
+        active.unassigned_character_profile_available !== true) {
+      return 'Save an available global Unassigned Character profile in Voice Studio before generating with unassigned characters or dialogue passages.';
     }
     const unsaved = metadataDialogDirty && metadataDialogProjectFolder === String(active.folder);
     if (unsaved) return 'Save or discard Input Project Details changes before generation.';
@@ -6339,7 +6407,10 @@ function renderProductionMetadataGate(active) {
     const fullActive = productionJobIsActive(fullJob);
     const completedOutput = !fullJob && Boolean(project?.completed && project?.output_path);
     const fullError = String(fullJob?.error?.message || fullJob?.message || '').trim();
-    const fullStageLabel = fullState === 'failed'
+    const interrupted = String(fullJob?.error?.code || '').toLowerCase() === 'interrupted';
+    const fullStageLabel = fullState === 'failed' && interrupted
+      ? 'Interrupted · the app closed before this job finished. Recover or retry to reuse saved chapter checkpoints.'
+      : fullState === 'failed'
       ? 'Failed · ' + (fullError || 'Generation failed. Retry from Production Studio or inspect Background Jobs.')
       : fullState === 'cancelled'
         ? 'Cancelled'
@@ -6358,10 +6429,10 @@ function renderProductionMetadataGate(active) {
       ring.setAttribute('aria-valuemax', '100');
       ring.setAttribute('aria-valuenow', String(fullPercent));
       ring.setAttribute('aria-valuetext', fullJob
-        ? fullStageLabel + ' · ' + fullPercent + '%'
+        ? 'Completed narration text workload · ' + fullPercent + '% · ' + fullStageLabel
         : (completedOutput ? 'Audiobook ready' : 'Idle'));
     }
-    setProductionStatus('genPercent', fullJob ? fullPercent + '%' : (completedOutput ? '100%' : 'Idle'));
+    setProductionStatus('genPercent', fullJob ? fullPercent + '% narration workload' : (completedOutput ? '100% narration workload' : 'Idle'));
     setProductionStatus('genStage', fullJob
       ? fullStageLabel
       : (completedOutput ? 'Audiobook ready' : 'Ready to generate'));
@@ -6373,7 +6444,43 @@ function renderProductionMetadataGate(active) {
     const elapsed = productionElapsedSeconds(fullJob);
     const eta = productionJobEtaSeconds(fullJob);
     setProductionStatus('elapsed', Number.isFinite(elapsed) && elapsed >= 0 ? formatProductionDuration(elapsed) : '—');
-    setProductionStatus('remaining', Number.isFinite(eta) ? formatProductionDuration(eta) : '—');
+    const packagingStage = /assembling|encoding|validating final m4b/i.test(String(fullJob?.stage || ''));
+    const etaLabel = Number.isFinite(eta)
+      ? 'Measured ETA · ' + formatProductionDuration(eta)
+      : packagingStage
+        ? 'Narration complete · final M4B assembly in progress; ETA not estimated'
+        : fullActive
+          ? 'Available after 3 completed synthesis chunks'
+          : (fullState === 'completed' ? 'Complete' : '—');
+    setProductionStatus('remaining', etaLabel);
+    const measuredDuration = Number(
+      fullJob?.result?.output_duration_seconds ?? project?.output_duration_seconds ?? NaN
+    );
+    const metricHost = $('remaining')?.parentElement?.parentElement ||
+      $('remaining')?.parentElement || $('genStage')?.parentElement || ring?.parentElement;
+    let durationNode = $('genDuration');
+    if (!durationNode && metricHost) {
+      durationNode = document.createElement('div');
+      durationNode.id = 'genDuration';
+      durationNode.className = 'muted';
+      durationNode.style.cssText = 'grid-column:1/-1;flex:1 1 100%;min-width:0;margin-top:8px;font-size:12px;line-height:1.45;overflow-wrap:anywhere';
+      metricHost.appendChild(durationNode);
+    }
+    if (durationNode) {
+      durationNode.textContent = Number.isFinite(measuredDuration) && measuredDuration > 0
+        ? 'Measured audiobook duration · ' + formatProductionDuration(measuredDuration)
+        : (fullActive || fullState === 'completed'
+          ? 'Final audiobook duration · measured from the validated M4B when assembly finishes'
+          : (completedOutput
+            ? 'Audiobook duration · not available in this saved project record'
+            : 'Final audiobook duration · shown after M4B validation'));
+    }
+    const workloadCompleted = Math.max(0, Number(fullJob?.generation_completed_work_units || 0));
+    const workloadTotal = Math.max(0, Number(fullJob?.generation_total_work_units || 0));
+    const workloadLabel = workloadTotal > 0
+      ? 'Completed narration workload · ' + workloadCompleted.toLocaleString() + ' / ' + workloadTotal.toLocaleString() + ' text units'
+      : (fullActive ? 'Preparing the measured narration workload plan' : '');
+    setProductionStatus('genWorkload', workloadLabel);
 
     const pause = $('pauseGenerate');
     if (pause) {
@@ -6451,8 +6558,12 @@ function renderProductionMetadataGate(active) {
             (Number.isFinite(totalSeconds) ? ' · total ' + totalSeconds.toFixed(1) + 's' : '') +
             (Number.isFinite(synthesisSeconds) ? ' · synthesis ' + synthesisSeconds.toFixed(1) + 's' : '');
         } else {
-          previewTiming.textContent = (Number.isFinite(previewElapsed) ? 'Elapsed ' + formatProductionDuration(previewElapsed) : 'Elapsed —') +
-            (Number.isFinite(previewEta) ? ' · remaining ' + formatProductionDuration(previewEta) : '');
+          const previewSegments = Math.max(0, Number(previewJob.preview_completed_segments || 0));
+        const previewSegmentTotal = Math.max(0, Number(previewJob.preview_total_segments || 0));
+        previewTiming.textContent =
+          (Number.isFinite(previewElapsed) ? 'Elapsed ' + formatProductionDuration(previewElapsed) : 'Elapsed —') +
+          (previewSegmentTotal ? ' · completed segments ' + previewSegments + '/' + previewSegmentTotal : '') +
+          (Number.isFinite(previewEta) ? ' · remaining ' + formatProductionDuration(previewEta) : ' · ETA unavailable during model loading/synthesis');
         }
       }
     }
@@ -6510,8 +6621,7 @@ function renderProductionMetadataGate(active) {
                 throw new Error('The active project changed while saving Narrator-Only Generation. Reopen Production and retry.');
               }
               input.checked = saved.enabled === true;
-              input.disabled = saved.automatic !== true && saved.user_opt_out !== true &&
-                active.narrator_only_eligible !== true;
+              input.disabled = active.narrator_voice_configured !== true || active.narrator_profile_available !== true;
               window.ryuPremiumActiveProject = {...active,
                 narrator_only_generation:input.checked,
                 narrator_only_generation_user_opt_out:saved.user_opt_out === true,
@@ -6521,14 +6631,15 @@ function renderProductionMetadataGate(active) {
                 ? (saved.automatic === true
                   ? 'Automatically enabled because this book has no configured character voice profiles. The saved narrator reads all narration and dialogue.'
                   : 'Saved for this book. The narrator reads all narration and dialogue.')
-                : 'Off by your choice. Character assignments and speaker review will be used.';
+                : 'Off by your choice. Assigned character profiles are used; other speakers use the global Unassigned Character profile.';
             } catch (error) {
               const currentProject = window.ryuPremiumActiveProject || null;
               input.checked = currentProject?.narrator_only_generation === true;
               message(error?.message || String(error), true);
               throw error;
             } finally {
-              input.disabled = (window.ryuPremiumActiveProject || {}).narrator_only_eligible !== true;
+              const latestProject = window.ryuPremiumActiveProject || {};
+              input.disabled = latestProject.narrator_voice_configured !== true || latestProject.narrator_profile_available !== true;
             }
           })();
           narratorOnlySavePromise.catch(() => {});
@@ -6547,7 +6658,7 @@ function renderProductionMetadataGate(active) {
         info.title = 'Narrator-only generation information';
         const tooltip = document.createElement('span');
         tooltip.className = 'ryu-info-tooltip';
-        tooltip.textContent = 'Automatically use the saved narrator for every passage, including dialogue, when this book has zero configured character voice profiles and an available narrator. Uncheck to review dialogue before generation; adding a character voice profile returns production to multi-character routing.';
+        tooltip.textContent = 'When on, the saved narrator reads every passage, including dialogue, and all character assignments are ignored for this book. When off, saved character voice assignments are used; any remaining unassigned speakers use the app-wide Unassigned Character profile selected in Voice Studio.';
         infoWrap.append(info,tooltip);
         const status = document.createElement('small');
         status.id = 'narratorOnlyGenerationStatus';
@@ -6556,12 +6667,10 @@ function renderProductionMetadataGate(active) {
         const voiceCount = Math.max(0,Number(project?.configured_character_voice_profile_count ?? project?.character_voice_count ?? 0));
         const narratorReadyForOnly = project?.narrator_voice_configured === true && project?.narrator_profile_available === true;
         status.textContent = input.checked
-          ? (project?.narrator_only_generation_auto === true ? 'Automatically enabled because this book has no configured character voice profiles · the saved narrator reads all narration and dialogue.' : 'On · saved for this book.')
+          ? 'On · the saved narrator reads all passages, including dialogue. Character assignments are ignored for this book.'
           : (project?.narrator_only_generation_user_opt_out === true
-            ? 'Off by your choice · multi-character review applies.'
-            : (voiceCount > 0
-              ? 'Unavailable · ' + voiceCount + ' configured character voice profile(s) found. Remove those assignments to use narrator-only mode.'
-              : (!narratorReadyForOnly ? 'Unavailable · save an available narrator profile first.' : 'Off · available for this book.')));
+            ? 'Off by your choice · assigned character profiles are used; other speakers use the global Unassigned Character profile.'
+            : (!narratorReadyForOnly ? 'Unavailable · save an available narrator profile first.' : 'Off · available. You can enable it even when character profiles are assigned.'));
         copy.append(title,infoWrap,status);
         row.append(input,copy);
         generateButton?.parentElement?.insertBefore(row,generateButton);
@@ -6572,18 +6681,16 @@ function renderProductionMetadataGate(active) {
       if (document.activeElement !== narratorOnlyControl && narratorOnlyControl.checked !== savedValue) {
         narratorOnlyControl.checked = savedValue;
       }
-      narratorOnlyControl.disabled = project?.narrator_only_eligible !== true;
+      narratorOnlyControl.disabled = project?.narrator_voice_configured !== true || project?.narrator_profile_available !== true;
       const status = $('narratorOnlyGenerationStatus');
       if (status) {
         const voiceCount = Math.max(0,Number(project?.configured_character_voice_profile_count ?? project?.character_voice_count ?? 0));
         const narratorReadyForOnly = project?.narrator_voice_configured === true && project?.narrator_profile_available === true;
         status.textContent = savedValue
-          ? (project?.narrator_only_generation_auto === true ? 'Automatically enabled because this book has no configured character voice profiles · the saved narrator reads all narration and dialogue.' : 'On · saved for this book.')
+          ? 'On · the saved narrator reads all passages, including dialogue. Character assignments are ignored for this book.'
           : (project?.narrator_only_generation_user_opt_out === true
-            ? 'Off by your choice · multi-character review applies.'
-            : (voiceCount > 0
-              ? 'Unavailable · ' + voiceCount + ' configured character voice profile(s) found. Remove those assignments to use narrator-only mode.'
-              : (!narratorReadyForOnly ? 'Unavailable · save an available narrator profile first.' : 'Off · available for this book.')));
+            ? 'Off by your choice · assigned character profiles are used; other speakers use the global Unassigned Character profile.'
+            : (!narratorReadyForOnly ? 'Unavailable · save an available narrator profile first.' : 'Off · available. You can enable it even when character profiles are assigned.'));
       }
     }
     ensureProductionEngineLayout();
@@ -11073,6 +11180,34 @@ function renderProductionMetadataGate(active) {
       await refreshTerms();
       const bitrate = Number(activeProject?.audio_bitrate || savedSettings?.bitrate || 256);
       const narratorOnly = $('narratorOnlyGeneration')?.checked === true;
+      const unassignedCharacters = Math.max(0, Number(activeProject?.unassigned_character_count || 0));
+      const pendingDialogue = Math.max(0, Number(activeProject?.pending_dialogue_count || 0));
+      const needsFallback = !narratorOnly && (unassignedCharacters > 0 || pendingDialogue > 0);
+      if (needsFallback) {
+        if (activeProject?.unassigned_character_profile_available !== true) {
+          throw new Error('Save a global Unassigned Character profile in Voice Studio before continuing with unassigned characters or dialogue.');
+        }
+        const acknowledgementKey = [
+          String(activeProject?.folder || ''),
+          unassignedCharacters,
+          pendingDialogue,
+          String(activeProject?.unassigned_character_profile_name || '')
+        ].join('\u001f');
+        if (productionUnassignedAcknowledgementKey !== acknowledgementKey) {
+          const confirmed = window.confirm(
+            'Some characters are still pending profile assigning.\n\n' +
+            unassignedCharacters + ' character(s) and ' + pendingDialogue +
+            ' dialogue passage(s) do not have their own valid voice assignment.\n' +
+            'They will use the global Unassigned Character profile: ' +
+            String(activeProject.unassigned_character_profile_name || '') + '.\n\n' +
+            'Press OK, then click Generate full audiobook again to continue.'
+          );
+          if (!confirmed) return;
+          productionUnassignedAcknowledgementKey = acknowledgementKey;
+          message('Unassigned characters acknowledged. Click Generate full audiobook again to start with the global fallback profile.');
+          return;
+        }
+      }
       const data = await call('production.generate_book', {
         profile_name:activeProject?.voice_profile,
         narrator_only_generation:narratorOnly,
