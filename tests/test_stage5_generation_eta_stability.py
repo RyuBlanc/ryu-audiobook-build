@@ -6,6 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 import wave
+from unittest.mock import patch
 
 from app.chapters.detector import Chapter
 from app.tts.generator import generate_chapter
@@ -74,26 +75,41 @@ class Stage5GenerationEtaStabilityTests(unittest.TestCase):
 
     def test_eta_uses_measured_chunk_times_and_resists_one_slow_outlier(self):
         bridge = _ProgressHarness()
-        bridge._generation_progress("eta-test", 0, 10, 0, "plan:10000:0:10")
+        # The fourth chunk establishes a 60-second estimate at t=40. One
+        # 100-second outlier then completes at t=140. The rolling median must
+        # reject that isolated rate and recalculate from the remaining workload.
+        clock_values = iter(
+            (0.0, 10.0, 10.0, 20.0, 20.0, 30.0, 30.0, 40.0, 40.0, 140.0, 140.0)
+        )
+        with patch(
+            "app.ui.premium_v2_host.time.monotonic",
+            side_effect=lambda: next(clock_values),
+        ):
+            bridge._generation_progress("eta-test", 0, 10, 0, "plan:10000:0:10")
 
-        # The first TTS call is excluded because it can include cold model load.
-        self._publish_chunk(bridge, 1, 1000, 10.0)
-        self.assertIsNone(bridge._jobs["eta-test"].get("eta_seconds"))
+            # The first TTS call is excluded because it can include cold model load.
+            self._publish_chunk(bridge, 1, 1000, 10.0)
+            self.assertIsNone(bridge._jobs["eta-test"].get("eta_seconds"))
 
-        self._publish_chunk(bridge, 2, 2000, 10.0)
-        self._publish_chunk(bridge, 3, 3000, 10.0)
-        self._publish_chunk(bridge, 4, 4000, 10.0)
+            self._publish_chunk(bridge, 2, 2000, 10.0)
+            self._publish_chunk(bridge, 3, 3000, 10.0)
+            self._publish_chunk(bridge, 4, 4000, 10.0)
 
-        first_eta = bridge._jobs["eta-test"]["eta_seconds"]
-        self.assertEqual(first_eta, 60)
-        self.assertIsNotNone(bridge._jobs["eta-test"].get("eta_updated_at"))
-        self.assertEqual(bridge._jobs["eta-test"]["generation_eta_sample_count"], 3)
+            first_eta = bridge._jobs["eta-test"]["eta_seconds"]
+            self.assertEqual(first_eta, 60)
+            self.assertIsNotNone(bridge._jobs["eta-test"].get("eta_updated_at"))
+            self.assertEqual(bridge._jobs["eta-test"]["generation_eta_sample_count"], 3)
 
-        # A single 10x slower chunk must not make a multi-hour ETA jump.
-        self._publish_chunk(bridge, 5, 5000, 100.0)
-        second_eta = bridge._jobs["eta-test"]["eta_seconds"]
-        self.assertEqual(second_eta, 50)
-        self.assertLessEqual(second_eta, first_eta)
+            # The 100-second call consumes the old forecast, but its isolated
+            # rate is rejected: 5,000 units remain at the 0.01s/unit median.
+            self._publish_chunk(bridge, 5, 5000, 100.0)
+            second_eta = bridge._jobs["eta-test"]["eta_seconds"]
+            self.assertEqual(second_eta, 50)
+            self.assertAlmostEqual(
+                bridge._jobs["eta-test"]["generation_eta_seconds_per_text_unit"],
+                0.01,
+            )
+            self.assertLessEqual(second_eta, first_eta)
 
     def test_synthesis_timer_is_reported_by_generate_chapter_for_each_real_call(self):
         chapter = Chapter(
