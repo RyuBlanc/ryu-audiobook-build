@@ -30,6 +30,51 @@ class Stage54GenerationJobUiStateTests(unittest.TestCase):
         ):
             self.assertIn(command, self.adapter)
 
+    def test_task_manager_preview_cancel_signals_the_active_provider_immediately(self):
+        import threading
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+
+        from app.ui import premium_v2_host as host
+
+        cancel_event = threading.Event()
+        provider = SimpleNamespace(request_cancel=Mock())
+        job = {
+            "job_id": "live-qwen-preview",
+            "type": "voice-preview",
+            "state": "running",
+        }
+        bridge = SimpleNamespace(
+            _jobs_lock=threading.RLock(),
+            _jobs={"live-qwen-preview": job},
+            _generators={},
+            _preview_cancel_events={"live-qwen-preview": cancel_event},
+            _preview_providers={"live-qwen-preview": provider},
+            _import_cancel_events={},
+            _analysis_cancel_events={},
+            _job_update=Mock(side_effect=lambda _job_id, **changes: {**job, **changes}),
+        )
+
+        result = host.PremiumV2Bridge._job_cancel(
+            bridge, {"job_id": "live-qwen-preview"}
+        )
+
+        self.assertTrue(cancel_event.is_set())
+        provider.request_cancel.assert_called_once_with()
+        self.assertEqual(result["state"], "cancel_requested")
+        self.assertEqual(result["stage"], "Cancelling voice synthesis")
+
+    def test_preview_worker_registers_provider_before_entering_qwen_synthesis(self):
+        from app.ui import premium_v2_host as host
+
+        source = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        start = source.index("def _preview_worker(")
+        end = source.index("\n    def _character_list(", start)
+        worker = source[start:end]
+        registration = worker.index('getattr(self, "_preview_providers", {})[job_id] = provider')
+        synthesis = worker.index("result = build_voice_preview(", registration)
+        self.assertLess(registration, synthesis)
+
     def test_dashboard_control_keeps_stable_identity_and_pending_labels(self):
         start = self.adapter.index("function refreshDashboardGeneration(")
         end = self.adapter.index("function audiobookPageActive()", start)
