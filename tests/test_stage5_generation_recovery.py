@@ -353,7 +353,11 @@ class GenerationRecoveryLaunchHarness:
     def _find_profile(self, name):
         return self.narrator_profile if name == self.narrator_profile.name else None
 
-    def _effective_generation_character_rows(self, _state, _series, *, strict=False):
+    def _unassigned_character_default_read(self):
+        # Recovered narrator-only jobs must not depend on a cast fallback.
+        return {"profile_name": None, "profile_available": False, "profile": None}
+
+    def _effective_generation_character_rows(self, _state, _series, *, strict=False, **_kwargs):
         # Character records may exist, but narrator-only eligibility
         # requires zero configured saved character voice profiles.
         return (
