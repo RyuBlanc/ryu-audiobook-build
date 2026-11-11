@@ -601,6 +601,9 @@ class ProjectSummaryReadinessHarness:
             "source": "project_override",
         }
 
+    def _unassigned_character_default_read(self):
+        return {"profile_name": None, "profile_available": False, "profile": None}
+
 
 class ProjectSummaryReadinessTests(unittest.TestCase):
     def _project(self, root: Path, *, target: str = ""):
