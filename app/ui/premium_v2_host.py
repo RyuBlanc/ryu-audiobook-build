@@ -7798,8 +7798,8 @@ class PremiumV2Bridge(QObject):
                       "generation_mode": generation_mode,
                       "narrator_only_generation": narrator_only,
                       "character_voice_profile_count": int(narrator_selection.get("character_voice_profile_count") or 0),
-                      "output_path": None, "output_duration_seconds": None,
-                      "generation_target_path": str(output),
+                      "output_path": None, "generation_target_path": str(output),
+                      "output_duration_seconds": None,
                       "status": "generating", "audio_bitrate": bitrate, "generation_job_id": job_id,
                       "generation_started_at": self._now(), "empty_chapters_skipped": empty_skipped,
                       "excluded_chapters_skipped": excluded_skipped, "chapters_skipped_for_generation": skipped})
