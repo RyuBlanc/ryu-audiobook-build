@@ -87,6 +87,76 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
             self.assertEqual(Path(environment["HF_HOME"]), selected_cache)
             self.assertTrue(selected_cache.is_dir())
 
+    def test_worker_timeout_reports_live_state_and_captured_stderr_log(self):
+        import queue
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.tts.providers.qwen_character import QwenCharacterProvider
+
+        provider = QwenCharacterProvider(
+            voice_id="timeout-diagnostic-test",
+            backend="cpu",
+            model_kind="design-1.7b",
+            qwen_mode="design-preview",
+        )
+        output_queue = queue.Queue()
+        with TemporaryDirectory() as temporary:
+            log_path = Path(temporary) / "worker.log"
+            log_path.write_text("model load failed: diagnostic sentinel", encoding="utf-8")
+            provider._worker_log = log_path.open("a", encoding="utf-8")
+            provider._worker = SimpleNamespace(poll=lambda: None)
+            provider._stdout_queue = output_queue
+            with patch(
+                "app.tts.providers.qwen_character.time.monotonic",
+                side_effect=(0.0, 0.0, 2.1, 2.1, 3.0, 3.0, 4.0),
+            ), patch(
+                "app.tts.providers.qwen_character.queue.Queue.get",
+                side_effect=queue.Empty,
+            ), patch.object(provider, "_status") as status:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "timed out.*Worker is still running.*diagnostic sentinel",
+                ):
+                    provider._read_response(timeout=4.0, heartbeat="Loading model")
+            self.assertTrue(status.called)
+            provider._worker_log.close()
+
+    def test_worker_exit_while_waiting_includes_exit_code_and_stderr(self):
+        import queue
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.tts.providers.qwen_character import QwenCharacterProvider
+
+        provider = QwenCharacterProvider(
+            voice_id="early-exit-diagnostic-test",
+            backend="cpu",
+            model_kind="design-1.7b",
+            qwen_mode="design-preview",
+        )
+        provider._stdout_queue = queue.Queue()
+        provider._worker = SimpleNamespace(poll=lambda: 37)
+        with TemporaryDirectory() as temporary:
+            log_path = Path(temporary) / "worker.log"
+            log_path.write_text("worker crashed: diagnostic sentinel", encoding="utf-8")
+            provider._worker_log = log_path.open("a", encoding="utf-8")
+            with patch(
+                "app.tts.providers.qwen_character.time.monotonic",
+                side_effect=(0.0, 0.0, 2.0, 2.0, 3.0),
+            ), patch(
+                "app.tts.providers.qwen_character.queue.Queue.get",
+                side_effect=queue.Empty,
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "exited while waiting.*Exit code: 37.*diagnostic sentinel",
+                ):
+                    provider._read_response(timeout=3.0, heartbeat="Loading model")
+            provider._worker_log.close()
+
     def test_command_runner_enforces_timeout_when_child_stalls_without_stdout(self):
         started = time.monotonic()
         with self.assertRaisesRegex(RuntimeError, "timed out after 0.3 seconds"):
