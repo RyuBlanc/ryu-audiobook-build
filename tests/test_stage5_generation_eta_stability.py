@@ -151,6 +151,11 @@ class Stage5GenerationEtaStabilityTests(unittest.TestCase):
         self.assertIn("if len(ordered) >= 3:", source)
         self.assertIn("waiting for the active chunk", source)
         self.assertNotIn("fallback_rate = work_done / elapsed", source)
+        plan_start = source.index('if message.startswith("plan:"):')
+        plan_end = source.index('if message.startswith("m4b-package:")', plan_start)
+        plan = source[plan_start:plan_end]
+        self.assertIn("self._eta_ema_sec_per_unit = None", plan)
+        self.assertNotIn("self._estimated_generation_seconds", plan)
 
     def test_production_exposes_estimated_and_measured_audiobook_runtime(self):
         root = Path(__file__).resolve().parents[1]
