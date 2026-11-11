@@ -7988,11 +7988,11 @@ class PremiumV2Bridge(QObject):
                     del samples[:-5]
                 timing["last_work"] = completed_work
                 timing["last_at"] = now
-                # Ninety percent represents synthesis work; the remaining ten
-                # percent is reserved for measured M4B assembly and validation.
-                narration_percent = round(90.0 * min(total_work, completed_work) / total_work)
+                # Main progress is the exact completed synthesis text-work
+                # ratio. M4B assembly has its own independent measured steps.
+                narration_percent = round(100.0 * min(total_work, completed_work) / total_work)
                 changes.update({
-                    "progress": max(0, min(90, narration_percent)),
+                    "progress": max(0, min(100, narration_percent)),
                     "generation_completed_work_units": completed_work,
                     "generation_total_work_units": total_work,
                     "generation_completed_chunks": completed_chunks,
@@ -8044,7 +8044,7 @@ class PremiumV2Bridge(QObject):
                 except (TypeError, ValueError, OverflowError):
                     measured_chapter_seconds = measured_book_seconds = None
             changes.update({
-                "progress": round(90.0 * min(total_work, current_work) / total_work),
+                "progress": round(100.0 * min(total_work, current_work) / total_work),
                 "generation_completed_work_units": current_work,
                 "message": msg.partition(":")[2],
             })
@@ -8056,10 +8056,13 @@ class PremiumV2Bridge(QObject):
         elif msg.startswith("m4b-packaging"):
             stage = "Assembling final M4B"
             changes.update({
-                "progress": 90,
+                "progress": 100,
+                "packaging_progress_percent": 0,
+                "packaging_completed_steps": 0,
+                "packaging_total_steps": None,
                 "eta_seconds": None,
                 "generation_eta_basis": None,
-                "message": "All narration chunks are complete. Measuring final M4B assembly and validation.",
+                "message": "Narration workload is 100% complete. Measuring final M4B assembly and validation separately.",
             })
         elif msg.startswith("m4b-package:"):
             stage = "Encoding and validating final M4B"
@@ -8067,10 +8070,16 @@ class PremiumV2Bridge(QObject):
             if match:
                 package_done = max(0, int(match.group(1)))
                 package_total = max(1, int(match.group(2)))
-                changes["progress"] = min(99, 90 + round(9.0 * package_done / package_total))
+                changes["progress"] = 100
+                changes["packaging_progress_percent"] = round(100.0 * package_done / package_total)
+                changes["packaging_completed_steps"] = package_done
+                changes["packaging_total_steps"] = package_total
                 detail = match.group(3) or stage
             else:
-                changes["progress"] = 90
+                changes["progress"] = 100
+                changes["packaging_progress_percent"] = None
+                changes["packaging_completed_steps"] = None
+                changes["packaging_total_steps"] = None
                 detail = stage
             changes.update({
                 "eta_seconds": None,
@@ -8081,6 +8090,7 @@ class PremiumV2Bridge(QObject):
             stage = "Audiobook duration measured · M4B ready"
             changes.update({
                 "progress": 100,
+                "packaging_progress_percent": 100,
                 "eta_seconds": 0,
                 "message": "Final M4B assembly and validation completed.",
             })
