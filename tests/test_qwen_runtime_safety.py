@@ -535,6 +535,9 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
                 patch.object(qwen_character, "runtime_ready", return_value=True),
                 patch.object(qwen_character, "model_installed", return_value=True),
                 patch.object(qwen_character, "runtime_environment", return_value={}),
+                patch.object(qwen_character, "best_clone_kind", side_effect=AssertionError(
+                    "VoiceDesign preview must not probe/select a Base clone model"
+                )),
                 patch.object(qwen_character.subprocess, "Popen", return_value=fake_worker),
                 patch.object(qwen_character.threading, "Thread", return_value=SimpleNamespace(start=Mock())),
                 patch.object(qwen_character, "register_qwen_worker"),

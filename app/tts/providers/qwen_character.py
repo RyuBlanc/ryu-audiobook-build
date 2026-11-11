@@ -321,7 +321,10 @@ class QwenCharacterProvider(TTSProvider):
             "--task", self.qwen_mode,
             "--backend", self.backend,
             "--models-root", str(RUNTIME_ROOT),
-            "--clone-kind", clone_kind or best_clone_kind(),
+            # Only production VoiceDesign needs the globally selected Base
+            # model. Preview/custom/clone workers use the CLI's safe default;
+            # do not run GPU discovery for a one-pass VoiceDesign audition.
+            "--clone-kind", clone_kind or "base-0.6b",
         ]
         if self.low_memory:
             command.append("--low-memory")
