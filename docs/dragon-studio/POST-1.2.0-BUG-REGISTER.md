@@ -55,8 +55,10 @@ The next correction fixed the test assertion, provided a realistic exited-proces
 
 **Validation evidence:**
 - Earlier intermediate PR run [#3261](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43020576268), commit `86f64fa309d754a3104039c25dab5e97e81b76c8`: all 1,498 regression tests passed; package job is not yet complete for the final PR head.
-- Current PR run [#3264](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43020594973), head `5bac4b58cd80bbaf5a3e528857fe3acf196fcee0`: all 1,498 regression tests passed (`OK`); current Windows build/installer package job is still running. This is the current-head test checkpoint, not yet a package checkpoint.
-- CPU Qwen run [#12](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43020566273), commit `b7006e4cadbb36170909ed384773754f0c722916`: dependency/runtime install still in progress at last inspection; focused tests and real model preview remain pending.
+- Current PR run [#3267](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43021199482), exact current PR head `17868d6afe1230f4d1cfb57326f260a4239af8e4`: dependency installation, frontend syntax, native Qt lifecycle, and Stage 6 preflight passed; full regression suite passed (1,498 tests, `OK`). Windows build job `130525480144` is still in `Prepare, validate and build application`; package/install/portable artifacts are not yet available.
+- Prior PR #3264 / run `43020594973` on `5bac4b58cd80bbaf5a3e528857fe3acf196fcee0` also passed 1,498 tests, but its package result is not being substituted for the latest-head gate.
+- CPU Qwen run [#12](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43020566273), commit `b7006e4cadbb36170909ed384773754f0c722916`: runtime installation, focused 56-test group, and expression protocol smoke passed; real 30-second Qwen 1.7B VoiceDesign CPU preview is still in progress. Worker stderr collection and artifact upload have not executed yet.
+- NVIDIA run #13 and AMD/Intel run #20 have not yet supplied verified physical-device results.
 - NVIDIA run #13 and AMD/Intel run #20 have not yet supplied verified physical-device results.
 
 The worker log collection step must still be verified after the real preview executes. The real CPU preview and hardware acceptance gates remain open; no Qwen runtime or performance bug is closed by the passing regression suite alone.
