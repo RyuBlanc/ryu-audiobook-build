@@ -75,11 +75,21 @@ class Stage5GenerationEtaStabilityTests(unittest.TestCase):
 
     def test_eta_uses_measured_chunk_times_and_resists_one_slow_outlier(self):
         bridge = _ProgressHarness()
-        # The fourth chunk establishes a 60-second estimate at t=40. One
-        # 100-second outlier then completes at t=140. The rolling median must
-        # reject that isolated rate and recalculate from the remaining workload.
+        # The fourth chunk establishes a 60-second estimate at t=40. A
+        # 100-second outlier expires that forecast but must not make the displayed
+        # ETA jump back to 50 seconds. A fresh estimate is published only after
+        # three further completed chunks confirm the overrun.
         clock_values = iter(
-            (0.0, 10.0, 10.0, 20.0, 20.0, 30.0, 30.0, 40.0, 40.0, 140.0, 140.0)
+            (
+                0.0,
+                10.0, 10.0,
+                20.0, 20.0,
+                30.0, 30.0,
+                40.0, 40.0,
+                140.0, 140.0,
+                150.0, 150.0,
+                160.0, 160.0,
+            )
         )
         with patch(
             "app.ui.premium_v2_host.time.monotonic",
@@ -100,16 +110,64 @@ class Stage5GenerationEtaStabilityTests(unittest.TestCase):
             self.assertIsNotNone(bridge._jobs["eta-test"].get("eta_updated_at"))
             self.assertEqual(bridge._jobs["eta-test"]["generation_eta_sample_count"], 3)
 
-            # The 100-second call consumes the old forecast, but its isolated
-            # rate is rejected: 5,000 units remain at the 0.01s/unit median.
+            # The isolated slow call expires the old forecast. Do not publish
+            # a replacement ETA from one chunk; retain the explicit overdue state.
             self._publish_chunk(bridge, 5, 5000, 100.0)
-            second_eta = bridge._jobs["eta-test"]["eta_seconds"]
-            self.assertEqual(second_eta, 50)
+            self.assertEqual(bridge._jobs["eta-test"]["eta_seconds"], 0)
+            self.assertEqual(
+                bridge._jobs["eta-test"]["generation_eta_sample_count"], 4
+            )
+
+            # Two more completed chunks are still insufficient to rebase.
+            self._publish_chunk(bridge, 6, 6000, 10.0)
+            self.assertEqual(bridge._jobs["eta-test"]["eta_seconds"], 0)
+            self._publish_chunk(bridge, 7, 7000, 10.0)
+
+            recalibrated = bridge._jobs["eta-test"]
+            self.assertEqual(recalibrated["eta_seconds"], 30)
+            self.assertTrue(recalibrated["generation_eta_recalibrated"])
+            self.assertIn("Three completed chunks", recalibrated["generation_eta_recalibration_reason"])
             self.assertAlmostEqual(
-                bridge._jobs["eta-test"]["generation_eta_seconds_per_text_unit"],
+                recalibrated["generation_eta_seconds_per_text_unit"],
                 0.01,
             )
-            self.assertLessEqual(second_eta, first_eta)
+            self.assertLessEqual(recalibrated["eta_seconds"], first_eta)
+
+    def test_eta_never_increases_while_a_published_estimate_is_still_active(self):
+        bridge = _ProgressHarness()
+        clock_values = iter(
+            (
+                0.0,
+                10.0, 10.0,
+                20.0, 20.0,
+                30.0, 30.0,
+                40.0, 40.0,
+                63.0, 63.0,
+            )
+        )
+        with patch(
+            "app.ui.premium_v2_host.time.monotonic",
+            side_effect=lambda: next(clock_values),
+        ):
+            bridge._generation_progress("eta-test", 0, 10, 0, "plan:10000:0:10")
+            self._publish_chunk(bridge, 1, 1000, 10.0)  # warm-up
+            self._publish_chunk(bridge, 2, 2000, 10.0)
+            self._publish_chunk(bridge, 3, 3000, 10.0)
+            self._publish_chunk(bridge, 4, 4000, 10.0)
+
+            initial_eta = bridge._jobs["eta-test"]["eta_seconds"]
+            self.assertEqual(initial_eta, 60)
+
+            # Twenty-three seconds later, the newly measured chunk is slower,
+            # but its raw remaining-work estimate must not move the display
+            # backwards; the published countdown continues from 60 seconds.
+            self._publish_chunk(bridge, 5, 5000, 23.0)
+            updated_eta = bridge._jobs["eta-test"]["eta_seconds"]
+            self.assertEqual(updated_eta, 37)
+            self.assertLess(updated_eta, initial_eta)
+            self.assertEqual(
+                bridge._jobs["eta-test"]["generation_eta_sample_count"], 4
+            )
 
     def test_synthesis_timer_is_reported_by_generate_chapter_for_each_real_call(self):
         chapter = Chapter(

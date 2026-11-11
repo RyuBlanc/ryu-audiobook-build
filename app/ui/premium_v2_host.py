@@ -7947,6 +7947,7 @@ class PremiumV2Bridge(QObject):
                 "warmup_chunk_skipped": False,
                 "smoothed_eta_seconds": None,
                 "eta_last_monotonic": None,
+                "eta_overrun_samples": 0,
             },
         )
 
@@ -7972,6 +7973,7 @@ class PremiumV2Bridge(QObject):
                 "warmup_chunk_skipped": False,
                 "smoothed_eta_seconds": None,
                 "eta_last_monotonic": None,
+                "eta_overrun_samples": 0,
             })
             stage = "Preparing generation plan"
             changes.update({
@@ -8127,6 +8129,7 @@ class PremiumV2Bridge(QObject):
                     previous_at = timing.get("eta_last_monotonic")
                     if previous_eta is None:
                         displayed_eta = measured_remaining
+                        timing["eta_overrun_samples"] = 0
                     else:
                         try:
                             previous_elapsed = max(
@@ -8137,28 +8140,44 @@ class PremiumV2Bridge(QObject):
                             )
                         except (TypeError, ValueError, OverflowError):
                             previous_remaining_now = max(0.0, float(previous_eta))
-                        discrepancy = measured_remaining - previous_remaining_now
-                        if discrepancy > 0:
-                            # The rolling median/EMA already resists an isolated
-                            # slow sample. Apply the evidence-based upward correction
-                            # in full, bounded to 60 seconds per update, so an expired
-                            # forecast can recover without a multi-minute jump.
-                            adjustment = min(discrepancy, 60.0)
+
+                        if measured_remaining <= previous_remaining_now:
+                            # Faster measured work can shorten the estimate. Do
+                            # not let a slower single chunk move the visible
+                            # remaining time backwards.
+                            displayed_eta = measured_remaining
+                            timing["eta_overrun_samples"] = 0
+                        elif previous_remaining_now > 0:
+                            # Keep the displayed estimate monotonic while it is
+                            # still valid. Sustained overruns are handled only
+                            # after the last estimate has actually expired.
+                            displayed_eta = previous_remaining_now
+                            timing["eta_overrun_samples"] = 0
                         else:
-                            # Faster measured work may reduce an overestimate,
-                            # while damping one unusually short chunk.
-                            adjustment = discrepancy * 0.25
-                        displayed_eta = max(
-                            1.0, previous_remaining_now + adjustment
-                        )
+                            # A single slow chunk must not make the ETA jump up.
+                            # Once the forecast expires, wait for three further
+                            # completed chunks before publishing a fresh estimate
+                            # from the rolling measured rate.
+                            overrun_samples = int(timing.get("eta_overrun_samples") or 0) + 1
+                            timing["eta_overrun_samples"] = overrun_samples
+                            if overrun_samples >= 3:
+                                displayed_eta = measured_remaining
+                                timing["eta_overrun_samples"] = 0
+                                changes["generation_eta_recalibrated"] = True
+                                changes["generation_eta_recalibration_reason"] = (
+                                    "Three completed chunks confirmed the previous estimate was exceeded."
+                                )
+                            else:
+                                displayed_eta = 0.0
+
                     timing["smoothed_eta_seconds"] = displayed_eta
                     timing["eta_last_monotonic"] = now
-                    changes["eta_seconds"] = max(1, int(round(displayed_eta)))
+                    changes["eta_seconds"] = max(0, int(round(displayed_eta)))
                     changes["eta_updated_at"] = self._now()
                     changes["generation_eta_basis"] = (
-                        "median measured synthesis-call duration per text unit; "
-                        f"display ETA smoothed over {len(samples)} completed chunk(s) "
-                        "with upward revisions capped at 60s per chunk"
+                        "rolling median of measured synthesis-call duration per text unit; "
+                        "visible ETA is monotonic and is recalibrated only after "
+                        "three completed chunks exceed an expired estimate"
                     )
             # Before three post-warm-up samples, retain the last valid estimate
             # (or leave it unavailable during initial calibration).

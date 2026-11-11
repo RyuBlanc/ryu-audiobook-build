@@ -29,3 +29,11 @@ This checkpoint repairs the Production Studio estimate shown while a long-form a
 - Verify narrator-only and character-cast generation, cancellation, pause/resume, recovery and final M4B playback remain intact.
 - Compare Qwen timing on the user's NVIDIA device and any supported AMD/Intel devices separately. CI without the physical target GPU does not establish real-device performance.
 - Listen to the final audiobook and verify its measured duration and chapter markers. A text-based listening-length estimate is only an approximation.
+
+
+## Monotonic ETA correction — Dragon Studio follow-up
+
+- While a published estimate is still positive, subsequent chunk measurements may shorten it, but a slower single chunk cannot increase the displayed remaining time.
+- When the estimate reaches zero before the workload finishes, the UI retains its existing "past the last measured estimate" state rather than jumping back to a positive number.
+- A replacement estimate is published only after three further completed chunks confirm that the prior estimate was exceeded; it is explicitly marked as recalibrated.
+- Regression coverage verifies the reported 23-second countdown case, isolated slow-chunk handling, and sustained-overrun recalibration.
