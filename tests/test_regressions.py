@@ -291,8 +291,8 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("ANCHOR_TEXTS", worker)
         self.assertIn("recommended_chunk_chars = 2400", provider)
         self.assertIn("recommended_chunk_sentences = 10", provider)
-        self.assertIn("recommended_preview_chunk_chars = 800", provider)
-        self.assertIn("recommended_preview_chunk_sentences = 4", provider)
+        self.assertIn("recommended_preview_chunk_chars = 2400", provider)
+        self.assertIn("recommended_preview_chunk_sentences = 10", provider)
 
     def test_voice_profile_save_and_qwen_preview_controls_are_exposed(self):
         source = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
