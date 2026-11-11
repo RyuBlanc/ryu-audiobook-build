@@ -2236,10 +2236,14 @@ class PremiumV2Bridge(QObject):
                     row["elapsed_seconds"] = max(0, int((datetime.now(timezone.utc) - datetime.fromisoformat(row["started_at"])).total_seconds()))
                 except (TypeError, ValueError):
                     pass
-                if str(row.get("type") or "").casefold() == "audiobook-generation":
-                    # Full-book ETA is populated only by _generation_progress()
-                    # after completed chunks provide measured throughput.
-                    # Never extrapolate from a UI percentage or chapter count.
+                job_type = str(row.get("type") or "").casefold()
+                if job_type in {
+                    "audiobook-generation", "voice-preview",
+                    "production-preview", "sound-design-preview",
+                }:
+                    # TTS progress is not a time estimate. Audiobooks use
+                    # completed text-work timing samples; previews intentionally
+                    # show no ETA until a measured preview estimate is available.
                     row.setdefault("eta_seconds", None)
                 else:
                     try:
@@ -4288,8 +4292,18 @@ class PremiumV2Bridge(QObject):
                     else "Preparing segments"
                 )
                 remember_preview_status(normalized_stage, detail)
-                self._job_update(job_id, stage=normalized_stage, message=detail,
-                                 progress=min(95, max(2, 5 + int(90 * current / max(1, total)))))
+                # Preview percentage is the count of fully synthesized and
+                # normalized segments. Model loading and the active segment
+                # stay at 0 until the first segment actually completes.
+                actual_percent = min(95, max(0, round(95 * current / max(1, total))))
+                self._job_update(
+                    job_id,
+                    stage=normalized_stage,
+                    message=detail,
+                    progress=actual_percent,
+                    preview_completed_segments=max(0, min(int(current), int(total))),
+                    preview_total_segments=max(1, int(total)),
+                )
 
             def report_elapsed_time() -> None:
                 while not heartbeat_stop.wait(5.0):
@@ -7939,6 +7953,8 @@ class PremiumV2Bridge(QObject):
         elif msg.startswith("chunk-start:"):
             stage = "Loading voice model" if int(timing.get("last_work") or 0) == 0 else "Rendering chapter audio"
             timing["last_at"] = now
+            changes["eta_seconds"] = None
+            changes["generation_eta_basis"] = None
             changes["message"] = (
                 "Initializing the selected voice provider; no narration chunk has completed yet."
                 if int(timing.get("last_work") or 0) == 0
