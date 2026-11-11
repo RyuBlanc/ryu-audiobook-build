@@ -30,6 +30,9 @@ class ProductionGenerationHarness:
         self.close_preview_provider_cache = Mock()
         self._active_project = Mock(return_value=project)
         self.narrator_only = narrator_only
+        self.unassigned_profile = SimpleNamespace(
+            name="Global Unassigned Character", provider="piper", voice_id="unassigned-character"
+        )
         self._resolve_narrator_for_generation = Mock(
             return_value=(
                 profile,
@@ -42,6 +45,8 @@ class ProductionGenerationHarness:
                     # character voice profiles are configured for this book.
                     "character_voice_profile_count": 0,
                     "effective_character_rows": [],
+                    "unassigned_character_profile_name": self.unassigned_profile.name,
+                    "unassigned_character_profile_required": not narrator_only,
                 },
             )
         )
@@ -107,7 +112,7 @@ class Stage53ProductionPreflightTests(unittest.TestCase):
             patch.object(host, "load_state", return_value=state),
             patch.object(host, "save_state"),
             patch.object(host, "provider_from_profile", return_value=(object(), "saved-narrator-voice")),
-            patch.object(host, "load_profiles", return_value=[]),
+            patch.object(host, "load_profiles", return_value=[bridge.unassigned_profile]),
             patch.object(host, "_effective_pronunciation_dictionary", return_value=[
                 {"written_form": "Mira", "spoken_form": "Mee-rah", "enabled": True}
             ]),
@@ -151,7 +156,7 @@ class Stage53ProductionPreflightTests(unittest.TestCase):
             # The saved narrator/profile and metadata win over any transient
             # profile supplied by the frontend.
             self.assertEqual(positional[1], "saved-narrator-voice")
-            self.assertIs(positional[0].profile, profile)
+            self.assertIs(positional[0].narrator_provider.profile, profile)
             kwargs = manager_factory.call_args.kwargs
             self.assertEqual(kwargs["bitrate"], 192)
             self.assertEqual(kwargs["narration_speed"], 0.97)
@@ -380,7 +385,7 @@ class Stage53GenerationProgressDispatchTests(unittest.TestCase):
             observed.append(changes["progress"])
 
         self.assertEqual(observed, sorted(observed))
-        self.assertEqual(observed[-1], 99)
+        self.assertEqual(observed[-1], 100)
 
     def test_paused_generation_progress_keeps_last_saved_progress_percentage(self):
         bridge = GenerationProgressDispatchHarness()
