@@ -47,7 +47,8 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         end = adapter.index("const chapter =", start)
         production = adapter[start:end]
         self.assertIn("ring.style.setProperty('--progress', fullPercent + '%')", production)
-        self.assertIn("setProductionStatus('genPercent', fullJob ? fullPercent + '%' ", production)
+        self.assertIn("setProductionStatus('genPercent', fullJob ? fullPercent + '% narration workload'", production)
+        self.assertIn("'100% narration workload'", production)
         self.assertIn("ring.setAttribute('aria-valuenow', String(fullPercent))", production)
         self.assertIn("ring.dataset.active =", production)
         self.assertIn("conic-gradient(var(--red2,#d4375d) 0 var(--progress,0%)", adapter)
@@ -84,13 +85,15 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         adapter = (
             ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
         ).read_text(encoding="utf-8")
-        start = adapter.index("const message = (text, error = false) =>")
+        start = adapter.index("const message = (text, error = false, options = {}) =>")
         end = adapter.index("const act =", start)
         helper = adapter[start:end]
         self.assertNotIn("const node = $('importStatus')", helper)
         self.assertNotIn("const validation = $('validation')", helper)
         self.assertIn("document.querySelector('.page.active #validation')", helper)
         self.assertIn("writeTextIfChanged(toasts, text)", helper)
+        self.assertIn("if (options.toast !== false)", helper)
+        self.assertIn("const entry = {text:content,error:Boolean(error),at:now}", helper)
 
     def test_active_project_refresh_is_ordered_and_clears_stale_identity(self):
         adapter = (
