@@ -36,6 +36,7 @@ class CastAwareProvider(TTSProvider):
         backend_override: str = "automatic",
         narrator_profile: VoiceProfile | None = None,
         identity_assignments: dict[str, str] | None = None,
+        unassigned_voice: str | None = None,
     ):
         self.narrator_provider = narrator_provider
         self.narrator_voice = narrator_voice
@@ -56,6 +57,7 @@ class CastAwareProvider(TTSProvider):
                 series, name = parsed
                 self._identity_series_by_name.setdefault(name, set()).add(series)
         self.narrating_character = (narrating_character or "").casefold()
+        self.unassigned_voice = str(unassigned_voice or "").strip()
         self.backend_override = backend_override or "automatic"
         self._providers: dict[str, tuple[TTSProvider, str]] = {}
         self._status_callback = None
@@ -193,11 +195,12 @@ class CastAwareProvider(TTSProvider):
             "profiles": sorted(
                 (
                     self._profile_signature(self.profiles.get(name.casefold()))
-                    for name in set([*self.assignments.values(), *self.identity_assignments.values()]) if name
+                    for name in set([*self.assignments.values(), *self.identity_assignments.values(), self.unassigned_voice]) if name
                 ),
                 key=lambda item: str((item or {}).get("name", "")).casefold(),
             ),
             "narrating_character": self.narrating_character,
+            "unassigned_voice": self.unassigned_voice,
             "backend_override": self.backend_override,
         }
         return hashlib.sha256(
@@ -354,6 +357,10 @@ class CastAwareProvider(TTSProvider):
                     profile_name = self.assignments.get(name_key, "")
                 if profile_name:
                     assigned_voices.append(profile_name)
+                elif self.unassigned_voice:
+                    # Every detected but unassigned character receives the
+                    # explicit app-wide fallback profile, never the narrator.
+                    assigned_voices.append(self.unassigned_voice)
             if assigned_voices:
                 if len(assigned_voices) > 1 and multi_mode == "alternating":
                     # Alternate one configured voice per dialogue span; do not
@@ -365,7 +372,10 @@ class CastAwareProvider(TTSProvider):
                 else:
                     voice = assigned_voices[0]
             else:
-                voice = fallback_voice
+                # Dialogue with no reliable speaker identity is still dialogue.
+                # Route it to Unassigned Character; plain narration remains on
+                # the narrator path outside these quote spans.
+                voice = self.unassigned_voice or fallback_voice
             if speakers:
                 last_speaker = speakers[-1].casefold()
 
