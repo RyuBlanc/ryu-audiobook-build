@@ -96,11 +96,11 @@ jobs:
         if: always()
         shell: pwsh
         env:
-          RYU_QWEN_ACCEPTANCE_OUTPUT: ${{ github.workspace }}\\qwen-cpu-acceptance
+          RYU_QWEN_ACCEPTANCE_OUTPUT: ${{ github.workspace }}\qwen-cpu-acceptance
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path $env:RYU_QWEN_ACCEPTANCE_OUTPUT | Out-Null
-          $source = Join-Path $HOME "Ryu's Audiobook\\Settings\\qwen_character_worker.log"
+          $source = Join-Path $HOME "Ryu's Audiobook\Settings\qwen_character_worker.log"
           if (Test-Path -LiteralPath $source) {
             Copy-Item -LiteralPath $source -Destination (Join-Path $env:RYU_QWEN_ACCEPTANCE_OUTPUT 'qwen_character_worker.log') -Force
             Write-Host "Captured Qwen worker stderr from $source"
