@@ -202,6 +202,29 @@ class FunctionalCheckpoint20261111Tests(unittest.TestCase):
         self.assertNotIn("if (narratorOnly && configuredCharacterVoiceCount > 0)", adapter)
         self.assertIn("state[\"narrator_only_generation\"] = enabled", backend)
 
+    def test_preserved_help_guide_documents_current_gen07_eligibility(self):
+        adapter = (
+            Path(__file__).resolve().parents[1]
+            / "assets"
+            / "frontend"
+            / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        start = adapter.index("function renderHelpGuide()")
+        end = adapter.index("function wireStorageControls()", start)
+        guide_reconciliation = adapter[start:end]
+        self.assertIn(
+            "Narrator-only Generation (GEN-07) does not require that zero valid character voice profiles are configured.",
+            guide_reconciliation,
+        )
+        self.assertIn(
+            "saved narrator reads all narration and dialogue",
+            guide_reconciliation,
+        )
+        self.assertIn(
+            "A valid saved narrator profile is still required.",
+            guide_reconciliation,
+        )
+
     def test_qwen_preview_starts_at_zero_and_progress_is_completed_segment_based(self):
         adapter = (Path(__file__).resolve().parents[1] / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         backend = (Path(__file__).resolve().parents[1] / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
