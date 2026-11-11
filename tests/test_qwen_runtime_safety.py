@@ -126,12 +126,12 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
                 ), patch.object(provider, "_status") as status:
                     with self.assertRaisesRegex(
                         RuntimeError,
-                        "timed out.*Worker is still running.*diagnostic sentinel",
+                        "(?i)timed out.*Worker is still running.*diagnostic sentinel",
                     ):
                         provider._read_response(timeout=4.0, heartbeat="Loading model")
                 self.assertTrue(status.called)
             finally:
-                provider.close()
+                provider._close_worker_log()
 
     def test_worker_exit_while_waiting_includes_exit_code_and_stderr(self):
         import queue
@@ -148,7 +148,15 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
             qwen_mode="design-preview",
         )
         provider._stdout_queue = queue.Queue()
-        provider._worker = SimpleNamespace(poll=lambda: 37)
+        class ExitedWorker:
+            pid = None
+            stdin = None
+            stdout = None
+
+            def poll(self):
+                return 37
+
+        provider._worker = ExitedWorker()
         with TemporaryDirectory() as temporary:
             log_path = Path(temporary) / "worker.log"
             log_path.write_text("worker crashed: diagnostic sentinel", encoding="utf-8")
@@ -167,7 +175,8 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
                     ):
                         provider._read_response(timeout=3.0, heartbeat="Loading model")
             finally:
-                provider.close()
+                provider._close_worker_log()
+                provider._worker = None
 
     def test_command_runner_enforces_timeout_when_child_stalls_without_stdout(self):
         started = time.monotonic()
