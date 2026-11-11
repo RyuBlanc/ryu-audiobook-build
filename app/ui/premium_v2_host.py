@@ -7945,6 +7945,8 @@ class PremiumV2Bridge(QObject):
                 "samples": [],
                 "seconds_per_unit_ema": None,
                 "warmup_chunk_skipped": False,
+                "smoothed_eta_seconds": None,
+                "eta_last_monotonic": None,
             },
         )
 
@@ -7952,7 +7954,9 @@ class PremiumV2Bridge(QObject):
             state = "paused"
             stage = "Paused at chapter checkpoint"
             changes["message"] = msg.split(":", 1)[1]
-            # Freeze the last estimate while paused; resume will reset its clock.
+            # Freeze the last estimate while paused; resume resets both clocks so
+            # the suspended interval is never mistaken for synthesis time.
+            timing["eta_last_monotonic"] = now
             changes["eta_updated_at"] = None
         elif msg.startswith("plan:"):
             parts = msg.split(":")
@@ -7966,6 +7970,8 @@ class PremiumV2Bridge(QObject):
                 "samples": [],
                 "seconds_per_unit_ema": None,
                 "warmup_chunk_skipped": False,
+                "smoothed_eta_seconds": None,
+                "eta_last_monotonic": None,
             })
             stage = "Preparing generation plan"
             changes.update({
@@ -8114,13 +8120,45 @@ class PremiumV2Bridge(QObject):
                     changes["eta_updated_at"] = self._now()
                 elif len(samples) >= 3 and seconds_per_unit is not None:
                     remaining_work = max(0, total_work - completed_work)
-                    changes["eta_seconds"] = max(
-                        1, int(round(remaining_work * seconds_per_unit))
+                    measured_remaining = max(
+                        1.0, float(remaining_work) * float(seconds_per_unit)
                     )
+                    previous_eta = timing.get("smoothed_eta_seconds")
+                    previous_at = timing.get("eta_last_monotonic")
+                    if previous_eta is None:
+                        displayed_eta = measured_remaining
+                    else:
+                        try:
+                            previous_elapsed = max(
+                                0.0, now - float(previous_at)
+                            ) if previous_at is not None else 0.0
+                            previous_remaining_now = max(
+                                0.0, float(previous_eta) - previous_elapsed
+                            )
+                        except (TypeError, ValueError, OverflowError):
+                            previous_remaining_now = max(0.0, float(previous_eta))
+                        discrepancy = measured_remaining - previous_remaining_now
+                        if discrepancy > 0:
+                            # A single slower chunk can revise the estimate
+                            # upward, but cannot add more than 60 seconds at once.
+                            # Sustained slower measurements continue to converge
+                            # through the rolling median/EMA and later chunks.
+                            adjustment = min(discrepancy * 0.15, 60.0)
+                        else:
+                            # Faster measured work may reduce an overestimate,
+                            # while damping one unusually short chunk.
+                            adjustment = discrepancy * 0.25
+                        displayed_eta = max(
+                            1.0, previous_remaining_now + adjustment
+                        )
+                    timing["smoothed_eta_seconds"] = displayed_eta
+                    timing["eta_last_monotonic"] = now
+                    changes["eta_seconds"] = max(1, int(round(displayed_eta)))
                     changes["eta_updated_at"] = self._now()
                     changes["generation_eta_basis"] = (
-                        "median measured synthesis-call duration per text unit, "
-                        f"smoothed over {len(samples)} completed chunk(s)"
+                        "median measured synthesis-call duration per text unit; "
+                        f"display ETA smoothed over {len(samples)} completed chunk(s) "
+                        "with upward revisions capped at 60s per chunk"
                     )
             # Before three post-warm-up samples, retain the last valid estimate
             # (or leave it unavailable during initial calibration).
@@ -8155,6 +8193,8 @@ class PremiumV2Bridge(QObject):
                 )
         elif msg.startswith("m4b-packaging"):
             stage = "Assembling final M4B"
+            timing["smoothed_eta_seconds"] = None
+            timing["eta_last_monotonic"] = None
             changes.update({
                 "progress": 100,
                 "packaging_progress_percent": 0,
@@ -8584,6 +8624,12 @@ class PremiumV2Bridge(QObject):
                 or not _generation_worker_is_alive(manager)
             ):
                 return dict(current)
+            timing_rows = getattr(self, "_generation_progress_timing", {})
+            timing = timing_rows.get(job_id) if isinstance(timing_rows, dict) else None
+            if isinstance(timing, dict):
+                # Do not subtract time spent in the paused state from the next
+                # measured ETA revision.
+                timing["eta_last_monotonic"] = time.monotonic()
             return self._job_update(
                 job_id,
                 state="running",
