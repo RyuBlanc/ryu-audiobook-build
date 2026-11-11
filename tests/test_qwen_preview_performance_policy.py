@@ -49,17 +49,20 @@ class QwenPreviewPerformancePolicyTests(unittest.TestCase):
             qwen_profile_id="qwen-preview-policy-test",
         )
 
-    def test_qwen_preview_groups_up_to_four_same_family_sentences(self):
+    def test_qwen_preview_uses_high_throughput_ten_sentence_chunks(self):
         provider = self._provider()
         sentence = "The road continued toward the old village."
-        source = " ".join([sentence] * 8)
+        source = " ".join([sentence] * 12)
 
         units = _preview_units(
             source, provider, provider.voice_id, None, max_chars=4000
         )
 
+        self.assertEqual(provider.recommended_preview_chunk_chars, 2400)
+        self.assertEqual(provider.recommended_preview_chunk_sentences, 10)
         self.assertEqual(len(units), 2)
-        self.assertTrue(all(unit.count(".") == 4 for unit, _voice in units))
+        self.assertEqual(units[0][0].count("."), 10)
+        self.assertEqual(units[1][0].count("."), 2)
 
     def test_qwen_preview_keeps_expression_family_changes_as_boundaries(self):
         provider = self._provider()
