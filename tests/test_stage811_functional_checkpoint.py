@@ -139,7 +139,7 @@ class FunctionalCheckpoint20261111Tests(unittest.TestCase):
             self.assertEqual(bridge._jobs["generation-1"]["packaging_completed_steps"], 1)
             self.assertEqual(bridge._jobs["generation-1"]["packaging_total_steps"], 4)
 
-    def test_measured_eta_upward_revision_is_bounded_and_counts_down(self):
+    def test_measured_eta_does_not_increase_and_keeps_counting_down(self):
         bridge = SimpleNamespace(
             _now=host.PremiumV2Bridge._now,
             _jobs_lock=threading.RLock(),
@@ -167,11 +167,11 @@ class FunctionalCheckpoint20261111Tests(unittest.TestCase):
                 "chunk-timing:1000:1000.000:1000:100000:4:100",
             )
 
-        # A very slow measured chunk must not add its entire revised remainder
-        # to the UI in one jump. The live timer has already consumed 10 seconds;
-        # only the configured 60-second upward correction is applied.
-        self.assertEqual(bridge._jobs["eta-job"]["eta_seconds"], 350)
-        self.assertIn("upward revisions capped at 60s", bridge._jobs["eta-job"]["generation_eta_basis"])
+        # The slow chunk's raw remaining-work estimate exceeds the active
+        # forecast. The UI must keep the previous countdown (300 - 10 seconds),
+        # rather than revising remaining time upwards.
+        self.assertEqual(bridge._jobs["eta-job"]["eta_seconds"], 290)
+        self.assertIn("visible ETA counts down monotonically", bridge._jobs["eta-job"]["generation_eta_basis"])
 
     def test_measured_eta_downward_revision_is_damped(self):
         bridge = SimpleNamespace(

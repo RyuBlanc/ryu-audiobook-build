@@ -35,5 +35,5 @@ This checkpoint repairs the Production Studio estimate shown while a long-form a
 
 - While a published estimate is still positive, subsequent chunk measurements may shorten it, but a slower single chunk cannot increase the displayed remaining time.
 - When the estimate reaches zero before the workload finishes, the UI retains its existing "past the last measured estimate" state rather than jumping back to a positive number.
-- A replacement estimate is published only after three further completed chunks confirm that the prior estimate was exceeded; it is explicitly marked as recalibrated.
+- Faster measurements can shorten the estimate with the existing 25% downward smoothing; slower measurements cannot increase an active estimate. A replacement estimate is published only after three further completed chunks confirm the prior estimate was exceeded; it is explicitly marked as recalibrated.
 - Regression coverage verifies the reported 23-second countdown case, isolated slow-chunk handling, and sustained-overrun recalibration.

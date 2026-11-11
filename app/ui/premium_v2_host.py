@@ -8142,10 +8142,13 @@ class PremiumV2Bridge(QObject):
                             previous_remaining_now = max(0.0, float(previous_eta))
 
                         if measured_remaining <= previous_remaining_now:
-                            # Faster measured work can shorten the estimate. Do
-                            # not let a slower single chunk move the visible
-                            # remaining time backwards.
-                            displayed_eta = measured_remaining
+                            # Faster measured work may shorten the estimate,
+                            # but retain the established gradual downward smoothing
+                            # so one unusually fast chunk does not collapse ETA.
+                            discrepancy = measured_remaining - previous_remaining_now
+                            displayed_eta = max(
+                                0.0, previous_remaining_now + discrepancy * 0.25
+                            )
                             timing["eta_overrun_samples"] = 0
                         elif previous_remaining_now > 0:
                             # Keep the displayed estimate monotonic while it is
@@ -8175,9 +8178,9 @@ class PremiumV2Bridge(QObject):
                     changes["eta_seconds"] = max(0, int(round(displayed_eta)))
                     changes["eta_updated_at"] = self._now()
                     changes["generation_eta_basis"] = (
-                        "rolling median of measured synthesis-call duration per text unit; "
-                        "visible ETA is monotonic and is recalibrated only after "
-                        "three completed chunks exceed an expired estimate"
+                        "median measured synthesis-call duration per text unit; "
+                        "visible ETA counts down monotonically, smooths faster samples, "
+                        "and recalibrates only after three completed chunks exceed an expired estimate"
                     )
             # Before three post-warm-up samples, retain the last valid estimate
             # (or leave it unavailable during initial calibration).
