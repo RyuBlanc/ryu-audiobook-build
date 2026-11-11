@@ -304,6 +304,7 @@ class GenerationPage(QWidget):
         self._eta_last_time: float | None = None
         self._eta_warmup_samples = 0
         self._eta_rates: list[float] = []
+        self._eta_estimate_updated_at: float | None = None
         self._estimated_listening_seconds = 0.0
         self._estimated_generation_seconds = 0.0
         self._active_calibration_key: str | None = None
@@ -3021,6 +3022,7 @@ class GenerationPage(QWidget):
             self._eta_rates = []
             self._eta_last_work = completed_work
             self._eta_last_time = time.monotonic()
+            self._eta_estimate_updated_at = self._eta_last_time
             self.generation_phase = "synthesis"
             if completed_work:
                 self.stage.setText(
@@ -3093,32 +3095,38 @@ class GenerationPage(QWidget):
                     f"chapter {chapter}/{total}"
                 )
                 now = time.monotonic()
-                if self._eta_last_work is not None and self._eta_last_time is not None:
-                    delta_work = work_done_n - self._eta_last_work
-                    delta_time = now - self._eta_last_time
-                    if delta_work > 0 and delta_time >= 0.2:
-                        sample = delta_time / delta_work
-                        # The first completed segments include model startup and
-                        # cache warm-up. Do not let those samples dominate the
-                        # full-book ETA.
-                        if self._eta_warmup_samples < 2:
-                            self._eta_warmup_samples += 1
-                        else:
-                            previous = self._eta_ema_sec_per_unit
-                            # Ignore extreme one-sample stalls/spikes; they make
-                            # a multi-hour ETA jump from minutes to days.
-                            if previous is None or sample <= previous * 4.0:
-                                self._eta_rates.append(sample)
-                                self._eta_rates = self._eta_rates[-10:]
-                                ordered = sorted(self._eta_rates)
-                                median = ordered[len(ordered) // 2]
-                                self._eta_ema_sec_per_unit = (
-                                    median
-                                    if previous is None
-                                    else (0.18 * median + 0.82 * previous)
-                                )
                 self._eta_last_work = work_done_n
                 self._eta_last_time = now
+            except (ValueError, IndexError):
+                self.stage.setText(f"Chapter {chapter}/{total}")
+        elif message.startswith("chunk-timing:"):
+            try:
+                parts = message.split(":")
+                work_units = max(1, int(parts[1]))
+                synthesis_seconds = max(0.001, float(parts[2]))
+                if self._eta_warmup_samples < 1:
+                    # The first synthesis call may include cold Qwen model load.
+                    self._eta_warmup_samples += 1
+                else:
+                    self._eta_rates.append(synthesis_seconds / work_units)
+                    self._eta_rates = self._eta_rates[-9:]
+                    ordered = sorted(self._eta_rates)
+                    middle = len(ordered) // 2
+                    observed_median = (
+                        ordered[middle]
+                        if len(ordered) % 2
+                        else (ordered[middle - 1] + ordered[middle]) / 2.0
+                    )
+                    previous = self._eta_ema_sec_per_unit
+                    self._eta_ema_sec_per_unit = (
+                        observed_median
+                        if previous is None
+                        else (0.20 * observed_median + 0.80 * previous)
+                    )
+                self._eta_estimate_updated_at = time.monotonic()
+                self.stage.setText(
+                    f"Measured synthesis time · {synthesis_seconds:.1f}s for {work_units:,} text units"
+                )
             except (ValueError, IndexError):
                 self.stage.setText(f"Chapter {chapter}/{total}")
         else:
@@ -3161,19 +3169,17 @@ class GenerationPage(QWidget):
         work_remaining = max(0, total - current)
 
         if self._eta_ema_sec_per_unit is not None and work_remaining > 0:
-            remaining = max(0, int(work_remaining * self._eta_ema_sec_per_unit))
+            estimate = work_remaining * self._eta_ema_sec_per_unit
+            elapsed_since_sample = (
+                max(0.0, time.monotonic() - self._eta_estimate_updated_at)
+                if self._eta_estimate_updated_at is not None else 0.0
+            )
+            remaining = max(0, int(estimate - elapsed_since_sample))
             self.remaining.setText(
                 f"Remaining: {remaining // 3600:02d}:{(remaining // 60) % 60:02d}:{remaining % 60:02d}"
             )
             units_per_min = 60.0 / max(self._eta_ema_sec_per_unit, 1e-9)
             self.speed.setText(f"Speed: {units_per_min:,.0f} chars/min")
-        elif work_done > 0 and elapsed > 8:
-            fallback_rate = work_done / elapsed
-            remaining = max(0, int(work_remaining / max(fallback_rate, 1e-9)))
-            self.remaining.setText(
-                f"Remaining: {remaining // 3600:02d}:{(remaining // 60) % 60:02d}:{remaining % 60:02d}"
-            )
-            self.speed.setText(f"Speed: {fallback_rate * 60:,.0f} chars/min")
         else:
             self.remaining.setText("Remaining: calibrating…")
             self.speed.setText("Speed: calibrating…")
