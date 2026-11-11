@@ -42,6 +42,7 @@ class GenerationControlBridgeHarness:
     _job_resume = host.PremiumV2Bridge._job_resume
     _job_cancel = host.PremiumV2Bridge._job_cancel
     _generation_progress = host.PremiumV2Bridge._generation_progress
+    _now = staticmethod(host.PremiumV2Bridge._now)
 
     def __init__(self, job_id: str, manager: GenerationManager) -> None:
         self._jobs_lock = threading.RLock()
