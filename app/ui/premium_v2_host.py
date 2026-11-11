@@ -404,6 +404,8 @@ class PremiumV2Bridge(QObject):
         self._generators: dict[str, GenerationManager] = {}
         self._import_cancel_events: dict[str, threading.Event] = {}
         self._preview_cancel_events: dict[str, threading.Event] = {}
+        self._preview_providers: dict[str, Any] = {}
+        self._generation_progress_timing: dict[str, dict[str, Any]] = {}
         self._analysis_cancel_events: dict[str, threading.Event] = {}
         self._preview_provider_cache_lock = threading.RLock()
         self._preview_provider_cache: dict[str, Any] | None = None
@@ -460,6 +462,8 @@ class PremiumV2Bridge(QObject):
                 "narrator.preview": self._narrator_preview,
                 "narrator.series.default.get": self._narrator_series_default_get,
                 "narrator.series.default.save": self._narrator_series_default_save,
+                "voice.unassigned_character.default.get": self._unassigned_character_default_get,
+                "voice.unassigned_character.default.save": self._unassigned_character_default_save,
                 "narrator.series.default.apply": self._narrator_series_default_apply,
                 "narrator.project.reset": self._narrator_project_reset,
                 "voice.preview": self._voice_preview,
@@ -896,6 +900,15 @@ class PremiumV2Bridge(QObject):
             and str(row.get("voice_profile") or "").strip().casefold() in available_character_profile_names
         ]
         configured_character_voice_profile_count = len(configured_character_rows)
+        unassigned_character_count = max(
+            0,
+            sum(
+                1 for row in effective_character_rows
+                if isinstance(row, dict)
+                and str(row.get("name") or row.get("primary_name") or "").strip().casefold() != "narrator"
+            ) - configured_character_voice_profile_count,
+        )
+        unassigned_character_default = self._unassigned_character_default_read()
 
         dialogue_index_ready = False
         dialogue_index_revision = ""
@@ -955,8 +968,15 @@ class PremiumV2Bridge(QObject):
         narrator_ready = bool(
             effective_narrator_profile and narrator_selection.get("profile_available")
         )
-        narrator_only_eligible = narrator_ready and configured_character_voice_profile_count == 0
-        narrator_only_automatic = narrator_only_eligible and not narrator_only_user_opt_out
+        narrator_only_eligible = narrator_ready
+        narrator_only_automatic = (
+            narrator_ready
+            and configured_character_voice_profile_count == 0
+            and not narrator_only_user_opt_out
+        )
+        narrator_only_enabled = (
+            state.get("narrator_only_generation") is True or narrator_only_automatic
+        )
         metadata_missing = missing_required_metadata_fields(
             project.title, state, effective_narrator_profile if narrator_ready else ""
         )
@@ -1070,7 +1090,7 @@ class PremiumV2Bridge(QObject):
             "series_narrator_profile": str(narrator_selection.get("profile_name") or ""),
             "narrator_voice_configured": narrator_ready,
             "narrator_profile_available": bool(narrator_selection.get("profile_available")),
-            "narrator_only_generation": narrator_only_automatic,
+            "narrator_only_generation": narrator_only_enabled,
             "narrator_only_generation_auto": narrator_only_automatic,
             "narrator_only_generation_user_opt_out": narrator_only_user_opt_out,
             # Preserve the last generation's immutable cast snapshot for the
@@ -1080,7 +1100,7 @@ class PremiumV2Bridge(QObject):
             "character_voice_profile_count": generation_character_voice_profile_count,
             "generation_mode": str(
                 state.get("generation_mode")
-                or ("narrator_only" if narrator_only_automatic else "character_cast")
+                or ("narrator_only" if narrator_only_enabled else "character_cast")
             ),
             "output_target_path": str(output_target),
             "output_folder": str(output_folder),
@@ -1091,6 +1111,10 @@ class PremiumV2Bridge(QObject):
             "character_count": len(character_names),
             "character_voice_count": character_voice_count,
             "configured_character_voice_profile_count": configured_character_voice_profile_count,
+            "unassigned_character_count": unassigned_character_count,
+            "unassigned_character_profile_name": unassigned_character_default.get("profile_name"),
+            "unassigned_character_profile_available": bool(unassigned_character_default.get("profile_available")),
+            "output_duration_seconds": state.get("output_duration_seconds"),
             "character_assignment_issue_count": len(character_assignment_issues),
             "dialogue_index_ready": dialogue_index_ready,
             "dialogue_index_revision": dialogue_index_revision,
@@ -1104,6 +1128,11 @@ class PremiumV2Bridge(QObject):
                 dialogue_index_ready
                 and len(character_assignment_issues) == 0
                 and pending_dialogue_count == 0
+                and conflicting_dialogue_count == 0
+                and dialogue_index_issue_count == 0
+            ),
+            "dialogue_routing_ready": (
+                dialogue_index_ready
                 and conflicting_dialogue_count == 0
                 and dialogue_index_issue_count == 0
             ),
@@ -5867,6 +5896,47 @@ class PremiumV2Bridge(QObject):
         ).strip(" \t-–—_.:|")
         return (inferred or title or "Unassigned series")[:300]
 
+    def _unassigned_character_default_read(self) -> dict[str, Any]:
+        """Resolve the app-wide fallback voice used for characters without a valid assignment."""
+        profile_name = str(
+            self.settings.value("voice/unassigned_character_profile", "") or ""
+        ).strip()
+        profile = self._find_profile(profile_name) if profile_name else None
+        return {
+            "profile_name": profile_name or None,
+            "profile_available": bool(profile),
+            "profile": profile,
+        }
+
+    def _unassigned_character_default_get(self, _payload: dict[str, Any]) -> dict[str, Any]:
+        """Return the mandatory app-wide Unassigned Character voice selection."""
+        selected = self._unassigned_character_default_read()
+        return {
+            "profile_name": selected.get("profile_name"),
+            "profile_available": selected.get("profile_available", False),
+        }
+
+    def _unassigned_character_default_save(self, payload: dict[str, Any]) -> dict[str, Any]:
+        profile_name = str(payload.get("profile_name") or "").strip()
+        if not profile_name:
+            raise ValueError("Choose a saved Voice Studio profile for Unassigned Character.")
+        profile = self._find_profile(profile_name)
+        if profile is None:
+            raise ValueError(
+                f"The selected Unassigned Character profile '{profile_name}' is not in the saved Voice Studio catalogue."
+            )
+        self.settings.setValue("voice/unassigned_character_profile", profile.name)
+        self.settings.sync()
+        if self.settings.status() != QSettings.Status.NoError:
+            raise RuntimeError("Windows could not confirm the Unassigned Character voice setting was saved.")
+        return {
+            "saved": True,
+            "profile_name": profile.name,
+            "provider": profile.provider,
+            "voice_id": profile.voice_id,
+            "scope": "all_series_and_books",
+        }
+
     def _narrator_series_default_store_path(self, series: str) -> Path:
         """Return an app-owned file path for one normalized series narrator preference."""
         from app.core.paths import settings_root
@@ -7197,6 +7267,9 @@ class PremiumV2Bridge(QObject):
                 issues.append(
                     f"Character '{row.get('name') or 'Unknown'}' references unavailable saved voice profile '{existing}'."
                 )
+                # The stale reference is not a valid configured profile. Keep
+                # the returned generation snapshot empty so this character is
+                # safely routed through the explicit Unassigned Character voice.
             elif profile is not None:
                 row["voice_profile"] = str(profile.name)
             elif not str(row.get("voice_profile") or "").strip():
@@ -7295,7 +7368,7 @@ class PremiumV2Bridge(QObject):
         return rows, issues
 
     def _production_narrator_only_save(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Persist a per-book narrator-only choice, including an explicit opt-out."""
+        """Persist an explicit per-book narrator-only choice, independent of cast assignments."""
         project = self._active_project()
         expected_folder = str(payload.get("expected_project_folder") or "").strip()
         if expected_folder and Path(expected_folder).expanduser().resolve() != project.folder.resolve():
@@ -7311,59 +7384,32 @@ class PremiumV2Bridge(QObject):
         narrator = self._narrator_series_default_read(project, state, series)
         profile_name = str(narrator.get("effective_profile_name") or "").strip()
         narrator_available = bool(profile_name and narrator.get("profile_available"))
-
-        # Count resolved saved profiles, not stale profile names or invalid
-        # legacy IDs. Narrator-only is available only for a valid narrator and
-        # zero configured character voice profiles.
-        saved_profiles = load_profiles()
-        saved_profile_names = {
-            str(getattr(profile, "name", "") or "").strip().casefold()
-            for profile in saved_profiles
-            if str(getattr(profile, "name", "") or "").strip()
-        }
-        character_rows, _issues = self._effective_generation_character_rows(
-            state,
-            series,
-            strict=False,
-        )
-        configured_profiles = [
-            row for row in character_rows
-            if str(row.get("voice_profile") or "").strip().casefold() in saved_profile_names
-        ]
         if enabled and not narrator_available:
             raise ValueError(
                 "Save an available narrator profile for this book or its series before enabling Narrator-Only Generation."
             )
-        if enabled and configured_profiles:
-            raise ValueError(
-                "Narrator-Only Generation is available only when this project has zero "
-                "configured character voice profiles. Switch to multi-character production "
-                "to use the saved character assignments."
-            )
+
+        # This is a routing preference, not a cast-eligibility rule. When enabled,
+        # it deliberately ignores every character assignment for this generation.
         state["narrator_only_generation"] = enabled
-        user_opt_out = bool(not enabled and narrator_available and not configured_profiles)
-        if user_opt_out:
-            state["narrator_only_generation_user_opt_out"] = True
-        else:
+        if enabled:
             state.pop("narrator_only_generation_user_opt_out", None)
+        else:
+            # Persist the user's choice so zero-cast books do not silently switch
+            # back to narrator-only mode on the next Production refresh.
+            state["narrator_only_generation_user_opt_out"] = True
         state["modified_at"] = self._now()
         save_state(project.folder, state)
         return {
             "saved": True,
             "enabled": enabled,
-            "user_opt_out": user_opt_out,
-            "automatic": bool(narrator_available and not configured_profiles and not user_opt_out),
+            "user_opt_out": not enabled,
+            "automatic": False,
             "project_folder": str(project.folder),
         }
 
     def _resolve_narrator_for_generation(self, project, state: dict[str, Any], chapters):
-        """Resolve narrator and choose automatic zero-cast or cast-aware routing.
-
-        A valid narrator automatically reads every passage when the project
-        has no configured character voice profiles, unless the user explicitly
-        opts out. Configured character profiles always return the project to
-        normal cast-aware speaker review.
-        """
+        """Resolve narrator, explicit narrator-only mode and the cast fallback voice."""
         series = self._project_series_name(project, state)
         selection = self._narrator_series_default_read(project, state, series)
         profile_name = str(selection.get("effective_profile_name") or "").strip()
@@ -7386,12 +7432,10 @@ class PremiumV2Bridge(QObject):
             for saved_profile in saved_profiles
             if str(getattr(saved_profile, "name", "") or "").strip()
         }
-
-        # Resolve non-strictly first so stale references cannot masquerade as
-        # configured profiles or prevent automatic narrator-only mode.
         character_rows, cast_mapping_issues = self._effective_generation_character_rows(
             state if isinstance(state, dict) else {},
             series,
+            available_profiles=saved_profiles,
             strict=False,
         )
         configured_profiles = [
@@ -7399,51 +7443,48 @@ class PremiumV2Bridge(QObject):
             if str(row.get("voice_profile") or "").strip().casefold() in saved_profile_names
         ]
 
-        narrator_only = not configured_profiles and not user_opt_out
-        narrator_only_disabled_reason = ""
-        if configured_profiles:
-            if state.get("narrator_only_generation", False) is True:
-                narrator_only_disabled_reason = (
-                    "Narrator-Only Generation was switched off because this project now has "
-                    "one or more configured character voice profiles. Multi-character speaker "
-                    "review and saved character assignments apply."
-                )
-            state["narrator_only_generation"] = False
-            state.pop("narrator_only_generation_user_opt_out", None)
-            character_rows, cast_mapping_issues = self._effective_generation_character_rows(
-                state if isinstance(state, dict) else {},
-                series,
-                strict=True,
-            )
-        elif narrator_only:
+        # A saved explicit choice always wins. A book with no configured cast
+        # defaults to narrator-only only when the user has not explicitly opted out.
+        narrator_only = (
+            state.get("narrator_only_generation") is True
+            or (not configured_profiles and not user_opt_out)
+        )
+        unassigned_default = self._unassigned_character_default_read()
+        unassigned_profile_name = str(unassigned_default.get("profile_name") or "").strip()
+        unassigned_profile_available = bool(unassigned_profile_name and unassigned_default.get("profile_available"))
+
+        if narrator_only:
             state["narrator_only_generation"] = True
             state.pop("narrator_only_generation_user_opt_out", None)
-        else:
-            state["narrator_only_generation"] = False
+            if getattr(project, "folder", None) is not None:
+                state["modified_at"] = self._now()
+                save_state(project.folder, state)
+            return profile, {
+                **selection,
+                "generation_mode": "narrator_only",
+                "narrator_only": True,
+                "character_voice_profile_count": len(configured_profiles),
+                "effective_character_rows": character_rows,
+                "dialogue_routing": "narrator_for_all_passages",
+                "unassigned_character_profile_name": unassigned_profile_name or None,
+                "unassigned_character_profile_required": False,
+                "unassigned_character_count": max(0, len(character_rows) - len(configured_profiles)),
+                "pending_dialogue_count": 0,
+                "narrator_only_disabled_reason": "",
+            }
 
-        if getattr(project, "folder", None) is not None and (
-            state.get("narrator_only_generation", False) is True
-            or narrator_only_disabled_reason
-        ):
+        state["narrator_only_generation"] = False
+        if getattr(project, "folder", None) is not None:
             state["modified_at"] = self._now()
             save_state(project.folder, state)
 
-        effective_selection = dict(selection)
-        effective_selection.update({
-            "generation_mode": "narrator_only" if narrator_only else "character_cast",
-            "narrator_only": narrator_only,
-            "character_voice_profile_count": len(configured_profiles),
-            "dialogue_routing": "narrator_for_all_passages" if narrator_only else "saved_character_assignments",
-            "effective_character_rows": character_rows,
-            "narrator_only_disabled_reason": narrator_only_disabled_reason,
-        })
-        if narrator_only:
-            return profile, effective_selection
-
-        eligible_chapter_ids = {str(getattr(chapter, "chapter_id", "") or "") for chapter in chapters}
+        eligible_chapter_ids = {
+            str(getattr(chapter, "chapter_id", "") or "")
+            for chapter in chapters
+        }
+        unresolved: list[tuple[int, str]] = []
+        passage_index: dict[str, Any] = {"issues": [], "counts": {}}
         if getattr(project, "folder", None) is None:
-            # Projectless tests may use a SimpleNamespace instead of a persisted
-            # Project. Keep this small harness on the exact source segmenter.
             from app.chapters.speaker_segmentation import segment_chapter_speakers
             unresolved = [
                 (int(chapter.number), str(segment.text or ""))
@@ -7451,45 +7492,62 @@ class PremiumV2Bridge(QObject):
                 for segment in segment_chapter_speakers(chapter)
                 if segment.needs_review or segment.kind in {"needs_speaker_review", "review_required"}
             ]
-            passage_index = {"issues": []}
         else:
             from app.chapters.passage_index import load_or_build_passage_index
             passage_index = load_or_build_passage_index(
-                project.folder, project.chapters,
+                project.folder,
+                project.chapters,
                 suggested_passages=state.get("character_dialogue_suggestions") or [],
             )
             unresolved = [
                 (int(row.get("chapter_number") or 0), str(row.get("text") or ""))
-                for row in passage_index["passages"]
+                for row in passage_index.get("passages", [])
                 if str(row.get("chapter_id") or "") in eligible_chapter_ids
                 and bool(row.get("needs_review"))
             ]
-        unresolved.extend(
-            (int(issue.get("chapter_number") or 0), str(issue.get("text") or ""))
-            for issue in passage_index.get("issues", [])
-            if str(issue.get("chapter_id") or "") in eligible_chapter_ids
-        )
-        if unresolved:
+            unresolved.extend(
+                (int(issue.get("chapter_number") or 0), str(issue.get("text") or ""))
+                for issue in passage_index.get("issues", [])
+                if str(issue.get("chapter_id") or "") in eligible_chapter_ids
+            )
+
+        index_issues = passage_index.get("issues") or []
+        if index_issues and getattr(project, "folder", None) is not None:
+            # A corrupt canonical source/index is not the same as an unassigned
+            # speaker. Do not silently route structurally invalid source data.
+            raise ValueError(
+                f"The canonical dialogue index contains {len(index_issues)} source/index issue(s). "
+                "Refresh Character Studio and resolve those source issues before generating."
+            )
+
+        unassigned_character_count = max(0, len(character_rows) - len(configured_profiles))
+        unassigned_required = bool(unassigned_character_count or unresolved)
+        if unassigned_required and not unassigned_profile_available:
             examples = "; ".join(
                 f"Chapter {number}: {text[:64].strip()!r}"
-                for number, text in unresolved[:3]
+                for number, text in unresolved[:2]
             )
-            mode_notice = (
-                narrator_only_disabled_reason + " "
-                if narrator_only_disabled_reason else ""
-            )
+            detail = f" {examples}" if examples else ""
             raise ValueError(
-                mode_notice
-                + f"Generation is blocked: {len(unresolved)} dialogue passage(s) still need speaker review. "
-                "Assign a character speaker or correct the narration classification before generating. "
-                + examples
+                "Some characters or dialogue passages still need a voice profile. "
+                "Open Voice Studio and save the app-wide 'Unassigned Character' default profile, "
+                "then retry generation." + detail
             )
+
+        pending_dialogue_count = len(unresolved)
+        effective_selection = dict(selection)
         effective_selection.update({
             "generation_mode": "character_cast",
             "narrator_only": False,
             "character_voice_profile_count": len(configured_profiles),
-            "dialogue_routing": "saved_character_assignments",
+            "dialogue_routing": "saved_character_assignments_with_unassigned_fallback",
             "effective_character_rows": character_rows,
+            "unassigned_character_profile_name": unassigned_profile_name or None,
+            "unassigned_character_profile_required": unassigned_required,
+            "unassigned_character_count": unassigned_character_count,
+            "pending_dialogue_count": pending_dialogue_count,
+            "cast_mapping_issue_count": len(cast_mapping_issues),
+            "narrator_only_disabled_reason": "",
         })
         return profile, effective_selection
 
