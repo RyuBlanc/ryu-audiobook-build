@@ -7,6 +7,7 @@ import time
 import re
 from typing import Callable
 import shutil
+import wave
 
 from app.audio.assembler import assemble_m4b
 from app.audio.metadata import sanitize_metadata, validate_cover
@@ -126,6 +127,7 @@ class GenerationManager:
         self._total_chunks = 0
         self._total_work_units = 0
         self.pronunciation_rule_counts: dict[str, int] = {}
+        self._completed_chapter_audio_seconds: dict[int, float] = {}
 
     def start(
         self,
@@ -283,6 +285,7 @@ class GenerationManager:
         self._chunk_offsets = []
         self._chunk_work_offsets = []
         self._chapter_work_units = []
+        self._completed_chapter_audio_seconds = {}
         offset = 0
         work_offset = 0
         for chapter in self.chapters:
@@ -391,6 +394,9 @@ class GenerationManager:
                 completed_numbers.append(chapter.number)
                 self._completed_numbers = list(completed_numbers)
                 generated_chapter_dirs.append(result.output_path)
+                measured_chapter_seconds = self._measure_chapter_audio_seconds(result.output_path)
+                self._completed_chapter_audio_seconds[int(chapter.number)] = measured_chapter_seconds
+                measured_book_seconds = sum(self._completed_chapter_audio_seconds.values())
                 chapter_units = self._chapter_work_units[index] if index < len(self._chapter_work_units) else []
                 completed_units = sum(chapter_units[: result.chunks_completed])
                 overall_work = (
@@ -401,7 +407,10 @@ class GenerationManager:
                     index + 1,
                     len(self.chapters),
                     overall_work,
-                    f"chapter-complete:{result.chunks_completed}/{result.chunks_total}",
+                    (
+                        f"chapter-complete:{result.chunks_completed}/{result.chunks_total}:"
+                        f"{measured_chapter_seconds:.3f}:{measured_book_seconds:.3f}"
+                    ),
                 )
             except Exception as exc:
                 if self.cancel_event.is_set():
@@ -504,6 +513,21 @@ class GenerationManager:
         self._finished_callback_called = True
         if self.on_finished:
             self.on_finished(summary)
+
+    @staticmethod
+    def _measure_chapter_audio_seconds(chapter_output: Path) -> float:
+        """Measure committed PCM chunk durations from their WAV headers."""
+        chunks_dir = Path(chapter_output) / "chunks"
+        if not chunks_dir.is_dir():
+            return 0.0
+        total = 0.0
+        for chunk_path in sorted(chunks_dir.glob("*.wav")):
+            try:
+                with wave.open(str(chunk_path), "rb") as wav_file:
+                    total += wav_file.getnframes() / float(max(1, wav_file.getframerate()))
+            except (OSError, wave.Error):
+                continue
+        return round(total, 3)
 
     def _package_progress(self, done: int, total: int, message: str) -> None:
         self._emit(
