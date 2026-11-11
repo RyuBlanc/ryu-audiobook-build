@@ -15,6 +15,7 @@ This checkpoint repairs the Production Studio estimate shown while a long-form a
 - The native Generate page uses the same measured timing event and does not extrapolate from elapsed time divided by completed work.
 - Narration progress remains the ratio of completed normalized text workload. It does not invent Qwen token completion.
 - The project summary exposes a clearly labelled text-based listening-length estimate. Once chapters finish, the UI can project runtime from measured audio duration and completed text workload; the validated M4B duration remains authoritative.
+- Production Studio also displays the count of validated/saved synthesis chunks so users can distinguish committed progress from a currently rendering Qwen chunk.
 - M4B assembly is shown as a separate phase. No packaging ETA is invented where the packager does not report a reliable measure.
 
 ## Automated regression coverage
