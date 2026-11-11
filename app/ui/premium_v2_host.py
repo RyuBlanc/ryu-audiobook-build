@@ -4256,6 +4256,8 @@ class PremiumV2Bridge(QObject):
                 except Exception:
                     log.debug("Could not publish Qwen preview status.", exc_info=True)
 
+            with self._jobs_lock:
+                self._preview_providers[job_id] = provider
             status_setter = getattr(provider, "set_status_callback", None)
             if callable(status_setter):
                 status_setter(provider_status)
@@ -4499,6 +4501,7 @@ class PremiumV2Bridge(QObject):
             if cancel_event is not None:
                 with self._jobs_lock:
                     self._preview_cancel_events.pop(job_id, None)
+                    self._preview_providers.pop(job_id, None)
 
     def _character_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
         """Return a clean saved cast and remove legacy false detections on first review."""
@@ -7767,7 +7770,8 @@ class PremiumV2Bridge(QObject):
                       "generation_mode": generation_mode,
                       "narrator_only_generation": narrator_only,
                       "character_voice_profile_count": int(narrator_selection.get("character_voice_profile_count") or 0),
-                      "output_path": None, "generation_target_path": str(output),
+                      "output_path": None, "output_duration_seconds": None,
+                      "generation_target_path": str(output),
                       "status": "generating", "audio_bitrate": bitrate, "generation_job_id": job_id,
                       "generation_started_at": self._now(), "empty_chapters_skipped": empty_skipped,
                       "excluded_chapters_skipped": excluded_skipped, "chapters_skipped_for_generation": skipped})
@@ -8044,6 +8048,7 @@ class PremiumV2Bridge(QObject):
         else:
             changes["message"] = msg
 
+        changes["state"] = state
         changes["stage"] = stage
         self._job_update(job_id, **changes)
 
@@ -8200,7 +8205,17 @@ class PremiumV2Bridge(QObject):
 
         if success:
             source_stat = actual.stat()
-            state.update({"status": "completed", "output_path": str(actual), "voice_profile": voice_name,
+            actual_duration_seconds = None
+            try:
+                from app.audio.assembler import _duration_ms
+                measured_duration_ms = int(_duration_ms(actual))
+                if measured_duration_ms > 0:
+                    actual_duration_seconds = round(measured_duration_ms / 1000.0, 2)
+            except Exception:
+                log.warning("Could not measure completed M4B duration for %s", actual, exc_info=True)
+            state.update({"status": "completed", "output_path": str(actual),
+                          "output_duration_seconds": actual_duration_seconds,
+                          "voice_profile": voice_name,
                           "playback_output_path": str(playback_output) if playback_output else None,
                           "playback_source_path": str(actual.resolve()) if playback_output else None,
                           "playback_source_size": int(source_stat.st_size) if playback_output else None,
@@ -8210,8 +8225,16 @@ class PremiumV2Bridge(QObject):
                           "failed_chapters": [], "generation_completed_at": self._now()})
             save_state(project.folder, state)
             self._job_update(job_id, state="completed", stage="Audiobook ready", progress=100,
-                             message="Generator completed; the M4B and Audiobooks playback copy are ready",
+                             message=(
+                                 "Generator completed; the M4B and Audiobooks playback copy are ready."
+                                 + (
+                                     f" Measured audiobook duration: {actual_duration_seconds:.2f} seconds."
+                                     if actual_duration_seconds is not None
+                                     else " Final audiobook duration could not be measured."
+                                 )
+                             ),
                              output_path=str(actual), result={**terminal_identity,
+                                 "output_duration_seconds": actual_duration_seconds,
                                  "output_path": str(actual), "file_url": actual.resolve().as_uri(),
                                  "playback_output_path": str(playback_output) if playback_output else None,
                                  "playback_format": playback_output.suffix.lower().lstrip(".") if playback_output else None,
@@ -8265,6 +8288,7 @@ class PremiumV2Bridge(QObject):
                              recoverable=not summary.cancelled)
         with self._jobs_lock:
             self._generators.pop(job_id, None)
+            self._generation_progress_timing.pop(job_id, None)
 
     def _production_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
@@ -8403,6 +8427,7 @@ class PremiumV2Bridge(QObject):
         if manager is None:
             with self._jobs_lock:
                 preview_cancel = self._preview_cancel_events.get(job_id)
+                preview_provider = self._preview_providers.get(job_id)
                 import_cancel = self._import_cancel_events.get(job_id)
             if row and row.get("state") in {"completed", "failed", "cancelled"}:
                 return dict(row)
@@ -8417,8 +8442,27 @@ class PremiumV2Bridge(QObject):
                 )
             if row and preview_cancel is not None and row.get("state") in {"queued", "running", "cancel_requested"}:
                 preview_cancel.set()
-                return self._job_update(job_id, state="cancel_requested", stage="Cancellation requested",
-                                        message="Preview will stop at the next safe synthesis or FFmpeg boundary; partial preview audio will be discarded.")
+                # A Qwen preview can sit inside one long inference call. Signal
+                # the actual subprocess now instead of waiting for the next
+                # preview chunk callback to observe its cancellation event.
+                cancel_provider = getattr(preview_provider, "request_cancel", None)
+                if callable(cancel_provider):
+                    try:
+                        cancel_provider()
+                    except Exception:
+                        log.exception("Immediate provider cancellation failed for preview job %s", job_id)
+                elif callable(getattr(preview_provider, "close", None)):
+                    threading.Thread(
+                        target=preview_provider.close,
+                        daemon=True,
+                        name="RyuPreviewCancelCleanup",
+                    ).start()
+                return self._job_update(
+                    job_id,
+                    state="cancel_requested",
+                    stage="Cancelling voice synthesis",
+                    message="Provider cancellation was sent immediately. Partial preview audio will be discarded and the model worker released.",
+                )
             with self._jobs_lock:
                 import_cancel = self._import_cancel_events.get(job_id)
             if row and row.get("type") == "import" and import_cancel is not None and row.get("state") in {"queued", "running", "cancel_requested"}:
