@@ -6538,13 +6538,20 @@ function renderProductionMetadataGate(active) {
     const eta = productionJobEtaSeconds(fullJob);
     setProductionStatus('elapsed', Number.isFinite(elapsed) && elapsed >= 0 ? formatProductionDuration(elapsed) : '—');
     const packagingStage = /assembling|encoding|validating final m4b/i.test(String(fullJob?.stage || ''));
-    const etaLabel = Number.isFinite(eta)
-      ? 'Measured ETA · ' + formatProductionDuration(eta)
-      : packagingStage
-        ? 'Narration complete · final M4B assembly in progress; ETA not estimated'
-        : fullActive
-          ? 'Available after 4 completed synthesis chunks'
-          : (fullState === 'completed' ? 'Complete' : '—');
+    const etaExpired = Number.isFinite(eta) && eta <= 0 && fullActive;
+    const etaLabel = etaExpired
+      ? 'Past the last measured estimate · the active synthesis chunk is still rendering; it will refresh when the chunk completes'
+      : Number.isFinite(eta)
+        ? 'Measured ETA · ' + formatProductionDuration(eta)
+        : packagingStage
+          ? 'Narration complete · final M4B assembly in progress; ETA not estimated'
+          : fullState === 'paused'
+            ? 'Paused · the measured remaining time will resume with generation'
+            : fullState === 'pause_requested'
+              ? 'Pause requested · waiting for the current chunk checkpoint'
+              : fullActive
+                ? 'Calibrating after Qwen model warm-up · ETA appears after 4 completed synthesis chunks'
+                : (fullState === 'completed' ? 'Complete' : '—');
     setProductionStatus('remaining', etaLabel);
     const measuredDuration = Number(
       fullJob?.result?.output_duration_seconds ?? project?.output_duration_seconds ?? NaN
