@@ -394,6 +394,17 @@ class QwenCharacterProvider(TTSProvider):
         finally:
             output_queue.put(None)
 
+    def _close_worker_log(self) -> None:
+        """Close the stderr file after diagnostic details have been captured."""
+        handle = self._worker_log
+        self._worker_log = None
+        if handle is not None:
+            try:
+                handle.flush()
+                handle.close()
+            except (OSError, ValueError):
+                pass
+
     def _read_response(self, timeout: float, heartbeat: str = "") -> dict:
         q = self._stdout_queue
         if q is None:
@@ -426,6 +437,7 @@ class QwenCharacterProvider(TTSProvider):
                     suffix = f" Exit code: {exit_code}."
                     if detail:
                         suffix += f" Worker log: {detail}"
+                    self._close_worker_log()
                     raise RuntimeError(
                         "Offline character worker exited while waiting for a response."
                         + suffix
@@ -453,6 +465,7 @@ class QwenCharacterProvider(TTSProvider):
                 suffix = f" Exit code: {exit_code}."
                 if detail:
                     suffix += f" Worker log: {detail}"
+                self._close_worker_log()
                 raise RuntimeError(
                     "Offline character worker exited before returning a response."
                     + suffix
@@ -483,6 +496,7 @@ class QwenCharacterProvider(TTSProvider):
         suffix = f" Worker exit code: {exit_code}." if exit_code is not None else " Worker is still running."
         if detail:
             suffix += f" Worker log: {detail}"
+        self._close_worker_log()
         raise RuntimeError(
             f"Timed out waiting for the offline character worker after {timeout:.1f} seconds."
             + suffix
