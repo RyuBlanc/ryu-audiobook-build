@@ -49,8 +49,11 @@ class QwenCharacterProvider(TTSProvider):
     # Preview requests use the same bounded sentence-aware units as production
     # narration. This reduces per-request model overhead without changing the
     # selected model, prompt, sampling, pronunciation or voice identity.
-    recommended_preview_chunk_chars = 800
-    recommended_preview_chunk_sentences = 4
+    # Reuse the original high-throughput 2.4k / 10-sentence policy.
+    # Smaller preview calls multiply model request and decoder overhead and
+    # regressed 30-second auditions on supported 4–8 GB GPU configurations.
+    recommended_preview_chunk_chars = 2400
+    recommended_preview_chunk_sentences = 10
     split_preview_on_expression_change = True
     # Conservative startup estimate used only until real chunk timings are available.
     estimated_chars_per_minute = 180.0
