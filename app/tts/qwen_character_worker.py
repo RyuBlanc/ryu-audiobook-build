@@ -8,6 +8,7 @@ import os
 import hashlib
 import json
 import sys
+import time
 
 # This worker is launched as a standalone Python script by the packaged
 # Windows application. In that mode Python starts with app/tts on sys.path,
@@ -49,6 +50,29 @@ MODEL_IDS = {
     "base-0.6b": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
     "base-1.7b": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
 }
+
+
+_WORKER_STARTED_AT = time.monotonic()
+_WORKER_DIAGNOSTIC_PREFIX = "[RYU_QWEN_WORKER] "
+
+
+def _worker_diagnostic(event: str, **details) -> None:
+    """Write one structured, flushed startup event to the worker stderr log."""
+    payload = {
+        "event": str(event),
+        "pid": os.getpid(),
+        "elapsed_seconds": round(max(0.0, time.monotonic() - _WORKER_STARTED_AT), 3),
+        **details,
+    }
+    try:
+        print(
+            _WORKER_DIAGNOSTIC_PREFIX + json.dumps(payload, ensure_ascii=True, default=str),
+            file=sys.stderr,
+            flush=True,
+        )
+    except Exception:
+        # Diagnostics must never make synthesis fail.
+        pass
 
 
 def _model_weight_bytes(model_path: Path) -> int:
@@ -98,8 +122,46 @@ def _preflight_device_memory(torch, device: str, model_path: Path, low_memory: b
 
 
 def _load_model(kind: str, backend: str, root: Path, low_memory: bool = False):
-    import torch
-    from qwen_tts import Qwen3TTSModel
+    _worker_diagnostic(
+        "model_load_begin",
+        model_kind=kind,
+        requested_backend=backend,
+        low_memory=bool(low_memory),
+    )
+    import_started = time.monotonic()
+    try:
+        import torch
+    except Exception as exc:
+        _worker_diagnostic(
+            "torch_import_failed",
+            model_kind=kind,
+            error_type=type(exc).__name__,
+            error=str(exc),
+        )
+        raise
+    _worker_diagnostic(
+        "torch_import_complete",
+        model_kind=kind,
+        elapsed_seconds=round(time.monotonic() - import_started, 3),
+        torch_version=str(getattr(torch, "__version__", "unknown")),
+    )
+
+    qwen_import_started = time.monotonic()
+    try:
+        from qwen_tts import Qwen3TTSModel
+    except Exception as exc:
+        _worker_diagnostic(
+            "qwen_tts_import_failed",
+            model_kind=kind,
+            error_type=type(exc).__name__,
+            error=str(exc),
+        )
+        raise
+    _worker_diagnostic(
+        "qwen_tts_import_complete",
+        model_kind=kind,
+        elapsed_seconds=round(time.monotonic() - qwen_import_started, 3),
+    )
 
     if kind not in MODEL_IDS:
         raise RuntimeError(f"Unknown Qwen model kind: {kind}")
@@ -164,21 +226,49 @@ def _load_model(kind: str, backend: str, root: Path, low_memory: bool = False):
     }
     if low_memory:
         kwargs["low_cpu_mem_usage"] = True
-    with redirect_stdout(sys.stderr):
-        try:
-            model = Qwen3TTSModel.from_pretrained(str(model_path), **kwargs)
-        except TypeError as exc:
-            if low_memory and "low_cpu_mem_usage" in str(exc):
-                kwargs.pop("low_cpu_mem_usage", None)
-                print(json.dumps({
-                    "progress": (
-                        "This Qwen runtime wrapper does not expose low_cpu_mem_usage; "
-                        "continuing with single-job, CPU-thread and accelerator-memory safeguards."
-                    )
-                }), flush=True)
+    weight_bytes = _model_weight_bytes(model_path)
+    model_load_started = time.monotonic()
+    _worker_diagnostic(
+        "model_weights_load_begin",
+        model_kind=kind,
+        requested_backend=backend,
+        selected_device=device,
+        weight_bytes=weight_bytes,
+        low_memory=bool(low_memory),
+        dtype=str(dtype),
+    )
+    try:
+        with redirect_stdout(sys.stderr):
+            try:
                 model = Qwen3TTSModel.from_pretrained(str(model_path), **kwargs)
-            else:
-                raise
+            except TypeError as exc:
+                if low_memory and "low_cpu_mem_usage" in str(exc):
+                    kwargs.pop("low_cpu_mem_usage", None)
+                    print(json.dumps({
+                        "progress": (
+                            "This Qwen runtime wrapper does not expose low_cpu_mem_usage; "
+                            "continuing with single-job, CPU-thread and accelerator-memory safeguards."
+                        )
+                    }), flush=True)
+                    model = Qwen3TTSModel.from_pretrained(str(model_path), **kwargs)
+                else:
+                    raise
+    except Exception as exc:
+        _worker_diagnostic(
+            "model_weights_load_failed",
+            model_kind=kind,
+            selected_device=device,
+            elapsed_seconds=round(time.monotonic() - model_load_started, 3),
+            error_type=type(exc).__name__,
+            error=str(exc),
+        )
+        raise
+    _worker_diagnostic(
+        "model_weights_load_complete",
+        model_kind=kind,
+        selected_device=device,
+        elapsed_seconds=round(time.monotonic() - model_load_started, 3),
+    )
     gc.collect()
     if device.startswith("cuda"):
         try:
@@ -587,6 +677,13 @@ def _generate_clone(model, request: dict, output: Path) -> None:
 
 def server(args) -> int:
     root = Path(args.models_root).resolve()
+    _worker_diagnostic(
+        "worker_server_started",
+        task=args.task,
+        model_kind=args.kind,
+        requested_backend=args.backend,
+        models_root_exists=root.is_dir(),
+    )
 
     # Design/preview workers are lazy-loaded. This prevents every new preview
     # from loading the 1.7B VoiceDesign model and immediately swapping it out
@@ -601,6 +698,12 @@ def server(args) -> int:
 
     def load_model(kind: str, *, allow_cpu_fallback: bool = True) -> None:
         nonlocal model, device, active_kind
+        _worker_diagnostic(
+            "load_model_requested",
+            task=active_task,
+            model_kind=kind,
+            requested_backend=args.backend,
+        )
         try:
             print(json.dumps({"progress": f"Loading Qwen model • {kind}"}), flush=True)
             model, device = _load_model(kind, args.backend, root, low_memory=args.low_memory)
@@ -611,6 +714,13 @@ def server(args) -> int:
             else:
                 raise
         active_kind = kind
+        _worker_diagnostic(
+            "load_model_ready",
+            task=active_task,
+            model_kind=kind,
+            selected_device=device,
+            selected_backend=_actual_backend(device),
+        )
         print(json.dumps({"progress": f"Qwen model loaded • {device}"}), flush=True)
 
     def anchor_bank_paths(request: dict) -> dict[str, Path]:
@@ -728,6 +838,12 @@ def server(args) -> int:
     # acknowledgement lets the parent send that request without claiming that
     # a model or compute device is already ready.
     if active_task in {"design", "design-preview"}:
+        _worker_diagnostic(
+            "worker_protocol_ready",
+            task=active_task,
+            model_kind=args.kind,
+            lazy_model_load=True,
+        )
         print(json.dumps({
             "worker_ready": True,
             "kind": args.kind,

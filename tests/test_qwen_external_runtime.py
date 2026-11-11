@@ -40,6 +40,45 @@ class QwenExternalRuntimePackagingTests(unittest.TestCase):
         self.assertNotIn('"device": device', lazy_handshake)
         self.assertNotIn('"backend": _actual_backend(device)', lazy_handshake)
 
+    def test_design_preview_parent_and_worker_complete_lazy_startup_handshake(self):
+        provider = (
+            ROOT / "app" / "tts" / "providers" / "qwen_character.py"
+        ).read_text(encoding="utf-8")
+        worker = (
+            ROOT / "app" / "tts" / "qwen_character_worker.py"
+        ).read_text(encoding="utf-8")
+
+        startup = provider[
+            provider.index("def _start_worker(self)"):
+            provider.index("def _drain_stdout(")
+        ]
+        self.assertIn('lazy_model_load = self.qwen_mode in {"design", "design-preview"}', startup)
+        self.assertIn("timeout=60.0 if lazy_model_load else 900.0", startup)
+        self.assertIn('if response.get("worker_ready") is True:', startup)
+
+        handshake_start = worker.index('if active_task in {"design", "design-preview"}:')
+        request_loop = worker.index("for line in sys.stdin:", handshake_start)
+        handshake = worker[handshake_start:request_loop]
+        self.assertIn('"worker_ready": True', handshake)
+        preview_request = worker[request_loop:]
+        self.assertIn('elif active_task == "design-preview" and model is None:', preview_request)
+        self.assertIn("load_model(args.kind)", preview_request)
+
+    def test_model_loading_emits_stage_level_diagnostics(self):
+        worker = (
+            ROOT / "app" / "tts" / "qwen_character_worker.py"
+        ).read_text(encoding="utf-8")
+        for event in (
+            "model_load_begin",
+            "torch_import_complete",
+            "qwen_tts_import_complete",
+            "model_weights_load_begin",
+            "model_weights_load_complete",
+            "model_weights_load_failed",
+        ):
+            with self.subTest(event=event):
+                self.assertIn(f'"{event}"', worker)
+
     def test_voice_design_preview_reports_verified_device_with_synthesis_result_after_load(self):
         source = (ROOT / "app" / "tts" / "qwen_character_worker.py").read_text(encoding="utf-8")
         start = source.index('elif active_task == "design-preview" and model is None:')
