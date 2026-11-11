@@ -6560,7 +6560,6 @@ function renderProductionMetadataGate(active) {
       details.style.cssText = 'display:grid;gap:5px;width:100%;max-width:100%;margin:14px auto 0;padding:0 10px;text-align:center;font-size:12px;line-height:1.45;overflow-wrap:anywhere;box-sizing:border-box';
       metricHost.appendChild(details);
     }
-    const ring = $('genRing');
     if (ring?.style) {
       // Lock the ring to a true 1:1 box at every responsive width. The CSS
       // --progress value remains the authoritative measured completion value.
