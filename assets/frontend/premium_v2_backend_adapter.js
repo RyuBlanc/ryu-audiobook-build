@@ -1230,7 +1230,9 @@
     setDashboardRow(card, 'processing stage', job.stage || job.message || 'Working');
     const percent = Math.max(0, Math.min(100, Math.round(Number(job.progress || 0))));
     writeTextIfChanged(percentLabel, percent + '% complete');
-    const eta = Number(job.eta_seconds);
+    // Use the same timestamped measured countdown as Production Studio so the
+    // Dashboard never displays a frozen ETA between backend job refreshes.
+    const eta = productionJobEtaSeconds(job);
     writeTextIfChanged(etaLabel, Number.isFinite(eta) && eta > 0 ? Math.floor(eta/60) + 'm ' + String(Math.floor(eta%60)).padStart(2,'0') + 's remaining' : '');
     writeStyleIfChanged(track, 'visibility', '');
     writeStyleIfChanged(fill, 'width', percent + '%');

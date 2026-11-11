@@ -189,6 +189,19 @@ class Stage5GenerationEtaStabilityTests(unittest.TestCase):
         self.assertIn("Date.now() - measuredAt", eta)
         self.assertIn("value - liveSeconds", eta)
 
+    def test_dashboard_generation_eta_uses_the_live_measured_countdown(self):
+        adapter = (
+            Path(__file__).resolve().parents[1]
+            / "assets"
+            / "frontend"
+            / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        start = adapter.index("function refreshDashboardGeneration(jobs = [])")
+        end = adapter.index("function audiobookPageActive()", start)
+        dashboard = adapter[start:end]
+        self.assertIn("const eta = productionJobEtaSeconds(job);", dashboard)
+        self.assertNotIn("Number(job.eta_seconds)", dashboard)
+
     def test_native_generation_page_uses_measured_samples_not_elapsed_fallback(self):
         source = (
             Path(__file__).resolve().parents[1]
