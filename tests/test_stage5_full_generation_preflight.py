@@ -355,12 +355,12 @@ class Stage53GenerationProgressDispatchTests(unittest.TestCase):
     def test_generation_progress_maps_plan_chunks_and_m4b_stages_monotonically(self):
         bridge = GenerationProgressDispatchHarness()
         events = (
-            ((0, 2, 0, "plan:4:0:4"), "Preparing generation plan", 2),
-            ((1, 2, 0, "chunk-start:1/4"), "Rendering chapter audio", 3),
-            ((1, 2, 1, "chunk:1/2:1/4"), "Rendering narration chunks", 24),
-            ((2, 2, 4, "m4b-packaging"), "Assembling audiobook", 90),
-            ((2, 2, 4, "m4b-package:2/4:Encoding final chapters"), "Encoding and validating output", 94),
-            ((2, 2, 4, "m4b-complete"), "Validating final audiobook", 99),
+            ((0, 2, 0, "plan:4:0:4"), "Preparing generation plan", 0),
+            ((1, 2, 0, "chunk-start:1/4"), "Loading voice model", 0),
+            ((1, 2, 1, "chunk:1/2:1/4"), "Rendering narration chunks", 25),
+            ((2, 2, 4, "m4b-packaging"), "Assembling final M4B", 100),
+            ((2, 2, 4, "m4b-package:2/4:Encoding final chapters"), "Encoding and validating final M4B", 100),
+            ((2, 2, 4, "m4b-complete"), "Audiobook duration measured · M4B ready", 100),
         )
         observed = []
         for args, expected_stage, expected_progress in events:
@@ -371,6 +371,12 @@ class Stage53GenerationProgressDispatchTests(unittest.TestCase):
             self.assertEqual(changes["progress"], expected_progress)
             self.assertEqual(changes["current_chapter"], args[0])
             self.assertEqual(changes["chapters_total"], args[1])
+            if args[3] == "m4b-packaging":
+                self.assertEqual(changes["packaging_progress_percent"], 0)
+            elif args[3].startswith("m4b-package:"):
+                self.assertEqual(changes["packaging_progress_percent"], 50)
+                self.assertEqual(changes["packaging_completed_steps"], 2)
+                self.assertEqual(changes["packaging_total_steps"], 4)
             observed.append(changes["progress"])
 
         self.assertEqual(observed, sorted(observed))
