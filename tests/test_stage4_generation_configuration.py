@@ -40,6 +40,9 @@ class EffectiveGenerationConfigurationTests(unittest.TestCase):
                 chapters=[chapter],
             )
             profile = SimpleNamespace(name="Saved Narrator", voice_id="narrator-main")
+            unassigned_profile = SimpleNamespace(
+                name="Global Unassigned Character", provider="piper", voice_id="unassigned-character"
+            )
             manager = Mock()
             pronunciation_rules = [
                 {"written_form": "Mira", "spoken_form": "Mee-rah", "enabled": True}
@@ -98,7 +101,13 @@ class EffectiveGenerationConfigurationTests(unittest.TestCase):
                 close_preview_provider_cache=Mock(),
                 _active_project=Mock(return_value=project),
                 _resolve_narrator_for_generation=Mock(
-                    return_value=(profile, {"source": "project_override", "profile_name": profile.name})
+                    return_value=(profile, {
+                        "source": "project_override",
+                        "profile_name": profile.name,
+                        "narrator_only": False,
+                        "unassigned_character_profile_name": unassigned_profile.name,
+                        "unassigned_character_profile_required": True,
+                    })
                 ),
                 _project_series_name=Mock(return_value="Dragon Chronicles"),
                 _new_job=Mock(return_value="step4-config-job"),
@@ -114,7 +123,7 @@ class EffectiveGenerationConfigurationTests(unittest.TestCase):
             with patch.object(host, "load_state", return_value=state), \
                  patch.object(host, "save_state"), \
                  patch.object(host, "provider_from_profile", return_value=(object(), "narrator-main")), \
-                 patch.object(host, "load_profiles", return_value=[]), \
+                 patch.object(host, "load_profiles", return_value=[unassigned_profile]), \
                  patch.object(host, "_effective_pronunciation_dictionary", return_value=pronunciation_rules), \
                  patch.object(host, "audiobooks_root", return_value=output_root), \
                  patch("app.audio.library.validate_saved_audio_paths"), \
