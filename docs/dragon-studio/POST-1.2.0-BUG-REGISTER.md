@@ -47,6 +47,22 @@ The current screenshot shows these failed Build Windows App push runs on the for
 
 These three runs are not considered diagnosed merely because their commit subjects are known. The exact failing job/step logs must be obtained before choosing a correction. The available connected Actions lookup in the current session cannot resolve these push-triggered runs by run number; #3200 is not the internal Actions run ID.
 
+## Diagnosed regression-suite failure — Build Windows App #3202
+
+The first pull-request validation on the initial Dragon Studio head (commit `b86ee65`, PR #35) completed installation, JavaScript syntax validation, the isolated Qt lifecycle test and the focused Stage 6 preflight successfully. The full regression suite ran 1,489 tests and failed with **4 failures and 1 error**.
+
+Exact findings from the log:
+
+1. **Error — `test_generation_progress_maps_plan_chunks_and_m4b_stages_monotonically`:** the test double `GenerationProgressDispatchHarness` did not expose the production bridge clock method `_now()`. The final chunk timing callback reached the completed-work branch and raised `AttributeError`. Test harness now delegates `_now` to `PremiumV2Bridge._now`.
+2. **Failure — `test_bridge_pause_and_resume_control_real_generation_manager`:** the control-test bridge double also lacked `_now()`. Final-chunk ETA anchoring raised inside the progress callback, so the test observed one completed chapter instead of two. Test harness now exposes the bridge clock.
+3. **Failure — `test_bridge_pause_and_resume_at_saved_chunk_boundary_inside_a_chapter`:** same missing clock method in the test bridge double; the final chunk callback aborted before the chapter completion checkpoint. Covered by the same harness repair.
+4. **Failure — `test_generation_progress_keeps_narration_and_package_percent_separate`:** this functional test still expected the previous callback-spacing throughput estimator. It now emits measured `chunk-timing` events, excludes warm-up, and expects the new measured median estimate.
+5. **Failure — `test_qwen_preview_starts_at_zero_and_progress_is_completed_segment_based`:** a source-contract assertion expected the old chapter-start loading expression and ETA reset. The implementation intentionally uses the warm-up state and preserves a valid measured ETA across chapter starts; the assertion now checks that new contract.
+
+The three test-double/expectation repairs are committed on the Dragon Studio branch. These are confirmed causes from #3202; they are not a substitute for the original push-run logs from #3198–#3200, which remain undiagnosed individually.
+
+The new CI rule runs the Windows package job for pull requests whose head branch starts with `dragon-studio/`, after the tests job succeeds. This closes the gap where the earlier pull-request validation ran tests but skipped artifact packaging.
+
 ## Closure checklist for every bug
 
 - [ ] Reproduction recorded with source version/build and exact steps.
