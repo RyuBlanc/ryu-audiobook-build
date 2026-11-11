@@ -7952,7 +7952,7 @@ class PremiumV2Bridge(QObject):
             state = "paused"
             stage = "Paused at chapter checkpoint"
             changes["message"] = msg.split(":", 1)[1]
-            changes["eta_seconds"] = None
+            # Freeze the last estimate while paused; resume will reset its clock.
             changes["eta_updated_at"] = None
         elif msg.startswith("plan:"):
             parts = msg.split(":")
@@ -8046,7 +8046,7 @@ class PremiumV2Bridge(QObject):
                     ),
                 })
         elif msg.startswith("chunk-timing:"):
-            stage = "Measured synthesis throughput"
+            stage = "Rendering narration chunks"
             match = re.match(
                 r"chunk-timing:(\d+):([0-9]+(?:\.[0-9]+)?):(\d+):(\d+):(\d+):(\d+)",
                 msg,
@@ -8115,7 +8115,7 @@ class PremiumV2Bridge(QObject):
                 elif len(samples) >= 3 and seconds_per_unit is not None:
                     remaining_work = max(0, total_work - completed_work)
                     changes["eta_seconds"] = max(
-                        0, int(round(remaining_work * seconds_per_unit))
+                        1, int(round(remaining_work * seconds_per_unit))
                     )
                     changes["eta_updated_at"] = self._now()
                     changes["generation_eta_basis"] = (
