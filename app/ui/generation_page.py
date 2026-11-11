@@ -3077,7 +3077,7 @@ class GenerationPage(QWidget):
             )
             self.status.setText(
                 "Voice engine is generating the current chunk. "
-                "ETA will appear after the first chunk completes."
+                "ETA will appear after three measured chunks following model warm-up."
             )
         elif message.startswith("chunk:"):
             try:
@@ -3112,17 +3112,18 @@ class GenerationPage(QWidget):
                     self._eta_rates = self._eta_rates[-9:]
                     ordered = sorted(self._eta_rates)
                     middle = len(ordered) // 2
-                    observed_median = (
-                        ordered[middle]
-                        if len(ordered) % 2
-                        else (ordered[middle - 1] + ordered[middle]) / 2.0
-                    )
-                    previous = self._eta_ema_sec_per_unit
-                    self._eta_ema_sec_per_unit = (
-                        observed_median
-                        if previous is None
-                        else (0.20 * observed_median + 0.80 * previous)
-                    )
+                    if len(ordered) >= 3:
+                        observed_median = (
+                            ordered[middle]
+                            if len(ordered) % 2
+                            else (ordered[middle - 1] + ordered[middle]) / 2.0
+                        )
+                        previous = self._eta_ema_sec_per_unit
+                        self._eta_ema_sec_per_unit = (
+                            observed_median
+                            if previous is None
+                            else (0.20 * observed_median + 0.80 * previous)
+                        )
                 self._eta_estimate_updated_at = time.monotonic()
                 self.stage.setText(
                     f"Measured synthesis time · {synthesis_seconds:.1f}s for {work_units:,} text units"
@@ -3175,9 +3176,14 @@ class GenerationPage(QWidget):
                 if self._eta_estimate_updated_at is not None else 0.0
             )
             remaining = max(0, int(estimate - elapsed_since_sample))
-            self.remaining.setText(
-                f"Remaining: {remaining // 3600:02d}:{(remaining // 60) % 60:02d}:{remaining % 60:02d}"
-            )
+            if remaining == 0:
+                self.remaining.setText(
+                    "Remaining: past the last measured estimate · waiting for the active chunk"
+                )
+            else:
+                self.remaining.setText(
+                    f"Remaining: {remaining // 3600:02d}:{(remaining // 60) % 60:02d}:{remaining % 60:02d}"
+                )
             units_per_min = 60.0 / max(self._eta_ema_sec_per_unit, 1e-9)
             self.speed.setText(f"Speed: {units_per_min:,.0f} chars/min")
         else:
