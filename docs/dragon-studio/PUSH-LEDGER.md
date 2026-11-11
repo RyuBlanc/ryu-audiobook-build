@@ -41,5 +41,13 @@ Commits:
 - Current PR #3264 / run `43020594973`, exact head `5bac4b58cd80bbaf5a3e528857fe3acf196fcee0`: tests passed (1,498). Windows build job `130523687954` is in progress; package outcome pending.
 - CPU Qwen run #12 / `43020566273`: real CPU runtime install is still active; real-preview outcome pending.
 
-Original failed runs #3251–#3258 remain recorded as failures. This correction resolves the two test errors, but Qwen real-preview/hardware and Windows package acceptance have not been marked complete.
+Original failed runs #3251–#3258 remain recorded as failures. This correction resolves the two test errors. Latest PR #3267 has passed 1,498 regression tests, while its Windows package is still running. CPU real-preview and hardware acceptance remain open.
+
+
+## Documentation follow-up commits #3265–#3266
+
+- `2897e31bedb87f3945f93765717d7282d03bb8c0` — `docs/dragon-studio/POST-1.2.0-BUG-REGISTER.md`: record the 1,498-test pass at #3264 and pending package status at that time.
+- `17868d6afe1230f4d1cfb57326f260a4239af8e4` — `docs/dragon-studio/PUSH-LEDGER.md`: record the current validation state. This commit triggers PR run #3267 (internal run ID `43021199482`).
+
+#3267 is the latest PR validation. Its tests job passed all 1,498 tests; build job `130525480144` remains in `Prepare, validate and build application`. The CPU Qwen real-preview step in run #12 (`43020566273`) remains in progress after focused contract tests and expression protocol smoke passed. No package or real-Qwen result is to be inferred until these jobs finish.
 
