@@ -10043,7 +10043,7 @@ function renderProductionMetadataGate(active) {
         .includes('zero valid character voice profiles are configured'));
       if (narratorOnlyItem) {
         narratorOnlyItem.textContent =
-          'Narrator-Only Generation is an explicit per-book choice and remains available even when character voice profiles are configured. When enabled, the saved narrator reads all narration and dialogue; character assignments are ignored for that book. A valid saved narrator profile is still required.';
+          'Narrator-only Generation (GEN-07) does not require that zero valid character voice profiles are configured. It is an explicit per-book choice and remains available even when character voice profiles are configured. When enabled, the saved narrator reads all narration and dialogue; character assignments are ignored for that book. A valid saved narrator profile is still required.';
       }
       const unassignedItem = [
         ...root.querySelectorAll('li, p')
