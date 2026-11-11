@@ -460,6 +460,9 @@ def generate_chapter(
                     for i in batch_indices:
                         output = chunks_dir / f"{i + 1:05d}.wav"
                         provider.synthesize(chunks[i], output, chunks_with_voices[i][1])
+                # Stop the synthesis timer before disk validation, checkpoint
+                # persistence and UI callbacks add non-inference overhead.
+                batch_synthesis_seconds = max(0.001, time.monotonic() - batch_started)
                 for i in batch_indices:
                     validate_and_commit(i, chunks_dir / f"{i + 1:05d}.wav", chunks[i])
                 if on_chunk_timing:
@@ -467,7 +470,7 @@ def generate_chapter(
                     on_chunk_timing(
                         batch_indices[-1] + 1,
                         batch_work_units,
-                        max(0.001, time.monotonic() - batch_started),
+                        batch_synthesis_seconds,
                     )
                 if checkpoint_callback:
                     # Batch synthesis may write multiple chunks at once. Commit
@@ -489,13 +492,14 @@ def generate_chapter(
             synthesize_voice_set(provider, chunks[index], chunk_voice, output)
         else:
             provider.synthesize(chunks[index], output, chunk_voice)
+        synthesis_seconds = max(0.001, time.monotonic() - synthesis_started)
 
         validate_and_commit(index, output, chunks[index])
         if on_chunk_timing:
             on_chunk_timing(
                 index + 1,
                 len(chunks[index]),
-                max(0.001, time.monotonic() - synthesis_started),
+                synthesis_seconds,
             )
         if checkpoint_callback:
             # Persist this chunk before allowing a pause/cancel request to
