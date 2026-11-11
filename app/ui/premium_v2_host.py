@@ -7543,17 +7543,20 @@ class PremiumV2Bridge(QObject):
             )
 
         unassigned_character_count = max(0, len(character_rows) - len(configured_profiles))
-        unassigned_required = bool(unassigned_character_count or unresolved)
-        if unassigned_required and not unassigned_profile_available:
+        # The Unassigned Character profile is a required global production
+        # default for every character-cast book, even when the currently known
+        # cast happens to be fully assigned. Future/ambiguous dialogue must have
+        # a deterministic fallback that never silently becomes the narrator.
+        unassigned_required = True
+        if not unassigned_profile_available:
             examples = "; ".join(
                 f"Chapter {number}: {text[:64].strip()!r}"
                 for number, text in unresolved[:2]
             )
             detail = f" {examples}" if examples else ""
             raise ValueError(
-                "Some characters or dialogue passages still need a voice profile. "
-                "Open Voice Studio and save the app-wide 'Unassigned Character' default profile, "
-                "then retry generation." + detail
+                "The app-wide 'Unassigned Character' voice profile is required for character-based generation. "
+                "Choose and save it in Voice Studio, then retry generation." + detail
             )
 
         pending_dialogue_count = len(unresolved)
@@ -7658,7 +7661,7 @@ class PremiumV2Bridge(QObject):
         if not narrator_only:
             unassigned_name = str(narrator_selection.get("unassigned_character_profile_name") or "").strip()
             unassigned_profile = available_profiles.get(unassigned_name.casefold()) if unassigned_name else None
-            if narrator_selection.get("unassigned_character_profile_required") and unassigned_profile is None:
+            if unassigned_profile is None:
                 raise ValueError(
                     "The app-wide Unassigned Character voice profile is missing or unavailable. "
                     "Choose and save it in Voice Studio before using character-cast generation."
