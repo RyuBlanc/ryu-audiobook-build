@@ -351,6 +351,7 @@ if __name__ == "__main__":
 
 class GenerationProgressDispatchHarness:
     _generation_progress = host.PremiumV2Bridge._generation_progress
+    _now = staticmethod(host.PremiumV2Bridge._now)
 
     def __init__(self):
         self._job_update = Mock()
