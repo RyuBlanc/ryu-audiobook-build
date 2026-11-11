@@ -5668,6 +5668,9 @@
     if (!narratorOnly && active.dialogue_index_ready !== true) {
       return 'The canonical dialogue index could not be verified. Refresh Character Studio and retry before generating.';
     }
+    if (!narratorOnly && active.dialogue_routing_ready !== true) {
+      return 'Dialogue routing is not ready. Resolve conflicting assignments and source/index issues in Character Studio before generating.';
+    }
     const pendingDialogue = Math.max(0, Number(active.pending_dialogue_count || 0));
     const conflictingDialogue = Math.max(0, Number(active.conflicting_dialogue_count || 0));
     const indexIssues = Math.max(0, Number(active.dialogue_index_issue_count || 0));
