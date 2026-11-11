@@ -6561,6 +6561,12 @@ function renderProductionMetadataGate(active) {
     const workloadLabel = workloadTotal > 0
       ? 'Narration workload completed · ' + workloadCompleted.toLocaleString() + ' / ' + workloadTotal.toLocaleString() + ' text units'
       : (fullActive ? 'Narration workload · preparing the measured generation plan' : '');
+    const completedChunks = Math.max(0, Number(fullJob?.generation_completed_chunks || 0));
+    const totalChunks = Math.max(0, Number(fullJob?.generation_total_chunks || 0));
+    const chunkProgressLabel = totalChunks > 0
+      ? 'Valid synthesis chunks saved · ' + completedChunks.toLocaleString() + ' / ' +
+        totalChunks.toLocaleString() + ' · percentage advances when a chunk is validated'
+      : (fullActive ? 'Synthesis chunk progress · preparing the measured generation plan' : '');
     const generatedAudioSeconds = Number(fullJob?.generated_audio_duration_seconds || 0);
     const completedChapterWork = Math.max(
       0, Number(fullJob?.generation_completed_chapter_work_units || 0)
@@ -6627,10 +6633,13 @@ function renderProductionMetadataGate(active) {
     if (details) {
       const workload = document.createElement('div');
       workload.textContent = workloadLabel;
+      const chunks = document.createElement('div');
+      chunks.id = 'genChunkProgress';
+      chunks.textContent = chunkProgressLabel;
       const generated = document.createElement('div');
       generated.id = 'genGeneratedDuration';
       generated.textContent = generatedAudioLabel;
-      const metrics = [workload, generated];
+      const metrics = [workload, chunks, generated];
       if (packagingLabel) {
         const packaging = document.createElement('div');
         packaging.id = 'genPackagingProgress';
