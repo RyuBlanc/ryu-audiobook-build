@@ -47,16 +47,19 @@ The current screenshot shows these failed Build Windows App push runs on the for
 
 These three runs are not considered diagnosed merely because their commit subjects are known. The exact failing job/step logs must be obtained before choosing a correction. The available connected Actions lookup in the current session cannot resolve these push-triggered runs by run number; #3200 is not the internal Actions run ID.
 
-## Follow-up diagnosis — Builds Windows App #3251–#3258
+## Verified test correction — Builds Windows App #3251–#3264
 
-The finite fake-clock defect was corrected, but validation still failed with two errors:
+The first correction attempt failed (#3251–#3258) for two independently observed test defects: a case-sensitive lowercase timeout assertion, and a minimal process double missing the stream attributes touched during provider cleanup. The CPU Qwen workflow consequently stopped before real model execution.
 
-- The timeout error's actual message starts with uppercase `Timed out`; the test pattern used a case-sensitive lowercase prefix.
-- Test cleanup called `provider.close()` on a deliberately minimal worker double without the `stdin` stream attribute, causing `AttributeError`. The timeout test must close only its log handle; the early-exit process double now supplies the process-stream attributes expected by provider cleanup.
+The next correction fixed the test assertion, provided a realistic exited-process object, limited cleanup to the diagnostic log handle in these focused tests, and normalized PowerShell path separators in the CPU Qwen log collector.
 
-The hosted CPU Qwen workflow's focused 56-test group also failed on those errors, so real model execution did not start. The worker-log collection step ran, but no worker log existed because the real-preview step was skipped. The artifact uploader consequently had no files.
+**Validation evidence:**
+- Earlier intermediate PR run [#3261](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43020576268), commit `86f64fa309d754a3104039c25dab5e97e81b76c8`: all 1,498 regression tests passed; package job is not yet complete for the final PR head.
+- Current PR run [#3264](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43020594973), head `5bac4b58cd80bbaf5a3e528857fe3acf196fcee0`: all 1,498 regression tests passed (`OK`); current Windows build/installer package job is still running. This is the current-head test checkpoint, not yet a package checkpoint.
+- CPU Qwen run [#12](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43020566273), commit `b7006e4cadbb36170909ed384773754f0c722916`: dependency/runtime install still in progress at last inspection; focused tests and real model preview remain pending.
+- NVIDIA run #13 and AMD/Intel run #20 have not yet supplied verified physical-device results.
 
-The next correction addresses the assertion, realistic process double, targeted cleanup and PowerShell path separators. It does not change Qwen model behavior or relax performance/device acceptance.
+The worker log collection step must still be verified after the real preview executes. The real CPU preview and hardware acceptance gates remain open; no Qwen runtime or performance bug is closed by the passing regression suite alone.
 
 ## Diagnosed Qwen diagnostic-test regression — Builds Windows App #3245–#3250
 
