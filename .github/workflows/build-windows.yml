@@ -726,10 +726,10 @@ jobs:
             throw "No verified Python interpreter is available for real multi-chapter M4B acceptance. Private=$privatePython; CI=$($env:RYU_CI_PYTHON_EXE)"
           }
           Write-Host "Using acceptance Python: $pythonExe"
-          & $pythonExe -m pip install --disable-pip-version-check --no-input 'piper-tts>=1.4,<2'
-          if ($LASTEXITCODE -ne 0) { throw "Installing the repository-pinned Piper acceptance runtime failed with exit code $LASTEXITCODE." }
-          & $pythonExe -c "import piper, piper.download_voices; print('Piper acceptance runtime ready: ' + str(getattr(piper, '__version__', 'version metadata unavailable')))"
-          if ($LASTEXITCODE -ne 0) { throw "Piper acceptance runtime import failed with exit code $LASTEXITCODE." }
+          & $pythonExe -m pip install --disable-pip-version-check --no-input -r requirements.txt
+          if ($LASTEXITCODE -ne 0) { throw "Installing declared application dependencies for real M4B acceptance failed with exit code $LASTEXITCODE." }
+          & $pythonExe -c "import piper, piper.download_voices, pyttsx3, imageio_ffmpeg, soundfile; print('Real M4B acceptance runtime imports verified: Piper, pyttsx3, FFmpeg, soundfile')"
+          if ($LASTEXITCODE -ne 0) { throw "Real M4B acceptance runtime import verification failed with exit code $LASTEXITCODE." }
           $testPiperRoot = Join-Path $env:RYU_PIPER_MODEL_ROOT 'piper'
           New-Item -ItemType Directory -Force -Path $testPiperRoot,$env:RYU_STAGE3_ACCEPTANCE_OUTPUT | Out-Null
           $bundledPiperRoot = Join-Path (Get-Location) 'bundled_models\piper'
