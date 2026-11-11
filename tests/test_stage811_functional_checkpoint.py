@@ -72,6 +72,7 @@ class FunctionalCheckpoint20261111Tests(unittest.TestCase):
     def test_generation_progress_keeps_narration_and_package_percent_separate(self):
         started = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()
         bridge = SimpleNamespace(
+            _now=host.PremiumV2Bridge._now,
             _jobs_lock=threading.RLock(),
             _jobs={"generation-1": {"started_at": started}},
             _generation_progress_timing={},
