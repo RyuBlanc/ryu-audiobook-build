@@ -139,6 +139,71 @@ class FunctionalCheckpoint20261111Tests(unittest.TestCase):
             self.assertEqual(bridge._jobs["generation-1"]["packaging_completed_steps"], 1)
             self.assertEqual(bridge._jobs["generation-1"]["packaging_total_steps"], 4)
 
+    def test_measured_eta_upward_revision_is_bounded_and_counts_down(self):
+        bridge = SimpleNamespace(
+            _now=host.PremiumV2Bridge._now,
+            _jobs_lock=threading.RLock(),
+            _jobs={"eta-job": {"started_at": (datetime.now(timezone.utc) - timedelta(minutes=4)).isoformat(),
+                              "state": "running", "eta_seconds": 300}},
+            _generation_progress_timing={
+                "eta-job": {
+                    "samples": [{"work": 1000, "seconds": 10.0}] * 3,
+                    "seconds_per_unit_ema": 0.01,
+                    "warmup_chunk_skipped": True,
+                    "smoothed_eta_seconds": 300.0,
+                    "eta_last_monotonic": 190.0,
+                }
+            },
+        )
+
+        def update(job_id, **changes):
+            bridge._jobs[job_id].update(changes)
+            return dict(bridge._jobs[job_id])
+
+        bridge._job_update = Mock(side_effect=update)
+        with patch("app.ui.premium_v2_host.time.monotonic", return_value=200.0):
+            host.PremiumV2Bridge._generation_progress(
+                bridge, "eta-job", 1, 20, 1000,
+                "chunk-timing:1000:1000.000:1000:100000:4:100",
+            )
+
+        # A very slow measured chunk must not add its entire revised remainder
+        # to the UI in one jump. The live timer has already consumed 10 seconds;
+        # only the configured 60-second upward correction is applied.
+        self.assertEqual(bridge._jobs["eta-job"]["eta_seconds"], 350)
+        self.assertIn("upward revisions capped at 60s", bridge._jobs["eta-job"]["generation_eta_basis"])
+
+    def test_eta_monotonic_anchor_resets_on_resume_without_counting_pause_time(self):
+        class LiveThread:
+            def is_alive(self):
+                return True
+
+        class LiveManager:
+            _thread = LiveThread()
+            def resume(self):
+                self.resumed = True
+
+        manager = LiveManager()
+        bridge = SimpleNamespace(
+            _jobs_lock=threading.RLock(),
+            _jobs={"eta-job": {"job_id": "eta-job", "state": "paused", "eta_seconds": 240}},
+            _generators={"eta-job": manager},
+            _generation_progress_timing={
+                "eta-job": {"smoothed_eta_seconds": 240.0, "eta_last_monotonic": 100.0}
+            },
+        )
+
+        def update(job_id, **changes):
+            bridge._jobs[job_id].update(changes)
+            return dict(bridge._jobs[job_id])
+
+        bridge._job_update = Mock(side_effect=update)
+        with patch("app.ui.premium_v2_host.time.monotonic", return_value=987.6):
+            result = host.PremiumV2Bridge._job_resume(bridge, {"job_id": "eta-job"})
+
+        self.assertTrue(manager.resumed)
+        self.assertEqual(result["state"], "running")
+        self.assertEqual(bridge._generation_progress_timing["eta-job"]["eta_last_monotonic"], 987.6)
     def test_completed_chapter_audio_duration_is_measured_from_wav_frames(self):
         with TemporaryDirectory() as temporary:
             chapter_dir = Path(temporary) / "chapter"
