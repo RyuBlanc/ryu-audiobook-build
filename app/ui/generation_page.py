@@ -3002,27 +3002,14 @@ class GenerationPage(QWidget):
             self.progress.setValue(completed_work)
             self.last_progress_value = completed_work
             self.initial_progress_value = completed_work
-            baseline_rate = None
-            # Start with the persisted end-to-end estimate for this voice/settings
-            # signature. Live chunk measurements refine it as this book progresses.
-            try:
-                if self._estimated_generation_seconds > 0:
-                    self._eta_ema_sec_per_unit = (
-                        self._estimated_generation_seconds / max(1, work_total)
-                    )
-                else:
-                    provider = self.manager.provider if self.manager else None
-                    estimated_cpm = float(getattr(provider, "estimated_chars_per_minute", 0) or 0)
-                    if estimated_cpm > 0:
-                        baseline_rate = estimated_cpm / 60.0
-                    self._eta_ema_sec_per_unit = (1.0 / baseline_rate) if baseline_rate else None
-            except Exception:
-                self._eta_ema_sec_per_unit = None
+            # Do not seed a live ETA from a prior book or provider benchmark.
+            # The active device/model/settings must establish its own measured rate.
+            self._eta_ema_sec_per_unit = None
             self._eta_warmup_samples = 0
             self._eta_rates = []
             self._eta_last_work = completed_work
             self._eta_last_time = time.monotonic()
-            self._eta_estimate_updated_at = self._eta_last_time
+            self._eta_estimate_updated_at = None
             self.generation_phase = "synthesis"
             if completed_work:
                 self.stage.setText(
@@ -3032,7 +3019,7 @@ class GenerationPage(QWidget):
             else:
                 self.stage.setText(
                     f"Preparing {chunk_total:,} audio segments… "
-                    f"ETA is an initial estimate and will refine after the first segments"
+                    "ETA appears after model warm-up and three measured synthesis chunks"
                 )
             return
 
