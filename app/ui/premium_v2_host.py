@@ -7890,7 +7890,7 @@ class PremiumV2Bridge(QObject):
                 )}
 
     def _generation_progress(self, job_id: str, chapter: int, total: int, done: int, message: str) -> None:
-        """Publish completed text-work units and an ETA measured from this run's chunks."""
+        """Publish real synthesis work, measured ETA and measured generated audio duration."""
         msg = str(message or "")
         state = "running"
         stage = "Generating narration"
@@ -7927,6 +7927,7 @@ class PremiumV2Bridge(QObject):
             changes.update({
                 "progress": 0,
                 "eta_seconds": None,
+                "generated_audio_duration_seconds": 0.0,
                 "generation_completed_work_units": 0,
                 "generation_total_work_units": total_work,
                 "generation_completed_chunks": 0,
@@ -7941,6 +7942,7 @@ class PremiumV2Bridge(QObject):
         elif msg.startswith("provider:"):
             stage = "Loading voice provider"
             changes["message"] = msg.partition(":")[2]
+            changes["eta_seconds"] = None
         elif msg.startswith("pronunciation:"):
             parts = msg.split(":", 2)
             try:
@@ -7979,17 +7981,18 @@ class PremiumV2Bridge(QObject):
                     if previous_at is not None else 0.0
                 )
                 samples = timing.setdefault("samples", [])
-                if delta_work > 0 and delta_seconds >= 2.0:
-                    samples.append({
-                        "work": delta_work,
-                        "seconds": delta_seconds,
-                    })
+                # Skip the first chunk: its duration can include lazy model load
+                # and accelerator warm-up, so it is not a valid throughput sample.
+                if previous_work > 0 and delta_work > 0 and delta_seconds >= 0.25:
+                    samples.append({"work": delta_work, "seconds": delta_seconds})
                     del samples[:-5]
                 timing["last_work"] = completed_work
                 timing["last_at"] = now
-                percent = round(100.0 * min(total_work, completed_work) / total_work)
+                # Ninety percent represents synthesis work; the remaining ten
+                # percent is reserved for measured M4B assembly and validation.
+                narration_percent = round(90.0 * min(total_work, completed_work) / total_work)
                 changes.update({
-                    "progress": max(0, min(100, percent)),
+                    "progress": max(0, min(90, narration_percent)),
                     "generation_completed_work_units": completed_work,
                     "generation_total_work_units": total_work,
                     "generation_completed_chunks": completed_chunks,
@@ -8010,7 +8013,7 @@ class PremiumV2Bridge(QObject):
                 eta = None
                 if (
                     len(samples) >= 3
-                    and elapsed >= 30
+                    and elapsed >= 10
                     and completed_work > 0
                     and completed_work < total_work
                 ):
@@ -8031,27 +8034,48 @@ class PremiumV2Bridge(QObject):
                 total_work = max(1, int(row.get("generation_total_work_units") or 1))
             except (TypeError, ValueError):
                 total_work = 1
+            parts = msg.split(":")
+            measured_chapter_seconds = None
+            measured_book_seconds = None
+            if len(parts) >= 4:
+                try:
+                    measured_chapter_seconds = max(0.0, float(parts[2]))
+                    measured_book_seconds = max(0.0, float(parts[3]))
+                except (TypeError, ValueError, OverflowError):
+                    measured_chapter_seconds = measured_book_seconds = None
             changes.update({
-                "progress": round(100.0 * min(total_work, current_work) / total_work),
+                "progress": round(90.0 * min(total_work, current_work) / total_work),
                 "generation_completed_work_units": current_work,
                 "message": msg.partition(":")[2],
             })
+            if measured_book_seconds is not None:
+                changes["generated_audio_duration_seconds"] = round(measured_book_seconds, 2)
+                changes["latest_completed_chapter_audio_seconds"] = round(
+                    measured_chapter_seconds or 0.0, 2
+                )
         elif msg.startswith("m4b-packaging"):
             stage = "Assembling final M4B"
             changes.update({
-                "progress": 100,
+                "progress": 90,
                 "eta_seconds": None,
                 "generation_eta_basis": None,
-                "message": "All narration synthesis chunks are complete. Measuring final M4B assembly and validation.",
+                "message": "All narration chunks are complete. Measuring final M4B assembly and validation.",
             })
         elif msg.startswith("m4b-package:"):
             stage = "Encoding and validating final M4B"
-            detail = msg.partition(":")[2].partition(":")[2]
+            match = re.match(r"m4b-package:(\d+)/(\d+):(.*)", msg)
+            if match:
+                package_done = max(0, int(match.group(1)))
+                package_total = max(1, int(match.group(2)))
+                changes["progress"] = min(99, 90 + round(9.0 * package_done / package_total))
+                detail = match.group(3) or stage
+            else:
+                changes["progress"] = 90
+                detail = stage
             changes.update({
-                "progress": 100,
                 "eta_seconds": None,
                 "generation_eta_basis": None,
-                "message": detail or stage,
+                "message": detail,
             })
         elif msg.startswith("m4b-complete"):
             stage = "Audiobook duration measured · M4B ready"
