@@ -193,7 +193,8 @@ class FunctionalCheckpoint20261111Tests(unittest.TestCase):
     def test_qwen_preview_starts_at_zero_and_progress_is_completed_segment_based(self):
         adapter = (Path(__file__).resolve().parents[1] / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         backend = (Path(__file__).resolve().parents[1] / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
-        self.assertIn("stage='Loading voice model', progress=0", backend)
+        self.assertIn('stage = "Loading voice model" if int(timing.get("last_work") or 0) == 0', backend)
+        self.assertIn("changes[\"eta_seconds\"] = None", backend)
         self.assertIn("actual_percent = min(95, max(0, round(95 * current / max(1, total))))", backend)
         self.assertIn("Loading voice model · 0%", adapter)
         self.assertIn("preview_completed_segments", backend)
