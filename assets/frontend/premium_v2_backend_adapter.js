@@ -5674,7 +5674,12 @@
     const pendingDialogue = Math.max(0, Number(active.pending_dialogue_count || 0));
     const conflictingDialogue = Math.max(0, Number(active.conflicting_dialogue_count || 0));
     const indexIssues = Math.max(0, Number(active.dialogue_index_issue_count || 0));
+    const assignmentIssues = Math.max(0, Number(active.character_assignment_issue_count || 0));
     const unassignedCharacters = Math.max(0, Number(active.unassigned_character_count || 0));
+    if (!narratorOnly && assignmentIssues > 0) {
+      return 'Generation is blocked by ' + assignmentIssues
+        + ' invalid character voice assignment(s). Repair those saved profiles in Character Studio before generating.';
+    }
     if (!narratorOnly && (conflictingDialogue > 0 || indexIssues > 0)) {
       return 'Generation is blocked by ' + conflictingDialogue + ' conflicting dialogue assignment(s) and '
         + indexIssues + ' source/index issue(s). Resolve these structural conflicts in Character Studio first.';
