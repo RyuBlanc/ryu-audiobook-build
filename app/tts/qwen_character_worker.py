@@ -724,10 +724,16 @@ def server(args) -> int:
         locked_anchors = paths
         design_identity_cache[profile_key] = (locked_clone_prompts, paths, clone_kind)
 
-    # A ready response means the requested model has genuinely loaded on an
-    # actual device. Never report a placeholder "pending" device as a verified
-    # GPU/CPU selection; VoiceDesign remains pending until its first request.
-    if active_task not in {"design", "design-preview"}:
+    # VoiceDesign loads lazily on the first request. A separate protocol
+    # acknowledgement lets the parent send that request without claiming that
+    # a model or compute device is already ready.
+    if active_task in {"design", "design-preview"}:
+        print(json.dumps({
+            "worker_ready": True,
+            "kind": args.kind,
+            "task": args.task,
+        }), flush=True)
+    else:
         load_model(args.kind)
         ready_kind = active_kind or args.kind
         print(json.dumps({
@@ -756,14 +762,7 @@ def server(args) -> int:
                 # One-pass audition: load only VoiceDesign, without preparing
                 # multiple anchor recordings or swapping to a Base model.
                 load_model(args.kind)
-                print(json.dumps({
-                    "ready": True,
-                    "device": device,
-                    "backend": _actual_backend(device),
-                    "model": MODEL_IDS.get(active_kind or args.kind, active_kind or args.kind),
-                    "kind": active_kind or args.kind,
-                    "task": args.task,
-                }), flush=True)
+
 
             if isinstance(batch_texts, list):
                 if not isinstance(batch_outputs, list) or len(batch_texts) != len(batch_outputs):

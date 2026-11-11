@@ -358,7 +358,17 @@ class QwenCharacterProvider(TTSProvider):
             + ("VoiceDesign preview" if self.qwen_mode == "design-preview" else "voice engine")
             + f" • {self.model_kind}"
         )
-        response = self._read_response(timeout=900.0, heartbeat="Loading Qwen model / character identity")
+        # VoiceDesign workers load lazily on the first synthesis request. Their
+        # startup acknowledgement confirms only that the protocol loop is ready;
+        # it must never be confused with a loaded model or verified device.
+        lazy_model_load = self.qwen_mode in {"design", "design-preview"}
+        response = self._read_response(
+            timeout=60.0 if lazy_model_load else 900.0,
+            heartbeat="Starting Qwen worker" if lazy_model_load else "Loading Qwen model / character identity",
+        )
+        if response.get("worker_ready") is True:
+            self._status("Qwen worker started • model will load for the first request")
+            return
         if response.get("ready"):
             # The worker's ready message now carries a real device only after
             # model initialization; reject legacy/pending responses rather than

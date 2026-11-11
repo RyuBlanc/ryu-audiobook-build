@@ -416,6 +416,140 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
                 })
             self.assertFalse((Path(temporary) / "qwen_last_inference.json").exists())
 
+    def test_lazy_voicedesign_worker_acknowledges_protocol_readiness_without_device_claim(self):
+        import io
+        import json
+        from contextlib import redirect_stdout
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.tts import qwen_character_worker as worker
+
+        for task in ("design", "design-preview"):
+            output = io.StringIO()
+            args = SimpleNamespace(
+                models_root=".",
+                task=task,
+                kind="design-1.7b",
+                backend="cpu",
+                low_memory=False,
+                clone_kind="base-0.6b",
+            )
+            with self.subTest(task=task), patch("sys.stdin", io.StringIO("")), redirect_stdout(output):
+                worker.server(args)
+
+            messages = [json.loads(line) for line in output.getvalue().splitlines() if line.strip()]
+            self.assertEqual(len(messages), 1)
+            self.assertIs(messages[0].get("worker_ready"), True)
+            self.assertEqual(messages[0].get("task"), task)
+            self.assertNotIn("ready", messages[0])
+            self.assertNotIn("device", messages[0])
+            self.assertNotIn("backend", messages[0])
+
+    def test_voicedesign_preview_first_request_returns_synthesis_result_not_second_ready_message(self):
+        import io
+        import json
+        from contextlib import redirect_stdout
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.tts import qwen_character_worker as worker
+
+        with TemporaryDirectory() as temporary:
+            output_path = Path(temporary) / "preview.wav"
+            request = {
+                "text": "A short preview sentence.",
+                "output": str(output_path),
+                "speaker": "Test narrator",
+                "language": "English",
+                "instruct": "A clear narrator.",
+                "profile_id": "lazy-preview-protocol-test",
+            }
+            args = SimpleNamespace(
+                models_root=temporary,
+                task="design-preview",
+                kind="design-1.7b",
+                backend="cpu",
+                low_memory=False,
+                clone_kind="base-0.6b",
+            )
+            output = io.StringIO()
+
+            def write_preview(_model, _request, path):
+                Path(path).write_bytes(b"\0" * 2048)
+
+            with (
+                patch("sys.stdin", io.StringIO(json.dumps(request) + "\n")),
+                redirect_stdout(output),
+                patch.object(worker, "_load_model", return_value=(object(), "cpu")) as load_model,
+                patch.object(worker, "_generate_design_preview", side_effect=write_preview),
+            ):
+                worker.server(args)
+
+            messages = [json.loads(line) for line in output.getvalue().splitlines() if line.strip()]
+            self.assertIs(messages[0].get("worker_ready"), True)
+            self.assertFalse(any(message.get("ready") is True for message in messages))
+            self.assertIs(messages[-1].get("ok"), True)
+            self.assertEqual(messages[-1].get("device"), "cpu")
+            load_model.assert_called_once()
+
+    def test_provider_accepts_lazy_worker_protocol_handshake_without_device(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+        from app.tts.providers import qwen_character
+
+        class FakeStream:
+            def close(self):
+                return None
+
+        class FakeWorker:
+            pid = 31415
+
+            def __init__(self):
+                self.stdin = FakeStream()
+                self.stdout = FakeStream()
+                self.running = True
+
+            def poll(self):
+                return None if self.running else 0
+
+            def terminate(self):
+                self.running = False
+
+            def wait(self, timeout=None):
+                self.running = False
+                return 0
+
+        provider = qwen_character.QwenCharacterProvider(
+            voice_id="lazy-preview-handshake-test",
+            backend="cpu",
+            model_kind="design-1.7b",
+            qwen_mode="design-preview",
+        )
+        fake_worker = FakeWorker()
+        with TemporaryDirectory() as temporary:
+            with (
+                patch.object(qwen_character.Path, "home", return_value=Path(temporary)),
+                patch.object(qwen_character, "runtime_ready", return_value=True),
+                patch.object(qwen_character, "model_installed", return_value=True),
+                patch.object(qwen_character, "runtime_environment", return_value={}),
+                patch.object(qwen_character.subprocess, "Popen", return_value=fake_worker),
+                patch.object(qwen_character.threading, "Thread", return_value=SimpleNamespace(start=Mock())),
+                patch.object(qwen_character, "register_qwen_worker"),
+                patch.object(qwen_character, "unregister_qwen_worker"),
+                patch.object(provider, "_read_response", return_value={
+                    "worker_ready": True,
+                    "kind": "design-1.7b",
+                    "task": "design-preview",
+                }) as read_response,
+            ):
+                provider._start_worker()
+                self.assertIs(provider._worker, fake_worker)
+                self.assertEqual(read_response.call_args.kwargs["timeout"], 60.0)
+                provider.close()
+
     def test_close_tolerates_already_closed_qwen_streams(self):
         from types import SimpleNamespace
         from app.tts.providers.qwen_character import QwenCharacterProvider
