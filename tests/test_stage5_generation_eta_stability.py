@@ -166,6 +166,8 @@ class Stage5GenerationEtaStabilityTests(unittest.TestCase):
         self.assertIn("Estimated audiobook listening length", adapter)
         self.assertIn("Projected full audiobook runtime", adapter)
         self.assertIn("Measured full audiobook duration", adapter)
+        self.assertIn("Valid synthesis chunks saved", adapter)
+        self.assertIn("percentage advances when a chunk is validated", adapter)
 
     def test_progress_ring_remains_a_true_circle_and_reports_completed_workload(self):
         root = Path(__file__).resolve().parents[1]
