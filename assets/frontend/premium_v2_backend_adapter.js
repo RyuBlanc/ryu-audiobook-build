@@ -6179,7 +6179,14 @@ function renderProductionMetadataGate(active) {
     const raw = job.eta_seconds;
     if (raw === null || raw === undefined || raw === '') return NaN;
     const value = Number(raw);
-    return Number.isFinite(value) && value >= 0 ? value : NaN;
+    if (!Number.isFinite(value) || value < 0) return NaN;
+    // eta_seconds is the measured remainder at eta_updated_at. Count it down
+    // locally between chunk completions instead of showing a frozen estimate.
+    const measuredAt = Date.parse(job.eta_updated_at || '');
+    const liveSeconds = Number.isFinite(measuredAt)
+      ? Math.max(0, Math.floor((Date.now() - measuredAt) / 1000))
+      : 0;
+    return Math.max(0, value - liveSeconds);
   }
   function syncProductionPreviewChapterSelector() {
     const select = $('productionPreviewChapterSelect');
@@ -6547,14 +6554,33 @@ function renderProductionMetadataGate(active) {
     const workloadLabel = workloadTotal > 0
       ? 'Narration workload completed · ' + workloadCompleted.toLocaleString() + ' / ' + workloadTotal.toLocaleString() + ' text units'
       : (fullActive ? 'Narration workload · preparing the measured generation plan' : '');
+    const generatedAudioSeconds = Number(fullJob?.generated_audio_duration_seconds || 0);
+    const completedChapterWork = Math.max(
+      0, Number(fullJob?.generation_completed_chapter_work_units || 0)
+    );
+    const projectedRuntimeSeconds = (
+      generatedAudioSeconds > 0 && completedChapterWork > 0 && workloadTotal > 0
+        ? Math.max(60, Math.round(
+            (generatedAudioSeconds * workloadTotal / completedChapterWork) / 60
+          ) * 60)
+        : NaN
+    );
+    const textEstimateSeconds = Number(
+      project?.estimated_listening_duration_seconds || NaN
+    );
     const durationLabel = Number.isFinite(measuredDuration) && measuredDuration > 0
       ? 'Measured full audiobook duration · ' + formatProductionDuration(measuredDuration)
-      : (fullActive || fullState === 'completed'
-        ? 'Full audiobook duration · shown only after the final M4B is measured'
-        : (completedOutput
-          ? 'Audiobook duration · not available in this saved project record'
-          : 'Full audiobook duration · shown after M4B validation'));
-    const generatedAudioSeconds = Number(fullJob?.generated_audio_duration_seconds || 0);
+      : Number.isFinite(projectedRuntimeSeconds) && projectedRuntimeSeconds > 0
+        ? 'Projected full audiobook runtime · about ' + formatProductionDuration(projectedRuntimeSeconds) +
+          ' (based on measured completed chapters)'
+        : Number.isFinite(textEstimateSeconds) && textEstimateSeconds > 0
+          ? 'Estimated audiobook listening length · about ' + formatProductionDuration(textEstimateSeconds) +
+            ' (text estimate at ' + Number(project?.estimated_listening_rate_words_per_minute || 150) + ' words/min)'
+          : (fullActive || fullState === 'completed'
+            ? 'Full audiobook duration · will appear when enough source/audio measurements are available'
+            : (completedOutput
+              ? 'Audiobook duration · not available in this saved project record'
+              : 'Full audiobook duration · shown after source text is analysed'));
     const generatedAudioLabel = Number.isFinite(measuredDuration) && measuredDuration > 0
       ? 'Validated audiobook runtime · ' + formatProductionDuration(measuredDuration)
       : (generatedAudioSeconds > 0
