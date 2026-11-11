@@ -315,7 +315,7 @@ class NarratorOnlyGenerationTests(unittest.TestCase):
         self.assertIn("info.className = 'ryu-info-trigger'", control)
         self.assertIn("tooltip.className = 'ryu-info-tooltip'", control)
         self.assertIn("project?.narrator_only_eligible !== true", control)
-        self.assertIn("available even when character profiles are assigned", control)
+        self.assertIn("You can enable it even when character profiles are assigned", control)
         self.assertIn("save an available narrator profile first", control)
 
     def test_narrator_only_eligibility_requires_only_a_valid_narrator(self):
