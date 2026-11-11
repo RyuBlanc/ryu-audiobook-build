@@ -6486,7 +6486,7 @@ function renderProductionMetadataGate(active) {
     const fullStageLabel = fullState === 'failed' && interrupted
       ? 'Interrupted · the app closed before this job finished. Recover or retry to reuse saved chapter checkpoints.'
       : fullState === 'failed'
-      ? 'Failed · ' + (fullError || 'Generation failed. Retry from Production Studio or inspect Background Jobs.')
+      ? 'Last attempt failed · ' + (fullError || 'Generation failed. Retry from Production Studio or inspect Background Jobs.')
       : fullState === 'cancelled'
         ? 'Cancelled'
         : String(fullJob?.stage || fullJob?.message || fullState || 'Generation running');
@@ -6537,12 +6537,20 @@ function renderProductionMetadataGate(active) {
       ? 'Narration workload completed · ' + workloadCompleted.toLocaleString() + ' / ' + workloadTotal.toLocaleString() + ' text units'
       : (fullActive ? 'Narration workload · preparing the measured generation plan' : '');
     const durationLabel = Number.isFinite(measuredDuration) && measuredDuration > 0
-      ? 'Measured audiobook duration · ' + formatProductionDuration(measuredDuration)
+      ? 'Measured full audiobook duration · ' + formatProductionDuration(measuredDuration)
       : (fullActive || fullState === 'completed'
-        ? 'Final audiobook duration · measured from the validated M4B when assembly finishes'
+        ? 'Full audiobook duration · shown only after the final M4B is measured'
         : (completedOutput
           ? 'Audiobook duration · not available in this saved project record'
-          : 'Final audiobook duration · shown after M4B validation'));
+          : 'Full audiobook duration · shown after M4B validation'));
+    const generatedAudioSeconds = Number(fullJob?.generated_audio_duration_seconds || 0);
+    const generatedAudioLabel = Number.isFinite(measuredDuration) && measuredDuration > 0
+      ? 'Validated audiobook runtime · ' + formatProductionDuration(measuredDuration)
+      : (generatedAudioSeconds > 0
+        ? 'Measured audio in completed chapters · ' + formatProductionDuration(generatedAudioSeconds)
+        : (fullActive
+          ? 'Measured audio generated so far · waiting for the first chapter checkpoint'
+          : 'Measured audio generated so far · —'));
     const metricHost = $('genRing')?.closest('.card') || $('genRing')?.parentElement;
     let details = $('genProgressDetails');
     if (!details && metricHost) {
@@ -6552,13 +6560,27 @@ function renderProductionMetadataGate(active) {
       details.style.cssText = 'display:grid;gap:5px;width:100%;max-width:100%;margin:14px auto 0;padding:0 10px;text-align:center;font-size:12px;line-height:1.45;overflow-wrap:anywhere;box-sizing:border-box';
       metricHost.appendChild(details);
     }
+    const ring = $('genRing');
+    if (ring?.style) {
+      // Lock the ring to a true 1:1 box at every responsive width. The CSS
+      // --progress value remains the authoritative measured completion value.
+      ring.style.width = 'min(240px, 62vw)';
+      ring.style.height = 'min(240px, 62vw)';
+      ring.style.aspectRatio = '1 / 1';
+      ring.style.borderRadius = '50%';
+      ring.style.boxSizing = 'border-box';
+      ring.style.flex = '0 0 auto';
+    }
     if (details) {
       const workload = document.createElement('div');
       workload.textContent = workloadLabel;
+      const generated = document.createElement('div');
+      generated.id = 'genGeneratedDuration';
+      generated.textContent = generatedAudioLabel;
       const duration = document.createElement('div');
       duration.id = 'genDuration';
       duration.textContent = durationLabel;
-      details.replaceChildren(workload, duration);
+      details.replaceChildren(workload, generated, duration);
     }
 
     const pause = $('pauseGenerate');
