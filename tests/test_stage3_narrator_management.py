@@ -273,16 +273,30 @@ class Stage3NarratorManagementTests(unittest.TestCase):
             "profile_available": True,
         }
         narrator_profile = self._profile("Series Narrator")
-        self.bridge._find_profile = lambda name: narrator_profile if name == "Series Narrator" else None
-        # GEN-07 permits all-dialogue narrator routing only when no character
-        # voice profile is configured. The normal cast-aware gate remains strict.
+        unassigned_profile = self._profile("Unassigned Character")
+        profiles = {
+            narrator_profile.name: narrator_profile,
+            "Mira Voice": self._profile("Mira Voice"),
+            unassigned_profile.name: unassigned_profile,
+        }
+        self.bridge._find_profile = lambda name: profiles.get(name)
+        self.bridge._unassigned_character_default_read = lambda: {
+            "profile_name": unassigned_profile.name,
+            "profile_available": True,
+            "profile": unassigned_profile,
+        }
+        # Unidentified quoted passages are accepted only when the mandatory
+        # app-wide fallback exists; they remain visible as pending and route to
+        # that voice instead of silently being assigned to the narrator.
         state = {"characters": [{"name": "Mira", "voice_profile": "Mira Voice"}]}
         with patch(
             "app.ui.premium_v2_host.load_profiles",
-            return_value=[narrator_profile, self._profile("Mira Voice")],
+            return_value=list(profiles.values()),
         ):
-            with self.assertRaisesRegex(ValueError, "dialogue passage.*need speaker review"):
-                self.bridge._resolve_narrator_for_generation(project, state, [chapter])
+            _profile, resolved = self.bridge._resolve_narrator_for_generation(project, state, [chapter])
+        self.assertEqual(resolved["dialogue_routing"], "saved_character_assignments_with_unassigned_fallback")
+        self.assertEqual(resolved["unassigned_character_profile_name"], unassigned_profile.name)
+        self.assertGreaterEqual(resolved["pending_dialogue_count"], 1)
 
     def test_generation_fails_closed_when_effective_narrator_profile_is_missing(self):
         chapter = Chapter(1, "One", "The sun rose.")
