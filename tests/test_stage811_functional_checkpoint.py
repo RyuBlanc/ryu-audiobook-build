@@ -84,7 +84,7 @@ class FunctionalCheckpoint20261111Tests(unittest.TestCase):
         bridge._job_update = Mock(side_effect=update)
         with patch(
             "app.ui.premium_v2_host.time.monotonic",
-            side_effect=[10.0, 11.0, 12.0, 13.0, 14.0, 15.0],
+            side_effect=[10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0],
         ):
             host.PremiumV2Bridge._generation_progress(
                 bridge, "generation-1", 0, 23, 0, "plan:2000:0:8"
@@ -92,16 +92,16 @@ class FunctionalCheckpoint20261111Tests(unittest.TestCase):
             host.PremiumV2Bridge._generation_progress(
                 bridge, "generation-1", 1, 23, 0, "chunk-start:1/8"
             )
-            for completed, work in ((1, 250), (2, 500), (3, 750), (4, 1000)):
+            for completed, work in ((1, 250), (2, 500), (3, 750)):
                 host.PremiumV2Bridge._generation_progress(
                     bridge, "generation-1", 1, 23, work,
                     f"chunk:{completed}/8:{work}/2000",
                 )
             self.assertIsNone(bridge._jobs["generation-1"].get("eta_seconds"))
-            # Three usable samples are collected only after the first chunk
-            # (which includes model warm-up) has been excluded.
+            # Three usable samples are collected after the first completed
+            # chunk (which includes model warm-up) has been excluded.
             host.PremiumV2Bridge._generation_progress(
-                bridge, "generation-1", 1, 23, 1250, "chunk:5/8:1250/2000"
+                bridge, "generation-1", 1, 23, 1000, "chunk:4/8:1000/2000"
             )
             self.assertIsNotNone(bridge._jobs["generation-1"].get("eta_seconds"))
             self.assertIn("measured throughput", bridge._jobs["generation-1"].get("generation_eta_basis", ""))
