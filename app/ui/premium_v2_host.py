@@ -3780,7 +3780,7 @@ class PremiumV2Bridge(QObject):
             self._preview_cancel_events = {}
         with getattr(self, "_jobs_lock", threading.RLock()):
             self._preview_cancel_events[job_id] = cancel_event
-        self._job_update(job_id, state="running", started_at=self._now(), stage="Preparing preview", progress=2,
+        self._job_update(job_id, state="running", started_at=self._now(), stage="Loading voice model", progress=0,
                           current_chapter=int(selected_chapter.number) if selected_chapter else 0,
                           current_chapter_title=str(selected_chapter.title or "") if selected_chapter else "",
                           current_chapter_id=str(getattr(selected_chapter, "chapter_id", "") or getattr(selected_chapter, "id", "") or "") if selected_chapter else "",
