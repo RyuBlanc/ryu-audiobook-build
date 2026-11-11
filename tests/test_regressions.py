@@ -458,7 +458,8 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('qwen_mode="design"', voice_page)
         self.assertIn('preview_profile.qwen_mode = "design-preview"', host)
         self.assertIn('best_long_form_clone_kind()', provider)
-        self.assertIn('"--clone-kind", clone_kind or best_clone_kind()', provider)
+        self.assertIn('"--clone-kind", clone_kind or "base-0.6b"', provider)
+        self.assertNotIn('clone_kind or best_clone_kind()', provider)
 
     def test_voicedesign_requires_stable_base_model(self):
         provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")

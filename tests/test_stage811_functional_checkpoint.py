@@ -318,7 +318,7 @@ class FunctionalCheckpoint20261111Tests(unittest.TestCase):
             adapter,
         )
 
-    def test_dragon_studio_pr_runs_packaged_acceptance_without_uploading_candidate_artifacts(self):
+    def test_dragon_studio_pr_runs_packaged_acceptance_and_uploads_candidate_installer_and_manifest(self):
         workflow = (
             Path(__file__).resolve().parents[1]
             / ".github"
@@ -343,11 +343,14 @@ class FunctionalCheckpoint20261111Tests(unittest.TestCase):
             start = workflow.index("      - name: " + step_name)
             next_step = workflow.find("\n      - name: ", start + 1)
             block = workflow[start:next_step if next_step >= 0 else len(workflow)]
-            self.assertIn(
-                "if: ${{ github.event_name != 'pull_request' }}",
-                block,
-                msg=step_name + " must not publish artifacts from PR validation.",
-            )
+            if step_name in {"Upload Windows installer artifact", "Upload release SHA-256 manifest"}:
+                self.assertIn("startsWith(github.head_ref, 'dragon-studio/')", block)
+            else:
+                self.assertIn(
+                    "if: ${{ github.event_name != 'pull_request' }}",
+                    block,
+                    msg=step_name + " must remain disabled for pull-request validation.",
+                )
     def test_narrator_only_remains_available_with_character_profiles(self):
         adapter = (Path(__file__).resolve().parents[1] / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         backend = (Path(__file__).resolve().parents[1] / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
