@@ -7,6 +7,7 @@ import json
 import os
 import re
 import tempfile
+import time
 import wave
 from typing import Callable
 
@@ -353,6 +354,7 @@ def generate_chapter(
     pacing_profile: str = "natural",
     preserve_paragraph_boundaries: bool = False,
     checkpoint_callback: Callable[[int, int], bool] | None = None,
+    on_chunk_timing: Callable[[int, int, float], None] | None = None,
 ) -> GenerationResult:
     plan = prepare_chapter_plan(
         chapter,
@@ -442,6 +444,7 @@ def generate_chapter(
                     )
                     for i in batch_indices
                 ]
+                batch_started = time.monotonic()
                 try:
                     try:
                         batch_provider(items, voice=chunk_voice)
@@ -459,6 +462,13 @@ def generate_chapter(
                         provider.synthesize(chunks[i], output, chunks_with_voices[i][1])
                 for i in batch_indices:
                     validate_and_commit(i, chunks_dir / f"{i + 1:05d}.wav", chunks[i])
+                if on_chunk_timing:
+                    batch_work_units = sum(len(chunks[i]) for i in batch_indices)
+                    on_chunk_timing(
+                        batch_indices[-1] + 1,
+                        batch_work_units,
+                        max(0.001, time.monotonic() - batch_started),
+                    )
                 if checkpoint_callback:
                     # Batch synthesis may write multiple chunks at once. Commit
                     # the entire validated batch before pausing at this safe point.
@@ -474,12 +484,19 @@ def generate_chapter(
             index += 1
             continue
 
+        synthesis_started = time.monotonic()
         if isinstance(chunk_voice, list):
             synthesize_voice_set(provider, chunks[index], chunk_voice, output)
         else:
             provider.synthesize(chunks[index], output, chunk_voice)
 
         validate_and_commit(index, output, chunks[index])
+        if on_chunk_timing:
+            on_chunk_timing(
+                index + 1,
+                len(chunks[index]),
+                max(0.001, time.monotonic() - synthesis_started),
+            )
         if checkpoint_callback:
             # Persist this chunk before allowing a pause/cancel request to
             # suspend generation. Resume will reuse only validated WAV payloads.
