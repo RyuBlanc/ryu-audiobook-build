@@ -33,16 +33,24 @@ class QwenExternalRuntimePackagingTests(unittest.TestCase):
         self.assertNotIn('"device": "pending"', source)
         self.assertIn('"backend": _actual_backend(device)', source)
         self.assertIn('"device": device', source)
-        self.assertIn('if active_task not in {"design", "design-preview"}:', source)
+        lazy_start = source.index('if active_task in {"design", "design-preview"}:')
+        lazy_end = source.index("    else:", lazy_start)
+        lazy_handshake = source[lazy_start:lazy_end]
+        self.assertIn('"worker_ready": True', lazy_handshake)
+        self.assertNotIn('"device": device', lazy_handshake)
+        self.assertNotIn('"backend": _actual_backend(device)', lazy_handshake)
 
-    def test_voice_design_reports_ready_only_after_first_real_model_load(self):
+    def test_voice_design_preview_reports_verified_device_with_synthesis_result_after_load(self):
         source = (ROOT / "app" / "tts" / "qwen_character_worker.py").read_text(encoding="utf-8")
         start = source.index('elif active_task == "design-preview" and model is None:')
         end = source.index("if isinstance(batch_texts, list):", start)
         section = source[start:end]
         self.assertIn("load_model(args.kind)", section)
-        self.assertIn('"ready": True', section)
-        self.assertIn('"device": device', section)
+        self.assertNotIn('"ready": True', section)
+        self.assertIn('elif active_task == "design-preview":', source)
+        self.assertIn("_generate_design_preview(model, request, output)", source)
+        self.assertIn('"ok": True', source)
+        self.assertIn('"device": device', source)
 
     def test_provider_marks_actual_device_only_after_successful_audio_response(self):
         source = (ROOT / "app" / "tts" / "providers" / "qwen_character.py").read_text(encoding="utf-8")
