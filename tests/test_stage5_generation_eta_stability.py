@@ -48,7 +48,7 @@ class _WavProvider:
             handle.setnchannels(1)
             handle.setsampwidth(2)
             handle.setframerate(22050)
-            handle.writeframes(b"\\x00\\x00" * 4410)
+            handle.writeframes(bytes(8820))
         return target
 
 
