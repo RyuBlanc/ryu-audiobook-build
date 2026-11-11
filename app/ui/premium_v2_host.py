@@ -4267,6 +4267,14 @@ class PremiumV2Bridge(QObject):
             if isinstance(preview_registry, dict) and jobs_lock is not None:
                 with jobs_lock:
                     preview_registry[job_id] = provider
+            # Register the live provider before its first potentially long
+            # inference request. Task Manager cancellation uses this reference
+            # to terminate Qwen's subprocess immediately rather than waiting
+            # for the current synthesis call to return.
+            jobs_lock = getattr(self, "_jobs_lock", None)
+            if jobs_lock is not None:
+                with jobs_lock:
+                    getattr(self, "_preview_providers", {})[job_id] = provider
             status_setter = getattr(provider, "set_status_callback", None)
             if callable(status_setter):
                 status_setter(provider_status)
