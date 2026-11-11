@@ -70,8 +70,11 @@ class LiveProductionGenerationHarness:
         self._assert_no_active_audio_synthesis = Mock()
         self.close_preview_provider_cache = Mock()
         self._active_project = Mock(return_value=project)
-        self.unassigned_profile = SimpleNamespace(
-            name="Global Unassigned Character", provider="piper", voice_id="unassigned-character"
+        self.unassigned_profile = VoiceProfile(
+            name="Global Unassigned Character",
+            provider="piper",
+            voice_id="unassigned-character",
+            authorized=True,
         )
         self._resolve_narrator_for_generation = Mock(
             return_value=(
