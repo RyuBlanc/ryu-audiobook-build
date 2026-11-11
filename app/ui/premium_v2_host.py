@@ -8112,6 +8112,18 @@ class PremiumV2Bridge(QObject):
         else:
             changes["message"] = msg
 
+        # Provider loading, pronunciation preparation and chunk-start are
+        # real states, but they do not complete narration work. Preserve the
+        # last measured workload percentage instead of dropping the field or
+        # inventing progress. Pause deliberately omits progress so the durable
+        # job row retains its last saved value.
+        if "progress" not in changes and state != "paused":
+            current = getattr(self, "_jobs", {}).get(str(job_id), {})
+            try:
+                previous = float(current.get("progress") or 0)
+            except (TypeError, ValueError, OverflowError):
+                previous = 0.0
+            changes["progress"] = max(0, min(100, round(previous)))
         changes["state"] = state
         changes["stage"] = stage
         self._job_update(job_id, **changes)
