@@ -6084,7 +6084,9 @@ function renderProductionMetadataGate(active) {
     const conflictingDialogue = Math.max(0, Number(active.conflicting_dialogue_count || 0));
     const dialogueIndexIssues = Math.max(0, Number(active.dialogue_index_issue_count || 0));
     let characterStatus = narratorOnly
-      ? 'Narrator-only · saved narrator reads every passage; configured character profiles are ignored for this book'
+      ? (configuredCharacterVoiceCount === 0
+        ? '0 configured character voice profiles · Narrator-only; the saved narrator reads every passage.'
+        : configuredCharacterVoiceCount + ' configured character voice profile(s) · Narrator-only; character voices are ignored for this book and the saved narrator reads every passage.')
       : 'Character analysis not run';
     let characterKind = narratorOnly ? 'ready' : 'warn';
     if (!narratorOnly && active.dialogue_index_ready !== true) {
