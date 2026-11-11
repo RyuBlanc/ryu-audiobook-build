@@ -3072,7 +3072,12 @@
     const project = window.ryuPremiumActiveProject || null;
     const series = String(project?.series_name || project?.series || project?.title || '').trim();
     const panel = $('voices') || $('voice');
-    if (!series || !panel) { seriesNarratorDefault = null; return null; }
+    if (!panel) { seriesNarratorDefault = null; return null; }
+    if (!series) {
+      seriesNarratorDefault = null;
+      await refreshUnassignedCharacterDefaultControls(panel);
+      return null;
+    }
     try { seriesNarratorDefault = await call('narrator.series.default.get', {series}); }
     catch (error) { console.warn('[Ryu series narrator default]', error); seriesNarratorDefault = null; }
     let card = $('seriesNarratorDefaultCard');
@@ -3197,8 +3202,79 @@
         await waitForNarratorPreviewJob(result.job_id, duration, result.profile_name);
       } catch (error) { message(error?.message || String(error), true); }
     });
+    await refreshUnassignedCharacterDefaultControls(panel);
     return seriesNarratorDefault;
   }
+
+  async function refreshUnassignedCharacterDefaultControls(panel = $('voices') || $('voice')) {
+    if (!panel) return null;
+    let selected = null;
+    try {
+      selected = await call('voice.unassigned_character.default.get', {});
+    } catch (error) {
+      console.warn('[Ryu Unassigned Character default]', error);
+      selected = null;
+    }
+    let card = $('unassignedCharacterDefaultCard');
+    if (!card) {
+      card = document.createElement('section');
+      card.id = 'unassignedCharacterDefaultCard';
+      card.className = 'card';
+      card.style.cssText = 'margin:14px 0;padding:14px;border:1px solid rgba(150,160,180,.22);border-radius:12px;';
+      const anchor = $('seriesNarratorDefaultCard') || $('useNarrator')?.closest('.card');
+      if (anchor?.parentNode) anchor.parentNode.insertBefore(card, anchor.nextSibling);
+      else panel.appendChild(card);
+    }
+    const savedName = String(selected?.profile_name || '');
+    const available = selected?.profile_available === true;
+    const profileOptions = characterSavedProfiles().map(profile =>
+      '<option value="' + esc(profile.name) + '"' +
+      (String(profile.name).toLowerCase() === savedName.toLowerCase() ? ' selected' : '') +
+      '>' + esc(characterSavedProfileLabel(profile)) + '</option>'
+    ).join('');
+    card.innerHTML =
+      '<div style="font-weight:750;margin-bottom:5px">Unassigned Character · Global Default</div>' +
+      '<div class="muted" style="font-size:12px;line-height:1.45;margin-bottom:10px">' +
+      'Mandatory fallback voice for every series and book. In character-based generation, ' +
+      'dialogue or detected characters without a valid individual assignment use this profile. ' +
+      'It does not replace the narrator or explicitly assigned character voices.</div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+      '<select id="unassignedCharacterProfile" class="input" aria-label="Global Unassigned Character voice profile" style="min-width:220px;flex:1">' +
+      '<option value="">Choose a saved voice profile</option>' + profileOptions + '</select>' +
+      '<button class="btn small" type="button" id="saveUnassignedCharacterProfile">Save for All Series and Books</button></div>' +
+      '<div id="unassignedCharacterDefaultStatus" class="muted" style="font-size:12px;margin-top:8px">' +
+      (savedName && available
+        ? 'Saved global fallback · ' + esc(savedName)
+        : 'Required · choose and save a valid Voice Studio profile before character-based generation.') +
+      '</div>';
+    $('saveUnassignedCharacterProfile')?.addEventListener('click', async () => {
+      const profileName = String($('unassignedCharacterProfile')?.value || '').trim();
+      if (!profileName) {
+        message('Select a saved Voice Studio profile for Unassigned Character.', true);
+        return;
+      }
+      const button = $('saveUnassignedCharacterProfile');
+      if (button) button.disabled = true;
+      try {
+        const saved = await call('voice.unassigned_character.default.save', {
+          profile_name:profileName
+        });
+        const status = $('unassignedCharacterDefaultStatus');
+        if (status) status.textContent =
+          'Saved global fallback · ' + String(saved.profile_name || profileName) +
+          ' · applies to all series and books.';
+        message('Unassigned Character default saved for all series and books: ' +
+          String(saved.profile_name || profileName));
+        await refreshCurrentProjectCard().catch(() => {});
+      } catch (error) {
+        message(error?.message || String(error), true);
+      } finally {
+        if (button) button.disabled = false;
+      }
+    });
+    return selected;
+  }
+
   function activeCharacterProjectSeries() {
     const active = window.ryuPremiumActiveProject || {};
     return String(active.series_name || active.series || active.title || '').trim();
