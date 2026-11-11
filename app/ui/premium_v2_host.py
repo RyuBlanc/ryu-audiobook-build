@@ -8139,11 +8139,11 @@ class PremiumV2Bridge(QObject):
                             previous_remaining_now = max(0.0, float(previous_eta))
                         discrepancy = measured_remaining - previous_remaining_now
                         if discrepancy > 0:
-                            # A single slower chunk can revise the estimate
-                            # upward, but cannot add more than 60 seconds at once.
-                            # Sustained slower measurements continue to converge
-                            # through the rolling median/EMA and later chunks.
-                            adjustment = min(discrepancy * 0.15, 60.0)
+                            # The rolling median/EMA already resists an isolated
+                            # slow sample. Apply the evidence-based upward correction
+                            # in full, bounded to 60 seconds per update, so an expired
+                            # forecast can recover without a multi-minute jump.
+                            adjustment = min(discrepancy, 60.0)
                         else:
                             # Faster measured work may reduce an overestimate,
                             # while damping one unusually short chunk.
