@@ -3,8 +3,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import re
 from collections import Counter
+import unicodedata
 
 from app.chapters.detector import Chapter
+
+
+
+def _identity_key(value: str) -> str:
+    """Normalize Unicode spelling before comparing a cast/series identity."""
+    return unicodedata.normalize("NFC", str(value or "")).strip().casefold()
+
+
 
 
 @dataclass
@@ -108,7 +117,7 @@ def analyze_book(chapters: list[Chapter]) -> CharacterAnalysis:
     canonical, aliases = _canonicalize_candidates(candidates)
 
     records: dict[str, Character] = {
-        name.casefold(): Character(
+        _identity_key(name): Character(
             name=name,
             role="Possible Character",
             aliases=sorted(aliases.get(name, set())),
@@ -139,7 +148,7 @@ def analyze_book(chapters: list[Chapter]) -> CharacterAnalysis:
     for speaker in manual_speakers:
         if _is_plausible_name(speaker):
             canonical.append(speaker)
-            key = speaker.casefold()
+            key = _identity_key(speaker)
             if key not in records:
                 records[key] = Character(
                     name=speaker,
@@ -158,7 +167,7 @@ def analyze_book(chapters: list[Chapter]) -> CharacterAnalysis:
         if not speaker:
             continue
         speaker = _resolve_canonical(speaker, canonical, aliases) or speaker
-        key = speaker.casefold()
+        key = _identity_key(speaker)
         if key not in records:
             records[key] = Character(name=speaker, role="Possible Character")
         item = records[key]
@@ -172,19 +181,19 @@ def analyze_book(chapters: list[Chapter]) -> CharacterAnalysis:
     if narrator_name:
         narrator_name = _resolve_canonical(narrator_name, canonical, aliases) or narrator_name
         records.setdefault(
-            narrator_name.casefold(),
+            _identity_key(narrator_name),
             Character(name=narrator_name, role="Narrating Character"),
         )
 
     characters = list(records.values())
-    characters.sort(key=lambda c: (-c.dialogue_count, -c.confidence, c.name.casefold()))
+    characters.sort(key=lambda c: (-c.dialogue_count, -c.confidence, _identity_key(c.name)))
     for item in characters:
         item.role = (
             "Primary Character" if item.dialogue_count >= 8 else
             "Supporting Character" if item.dialogue_count >= 2 else
             "Possible Character"
         )
-        if narrator_name and item.name.casefold() == narrator_name.casefold():
+        if narrator_name and _identity_key(item.name) == _identity_key(narrator_name):
             item.role = "Narrating Character"
 
     audiobook_narrator = Character(
@@ -201,6 +210,9 @@ def analyze_book(chapters: list[Chapter]) -> CharacterAnalysis:
 
 
 def _clean_analysis_text(text: str) -> str:
+    # Normalize before speaker tokenization so precomposed and decomposed
+    # accented characters have identical source and identity representations.
+    text = unicodedata.normalize("NFC", str(text or ""))
     text = re.sub(r"^\s*Page\s+\d+\s+.*mp4directs\.com.*$", "", text, flags=re.I | re.M)
     text = re.sub(r"^\s*Page\s+\d+\s*$", "", text, flags=re.I | re.M)
     text = re.sub(r"^.*mp4directs\.com.*$", "", text, flags=re.I | re.M)
@@ -316,7 +328,7 @@ def _discover_explicit_speakers(text: str) -> set[str]:
 
 
 def _canonicalize_candidates(candidates: set[str]) -> tuple[list[str], dict[str, set[str]]]:
-    ordered = sorted(candidates, key=lambda x: (-len(x.split()), -len(x), x.casefold()))
+    ordered = sorted(candidates, key=lambda x: (-len(x.split()), -len(x), _identity_key(x)))
     canonical: list[str] = []
     aliases: dict[str, set[str]] = {}
     for candidate in ordered:
@@ -326,10 +338,10 @@ def _canonicalize_candidates(candidates: set[str]) -> tuple[list[str], dict[str,
         target = None
         for existing in list(canonical):
             ewords = existing.split()
-            if len(words) == 1 and len(ewords) > 1 and words[0].casefold() in {w.casefold() for w in ewords}:
+            if len(words) == 1 and len(ewords) > 1 and _identity_key(words[0]) in {_identity_key(w) for w in ewords}:
                 target = existing
                 break
-            if len(ewords) == 1 and len(words) > 1 and ewords[0].casefold() in {w.casefold() for w in words}:
+            if len(ewords) == 1 and len(words) > 1 and _identity_key(ewords[0]) in {_identity_key(w) for w in words}:
                 target = candidate
                 canonical.remove(existing)
                 aliases.setdefault(candidate, set()).add(existing)
@@ -338,7 +350,7 @@ def _canonicalize_candidates(candidates: set[str]) -> tuple[list[str], dict[str,
             aliases.setdefault(target, set()).add(candidate)
         elif candidate not in canonical:
             canonical.append(candidate)
-    canonical.sort(key=lambda x: x.casefold())
+    canonical.sort(key=_identity_key)
     return canonical, aliases
 
 
@@ -451,11 +463,11 @@ def _speaker_near_quote(
 
 
 def _resolve_candidate(name: str, candidates: list[str]) -> str | None:
-    key = name.casefold()
+    key = _identity_key(name)
     for candidate in candidates:
-        if candidate.casefold() == key:
+        if _identity_key(candidate) == key:
             return candidate
-        if key in {part.casefold() for part in candidate.split()}:
+        if key in {_identity_key(part) for part in candidate.split()}:
             return candidate
     return None
 
@@ -475,11 +487,11 @@ def infer_speaker_for_quote(
 
 
 def _resolve_canonical(name: str, canonical: list[str], aliases: dict[str, set[str]]) -> str | None:
-    key = name.casefold()
+    key = _identity_key(name)
     for item in canonical:
-        if item.casefold() == key:
+        if _identity_key(item) == key:
             return item
-        if key in {a.casefold() for a in aliases.get(item, set())}:
+        if key in {_identity_key(a) for a in aliases.get(item, set())}:
             return item
     return None
 
@@ -517,6 +529,7 @@ def _all_dialogue_spans(text: str) -> list[tuple[int, int, str]]:
 
 
 def _clean_name(value: str) -> str:
+    value = unicodedata.normalize("NFC", str(value or ""))
     value = re.sub(r"\s+", " ", value.strip(" ,.;:!?—–-\"“”"))
     words = []
     for word in value.split():
@@ -583,31 +596,31 @@ def character_detection_exclusion_keys(
     intentional later assignment can restore the identity without allowing
     an unrelated series or ordinary AI guess to bypass the dismissal.
     """
-    wanted_series = str(series or "").strip().casefold()
+    wanted_series = _identity_key(series)
     if not wanted_series or not isinstance(exclusions, (list, tuple)):
         return set()
     result: set[str] = set()
     for row in exclusions:
         if not isinstance(row, dict):
             continue
-        row_series = str(row.get("series") or "").strip().casefold()
+        row_series = _identity_key(row.get("series"))
         if not row_series or row_series != wanted_series:
             continue
         name = str(row.get("name") or row.get("primary_name") or "").strip()
         if name:
-            result.add(name.casefold())
+            result.add(_identity_key(name))
         aliases = row.get("aliases") or []
         if isinstance(aliases, str):
             aliases = [aliases]
         if isinstance(aliases, (list, tuple, set)):
             result.update(
-                str(alias).strip().casefold()
+                _identity_key(alias)
                 for alias in aliases if str(alias or "").strip()
             )
     protected: set[str] = set()
     for value in (protected_names or ()):
         if isinstance(value, dict):
-            protected_series = str(value.get("series") or "").strip().casefold()
+            protected_series = _identity_key(value.get("series"))
             if protected_series and protected_series != wanted_series:
                 continue
             names = [value.get("name"), *(value.get("aliases") or [])]
@@ -616,7 +629,7 @@ def character_detection_exclusion_keys(
             # series for simple callers and legacy tests.
             names = [value]
         protected.update(
-            str(name).strip().casefold()
+            _identity_key(name)
             for name in names if str(name or "").strip()
         )
     return result - protected
