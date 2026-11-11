@@ -48,8 +48,12 @@ class NarratorResolverHarness:
         self._now = Mock(return_value="2026-11-09T01:20:00+00:00")
 
     def _effective_generation_character_rows(self, state, default_series, **kwargs):
+        # The production resolver supplies its current profile catalogue. This
+        # harness keeps its deterministic saved catalogue authoritative.
+        kwargs.pop("available_profiles", None)
+        kwargs.pop("strict", None)
         return host.PremiumV2Bridge._effective_generation_character_rows(
-            self, state, default_series, available_profiles=self._saved_profiles, **kwargs
+            self, state, default_series, available_profiles=self._saved_profiles, strict=False
         )
 
 
