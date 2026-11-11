@@ -16,13 +16,15 @@ class CurrentHelpGuideRequirements(unittest.TestCase):
         help_end = html.index("</main>", help_start)
         cls.original_guide = html[help_start:help_end]
 
-    def test_gen07_explains_zero_profile_gate_dialogue_routing_and_narrator_requirement(self):
+    def test_gen07_explains_explicit_narrator_only_choice_and_global_unassigned_fallback(self):
         for phrase in (
             "Narrator-only audiobook generation (GEN-07)",
-            "zero saved character voice-profile assignments",
+            "per-book choice",
+            "even when character voice profiles are configured",
             "including quoted and dash-led dialogue",
-            "missing narrator profiles continue to block generation",
-            "normal cast-aware rules apply",
+            "mandatory app-wide Unassigned Character profile",
+            "click Generate full audiobook again",
+            "valid saved narrator profile is still required",
         ):
             self.assertIn(phrase, self.guide)
 
@@ -64,10 +66,14 @@ class CurrentHelpGuideRequirements(unittest.TestCase):
         ):
             self.assertIn(topic, self.original_guide)
 
-    def test_original_help_explains_the_current_narrator_only_gate(self):
+    def test_original_help_gen07_is_reconciled_without_replacing_the_seven_stage_guide(self):
         self.assertIn("Narrator-only audiobook generation (GEN-07)", self.guide)
-        self.assertIn("zero saved character voice-profile assignments", self.guide)
-        self.assertIn("normal cast-aware rules apply", self.guide)
+        self.assertIn("zero valid character voice profiles are configured", self.guide)
+        self.assertIn("unresolved dialogue must be reviewed or assigned", self.guide)
+        self.assertIn("narratorOnlyItem.textContent", self.guide)
+        self.assertIn("unassignedItem.textContent", self.guide)
+        self.assertIn("Narrator-Only Generation is an explicit per-book choice", self.guide)
+        self.assertIn("mandatory app-wide Unassigned Character profile", self.guide)
         self.assertIn("zero valid character voice profiles are configured", self.original_guide)
         self.assertIn("unresolved dialogue must be reviewed or assigned", self.original_guide)
 
