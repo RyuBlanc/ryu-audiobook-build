@@ -8546,8 +8546,8 @@ function renderProductionMetadataGate(active) {
     if($('playPreview')){$('playPreview').disabled=true;$('playPreview').textContent='▶ Play';}
     if($('downloadPreview'))$('downloadPreview').disabled=true;
     if($('previewProgress'))$('previewProgress').style.width='0%';
-    if($('previewState'))$('previewState').textContent='Preparing · 2%';
-    if($('validation'))$('validation').textContent='Preparing synthesis · 2%';
+    if($('previewState'))$('previewState').textContent='Loading voice model · 0%';
+    if($('validation'))$('validation').textContent='Loading voice model · 0%';
     updateVoiceActionButtons();
     const data=await call('voice.preview',payload);
     if(previewToken!==voicePreviewEpoch)return;
