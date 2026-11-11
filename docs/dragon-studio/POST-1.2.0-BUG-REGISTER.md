@@ -47,6 +47,16 @@ The current screenshot shows these failed Build Windows App push runs on the for
 
 These three runs are not considered diagnosed merely because their commit subjects are known. The exact failing job/step logs must be obtained before choosing a correction. The available connected Actions lookup in the current session cannot resolve these push-triggered runs by run number; #3200 is not the internal Actions run ID.
 
+## Diagnosed Qwen diagnostic-test regression — Builds Windows App #3245–#3250
+
+Affected head: `b29d9e162a32e149b5e51c16a172e30d46ded4aa`.
+
+Failed runs: [#3245](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43014810959), [#3246](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43014816798), [#3247](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43014817131), [#3248](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43014820763), [#3249](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43014823323), [#3250](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43014829590). Build #3244 / commit `f9457470293cbd0213efd2d558f65b679e504d5a` is the passing predecessor.
+
+The suite ran 1,498 tests and failed with one error in `test_worker_timeout_reports_live_state_and_captured_stderr_log`. The test patched `time.monotonic` with a finite iterable, but `_read_response` performs more clock reads per wait loop than the fixture anticipated. The mock raised `StopIteration` before the timeout assertion. Since the log handle was closed only after that assertion, Windows temporary-directory cleanup then raised a secondary `PermissionError [WinError 32]`.
+
+The correction is limited to deterministic test timing/cleanup, safe closing of the stderr log after its diagnostic tail has been assembled, and robust artifact collection using an explicit `if: always()` PowerShell copy to `qwen-cpu-acceptance/`. It does not increase timeouts, weaken acceptance conditions, or hide the Qwen failure.
+
 ## Diagnosed regression-suite failure — Build Windows App #3202
 
 The first pull-request validation on the initial Dragon Studio head (commit `b86ee65`, PR #35) completed installation, JavaScript syntax validation, the isolated Qt lifecycle test and the focused Stage 6 preflight successfully. The full regression suite ran 1,489 tests and failed with **4 failures and 1 error**.
