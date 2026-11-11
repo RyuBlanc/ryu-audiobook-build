@@ -140,6 +140,18 @@ class Stage5GenerationEtaStabilityTests(unittest.TestCase):
         self.assertIn("Date.now() - measuredAt", eta)
         self.assertIn("value - liveSeconds", eta)
 
+    def test_native_generation_page_uses_measured_samples_not_elapsed_fallback(self):
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "app"
+            / "ui"
+            / "generation_page.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('elif message.startswith("chunk-timing:"):', source)
+        self.assertIn("if len(ordered) >= 3:", source)
+        self.assertIn("waiting for the active chunk", source)
+        self.assertNotIn("fallback_rate = work_done / elapsed", source)
+
     def test_production_exposes_estimated_and_measured_audiobook_runtime(self):
         root = Path(__file__).resolve().parents[1]
         bridge = (root / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
