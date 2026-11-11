@@ -108,20 +108,30 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
             provider._worker_log = log_path.open("a", encoding="utf-8")
             provider._worker = SimpleNamespace(poll=lambda: None)
             provider._stdout_queue = output_queue
-            with patch(
-                "app.tts.providers.qwen_character.time.monotonic",
-                side_effect=(0.0, 0.0, 2.1, 2.1, 3.0, 3.0, 4.0),
-            ), patch(
-                "app.tts.providers.qwen_character.queue.Queue.get",
-                side_effect=queue.Empty,
-            ), patch.object(provider, "_status") as status:
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "timed out.*Worker is still running.*diagnostic sentinel",
-                ):
-                    provider._read_response(timeout=4.0, heartbeat="Loading model")
-            self.assertTrue(status.called)
-            provider._worker_log.close()
+            class FakeClock:
+                def __init__(self):
+                    self.value = 0.0
+
+                def monotonic(self):
+                    self.value += 0.75
+                    return self.value
+
+            try:
+                with patch(
+                    "app.tts.providers.qwen_character.time.monotonic",
+                    side_effect=FakeClock().monotonic,
+                ), patch(
+                    "app.tts.providers.qwen_character.queue.Queue.get",
+                    side_effect=queue.Empty,
+                ), patch.object(provider, "_status") as status:
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "timed out.*Worker is still running.*diagnostic sentinel",
+                    ):
+                        provider._read_response(timeout=4.0, heartbeat="Loading model")
+                self.assertTrue(status.called)
+            finally:
+                provider.close()
 
     def test_worker_exit_while_waiting_includes_exit_code_and_stderr(self):
         import queue
@@ -143,19 +153,21 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
             log_path = Path(temporary) / "worker.log"
             log_path.write_text("worker crashed: diagnostic sentinel", encoding="utf-8")
             provider._worker_log = log_path.open("a", encoding="utf-8")
-            with patch(
-                "app.tts.providers.qwen_character.time.monotonic",
-                side_effect=(0.0, 0.0, 2.0, 2.0, 3.0),
-            ), patch(
-                "app.tts.providers.qwen_character.queue.Queue.get",
-                side_effect=queue.Empty,
-            ):
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "exited while waiting.*Exit code: 37.*diagnostic sentinel",
+            try:
+                with patch(
+                    "app.tts.providers.qwen_character.time.monotonic",
+                    side_effect=(0.0, 0.0, 2.0, 2.0, 3.0),
+                ), patch(
+                    "app.tts.providers.qwen_character.queue.Queue.get",
+                    side_effect=queue.Empty,
                 ):
-                    provider._read_response(timeout=3.0, heartbeat="Loading model")
-            provider._worker_log.close()
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "exited while waiting.*Exit code: 37.*diagnostic sentinel",
+                    ):
+                        provider._read_response(timeout=3.0, heartbeat="Loading model")
+            finally:
+                provider.close()
 
     def test_command_runner_enforces_timeout_when_child_stalls_without_stdout(self):
         started = time.monotonic()
