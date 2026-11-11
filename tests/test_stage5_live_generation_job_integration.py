@@ -200,7 +200,7 @@ class Stage53LiveGenerationIntegrationTests(unittest.TestCase):
             local_provider.calls.clear()
             with (
                 patch.object(host, "provider_from_profile", return_value=(local_provider, profile.voice_id)),
-                patch.object(host, "load_profiles", return_value=[]),
+                patch.object(host, "load_profiles", return_value=[bridge.unassigned_profile]),
                 patch.object(host, "_effective_pronunciation_dictionary", return_value=[]),
                 patch("app.audio.library.effective_background_audio_mode", return_value="off"),
                 patch("app.audio.library.validate_saved_audio_paths"),
