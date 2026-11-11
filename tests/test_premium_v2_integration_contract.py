@@ -85,6 +85,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn('"production.generate_book": True', self.host)
         self.assertIn('"voice.save": True', self.host)
         self.assertIn('"voice.import_reference": True', self.host)
+        self.assertIn('"voice.unassigned_character.default.get": True', self.host)
+        self.assertIn('"voice.unassigned_character.default.save": True', self.host)
         self.assertIn('"models.install": self._models_install', self.host)
         self.assertIn('"models.install": True', self.host)
         self.assertIn('"character.update": True', self.host)
