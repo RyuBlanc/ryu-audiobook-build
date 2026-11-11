@@ -2236,17 +2236,21 @@ class PremiumV2Bridge(QObject):
                     row["elapsed_seconds"] = max(0, int((datetime.now(timezone.utc) - datetime.fromisoformat(row["started_at"])).total_seconds()))
                 except (TypeError, ValueError):
                     pass
-                try:
-                    progress = max(0.0, min(100.0, float(row.get("progress") or 0)))
-                    elapsed = int(row.get("elapsed_seconds") or 0)
-                    # Avoid displaying noisy estimates during startup or when
-                    # progress has not advanced enough to be meaningful.
-                    row["eta_seconds"] = (
-                        max(0, int(elapsed * (100.0 - progress) / progress))
-                        if elapsed >= 5 and progress >= 5 and progress < 100 else None
-                    )
-                except (TypeError, ValueError, ZeroDivisionError):
-                    row["eta_seconds"] = None
+                if str(row.get("type") or "").casefold() == "audiobook-generation":
+                    # Full-book ETA is populated only by _generation_progress()
+                    # after completed chunks provide measured throughput.
+                    # Never extrapolate from a UI percentage or chapter count.
+                    row.setdefault("eta_seconds", None)
+                else:
+                    try:
+                        progress = max(0.0, min(100.0, float(row.get("progress") or 0)))
+                        elapsed = int(row.get("elapsed_seconds") or 0)
+                        row["eta_seconds"] = (
+                            max(0, int(elapsed * (100.0 - progress) / progress))
+                            if elapsed >= 5 and progress >= 5 and progress < 100 else None
+                        )
+                    except (TypeError, ValueError, ZeroDivisionError):
+                        row["eta_seconds"] = None
             if row.get("state") in {"completed", "failed", "cancelled"}:
                 row["completed_at"] = row.get("completed_at") or row["updated_at"]
                 row["eta_seconds"] = 0
@@ -7865,41 +7869,182 @@ class PremiumV2Bridge(QObject):
                 )}
 
     def _generation_progress(self, job_id: str, chapter: int, total: int, done: int, message: str) -> None:
+        """Publish completed text-work units and an ETA measured from this run's chunks."""
         msg = str(message or "")
-        state, stage, progress = "running", "Generating narration", None
+        state = "running"
+        stage = "Generating narration"
+        changes: dict[str, Any] = {
+            "state": state,
+            "current_chapter": int(chapter or 0),
+            "chapters_total": int(total or 0),
+            "generation_progress_basis": "completed_normalized_text_workload",
+        }
+        now = time.monotonic()
+        timings = getattr(self, "_generation_progress_timing", None)
+        if not isinstance(timings, dict):
+            self._generation_progress_timing = {}
+            timings = self._generation_progress_timing
+        timing = timings.setdefault(
+            str(job_id),
+            {"last_at": None, "last_work": 0, "samples": []},
+        )
+
         if msg.startswith("paused:"):
-            state, stage, msg = "paused", "Paused at chapter checkpoint", msg.split(":", 1)[1]
+            state = "paused"
+            stage = "Paused at chapter checkpoint"
+            changes["message"] = msg.split(":", 1)[1]
+            changes["eta_seconds"] = None
         elif msg.startswith("plan:"):
-            stage, progress = "Preparing generation plan", 2
+            parts = msg.split(":")
+            try:
+                total_work = max(1, int(parts[1]))
+                total_chunks = max(1, int(parts[3]))
+            except (IndexError, TypeError, ValueError):
+                total_work, total_chunks = 1, 1
+            timing.update({"last_at": None, "last_work": 0, "samples": []})
+            stage = "Preparing generation plan"
+            changes.update({
+                "progress": 0,
+                "eta_seconds": None,
+                "generation_completed_work_units": 0,
+                "generation_total_work_units": total_work,
+                "generation_completed_chunks": 0,
+                "generation_total_chunks": total_chunks,
+                "generation_eta_sample_count": 0,
+                "generation_eta_basis": None,
+                "message": (
+                    f"Generation plan ready · {total_chunks} synthesis chunk(s) "
+                    f"covering {total_work:,} normalized text unit(s)."
+                ),
+            })
         elif msg.startswith("provider:"):
-            stage, msg = "Voice provider", msg.partition(":")[2]
+            stage = "Loading voice provider"
+            changes["message"] = msg.partition(":")[2]
         elif msg.startswith("pronunciation:"):
-            _prefix, replacements, rules = msg.split(":", 2)
+            parts = msg.split(":", 2)
+            try:
+                replacements = int(parts[1])
+                rules = int(parts[2])
+            except (IndexError, TypeError, ValueError):
+                replacements, rules = 0, 0
             stage = "Pronunciation rules applied"
-            msg = f"Prepared {int(replacements)} pronunciation replacement(s) across {int(rules)} enabled rule(s) for synthesis."
+            changes["message"] = (
+                f"Prepared {replacements} pronunciation replacement(s) "
+                f"across {rules} enabled rule(s) for synthesis."
+            )
         elif msg.startswith("chunk-start:"):
-            stage, progress = "Rendering chapter audio", min(85, max(3, int(85 * max(0, chapter - 1) / max(1, total))))
+            stage = "Loading voice model" if int(timing.get("last_work") or 0) == 0 else "Rendering chapter audio"
+            timing["last_at"] = now
+            changes["message"] = (
+                "Initializing the selected voice provider; no narration chunk has completed yet."
+                if int(timing.get("last_work") or 0) == 0
+                else msg.partition(":")[2]
+            )
         elif msg.startswith("chunk:"):
             stage = "Rendering narration chunks"
             match = re.search(r":(\d+)/(\d+):(\d+)/(\d+)", msg)
             if match:
-                progress = min(88, max(3, 3 + int(85 * int(match.group(3)) / max(1, int(match.group(4))))))
+                completed_chunks = max(0, int(match.group(1)))
+                total_chunks = max(1, int(match.group(2)))
+                completed_work = max(0, int(match.group(3)))
+                total_work = max(1, int(match.group(4)))
+                previous_work = max(0, int(timing.get("last_work") or 0))
+                previous_at = timing.get("last_at")
+                delta_work = max(0, completed_work - previous_work)
+                delta_seconds = (
+                    max(0.0, now - float(previous_at))
+                    if previous_at is not None else 0.0
+                )
+                samples = timing.setdefault("samples", [])
+                if delta_work > 0 and delta_seconds >= 2.0:
+                    samples.append({
+                        "work": delta_work,
+                        "seconds": delta_seconds,
+                    })
+                    del samples[:-5]
+                timing["last_work"] = completed_work
+                timing["last_at"] = now
+                percent = round(100.0 * min(total_work, completed_work) / total_work)
+                changes.update({
+                    "progress": max(0, min(100, percent)),
+                    "generation_completed_work_units": completed_work,
+                    "generation_total_work_units": total_work,
+                    "generation_completed_chunks": completed_chunks,
+                    "generation_total_chunks": total_chunks,
+                    "generation_eta_sample_count": len(samples),
+                    "message": (
+                        f"Completed synthesis workload {completed_work:,}/{total_work:,} "
+                        f"text unit(s) · chunk {completed_chunks}/{total_chunks}."
+                    ),
+                })
+                elapsed = 0
+                try:
+                    row = getattr(self, "_jobs", {}).get(str(job_id), {})
+                    started = datetime.fromisoformat(str(row.get("started_at") or ""))
+                    elapsed = max(0, int((datetime.now(timezone.utc) - started).total_seconds()))
+                except (TypeError, ValueError):
+                    pass
+                eta = None
+                if (
+                    len(samples) >= 3
+                    and elapsed >= 30
+                    and completed_work > 0
+                    and completed_work < total_work
+                ):
+                    measured_seconds = sum(float(sample["seconds"]) for sample in samples)
+                    measured_work = sum(int(sample["work"]) for sample in samples)
+                    throughput = measured_work / measured_seconds if measured_seconds > 0 else 0.0
+                    if throughput > 0:
+                        eta = max(0, int((total_work - completed_work) / throughput))
+                        changes["generation_eta_basis"] = (
+                            f"measured throughput from {len(samples)} completed chunks in this run"
+                        )
+                changes["eta_seconds"] = eta
+        elif msg.startswith("chapter-complete:"):
+            stage = "Chapter audio saved"
+            current_work = max(0, int(done or 0))
+            try:
+                row = getattr(self, "_jobs", {}).get(str(job_id), {})
+                total_work = max(1, int(row.get("generation_total_work_units") or 1))
+            except (TypeError, ValueError):
+                total_work = 1
+            changes.update({
+                "progress": round(100.0 * min(total_work, current_work) / total_work),
+                "generation_completed_work_units": current_work,
+                "message": msg.partition(":")[2],
+            })
         elif msg.startswith("m4b-packaging"):
-            stage, progress = "Assembling audiobook", 90
+            stage = "Assembling final M4B"
+            changes.update({
+                "progress": 100,
+                "eta_seconds": None,
+                "generation_eta_basis": None,
+                "message": "All narration synthesis chunks are complete. Measuring final M4B assembly and validation.",
+            })
         elif msg.startswith("m4b-package:"):
-            stage = "Encoding and validating output"
-            match = re.match(r"m4b-package:(\d+)/(\d+):(.*)", msg)
-            if match:
-                progress = min(98, 90 + int(8 * int(match.group(1)) / max(1, int(match.group(2)))))
-                msg = match.group(3) or stage
+            stage = "Encoding and validating final M4B"
+            detail = msg.partition(":")[2].partition(":")[2]
+            changes.update({
+                "progress": 100,
+                "eta_seconds": None,
+                "generation_eta_basis": None,
+                "message": detail or stage,
+            })
         elif msg.startswith("m4b-complete"):
-            stage, progress = "Validating final audiobook", 99
+            stage = "Audiobook duration measured · M4B ready"
+            changes.update({
+                "progress": 100,
+                "eta_seconds": 0,
+                "message": "Final M4B assembly and validation completed.",
+            })
         elif msg.startswith("m4b-failed"):
             stage = "Audiobook assembly failed"
-        changes = {"state": state, "stage": stage, "message": msg,
-                   "current_chapter": int(chapter or 0), "chapters_total": int(total or 0)}
-        if progress is not None:
-            changes["progress"] = progress
+            changes["message"] = msg.partition(":")[2]
+            changes["eta_seconds"] = None
+        else:
+            changes["message"] = msg
+
+        changes["stage"] = stage
         self._job_update(job_id, **changes)
 
     def _generation_finished(self, job_id: str, project, summary, output: Path, voice_name: str) -> None:
