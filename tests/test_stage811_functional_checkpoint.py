@@ -226,6 +226,8 @@ class FunctionalCheckpoint20261111Tests(unittest.TestCase):
         backend = (Path(__file__).resolve().parents[1] / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         self.assertIn("narrator_only_eligible = narrator_ready", backend)
         self.assertNotIn("if (narratorOnly && configuredCharacterVoiceCount > 0)", adapter)
+        self.assertIn("0 configured character voice profiles · Narrator-only", adapter)
+        self.assertIn("configured character voice profile(s) · Narrator-only", adapter)
         self.assertIn("state[\"narrator_only_generation\"] = enabled", backend)
 
     def test_preserved_help_guide_documents_current_gen07_eligibility(self):
