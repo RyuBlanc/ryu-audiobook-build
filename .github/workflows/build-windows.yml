@@ -1122,7 +1122,7 @@ jobs:
           retention-days: 30
 
       - name: Upload portable Windows application
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ github.event_name != 'pull_request' || startsWith(github.head_ref, 'dragon-studio/') }}
         uses: actions/upload-artifact@v4
         with:
           name: Ryu-Audiobook-Portable-${{ github.run_number }}

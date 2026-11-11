@@ -105,3 +105,48 @@ The new CI rule runs the Windows package job for pull requests whose head branch
 ## Release boundary
 
 Before the 1.2.0 tag, release-blocking rows stay in the release candidate checklist. After the exact 1.2.0 artifact is tagged and distributed, every newly discovered issue is marked either **post-release regression** or **older issue still open**, with the affected released version and first known bad build recorded. The branch remains the shared fix queue; it is not a reason to reopen or redo already accepted stages.
+
+## Exact-head packaged acceptance — Build Windows App #3291
+
+**Exact commit:** `3cb6f0d8cda0257b3d7e8a89d8ca74e51bbb88ff`  
+**PR:** [#35](https://github.com/RyuBlanc/ryu-audiobook-build/pull/35)  
+**PR workflow:** [#3291](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43049805295) — success  
+**Push workflow:** [#3290](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43049793518) — success
+
+### Confirmed by the #3291 package logs
+
+- Regression suite and Windows package jobs both completed successfully.
+- The real Piper acceptance generated a two-chapter M4B, reloaded saved narrator/Mira/Ren profiles, routed the dialogue to the saved character voices, verified voice identity output, and passed FFmpeg audio decode plus two named chapter markers. Evidence: `REAL_MULTICHAPTER_M4B=PASS`, `REAL_M4B_FFMPEG_DECODE=PASS`, and `STAGE_3_REAL_PROVIDER_ACCEPTANCE=PASS`.
+- The packaged UI acceptance generated a real narrator-only M4B for a zero-character-profile fixture, persisted narrator-only mode and saved narrator identity through project/job/History, and opened the generated output in Audiobooks playback. Evidence: `xapp08_packaged_narrator_only_full_book_generation`.
+- All 41 responsive CSS/DOM viewport cases passed across all 15 active pages, player, Library, mini-player, History, Task Manager and job details. The responsive shell bounds also passed. The separate scale/window emulator covered restored, half, quarter, maximized, ultrawide, portrait and 100/125/150/200% effective-size cases.
+- The packaged overlap scan passed on all 15 destinations. Help Guide search, empty-result and expand/collapse checks ran as part of the same packaged acceptance.
+- The Windows install/launch/upgrade/uninstall, user-data preservation, installer startup, logo transparency/hash checks, and Defender scan steps succeeded.
+- Artifacts uploaded: installer ZIP `Ryu-Audiobook-Installer-3291`, SHA-256/package report `Ryu-Audiobook-Release-SHA256-3291`, and real M4B evidence `Ryu-Stage3-Real-Multichapter-M4B-3291`.
+
+### Updated classification of the verification queue
+
+| ID | Exact-head evidence | Still required before closure |
+|---|---|---|
+| DS-ETA-001 | The measured timing/countdown implementation is in the tested head; full regression and packaged UI gates passed. | The old #3198–#3200 push failures remain individually undiagnosed because their logs are unavailable. A long real generation on the target PC must confirm the estimate remains monotonic/stable and useful during warm-up, pause, resume and slow Qwen chunks. |
+| DS-PROG-002 | Exact-head UI tests and packaged 41-viewport/overlap acceptance passed. | Long-running real Qwen/Piper generation on the target PC must show truthful movement, active stage/chapter, elapsed time and validated-work progress throughout the job. |
+| DS-DURATION-003 | Listening-time estimate, chapter projection and final-output measurement paths are covered by regression/package contracts; actual M4B was produced in two CI smoke paths. | Compare estimated, accumulated chapter and final measured durations against a full-book target-PC output; ensure labels do not conflate listening duration with synthesis time. |
+| DS-QWEN-004 | External runtime import/GPU-selection contract and saved-profile routing are covered by tests; the M4B Piper profile round-trip passed. | Audition and save/reload CustomVoice, VoiceDesign and Clone profiles using the actual installed Qwen runtime on the target PC. |
+| DS-QWEN-005 | Runtime selection and hardware fallback contracts are regression-tested; dedicated real-device acceptance workflows exist. | Not closed. CPU historical 30-second preview was ~298–355 seconds. NVIDIA run #15 and AMD/Intel run #23 have no assigned self-hosted runner jobs. Need real NVIDIA CUDA, AMD ROCm and Intel XPU hardware evidence; no CPU/simulated substitution. |
+| DS-JOBS-006 | Pause/resume/cancel-at-checkpoint, restart recovery, retry project ownership, checkpoint integrity and terminal job/history consistency have regression coverage. | Exercise a long real packaged job, force application/OS interruption, restart, recover/retry and verify no stale output or duplicate synthesis on the target PC. |
+| DS-M4B-007 | Two-chapter real Piper output passed FFmpeg decoding/chapter markers; packaged narrator-only full-book generation produced M4B and played the generated output in the packaged Audiobooks view. | A representative full novel using the selected target-PC provider/cast must be generated and auditioned end-to-end. Verify all expected chapters, metadata, cover, duration and playback/seek/chapter navigation. |
+| DS-CAST-008 | CI real Piper cast smoke passed saved-profile round-trip, narrator vs Mira/Ren routing, same-identity reuse and no cross-series character routing. Narrator-only packaged generation also passed. | Revalidate Qwen saved identities and Unassigned Character/narrator fallback on the target PC with a representative book. |
+| DS-UI-009 | Packaged overlap checks and 41 viewport CSS/DOM matrix passed. | Visually inspect Production Studio information hierarchy and user-supplied cover art in the installed app; confirm no app watermark is baked into the chosen artwork. |
+| DS-BRAND-010 | Build #3291 validated transparent logo alpha/corners, generated icon/installer assets, and completed install/uninstall. | Inspect actual shortcut/taskbar/installed shell icon on the target PC and confirm no opaque white/black square appears. |
+| DS-INSTALL-011 | Installer window geometry tests and #3291 HTML/core installer, startup, install, upgrade and uninstall steps passed. | Inspect the actual wizard visually at the target PC's display scaling/resolution; verify footer, Next/Back, details and frame have no cropping/black center bar. |
+| DS-AI-012 | Unicode NFKC/casefold source matching and English false-positive/stopword regression tests passed in the exact-head suite. | Analyze representative Japanese, Chinese and Korean novels and an accented Latin sample; compare detected names, exact quote evidence, false positives and passage counts against the source. The historic 1,175-vs-1,196 passage reconciliation remains open. |
+| DS-RESP-013 | **Automated 41-viewport CSS/DOM matrix passed** on all 15 pages at #3291, including Generate 1280×720, portrait/ultrawide, player/Library/mini-player/History/Task Manager/job details. Window/scale emulation passed. | Physical minimized/restored, mixed-DPI, multiple-monitor and extended-monitor checks still require Windows hardware; the emulated scale matrix is not a physical DPI test. |
+| DS-HELP-014 | Help Guide content contracts and packaged search, empty-result, expand and collapse interactions passed at #3291. | Final wording parity review against every user-visible feature after any remaining product changes; verify guide on target PC. |
+
+### Current artifact boundary and next required build
+
+The #3291 PR run uploaded the installer, release SHA-256/package report and the M4B evidence. Its portable upload was **skipped by the workflow condition for all pull requests**; this is a delivery-policy gap, not a successful portable artifact.
+
+The workflow is being adjusted so only PRs whose head starts with `dragon-studio/` also upload the portable application. Release publication remains restricted to a push on `main`. A new exact-head PR package run must pass before a portable artifact is claimed.
+
+**Hardware/manual boundary:** automated acceptance is not a substitute for real target-PC multi-monitor/DPI, shell icon, installer visuals, Qwen profiles, long-book generation and playback. NVIDIA/AMD/Intel Qwen accelerator gates remain blocked until matching self-hosted runners are online. Do not close those rows without their evidence.
+

@@ -114,6 +114,20 @@ class Stage8PackagedAcceptanceContractTests(unittest.TestCase):
         self.assertIn("Ryu-Stage3-Real-Multichapter-M4B-", upload_step)
         self.assertIn("if-no-files-found: warn", upload_step)
 
+    def test_dragon_studio_pull_requests_upload_portable_build_without_publishing_release(self):
+        workflow = (ROOT / ".github" / "workflows" / "build-windows.yml").read_text(encoding="utf-8")
+        start = workflow.index("      - name: Upload portable Windows application")
+        end = workflow.index("\n      - name: ", start + 1)
+        step = workflow[start:end]
+        self.assertIn("github.event_name != 'pull_request' || startsWith(github.head_ref, 'dragon-studio/')", step)
+        self.assertIn("path: dist/Ryu's Audiobook/", step)
+        self.assertIn("if-no-files-found: error", step)
+
+        release_start = workflow.index("      - name: Publish verified installer release")
+        release_end = workflow.find("\n      - name: ", release_start + 1)
+        release_step = workflow[release_start:release_end if release_end >= 0 else len(workflow)]
+        self.assertIn("github.event_name == 'push' && github.ref == 'refs/heads/main'", release_step)
+
     def test_live_qwen_smoke_download_has_official_fallback_and_pinned_digest(self):
         workflow = (ROOT / ".github" / "workflows" / "build-windows.yml").read_text(encoding="utf-8")
         self.assertIn("$llamaZipExpectedSha256 = '1110e183589e0e2ac5b365fb5c3c4a7e149e0760c1989cac18ee426b08e5813a'", workflow)
