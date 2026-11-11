@@ -7270,6 +7270,7 @@ class PremiumV2Bridge(QObject):
                 # The stale reference is not a valid configured profile. Keep
                 # the returned generation snapshot empty so this character is
                 # safely routed through the explicit Unassigned Character voice.
+                row["voice_profile"] = ""
             elif profile is not None:
                 row["voice_profile"] = str(profile.name)
             elif not str(row.get("voice_profile") or "").strip():
@@ -7632,6 +7633,17 @@ class PremiumV2Bridge(QObject):
         cast_profiles: dict[str, Any] = {}
         saved_profiles = load_profiles()
         available_profiles = {p.name.casefold(): p for p in saved_profiles}
+        unassigned_profile = None
+        if not narrator_only:
+            unassigned_name = str(narrator_selection.get("unassigned_character_profile_name") or "").strip()
+            unassigned_profile = available_profiles.get(unassigned_name.casefold()) if unassigned_name else None
+            if narrator_selection.get("unassigned_character_profile_required") and unassigned_profile is None:
+                raise ValueError(
+                    "The app-wide Unassigned Character voice profile is missing or unavailable. "
+                    "Choose and save it in Voice Studio before using character-cast generation."
+                )
+            if unassigned_profile is not None:
+                cast_profiles[unassigned_profile.name] = unassigned_profile
         project_series = self._project_series_name(project, state)
         generation_characters = narrator_selection.get("effective_character_rows")
         if not isinstance(generation_characters, list):
@@ -7669,7 +7681,7 @@ class PremiumV2Bridge(QObject):
                             cast_identity_assignments[
                                 character_identity_key(character_name, character_series)
                             ] = assigned_profile.name
-            if cast_assignments or cast_identity_assignments:
+            if cast_assignments or cast_identity_assignments or unassigned_profile is not None:
                 from app.tts.cast_provider import CastAwareProvider
                 provider = CastAwareProvider(
                     provider, voice, cast_profiles, cast_assignments,
@@ -7677,6 +7689,7 @@ class PremiumV2Bridge(QObject):
                     backend_override=str(state.get("backend") or "automatic"),
                     narrator_profile=profile,
                     identity_assignments=cast_identity_assignments,
+                    unassigned_voice=unassigned_profile.name if unassigned_profile is not None else None,
                 )
         output_text = str(payload.get("output_path") or state.get("output_path") or state.get("generation_target_path") or "").strip()
         if output_text:
