@@ -6076,20 +6076,18 @@ function renderProductionMetadataGate(active) {
       active.configured_character_voice_profile_count ?? active.character_voice_count ?? 0
     ));
     const narratorOnlyRequested = active.narrator_only_generation === true;
-    const narratorOnly = narratorOnlyRequested && configuredCharacterVoiceCount === 0;
+    // Narrator-only is an explicit routing choice and remains available even
+    // when this project already has saved character profiles.
+    const narratorOnly = narratorOnlyRequested;
     const assignmentIssues = Math.max(0, Number(active.character_assignment_issue_count || 0));
     const pendingDialogue = Math.max(0, Number(active.pending_dialogue_count || 0));
     const conflictingDialogue = Math.max(0, Number(active.conflicting_dialogue_count || 0));
     const dialogueIndexIssues = Math.max(0, Number(active.dialogue_index_issue_count || 0));
     let characterStatus = narratorOnly
-      ? '0 configured character voice profiles · character voice assignment not required; saved narrator reads all passages'
+      ? 'Narrator-only · saved narrator reads every passage; configured character profiles are ignored for this book'
       : 'Character analysis not run';
     let characterKind = narratorOnly ? 'ready' : 'warn';
-    if (narratorOnlyRequested && configuredCharacterVoiceCount > 0) {
-      characterStatus = configuredCharacterVoiceCount
-        + ' valid character voice profile(s) · narrator-only is no longer eligible; switch to multi-character speaker review';
-      characterKind = 'warn';
-    } else if (!narratorOnly && active.dialogue_index_ready !== true) {
+    if (!narratorOnly && active.dialogue_index_ready !== true) {
       characterStatus = 'Canonical dialogue index unavailable · refresh Character Studio before generation';
       characterKind = 'warn';
     } else if (!narratorOnly && assignmentIssues > 0) {
