@@ -173,6 +173,37 @@ class FunctionalCheckpoint20261111Tests(unittest.TestCase):
         self.assertEqual(bridge._jobs["eta-job"]["eta_seconds"], 350)
         self.assertIn("upward revisions capped at 60s", bridge._jobs["eta-job"]["generation_eta_basis"])
 
+    def test_measured_eta_downward_revision_is_damped(self):
+        bridge = SimpleNamespace(
+            _now=host.PremiumV2Bridge._now,
+            _jobs_lock=threading.RLock(),
+            _jobs={"eta-job": {"started_at": (datetime.now(timezone.utc) - timedelta(minutes=4)).isoformat(),
+                              "state": "running", "eta_seconds": 300}},
+            _generation_progress_timing={
+                "eta-job": {
+                    "samples": [{"work": 1000, "seconds": 10.0}] * 3,
+                    "seconds_per_unit_ema": 0.01,
+                    "warmup_chunk_skipped": True,
+                    "smoothed_eta_seconds": 300.0,
+                    "eta_last_monotonic": 190.0,
+                }
+            },
+        )
+
+        def update(job_id, **changes):
+            bridge._jobs[job_id].update(changes)
+            return dict(bridge._jobs[job_id])
+
+        bridge._job_update = Mock(side_effect=update)
+        with patch("app.ui.premium_v2_host.time.monotonic", return_value=200.0):
+            host.PremiumV2Bridge._generation_progress(
+                bridge, "eta-job", 1, 20, 5000,
+                "chunk-timing:1000:10.000:5000:10000:4:20",
+            )
+
+        # The 240-second downward discrepancy is damped to a 60-second step.
+        self.assertEqual(bridge._jobs["eta-job"]["eta_seconds"], 230)
+
     def test_eta_monotonic_anchor_resets_on_resume_without_counting_pause_time(self):
         class LiveThread:
             def is_alive(self):
@@ -185,6 +216,7 @@ class FunctionalCheckpoint20261111Tests(unittest.TestCase):
 
         manager = LiveManager()
         bridge = SimpleNamespace(
+            _now=host.PremiumV2Bridge._now,
             _jobs_lock=threading.RLock(),
             _jobs={"eta-job": {"job_id": "eta-job", "state": "paused", "eta_seconds": 240}},
             _generators={"eta-job": manager},
