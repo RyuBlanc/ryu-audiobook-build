@@ -102,7 +102,7 @@ class Stage8PackagedAcceptanceContractTests(unittest.TestCase):
         self.assertIn("RYU_PIPER_MODEL_ROOT", run_step)
         self.assertIn("RYU_STAGE3_ACCEPTANCE_OUTPUT", run_step)
         self.assertIn("en_US-ryan-high", run_step)
-                self.assertIn("tests\\smoke_stage3_real_multichapter.py", run_step)
+        self.assertIn("tests\\smoke_stage3_real_multichapter.py", run_step)
         self.assertIn("MODEL_ROOT = Path(os.environ.get(\"RYU_PIPER_MODEL_ROOT\"", smoke)
         self.assertIn("REAL_MULTICHAPTER_M4B=PASS", smoke)
         self.assertIn("REAL_M4B_FFMPEG_DECODE=PASS", smoke)
