@@ -221,6 +221,36 @@ class FunctionalCheckpoint20261111Tests(unittest.TestCase):
             adapter,
         )
 
+    def test_dragon_studio_pr_runs_packaged_acceptance_without_uploading_candidate_artifacts(self):
+        workflow = (
+            Path(__file__).resolve().parents[1]
+            / ".github"
+            / "workflows"
+            / "build-windows.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "github.event_name == 'pull_request' && startsWith(github.head_ref, 'dragon-studio/')",
+            workflow,
+        )
+        self.assertIn(
+            "Run packaged Sound Design Music Library acceptance (including Stage 5.3 generation UI)",
+            workflow,
+        )
+        upload_steps = (
+            "Upload Windows installer artifact",
+            "Upload release SHA-256 manifest",
+            "Upload portable Windows application",
+            "Upload Stage 7 real Piper benchmark evidence",
+        )
+        for step_name in upload_steps:
+            start = workflow.index("      - name: " + step_name)
+            next_step = workflow.find("\n      - name: ", start + 1)
+            block = workflow[start:next_step if next_step >= 0 else len(workflow)]
+            self.assertIn(
+                "if: ${{ github.event_name != 'pull_request' }}",
+                block,
+                msg=step_name + " must not publish artifacts from PR validation.",
+            )
     def test_narrator_only_remains_available_with_character_profiles(self):
         adapter = (Path(__file__).resolve().parents[1] / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         backend = (Path(__file__).resolve().parents[1] / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
