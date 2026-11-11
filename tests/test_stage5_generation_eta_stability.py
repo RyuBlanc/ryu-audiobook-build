@@ -126,6 +126,39 @@ class Stage5GenerationEtaStabilityTests(unittest.TestCase):
         )
         self.assertTrue(all(work > 0 and seconds > 0 for _, work, seconds in observed))
 
+    def test_synthesis_timing_stops_before_validation_and_checkpoint_work(self):
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "app"
+            / "tts"
+            / "generator.py"
+        ).read_text(encoding="utf-8")
+        single_start = source.index("synthesis_started = time.monotonic()")
+        single_measured = source.index(
+            "synthesis_seconds = max(0.001, time.monotonic() - synthesis_started)",
+            single_start,
+        )
+        single_validation = source.index(
+            "validate_and_commit(index, output, chunks[index])",
+            single_start,
+        )
+        single_callback = source.index("on_chunk_timing(", single_validation)
+        self.assertLess(single_measured, single_validation)
+        self.assertLess(single_validation, single_callback)
+
+        batch_start = source.index("batch_started = time.monotonic()")
+        batch_measured = source.index(
+            "batch_synthesis_seconds = max(0.001, time.monotonic() - batch_started)",
+            batch_start,
+        )
+        batch_validation = source.index(
+            "validate_and_commit(i, chunks_dir",
+            batch_start,
+        )
+        batch_callback = source.index("on_chunk_timing(", batch_validation)
+        self.assertLess(batch_measured, batch_validation)
+        self.assertLess(batch_validation, batch_callback)
+
     def test_frontend_counts_eta_down_between_measured_chunks(self):
         adapter = (
             Path(__file__).resolve().parents[1]
