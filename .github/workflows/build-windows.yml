@@ -679,52 +679,6 @@ jobs:
           }
           Write-Host "Bundled real starter audio verified: BGM=$($starterMusic.Count), with opening/page-turn/closing cue categories."
 
-      - name: Run real bundled-Piper multi-chapter M4B acceptance
-        timeout-minutes: 20
-        shell: pwsh
-        env:
-          RYU_PIPER_MODEL_ROOT: ${{ runner.temp }}\\ryu-stage3-test-models
-          RYU_STAGE3_ACCEPTANCE_OUTPUT: ${{ runner.temp }}\\ryu-stage3-real-multichapter-acceptance
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $privatePython = Join-Path $env:RUNNER_TEMP 'ryu-qwen-python-bootstrap\\python312\\python.exe'
-          $pythonExe = $privatePython
-          if (-not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
-            $pythonExe = $env:RYU_CI_PYTHON_EXE
-          }
-          if ([string]::IsNullOrWhiteSpace($pythonExe) -or $pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
-            throw "No verified Python interpreter is available for real multi-chapter M4B acceptance. Private=$privatePython; CI=$($env:RYU_CI_PYTHON_EXE)"
-          }
-          Write-Host "Using acceptance Python: $pythonExe"
-          $testPiperRoot = Join-Path $env:RYU_PIPER_MODEL_ROOT 'piper'
-          New-Item -ItemType Directory -Force -Path $testPiperRoot,$env:RYU_STAGE3_ACCEPTANCE_OUTPUT | Out-Null
-          $bundledPiperRoot = Join-Path (Get-Location) 'bundled_models\\piper'
-          foreach ($voice in @('en_US-amy-medium','en_US-lessac-medium')) {
-            foreach ($suffix in @('.onnx','.onnx.json')) {
-              $source = Join-Path $bundledPiperRoot ($voice + $suffix)
-              if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
-                throw "Required bundled Piper acceptance voice is missing: $source"
-              }
-              Copy-Item -LiteralPath $source -Destination (Join-Path $testPiperRoot ($voice + $suffix)) -Force
-            }
-          }
-          & $pythonExe -m piper.download_voices --data-dir $testPiperRoot en_US-ryan-high
-          if ($LASTEXITCODE -ne 0) { throw "Temporary Piper acceptance voice download failed with exit code $LASTEXITCODE." }
-          $env:PYTHONPATH = (Get-Location).Path
-          $env:PYTHONDONTWRITEBYTECODE = '1'
-          & $pythonExe -B 'tests\\smoke_stage3_real_multichapter.py'
-          if ($LASTEXITCODE -ne 0) { throw "Real multi-chapter M4B acceptance failed with exit code $LASTEXITCODE." }
-
-      - name: Upload real multi-chapter M4B acceptance evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Ryu-Stage3-Real-Multichapter-M4B-${{ github.run_number }}
-          path: ${{ runner.temp }}\\ryu-stage3-real-multichapter-acceptance\\
-          if-no-files-found: warn
-          retention-days: 30
-
-
           # The Qwen inference worker runs in a separate Python venv, outside
           # the frozen EXE/PYZ. Verify that its physical source tree contains
           # app.core and that Automatic can follow the GPU-selection path.
@@ -754,6 +708,52 @@ jobs:
             else { Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue }
           }
           Write-Host 'Critical application modules were already exercised by the frozen EXE self-test.'
+
+      - name: Run real bundled-Piper multi-chapter M4B acceptance
+        timeout-minutes: 20
+        shell: pwsh
+        env:
+          RYU_PIPER_MODEL_ROOT: ${{ runner.temp }}\ryu-stage3-test-models
+          RYU_STAGE3_ACCEPTANCE_OUTPUT: ${{ runner.temp }}\ryu-stage3-real-multichapter-acceptance
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $privatePython = Join-Path $env:RUNNER_TEMP 'ryu-qwen-python-bootstrap\python312\python.exe'
+          $pythonExe = $privatePython
+          if (-not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            $pythonExe = $env:RYU_CI_PYTHON_EXE
+          }
+          if ([string]::IsNullOrWhiteSpace($pythonExe) -or $pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "No verified Python interpreter is available for real multi-chapter M4B acceptance. Private=$privatePython; CI=$($env:RYU_CI_PYTHON_EXE)"
+          }
+          Write-Host "Using acceptance Python: $pythonExe"
+          $testPiperRoot = Join-Path $env:RYU_PIPER_MODEL_ROOT 'piper'
+          New-Item -ItemType Directory -Force -Path $testPiperRoot,$env:RYU_STAGE3_ACCEPTANCE_OUTPUT | Out-Null
+          $bundledPiperRoot = Join-Path (Get-Location) 'bundled_models\piper'
+          foreach ($voice in @('en_US-amy-medium','en_US-lessac-medium')) {
+            foreach ($suffix in @('.onnx','.onnx.json')) {
+              $source = Join-Path $bundledPiperRoot ($voice + $suffix)
+              if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+                throw "Required bundled Piper acceptance voice is missing: $source"
+              }
+              Copy-Item -LiteralPath $source -Destination (Join-Path $testPiperRoot ($voice + $suffix)) -Force
+            }
+          }
+          & $pythonExe -m piper.download_voices --data-dir $testPiperRoot en_US-ryan-high
+          if ($LASTEXITCODE -ne 0) { throw "Temporary Piper acceptance voice download failed with exit code $LASTEXITCODE." }
+          $env:PYTHONPATH = (Get-Location).Path
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -B 'tests\smoke_stage3_real_multichapter.py'
+          if ($LASTEXITCODE -ne 0) { throw "Real multi-chapter M4B acceptance failed with exit code $LASTEXITCODE." }
+
+      - name: Upload real multi-chapter M4B acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ryu-Stage3-Real-Multichapter-M4B-${{ github.run_number }}
+          path: ${{ runner.temp }}\ryu-stage3-real-multichapter-acceptance\
+          if-no-files-found: warn
+          retention-days: 30
+
 
       - name: Run packaged Sound Design Music Library acceptance (including Stage 5.3 generation UI)
         timeout-minutes: 20

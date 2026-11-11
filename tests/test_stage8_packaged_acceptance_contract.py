@@ -96,13 +96,13 @@ class Stage8PackagedAcceptanceContractTests(unittest.TestCase):
         run_start = workflow.index("      - name: Run real bundled-Piper multi-chapter M4B acceptance")
         upload_start = workflow.index("      - name: Upload real multi-chapter M4B acceptance evidence", run_start)
         run_step = workflow[run_start:upload_start]
-        upload_end = workflow.index("\\n      - name: ", upload_start + 1)
+        upload_end = workflow.index("\n      - name: ", upload_start + 1)
         upload_step = workflow[upload_start:upload_end]
 
         self.assertIn("RYU_PIPER_MODEL_ROOT", run_step)
         self.assertIn("RYU_STAGE3_ACCEPTANCE_OUTPUT", run_step)
         self.assertIn("en_US-ryan-high", run_step)
-        self.assertIn("tests\\\\smoke_stage3_real_multichapter.py", run_step)
+                self.assertIn("tests\\smoke_stage3_real_multichapter.py", run_step)
         self.assertIn("MODEL_ROOT = Path(os.environ.get(\"RYU_PIPER_MODEL_ROOT\"", smoke)
         self.assertIn("REAL_MULTICHAPTER_M4B=PASS", smoke)
         self.assertIn("REAL_M4B_FFMPEG_DECODE=PASS", smoke)
