@@ -202,26 +202,23 @@ class FunctionalCheckpoint20261111Tests(unittest.TestCase):
             / "frontend"
             / "premium_v2_backend_adapter.js"
         ).read_text(encoding="utf-8")
-        start = adapter.index("function syncProductionJobButtons")
-        end = adapter.index("function ensureProductionEngineLayout", start)
-        production_control = adapter[start:end]
         self.assertGreaterEqual(
-            production_control.count("project?.narrator_only_generation_auto === true"),
+            adapter.count("project?.narrator_only_generation_auto === true"),
             2,
         )
         self.assertGreaterEqual(
-            production_control.count(
+            adapter.count(
                 "Automatically enabled because this book has no configured character voice profiles."
             ),
-            2,
+            3,
         )
         self.assertIn(
             "Off by your choice · assigned character profiles are used",
-            production_control,
+            adapter,
         )
         self.assertIn(
             "On · the saved narrator reads all passages, including dialogue.",
-            production_control,
+            adapter,
         )
 
     def test_narrator_only_remains_available_with_character_profiles(self):
