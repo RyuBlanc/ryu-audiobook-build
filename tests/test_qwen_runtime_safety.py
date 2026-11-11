@@ -327,6 +327,111 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
         self.assertEqual(calls[0][0], str(model_root / "custom-1.7b"))
         self.assertTrue(calls[0][1].get("low_cpu_mem_usage"))
 
+    def test_automatic_worker_retries_same_model_on_cpu_after_hip_runtime_failure(self):
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from contextlib import redirect_stdout
+        import io
+        import json
+        from app.tts import qwen_character_worker as worker
+
+        calls = []
+        model = object()
+
+        def load(kind, backend, root, low_memory=False):
+            calls.append((kind, backend, low_memory))
+            if backend == "automatic":
+                raise RuntimeError("HIP error: invalid device function during model initialization")
+            return model, "cpu"
+
+        with TemporaryDirectory() as temporary:
+            args = type("Args", (), {
+                "models_root": temporary,
+                "task": "custom",
+                "kind": "custom-1.7b",
+                "backend": "automatic",
+                "low_memory": True,
+                "clone_kind": "base-1.7b",
+            })()
+            output = io.StringIO()
+            with (
+                patch.object(worker, "_load_model", side_effect=load),
+                patch("sys.stdin", io.StringIO("")),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(worker.server(args), 0)
+
+        messages = [json.loads(line) for line in output.getvalue().splitlines() if line.strip()]
+        self.assertEqual(calls, [
+            ("custom-1.7b", "automatic", True),
+            ("custom-1.7b", "cpu", True),
+        ])
+        self.assertTrue(any("retrying the same model on CPU" in m.get("progress", "") for m in messages))
+        self.assertEqual(messages[-1]["model"], worker.MODEL_IDS["custom-1.7b"])
+        self.assertEqual(messages[-1]["backend"], "cpu")
+
+    def test_explicit_gpu_backend_does_not_silently_fall_back_after_runtime_failure(self):
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from contextlib import redirect_stdout
+        import io
+        from app.tts import qwen_character_worker as worker
+
+        calls = []
+        def load(kind, backend, root, low_memory=False):
+            calls.append(backend)
+            raise RuntimeError("CUDA error: initialization error")
+
+        with TemporaryDirectory() as temporary:
+            args = type("Args", (), {
+                "models_root": temporary,
+                "task": "custom",
+                "kind": "custom-1.7b",
+                "backend": "cuda",
+                "low_memory": False,
+                "clone_kind": "base-0.6b",
+            })()
+            with (
+                patch.object(worker, "_load_model", side_effect=load),
+                patch("sys.stdin", io.StringIO("")),
+                redirect_stdout(io.StringIO()),
+                self.assertRaisesRegex(RuntimeError, "CUDA error"),
+            ):
+                worker.server(args)
+
+        self.assertEqual(calls, ["cuda"])
+
+    def test_non_accelerator_model_error_does_not_trigger_automatic_cpu_retry(self):
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from contextlib import redirect_stdout
+        import io
+        from app.tts import qwen_character_worker as worker
+
+        calls = []
+        def load(kind, backend, root, low_memory=False):
+            calls.append(backend)
+            raise RuntimeError("safetensors checkpoint is corrupted")
+
+        with TemporaryDirectory() as temporary:
+            args = type("Args", (), {
+                "models_root": temporary,
+                "task": "custom",
+                "kind": "custom-1.7b",
+                "backend": "automatic",
+                "low_memory": False,
+                "clone_kind": "base-0.6b",
+            })()
+            with (
+                patch.object(worker, "_load_model", side_effect=load),
+                patch("sys.stdin", io.StringIO("")),
+                redirect_stdout(io.StringIO()),
+                self.assertRaisesRegex(RuntimeError, "safetensors checkpoint is corrupted"),
+            ):
+                worker.server(args)
+
+        self.assertEqual(calls, ["automatic"])
+
     def test_stdout_drain_uses_captured_queue_after_close_clears_provider_state(self):
         import queue
         import threading

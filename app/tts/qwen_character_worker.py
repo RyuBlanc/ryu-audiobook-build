@@ -308,6 +308,58 @@ def _is_cuda_oom(exc: BaseException) -> bool:
     )
 
 
+def _is_accelerator_runtime_failure(exc: BaseException) -> bool:
+    """Recognize device initialization/driver/kernel failures, not model/data errors."""
+    message = f"{type(exc).__name__}: {exc}".casefold()
+    accelerators = ("cuda", "cublas", "cudnn", "hip", "rocm", "xpu", "sycl", "oneapi", "gpu")
+    failure_markers = (
+        "out of memory", "outofmemory", "error", "failed", "failure",
+        "initializ", "driver", "device-side", "no kernel", "invalid device",
+        "not available", "not supported", "launch",
+    )
+    return any(token in message for token in accelerators) and any(
+        token in message for token in failure_markers
+    )
+
+
+def _load_model_with_fallback(
+    kind: str,
+    backend: str,
+    root: Path,
+    low_memory: bool = False,
+    *,
+    progress=None,
+    allow_cpu_fallback: bool = True,
+):
+    """Load one exact model; Automatic may retry device-runtime failures on CPU."""
+    requested_backend = str(backend or "automatic").strip().casefold()
+    try:
+        return _load_model(kind, backend, root, low_memory=low_memory)
+    except Exception as accelerator_error:
+        # Explicit GPU choices are promises to use that device, not permission
+        # to silently deliver a much slower CPU result.
+        automatic = requested_backend in {"automatic", "auto"}
+        if (
+            not allow_cpu_fallback
+            or not automatic
+            or not _is_accelerator_runtime_failure(accelerator_error)
+        ):
+            raise
+        message = (
+            f"Automatic accelerator initialization failed for {kind}; "
+            f"retrying the same model on CPU. Device error: {accelerator_error}"
+        )
+        if callable(progress):
+            progress(message)
+        try:
+            return _load_model(kind, "cpu", root, low_memory=low_memory)
+        except Exception as cpu_error:
+            raise RuntimeError(
+                f"Automatic accelerator loading failed for {kind}, and its CPU fallback "
+                f"also failed. Accelerator error: {accelerator_error}. CPU error: {cpu_error}"
+            ) from cpu_error
+
+
 def _actual_backend(device: str) -> str:
     selected = str(device or "").casefold()
     if selected.startswith("xpu"):
@@ -590,23 +642,13 @@ def _prepare_design_clone(model, request: dict, args):
             pass
 
     requested_clone_kind = args.clone_kind
-    try:
-        clone_model, clone_device = _load_model(
-            requested_clone_kind, args.backend, root, low_memory=args.low_memory
-        )
-    except Exception as exc:
-        if _is_cuda_oom(exc) and args.backend != "cpu":
-            print(json.dumps({
-                "progress": (
-                    f"{requested_clone_kind} exceeded available GPU memory • "
-                    "retrying the same selected model on CPU without changing voice identity…"
-                )
-            }), flush=True)
-            clone_model, clone_device = _load_model(
-                requested_clone_kind, "cpu", root, low_memory=args.low_memory
-            )
-        else:
-            raise
+    clone_model, clone_device = _load_model_with_fallback(
+        requested_clone_kind,
+        args.backend,
+        root,
+        low_memory=args.low_memory,
+        progress=lambda message: print(json.dumps({"progress": message}), flush=True),
+    )
 
     explicit_anchor = bool(str(request.get("anchor_path") or "").strip())
     prompts = {}
@@ -704,15 +746,15 @@ def server(args) -> int:
             model_kind=kind,
             requested_backend=args.backend,
         )
-        try:
-            print(json.dumps({"progress": f"Loading Qwen model • {kind}"}), flush=True)
-            model, device = _load_model(kind, args.backend, root, low_memory=args.low_memory)
-        except Exception as exc:
-            if allow_cpu_fallback and _is_cuda_oom(exc) and args.backend != "cpu":
-                print(json.dumps({"progress": f"{kind} did not fit GPU memory • switching to CPU compatibility mode…"}), flush=True)
-                model, device = _load_model(kind, "cpu", root, low_memory=args.low_memory)
-            else:
-                raise
+        print(json.dumps({"progress": f"Loading Qwen model • {kind}"}), flush=True)
+        model, device = _load_model_with_fallback(
+            kind,
+            args.backend,
+            root,
+            low_memory=args.low_memory,
+            progress=lambda message: print(json.dumps({"progress": message}), flush=True),
+            allow_cpu_fallback=allow_cpu_fallback,
+        )
         active_kind = kind
         _worker_diagnostic(
             "load_model_ready",
@@ -762,7 +804,7 @@ def server(args) -> int:
                     model = None
                     gc.collect()
                     clear_model_cache(device)
-                model, device = _load_model(cached_kind, args.backend, root, low_memory=args.low_memory)
+                load_model(cached_kind)
                 active_kind = cached_kind
             return
 
@@ -804,19 +846,9 @@ def server(args) -> int:
                 model = None
                 gc.collect()
                 clear_model_cache(device)
-            try:
-                model, device = _load_model(clone_kind, args.backend, root, low_memory=args.low_memory)
-            except Exception as exc:
-                if _is_cuda_oom(exc) and args.backend != "cpu":
-                    # Respect the globally selected Base size. A GPU OOM may
-                    # move this same model to CPU, but must never silently swap
-                    # a user's selected 1.7B model for 0.6B.
-                    print(json.dumps({
-                        "progress": f"{clone_kind} did not fit GPU memory • retrying the same model on CPU…"
-                    }), flush=True)
-                    model, device = _load_model(clone_kind, "cpu", root, low_memory=args.low_memory)
-                else:
-                    raise
+            # Preserve the selected Base model kind across Automatic fallback;
+            # never trade the requested 1.7B identity for a smaller model.
+            load_model(clone_kind)
         active_kind = clone_kind
 
         explicit_anchor = bool(str(request.get("anchor_path") or "").strip())
