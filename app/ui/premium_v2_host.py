@@ -630,6 +630,8 @@ class PremiumV2Bridge(QObject):
             "narrator.preview": True,
             "narrator.series.default.get": True,
             "narrator.series.default.save": True,
+            "voice.unassigned_character.default.get": True,
+            "voice.unassigned_character.default.save": True,
             "narrator.series.default.apply": True,
             "narrator.project.reset": True,
             "voice.preview": True,
