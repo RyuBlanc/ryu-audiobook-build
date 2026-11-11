@@ -70,10 +70,19 @@ class LiveProductionGenerationHarness:
         self._assert_no_active_audio_synthesis = Mock()
         self.close_preview_provider_cache = Mock()
         self._active_project = Mock(return_value=project)
+        self.unassigned_profile = SimpleNamespace(
+            name="Global Unassigned Character", provider="piper", voice_id="unassigned-character"
+        )
         self._resolve_narrator_for_generation = Mock(
             return_value=(
                 profile,
-                {"source": "project_override", "profile_name": profile.name},
+                {
+                    "source": "project_override",
+                    "profile_name": profile.name,
+                    "narrator_only": False,
+                    "unassigned_character_profile_name": self.unassigned_profile.name,
+                    "unassigned_character_profile_required": True,
+                },
             )
         )
         self._project_series_name = Mock(return_value="Saved Series")
@@ -143,7 +152,7 @@ class Stage53LiveGenerationIntegrationTests(unittest.TestCase):
 
             with (
                 patch.object(host, "provider_from_profile", return_value=(local_provider, profile.voice_id)),
-                patch.object(host, "load_profiles", return_value=[]),
+                patch.object(host, "load_profiles", return_value=[bridge.unassigned_profile]),
                 patch.object(host, "_effective_pronunciation_dictionary", return_value=[]),
                 patch("app.audio.library.effective_background_audio_mode", return_value="off"),
                 patch("app.audio.library.validate_saved_audio_paths"),
