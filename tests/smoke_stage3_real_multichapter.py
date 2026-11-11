@@ -29,7 +29,7 @@ from app.tts.voice_profile import VoiceProfile, load_saved_profiles, save_profil
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MODEL_ROOT = ROOT / "bundled_models"
+MODEL_ROOT = Path(os.environ.get("RYU_PIPER_MODEL_ROOT", ROOT / "bundled_models")).expanduser().resolve()
 PIPER_ROOT = MODEL_ROOT / "piper"
 VOICE_IDS = ("en_US-lessac-medium", "en_US-amy-medium", "en_US-ryan-high")
 

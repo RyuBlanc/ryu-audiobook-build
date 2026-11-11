@@ -89,6 +89,28 @@ class Stage8PackagedAcceptanceContractTests(unittest.TestCase):
         self.assertIn('leftCardRect:(() => {const r=left.element.closest(".model-card")', source)
         self.assertIn('modelGridRect:(() => {const r=d.querySelector("#modelGrid")', source)
 
+    def test_windows_package_runs_real_multichapter_m4b_acceptance_without_changing_bundle(self):
+        workflow = (ROOT / ".github" / "workflows" / "build-windows.yml").read_text(encoding="utf-8")
+        smoke = (ROOT / "tests" / "smoke_stage3_real_multichapter.py").read_text(encoding="utf-8")
+
+        run_start = workflow.index("      - name: Run real bundled-Piper multi-chapter M4B acceptance")
+        upload_start = workflow.index("      - name: Upload real multi-chapter M4B acceptance evidence", run_start)
+        run_step = workflow[run_start:upload_start]
+        upload_end = workflow.index("\\n      - name: ", upload_start + 1)
+        upload_step = workflow[upload_start:upload_end]
+
+        self.assertIn("RYU_PIPER_MODEL_ROOT", run_step)
+        self.assertIn("RYU_STAGE3_ACCEPTANCE_OUTPUT", run_step)
+        self.assertIn("en_US-ryan-high", run_step)
+        self.assertIn("tests\\\\smoke_stage3_real_multichapter.py", run_step)
+        self.assertIn("MODEL_ROOT = Path(os.environ.get(\"RYU_PIPER_MODEL_ROOT\"", smoke)
+        self.assertIn("REAL_MULTICHAPTER_M4B=PASS", smoke)
+        self.assertIn("REAL_M4B_FFMPEG_DECODE=PASS", smoke)
+        self.assertIn("chapters_total != 2", smoke)
+        self.assertIn('if: always()', upload_step)
+        self.assertIn("Ryu-Stage3-Real-Multichapter-M4B-", upload_step)
+        self.assertIn("if-no-files-found: warn", upload_step)
+
     def test_live_qwen_smoke_download_has_official_fallback_and_pinned_digest(self):
         workflow = (ROOT / ".github" / "workflows" / "build-windows.yml").read_text(encoding="utf-8")
         self.assertIn("$llamaZipExpectedSha256 = '1110e183589e0e2ac5b365fb5c3c4a7e149e0760c1989cac18ee426b08e5813a'", workflow)
