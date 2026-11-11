@@ -21,8 +21,14 @@ Every commit and workflow attempt is tracked separately. A failed attempt remain
 | `0c1fdab929f4e6e3c16cb2dfefba8c510b37cf03` | SAME SCOPE / PR SYNC | Same Qwen timeout test. | Build #3248 / run 43014820763 | Failed on inherited test-fixture defect. |
 | `b29d9e162a32e149b5e51c16a172e30d46ded4aa` | NEW FIX (ARTIFACT COLLECTION) | `.github/workflows/qwen-cpu-contract-acceptance.yml` — adds worker log to upload path using tilde expansion. | Build #3249 / run 43014823323; Build #3250 / run 43014829590 | Both failed on inherited test-fixture defect before package. |
 
-## Corrective push — pending
-Expected scope:
+## Corrective push A — commits #3251–#3255
+
+Commits `8f3ac933a5d034df1ba91ab73e69e55e889cd3f1`, `9ffec2f43fdae005d224783727fef3daa05a76c0`, `59cb7bed2c10a8b1d9cb669021216512bfcd58c4`, `51a43378b27830f20ad7861b79deea324ed53e35`, and `22ae973607794ada48b4f356321b884cebfa7eb5`.
+
+The commits are pushed but unaccepted. The test still expected lowercase `timed out` while production correctly emitted `Timed out`, and its fake worker lacked the stream attributes needed by `close()`. CPU Qwen run #11 (internal ID `43017828264`) failed in the focused 56-test group; real preview did not run and no worker stderr artifact was available. Original failures #3251–#3258 remain failed.
+
+## Corrective push B — pending
+Expected files: `tests/test_qwen_runtime_safety.py`, `.github/workflows/qwen-cpu-contract-acceptance.yml`, bug register and ledger. Fix the regex, fake process shape and cleanup; normalize Windows path separators. No test/package result yet.
 - `tests/test_qwen_runtime_safety.py`: replace finite fake clock with incrementing monotonic clock; make both new tests close provider in finally.
 - `app/tts/providers/qwen_character.py`: close worker stderr handle after diagnostic tail capture on timeout/early exit.
 - `.github/workflows/qwen-cpu-contract-acceptance.yml`: explicit always-run PowerShell copy into artifact directory; upload that directory only.
