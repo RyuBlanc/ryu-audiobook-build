@@ -826,6 +826,18 @@ class PremiumV2Bridge(QObject):
             if not getattr(chapter, "skip_for_generation", False)
             and str(getattr(chapter, "text", "") or "").strip()
         )
+        eligible_narration_word_count = sum(
+            len(str(getattr(chapter, "text", "") or "").split())
+            for chapter in project.chapters
+            if not getattr(chapter, "skip_for_generation", False)
+            and str(getattr(chapter, "text", "") or "").strip()
+        )
+        # This is a clearly labelled text-only listening-time estimate, not a
+        # claim about model synthesis time or a substitute for measured M4B duration.
+        estimated_listening_duration_seconds = (
+            int(round(eligible_narration_word_count * 60 / 150))
+            if eligible_narration_word_count > 0 else None
+        )
         empty_chapters = sum(
             1 for chapter in project.chapters
             if not str(getattr(chapter, "text", "") or "").strip()
@@ -1072,6 +1084,9 @@ class PremiumV2Bridge(QObject):
             "folder": str(project.folder.resolve()),
             "source_path": str(project.source_path) if project.source_path else None,
             "chapter_count": chapter_count,
+            "eligible_narration_word_count": eligible_narration_word_count,
+            "estimated_listening_duration_seconds": estimated_listening_duration_seconds,
+            "estimated_listening_rate_words_per_minute": 150,
             "completed_chapter_count": completed_chapter_count,
             "empty_chapters_skipped": empty_chapters_skipped,
             "excluded_chapters_skipped": excluded_chapters_skipped,
