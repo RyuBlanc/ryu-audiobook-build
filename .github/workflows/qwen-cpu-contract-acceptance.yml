@@ -97,6 +97,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Ryu-Stage7-Qwen-Real-CPU-Preview-${{ github.run_number }}
-          path: qwen-cpu-acceptance/
+          path: |
+            qwen-cpu-acceptance/
+            ~\Ryu's Audiobook\Settings\qwen_character_worker.log
           if-no-files-found: warn
           retention-days: 30
