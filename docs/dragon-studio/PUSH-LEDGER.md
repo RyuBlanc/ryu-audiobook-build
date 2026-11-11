@@ -27,12 +27,19 @@ Commits `8f3ac933a5d034df1ba91ab73e69e55e889cd3f1`, `9ffec2f43fdae005d224783727f
 
 The commits are pushed but unaccepted. The test still expected lowercase `timed out` while production correctly emitted `Timed out`, and its fake worker lacked the stream attributes needed by `close()`. CPU Qwen run #11 (internal ID `43017828264`) failed in the focused 56-test group; real preview did not run and no worker stderr artifact was available. Original failures #3251–#3258 remain failed.
 
-## Corrective push B — pending
-Expected files: `tests/test_qwen_runtime_safety.py`, `.github/workflows/qwen-cpu-contract-acceptance.yml`, bug register and ledger. Fix the regex, fake process shape and cleanup; normalize Windows path separators. No test/package result yet.
-- `tests/test_qwen_runtime_safety.py`: replace finite fake clock with incrementing monotonic clock; make both new tests close provider in finally.
-- `app/tts/providers/qwen_character.py`: close worker stderr handle after diagnostic tail capture on timeout/early exit.
-- `.github/workflows/qwen-cpu-contract-acceptance.yml`: explicit always-run PowerShell copy into artifact directory; upload that directory only.
-- `docs/dragon-studio/POST-1.2.0-BUG-REGISTER.md`: record confirmed root cause and fix.
-- This file: update with exact correction SHA and run IDs after push.
+## Corrective push B — commits #3259–#3262
 
-Status before commit: prepared, not pushed; tests/package pending. Run focused Qwen diagnostic tests first, then full regression and exact-head Windows package. Inspect the CPU real-preview artifact separately for worker stderr.
+Commits:
+- `b7006e4cadbb36170909ed384773754f0c722916` — `tests/test_qwen_runtime_safety.py`: case-insensitive timeout message expectation, process-shaped fake for early exit, targeted stderr-handle cleanup.
+- `86f64fa309d754a3104039c25dab5e97e81b76c8` — `.github/workflows/qwen-cpu-contract-acceptance.yml`: normalized Windows path separators in artifact collector.
+- `27d569939edc20fd4d49d515ad67e8a5c91916af` — bug register: record #3251–#3258 follow-up diagnosis.
+- `5bac4b58cd80bbaf5a3e528857fe3acf196fcee0` — ledger: record correction and retry state.
+
+**Validation state:**
+- Push #3259 / run `43020565701`: tests passed (1,498); build job skipped because this is a push validation.
+- PR #3261 / run `43020576268`: tests passed (1,498); exact package job on this intermediate head is not the final current-head package gate.
+- Current PR #3264 / run `43020594973`, exact head `5bac4b58cd80bbaf5a3e528857fe3acf196fcee0`: tests passed (1,498). Windows build job `130523687954` is in progress; package outcome pending.
+- CPU Qwen run #12 / `43020566273`: real CPU runtime install is still active; real-preview outcome pending.
+
+Original failed runs #3251–#3258 remain recorded as failures. This correction resolves the two test errors, but Qwen real-preview/hardware and Windows package acceptance have not been marked complete.
+
