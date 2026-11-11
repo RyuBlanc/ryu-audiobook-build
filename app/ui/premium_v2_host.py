@@ -4260,8 +4260,11 @@ class PremiumV2Bridge(QObject):
                 except Exception:
                     log.debug("Could not publish Qwen preview status.", exc_info=True)
 
-            with self._jobs_lock:
-                self._preview_providers[job_id] = provider
+            preview_registry = getattr(self, "_preview_providers", None)
+            jobs_lock = getattr(self, "_jobs_lock", None)
+            if isinstance(preview_registry, dict) and jobs_lock is not None:
+                with jobs_lock:
+                    preview_registry[job_id] = provider
             status_setter = getattr(provider, "set_status_callback", None)
             if callable(status_setter):
                 status_setter(provider_status)
@@ -4513,9 +4516,11 @@ class PremiumV2Bridge(QObject):
                         close = getattr(provider, "close", None)
                         if callable(close): close()
             if cancel_event is not None:
-                with self._jobs_lock:
-                    self._preview_cancel_events.pop(job_id, None)
-                    self._preview_providers.pop(job_id, None)
+                jobs_lock = getattr(self, "_jobs_lock", None)
+                if jobs_lock is not None:
+                    with jobs_lock:
+                        getattr(self, "_preview_cancel_events", {}).pop(job_id, None)
+                        getattr(self, "_preview_providers", {}).pop(job_id, None)
 
     def _character_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
         """Return a clean saved cast and remove legacy false detections on first review."""
@@ -5919,9 +5924,13 @@ class PremiumV2Bridge(QObject):
 
     def _unassigned_character_default_read(self) -> dict[str, Any]:
         """Resolve the app-wide fallback voice used for characters without a valid assignment."""
-        profile_name = str(
-            self.settings.value("voice/unassigned_character_profile", "") or ""
-        ).strip()
+        settings = getattr(self, "settings", None)
+        try:
+            stored_name = settings.value("voice/unassigned_character_profile", "") if settings is not None else ""
+        except Exception:
+            log.warning("Could not read the app-wide Unassigned Character voice setting.", exc_info=True)
+            stored_name = ""
+        profile_name = str(stored_name or "").strip()
         profile = self._find_profile(profile_name) if profile_name else None
         return {
             "profile_name": profile_name or None,
@@ -8341,7 +8350,7 @@ class PremiumV2Bridge(QObject):
                              recoverable=not summary.cancelled)
         with self._jobs_lock:
             self._generators.pop(job_id, None)
-            self._generation_progress_timing.pop(job_id, None)
+            getattr(self, "_generation_progress_timing", {}).pop(job_id, None)
 
     def _production_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
@@ -8479,9 +8488,9 @@ class PremiumV2Bridge(QObject):
             row = self._jobs.get(job_id)
         if manager is None:
             with self._jobs_lock:
-                preview_cancel = self._preview_cancel_events.get(job_id)
-                preview_provider = self._preview_providers.get(job_id)
-                import_cancel = self._import_cancel_events.get(job_id)
+                preview_cancel = getattr(self, "_preview_cancel_events", {}).get(job_id)
+                preview_provider = getattr(self, "_preview_providers", {}).get(job_id)
+                import_cancel = getattr(self, "_import_cancel_events", {}).get(job_id)
             if row and row.get("state") in {"completed", "failed", "cancelled"}:
                 return dict(row)
             analysis_cancel = self._analysis_cancel_events.get(job_id)
