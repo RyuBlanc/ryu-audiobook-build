@@ -345,6 +345,13 @@ class FunctionalCheckpoint20261111Tests(unittest.TestCase):
             block = workflow[start:next_step if next_step >= 0 else len(workflow)]
             if step_name in {"Upload Windows installer artifact", "Upload release SHA-256 manifest"}:
                 self.assertIn("startsWith(github.head_ref, 'dragon-studio/')", block)
+            elif step_name == "Upload portable Windows application":
+                self.assertIn(
+                    "if: ${{ github.event_name != 'pull_request' || startsWith(github.head_ref, 'dragon-studio/') }}",
+                    block,
+                    msg="Portable application must upload for Dragon Studio PRs only.",
+                )
+                self.assertIn("path: dist/Ryu's Audiobook/", block)
             else:
                 self.assertIn(
                     "if: ${{ github.event_name != 'pull_request' }}",
