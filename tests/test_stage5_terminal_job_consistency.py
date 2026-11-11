@@ -43,6 +43,7 @@ class DurableGenerationCompletionHarness:
         }
         self._history: dict[str, dict] = {}
         self._generators = {job_id: object()}
+        self._generation_progress_timing = {}
         self._jobs_path = lambda: root / "premium_v2_jobs.json"
         self._history_path = lambda: root / "premium_v2_history.json"
 
