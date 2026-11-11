@@ -6525,7 +6525,7 @@ function renderProductionMetadataGate(active) {
       : packagingStage
         ? 'Narration complete · final M4B assembly in progress; ETA not estimated'
         : fullActive
-          ? 'Available after 3 completed synthesis chunks'
+          ? 'Available after 4 completed synthesis chunks'
           : (fullState === 'completed' ? 'Complete' : '—');
     setProductionStatus('remaining', etaLabel);
     const measuredDuration = Number(
@@ -6551,6 +6551,16 @@ function renderProductionMetadataGate(active) {
         : (fullActive
           ? 'Measured audio generated so far · waiting for the first chapter checkpoint'
           : 'Measured audio generated so far · —'));
+    const packagingStepsDone = Math.max(0, Number(fullJob?.packaging_completed_steps || 0));
+    const packagingStepsTotal = Math.max(0, Number(fullJob?.packaging_total_steps || 0));
+    const packagingProgress = Number(fullJob?.packaging_progress_percent);
+    const packagingLabel = packagingStage
+      ? (packagingStepsTotal > 0
+        ? 'M4B assembly and validation · ' + packagingStepsDone + ' / ' +
+          packagingStepsTotal + ' measured steps (' +
+          (Number.isFinite(packagingProgress) ? Math.round(packagingProgress) + '%' : 'progress pending') + ')'
+        : 'M4B assembly and validation · started; exact step progress not reported yet')
+      : (fullState === 'completed' ? 'M4B assembly and validation · completed' : '');
     const metricHost = $('genRing')?.closest('.card') || $('genRing')?.parentElement;
     let details = $('genProgressDetails');
     if (!details && metricHost) {
@@ -6576,10 +6586,18 @@ function renderProductionMetadataGate(active) {
       const generated = document.createElement('div');
       generated.id = 'genGeneratedDuration';
       generated.textContent = generatedAudioLabel;
+      const metrics = [workload, generated];
+      if (packagingLabel) {
+        const packaging = document.createElement('div');
+        packaging.id = 'genPackagingProgress';
+        packaging.textContent = packagingLabel;
+        metrics.push(packaging);
+      }
       const duration = document.createElement('div');
       duration.id = 'genDuration';
       duration.textContent = durationLabel;
-      details.replaceChildren(workload, generated, duration);
+      metrics.push(duration);
+      details.replaceChildren(...metrics);
     }
 
     const pause = $('pauseGenerate');
