@@ -1530,7 +1530,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("total_seconds", adapter)
         self.assertIn("synthesis_seconds", adapter)
         self.assertIn("target_seconds=seconds", host)
-        self.assertIn("progress=min(95, max(2, 5 + int(90 * current / max(1, total))))", host)
+        self.assertIn("actual_percent = min(95, max(0, round(95 * current / max(1, total))))", host)
         self.assertIn("duration = round(_duration_ms(preview_path) / 1000.0, 2)", host)
 
     def test_production_preview_is_a_typed_cancellable_job_with_real_chapter_identity(self):
@@ -1583,7 +1583,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
     def test_production_idle_state_is_neutral_and_preview_chapter_identity_is_visible(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
-        self.assertIn("fullJob ? fullPercent + '%' : (completedOutput ? '100%' : 'Idle')", adapter)
+        self.assertIn("fullJob ? fullPercent + '% narration workload' : (completedOutput ? '100% narration workload' : 'Idle')", adapter)
         self.assertIn("id = 'productionPreviewChapter'", adapter)
         self.assertIn("previewChapterNumber", adapter)
         self.assertIn("previewChapterLabel", adapter)
