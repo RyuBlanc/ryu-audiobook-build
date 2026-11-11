@@ -7953,6 +7953,7 @@ class PremiumV2Bridge(QObject):
             stage = "Paused at chapter checkpoint"
             changes["message"] = msg.split(":", 1)[1]
             changes["eta_seconds"] = None
+            changes["eta_updated_at"] = None
         elif msg.startswith("plan:"):
             parts = msg.split(":")
             try:
@@ -7974,6 +7975,7 @@ class PremiumV2Bridge(QObject):
                 "generation_eta_seconds_per_text_unit": None,
                 "generated_audio_duration_seconds": 0.0,
                 "generation_completed_work_units": 0,
+                "generation_completed_chapter_work_units": 0,
                 "generation_total_work_units": total_work,
                 "generation_completed_chunks": 0,
                 "generation_total_chunks": total_chunks,
@@ -8143,6 +8145,7 @@ class PremiumV2Bridge(QObject):
             changes.update({
                 "progress": round(100.0 * min(total_work, current_work) / total_work),
                 "generation_completed_work_units": current_work,
+                "generation_completed_chapter_work_units": current_work,
                 "message": msg.partition(":")[2],
             })
             if measured_book_seconds is not None:
@@ -8582,7 +8585,13 @@ class PremiumV2Bridge(QObject):
             ):
                 return dict(current)
             return self._job_update(
-                job_id, state="running", stage="Resuming generation", message="Resume requested."
+                job_id,
+                state="running",
+                stage="Resuming generation",
+                message="Resume requested.",
+                eta_updated_at=(
+                    self._now() if current.get("eta_seconds") is not None else None
+                ),
             )
 
     def _job_cancel(self, payload: dict[str, Any]) -> dict[str, Any]:
