@@ -5595,9 +5595,8 @@
       return 'Generation is blocked by ' + conflictingDialogue + ' conflicting dialogue assignment(s) and '
         + indexIssues + ' source/index issue(s). Resolve these structural conflicts in Character Studio first.';
     }
-    if (!narratorOnly && (unassignedCharacters > 0 || pendingDialogue > 0) &&
-        active.unassigned_character_profile_available !== true) {
-      return 'Save an available global Unassigned Character profile in Voice Studio before generating with unassigned characters or dialogue passages.';
+    if (!narratorOnly && active.unassigned_character_profile_available !== true) {
+      return 'Choose and save the required global Unassigned Character profile in Voice Studio before character-based generation.';
     }
     const unsaved = metadataDialogDirty && metadataDialogProjectFolder === String(active.folder);
     if (unsaved) return 'Save or discard Input Project Details changes before generation.';
@@ -6456,31 +6455,35 @@ function renderProductionMetadataGate(active) {
     const measuredDuration = Number(
       fullJob?.result?.output_duration_seconds ?? project?.output_duration_seconds ?? NaN
     );
-    const metricHost = $('remaining')?.parentElement?.parentElement ||
-      $('remaining')?.parentElement || $('genStage')?.parentElement || ring?.parentElement;
-    let durationNode = $('genDuration');
-    if (!durationNode && metricHost) {
-      durationNode = document.createElement('div');
-      durationNode.id = 'genDuration';
-      durationNode.className = 'muted';
-      durationNode.style.cssText = 'grid-column:1/-1;flex:1 1 100%;min-width:0;margin-top:8px;font-size:12px;line-height:1.45;overflow-wrap:anywhere';
-      metricHost.appendChild(durationNode);
-    }
-    if (durationNode) {
-      durationNode.textContent = Number.isFinite(measuredDuration) && measuredDuration > 0
-        ? 'Measured audiobook duration · ' + formatProductionDuration(measuredDuration)
-        : (fullActive || fullState === 'completed'
-          ? 'Final audiobook duration · measured from the validated M4B when assembly finishes'
-          : (completedOutput
-            ? 'Audiobook duration · not available in this saved project record'
-            : 'Final audiobook duration · shown after M4B validation'));
-    }
     const workloadCompleted = Math.max(0, Number(fullJob?.generation_completed_work_units || 0));
     const workloadTotal = Math.max(0, Number(fullJob?.generation_total_work_units || 0));
     const workloadLabel = workloadTotal > 0
-      ? 'Completed narration workload · ' + workloadCompleted.toLocaleString() + ' / ' + workloadTotal.toLocaleString() + ' text units'
-      : (fullActive ? 'Preparing the measured narration workload plan' : '');
-    setProductionStatus('genWorkload', workloadLabel);
+      ? 'Narration workload completed · ' + workloadCompleted.toLocaleString() + ' / ' + workloadTotal.toLocaleString() + ' text units'
+      : (fullActive ? 'Narration workload · preparing the measured generation plan' : '');
+    const durationLabel = Number.isFinite(measuredDuration) && measuredDuration > 0
+      ? 'Measured audiobook duration · ' + formatProductionDuration(measuredDuration)
+      : (fullActive || fullState === 'completed'
+        ? 'Final audiobook duration · measured from the validated M4B when assembly finishes'
+        : (completedOutput
+          ? 'Audiobook duration · not available in this saved project record'
+          : 'Final audiobook duration · shown after M4B validation'));
+    const metricHost = $('genRing')?.closest('.card') || $('genRing')?.parentElement;
+    let details = $('genProgressDetails');
+    if (!details && metricHost) {
+      details = document.createElement('div');
+      details.id = 'genProgressDetails';
+      details.className = 'muted';
+      details.style.cssText = 'display:grid;gap:5px;width:100%;max-width:100%;margin:14px auto 0;padding:0 10px;text-align:center;font-size:12px;line-height:1.45;overflow-wrap:anywhere;box-sizing:border-box';
+      metricHost.appendChild(details);
+    }
+    if (details) {
+      const workload = document.createElement('div');
+      workload.textContent = workloadLabel;
+      const duration = document.createElement('div');
+      duration.id = 'genDuration';
+      duration.textContent = durationLabel;
+      details.replaceChildren(workload, duration);
+    }
 
     const pause = $('pauseGenerate');
     if (pause) {
