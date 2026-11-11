@@ -7926,7 +7926,11 @@ class PremiumV2Bridge(QObject):
             timings = self._generation_progress_timing
         timing = timings.setdefault(
             str(job_id),
-            {"last_at": None, "last_work": 0, "samples": []},
+            {
+                "samples": [],
+                "seconds_per_unit_ema": None,
+                "warmup_chunk_skipped": False,
+            },
         )
 
         if msg.startswith("paused:"):
@@ -7941,11 +7945,18 @@ class PremiumV2Bridge(QObject):
                 total_chunks = max(1, int(parts[3]))
             except (IndexError, TypeError, ValueError):
                 total_work, total_chunks = 1, 1
-            timing.update({"last_at": None, "last_work": 0, "samples": []})
+            timing.clear()
+            timing.update({
+                "samples": [],
+                "seconds_per_unit_ema": None,
+                "warmup_chunk_skipped": False,
+            })
             stage = "Preparing generation plan"
             changes.update({
                 "progress": 0,
                 "eta_seconds": None,
+                "eta_updated_at": None,
+                "generation_eta_seconds_per_text_unit": None,
                 "generated_audio_duration_seconds": 0.0,
                 "generation_completed_work_units": 0,
                 "generation_total_work_units": total_work,
@@ -7959,9 +7970,16 @@ class PremiumV2Bridge(QObject):
                 ),
             })
         elif msg.startswith("provider:"):
-            stage = "Loading voice provider"
-            changes["message"] = msg.partition(":")[2]
-            changes["eta_seconds"] = None
+            provider_message = msg.partition(":")[2].strip()
+            stage = (
+                "Loading voice model"
+                if "loading" in provider_message.casefold()
+                or "initializing" in provider_message.casefold()
+                else "Rendering narration"
+            )
+            changes["message"] = provider_message
+            # Keep the last measured ETA while provider diagnostics arrive.
+            # These messages are not completed work and must not erase a valid estimate.
         elif msg.startswith("pronunciation:"):
             parts = msg.split(":", 2)
             try:
@@ -7975,15 +7993,18 @@ class PremiumV2Bridge(QObject):
                 f"across {rules} enabled rule(s) for synthesis."
             )
         elif msg.startswith("chunk-start:"):
-            stage = "Loading voice model" if int(timing.get("last_work") or 0) == 0 else "Rendering chapter audio"
-            timing["last_at"] = now
-            changes["eta_seconds"] = None
-            changes["generation_eta_basis"] = None
+            stage = (
+                "Loading voice model"
+                if not timing.get("warmup_chunk_skipped")
+                else "Rendering chapter audio"
+            )
             changes["message"] = (
-                "Initializing the selected voice provider; no narration chunk has completed yet."
-                if int(timing.get("last_work") or 0) == 0
+                "Initializing the selected voice provider; measuring completed synthesis chunks."
+                if not timing.get("warmup_chunk_skipped")
                 else msg.partition(":")[2]
             )
+            # Chapter boundaries do not invalidate the measured book-wide rate.
+            # In particular, do not clear eta_seconds while Qwen moves to a new chapter.
         elif msg.startswith("chunk:"):
             stage = "Rendering narration chunks"
             match = re.search(r":(\d+)/(\d+):(\d+)/(\d+)", msg)
@@ -7992,23 +8013,9 @@ class PremiumV2Bridge(QObject):
                 total_chunks = max(1, int(match.group(2)))
                 completed_work = max(0, int(match.group(3)))
                 total_work = max(1, int(match.group(4)))
-                previous_work = max(0, int(timing.get("last_work") or 0))
-                previous_at = timing.get("last_at")
-                delta_work = max(0, completed_work - previous_work)
-                delta_seconds = (
-                    max(0.0, now - float(previous_at))
-                    if previous_at is not None else 0.0
-                )
-                samples = timing.setdefault("samples", [])
-                # Skip the first chunk: its duration can include lazy model load
-                # and accelerator warm-up, so it is not a valid throughput sample.
-                if previous_work > 0 and delta_work > 0 and delta_seconds >= 0.25:
-                    samples.append({"work": delta_work, "seconds": delta_seconds})
-                    del samples[:-5]
-                timing["last_work"] = completed_work
-                timing["last_at"] = now
                 # Main progress is the exact completed synthesis text-work
-                # ratio. M4B assembly has its own independent measured steps.
+                # ratio. Timing is received separately from the synthesis call,
+                # never inferred from UI callback spacing.
                 narration_percent = round(100.0 * min(total_work, completed_work) / total_work)
                 changes.update({
                     "progress": max(0, min(100, narration_percent)),
@@ -8016,35 +8023,91 @@ class PremiumV2Bridge(QObject):
                     "generation_total_work_units": total_work,
                     "generation_completed_chunks": completed_chunks,
                     "generation_total_chunks": total_chunks,
-                    "generation_eta_sample_count": len(samples),
                     "message": (
                         f"Completed synthesis workload {completed_work:,}/{total_work:,} "
                         f"text unit(s) · chunk {completed_chunks}/{total_chunks}."
                     ),
                 })
-                elapsed = 0
-                try:
-                    row = getattr(self, "_jobs", {}).get(str(job_id), {})
-                    started = datetime.fromisoformat(str(row.get("started_at") or ""))
-                    elapsed = max(0, int((datetime.now(timezone.utc) - started).total_seconds()))
-                except (TypeError, ValueError):
-                    pass
-                eta = None
-                if (
-                    len(samples) >= 3
-                    and elapsed >= 10
-                    and completed_work > 0
-                    and completed_work < total_work
-                ):
-                    measured_seconds = sum(float(sample["seconds"]) for sample in samples)
-                    measured_work = sum(int(sample["work"]) for sample in samples)
-                    throughput = measured_work / measured_seconds if measured_seconds > 0 else 0.0
-                    if throughput > 0:
-                        eta = max(0, int((total_work - completed_work) / throughput))
-                        changes["generation_eta_basis"] = (
-                            f"measured throughput from {len(samples)} completed chunks in this run"
+        elif msg.startswith("chunk-timing:"):
+            stage = "Measured synthesis throughput"
+            match = re.match(
+                r"chunk-timing:(\d+):([0-9]+(?:\.[0-9]+)?):(\d+):(\d+):(\d+):(\d+)",
+                msg,
+            )
+            if match:
+                measured_work = max(1, int(match.group(1)))
+                measured_seconds = max(0.001, float(match.group(2)))
+                completed_work = max(0, int(match.group(3)))
+                total_work = max(1, int(match.group(4)))
+                completed_chunks = max(0, int(match.group(5)))
+                total_chunks = max(1, int(match.group(6)))
+                samples = timing.setdefault("samples", [])
+
+                # The first real synthesis call can include model loading and
+                # accelerator warm-up. Exclude it from the steady-state rate.
+                if not timing.get("warmup_chunk_skipped"):
+                    timing["warmup_chunk_skipped"] = True
+                else:
+                    samples.append({
+                        "work": measured_work,
+                        "seconds": measured_seconds,
+                    })
+                    del samples[:-9]
+
+                observed_rates = sorted(
+                    float(sample["seconds"]) / max(1, int(sample["work"]))
+                    for sample in samples
+                    if float(sample.get("seconds") or 0) > 0
+                    and int(sample.get("work") or 0) > 0
+                )
+                seconds_per_unit = None
+                if observed_rates:
+                    middle = len(observed_rates) // 2
+                    if len(observed_rates) % 2:
+                        observed_median = observed_rates[middle]
+                    else:
+                        observed_median = (
+                            observed_rates[middle - 1] + observed_rates[middle]
+                        ) / 2.0
+                    previous_rate = timing.get("seconds_per_unit_ema")
+                    if previous_rate is not None and float(previous_rate) > 0:
+                        # Damp changes from one unusually slow/fast chunk while
+                        # still adapting to sustained changes in Qwen throughput.
+                        seconds_per_unit = (
+                            0.20 * observed_median + 0.80 * float(previous_rate)
                         )
-                changes["eta_seconds"] = eta
+                    else:
+                        seconds_per_unit = observed_median
+                    timing["seconds_per_unit_ema"] = seconds_per_unit
+
+                changes.update({
+                    "generation_completed_work_units": completed_work,
+                    "generation_total_work_units": total_work,
+                    "generation_completed_chunks": completed_chunks,
+                    "generation_total_chunks": total_chunks,
+                    "generation_eta_sample_count": len(samples),
+                    "generation_eta_seconds_per_text_unit": seconds_per_unit,
+                    "message": (
+                        f"Measured synthesis chunk {completed_chunks}/{total_chunks} · "
+                        f"{measured_seconds:.1f}s for {measured_work:,} text unit(s)."
+                    ),
+                })
+                if completed_work >= total_work:
+                    changes["eta_seconds"] = 0
+                    changes["eta_updated_at"] = self._now()
+                elif len(samples) >= 3 and seconds_per_unit is not None:
+                    remaining_work = max(0, total_work - completed_work)
+                    changes["eta_seconds"] = max(
+                        0, int(round(remaining_work * seconds_per_unit))
+                    )
+                    changes["eta_updated_at"] = self._now()
+                    changes["generation_eta_basis"] = (
+                        "median measured synthesis-call duration per text unit, "
+                        f"smoothed over {len(samples)} completed chunk(s)"
+                    )
+            # Before three post-warm-up samples, retain the last valid estimate
+            # (or leave it unavailable during initial calibration).
+
         elif msg.startswith("chapter-complete:"):
             stage = "Chapter audio saved"
             current_work = max(0, int(done or 0))
@@ -8080,6 +8143,7 @@ class PremiumV2Bridge(QObject):
                 "packaging_completed_steps": 0,
                 "packaging_total_steps": None,
                 "eta_seconds": None,
+                "eta_updated_at": None,
                 "generation_eta_basis": None,
                 "message": "Narration workload is 100% complete. Measuring final M4B assembly and validation separately.",
             })
@@ -8102,6 +8166,7 @@ class PremiumV2Bridge(QObject):
                 detail = stage
             changes.update({
                 "eta_seconds": None,
+                "eta_updated_at": None,
                 "generation_eta_basis": None,
                 "message": detail,
             })
@@ -8111,12 +8176,14 @@ class PremiumV2Bridge(QObject):
                 "progress": 100,
                 "packaging_progress_percent": 100,
                 "eta_seconds": 0,
+                "eta_updated_at": self._now(),
                 "message": "Final M4B assembly and validation completed.",
             })
         elif msg.startswith("m4b-failed"):
             stage = "Audiobook assembly failed"
             changes["message"] = msg.partition(":")[2]
             changes["eta_seconds"] = None
+            changes["eta_updated_at"] = None
         else:
             changes["message"] = msg
 
