@@ -9991,6 +9991,26 @@ function renderProductionMetadataGate(active) {
     // that content; use the adapter guide below only as a safe fallback when a
     // build genuinely has no static Help page content.
     if (root.children.length && String(root.textContent || '').trim()) {
+      // Preserve the detailed shipped Help & Guide, but reconcile the old
+      // GEN-07 wording with the current per-book routing and global fallback.
+      // Only the two obsolete list items are replaced; all other guide content
+      // and its layout remain intact.
+      const narratorOnlyItem = [
+        ...root.querySelectorAll('li, p')
+      ].find(item => String(item.textContent || '').toLowerCase()
+        .includes('zero valid character voice profiles are configured'));
+      if (narratorOnlyItem) {
+        narratorOnlyItem.textContent =
+          'Narrator-Only Generation is an explicit per-book choice and remains available even when character voice profiles are configured. When enabled, the saved narrator reads all narration and dialogue; character assignments are ignored for that book. A valid saved narrator profile is still required.';
+      }
+      const unassignedItem = [
+        ...root.querySelectorAll('li, p')
+      ].find(item => String(item.textContent || '').toLowerCase()
+        .includes('unresolved dialogue must be reviewed or assigned'));
+      if (unassignedItem) {
+        unassignedItem.textContent =
+          'When Narrator-Only Generation is off, unassigned characters and dialogue use the app-wide Unassigned Character profile. Production shows the pending counts and asks you to acknowledge the fallback; after choosing OK, click Generate full audiobook again. Explicitly assigned character profiles remain in use, and the narrator continues to read narration.';
+      }
       root.dataset.ryuHelpGuideRendered = 'preserved-static-guide';
       return;
     }
@@ -10066,14 +10086,14 @@ function renderProductionMetadataGate(active) {
       },
       {
         title: 'Narrator-only audiobook generation (GEN-07)',
-        summary: 'Generate a complete audiobook with the narrator voice when no character voice profiles are configured.',
+        summary: 'Choose narrator-only routing for this book, or use assigned character voices with a mandatory global fallback for unassigned dialogue.',
         items: [
-          'Narrator-only mode is available when the active project has zero saved character voice-profile assignments. A list of detected or manually created character candidates without voice profiles does not prevent this mode.',
-          'Choose a valid, available saved narrator profile using the project narrator or its series default. The narrator must still be configured; missing narrator profiles continue to block generation.',
-          'In narrator-only mode, the narrator intentionally reads every passage, including quoted and dash-led dialogue. You do not need to create character profiles or assign speakers just to generate this version.',
-          'The Production job identifies Narrator-only mode and records the effective narrator and zero configured character profiles. Preview and final generation use the same narrator-only route.',
-          'As soon as any character voice profile is configured in the project, normal cast-aware rules apply. Unassigned dialogue must then be reviewed or assigned before full generation; the app does not silently route a partial cast to the narrator.',
-          'Required project metadata, valid chapters, output-folder permissions and the selected narrator remain mandatory in both modes.'
+          'Narrator-Only Generation is an explicit per-book choice and remains available even when character voice profiles are configured. When enabled, the saved narrator reads all narration and dialogue; character assignments are ignored for that book.',
+          'Choose a valid, available saved narrator profile using the project narrator or its series default. A narrator profile is mandatory in both narrator-only and character-cast modes.',
+          'When narrator-only is enabled, the narrator reads every passage, including quoted and dash-led dialogue. Existing character assignments are preserved but ignored for this book; switching the option off restores cast-aware routing.',
+          'When narrator-only is off, explicitly assigned characters use their saved Voice Studio profiles. Any unassigned character or dialogue passage uses the mandatory app-wide Unassigned Character profile selected in Voice Studio.',
+          'Before cast-aware generation, Production shows the number of unassigned characters and pending dialogue passages and asks you to confirm the fallback. Press OK, then click Generate full audiobook again to continue. Acknowledgement is invalidated if the project counts or fallback profile change.',
+          'Required project metadata, valid chapters, output-folder permissions and an available saved narrator remain mandatory in both modes. The global fallback profile is additionally required for character-cast mode.'
         ]
       },
       {
