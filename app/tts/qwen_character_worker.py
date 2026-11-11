@@ -347,7 +347,8 @@ def _load_model_with_fallback(
             raise
         message = (
             f"Automatic accelerator initialization failed for {kind}; "
-            f"retrying the same model on CPU. Device error: {accelerator_error}"
+            "retrying the same selected model on CPU without changing voice identity. "
+            f"Device error: {accelerator_error}"
         )
         if callable(progress):
             progress(message)

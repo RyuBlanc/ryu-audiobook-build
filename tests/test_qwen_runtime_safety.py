@@ -366,7 +366,7 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
             ("custom-1.7b", "automatic", True),
             ("custom-1.7b", "cpu", True),
         ])
-        self.assertTrue(any("retrying the same model on CPU" in m.get("progress", "") for m in messages))
+        self.assertTrue(any("retrying the same selected model on CPU without changing voice identity" in m.get("progress", "") for m in messages))
         self.assertEqual(messages[-1]["model"], worker.MODEL_IDS["custom-1.7b"])
         self.assertEqual(messages[-1]["backend"], "cpu")
 
