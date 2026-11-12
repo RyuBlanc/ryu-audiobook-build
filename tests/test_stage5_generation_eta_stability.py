@@ -361,6 +361,19 @@ class Stage5GenerationEtaStabilityTests(unittest.TestCase):
         self.assertIn("Valid synthesis chunks saved", adapter)
         self.assertIn("percentage advances when a chunk is validated", adapter)
 
+    def test_m4b_complete_waits_for_final_duration_measurement(self):
+        bridge = _ProgressHarness()
+        bridge._generation_progress(
+            "eta-test", 2, 2, 100, "m4b-complete"
+        )
+        row = bridge._jobs["eta-test"]
+        self.assertEqual(row["stage"], "Validating final M4B duration")
+        self.assertNotIn("duration measured", row["stage"].casefold())
+        self.assertIn("measuring the final audio duration", row["message"].casefold())
+        self.assertEqual(row["packaging_progress_percent"], 100)
+        self.assertEqual(row["progress"], 100)
+        self.assertEqual(row["state"], "running")
+
     def test_progress_ring_remains_a_true_circle_and_reports_completed_workload(self):
         root = Path(__file__).resolve().parents[1]
         adapter = (root / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
