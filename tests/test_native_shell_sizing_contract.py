@@ -240,11 +240,27 @@ class NativeShellSizingContracts(unittest.TestCase):
         self.assertNotIn("self.apply_window_size(", settings_saved)
         self.assertIn("apply_size(window_size)", settings)
 
-    def test_native_voice_design_preview_does_not_initialize_long_form_anchor_bank(self):
+    def test_native_voice_design_audition_uses_saved_identity_locked_profile(self):
         voice = (ROOT / "app/ui/voice_page.py").read_text(encoding="utf-8")
-        self.assertIn('qwen_mode="design-preview"', voice)
-        self.assertIn('one-pass preview', voice)
-        self.assertNotIn('VoiceDesign preview and audiobook require the local Qwen Base model', voice)
+        provider = (ROOT / "app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
+        worker = (ROOT / "app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
+        preview_start = voice.index("    def preview(self) -> None:")
+        preview_end = voice.index("\\n    def ", preview_start + 10)
+        preview = voice[preview_start:preview_end]
+
+        # The native audition must preserve the saved design profile and use
+        # the same VoiceDesign/Base identity lock as production, not the old
+        # one-pass design-preview task.
+        self.assertIn('if profile.qwen_mode == "design":', preview)
+        self.assertIn("qwen_model_kinds_for_preference(", preview)
+        self.assertIn("model_installed(clone_kind)", preview)
+        self.assertIn("preview_profile = profile", preview)
+        self.assertNotIn("preview_profile = replace(", preview)
+        self.assertNotIn('qwen_mode="design-preview"', preview)
+        self.assertIn('active_task == "design"', worker)
+        self.assertIn("lock_design_identity(request)", worker)
+        self.assertIn("_generate_design_locked(model, locked_clone_prompts, request, output)", worker)
+        self.assertIn('"longform": self.qwen_mode != "design-preview"', provider)
 
     def test_character_studio_static_samples_are_removed_and_empty_states_are_real(self):
         html = (ROOT / "assets/frontend/ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
