@@ -278,6 +278,8 @@ class Stage6HistoryTaskManagerTests(unittest.TestCase):
 
 class Stage8JobRetryRecoveryTests(unittest.TestCase):
     def _harness(self, folder: Path, source_row: dict, extra_jobs: dict | None = None):
+        project = SimpleNamespace(folder=folder)
+
         class Harness:
             _job_retry = host.PremiumV2Bridge._job_retry
             _job_recover = host.PremiumV2Bridge._job_recover
@@ -290,7 +292,15 @@ class Stage8JobRetryRecoveryTests(unittest.TestCase):
                 self._production_generate_book = Mock(return_value={"job_id": "new-generation-job"})
                 self._job_update = Mock(return_value={"job_id": "new-generation-job"})
 
-        project = SimpleNamespace(folder=folder)
+            def _load_library_project(self, requested_folder):
+                try:
+                    requested = Path(requested_folder).expanduser().resolve()
+                    expected = Path(project.folder).expanduser().resolve()
+                except (OSError, RuntimeError, TypeError, ValueError):
+                    return None
+                return project if requested == expected else None
+
+        project = project
         harness = Harness()
         return harness, project
 
@@ -304,7 +314,9 @@ class Stage8JobRetryRecoveryTests(unittest.TestCase):
             }
             harness, project = self._harness(folder, source)
             with (
-                patch("app.ui.premium_v2_host.list_projects", return_value=[project]),
+                patch("app.ui.premium_v2_host.list_projects", side_effect=AssertionError(
+                    "generation retry/recovery must resolve its saved project folder directly"
+                )),
                 patch("app.ui.premium_v2_host.load_state", return_value={
                     "generation_job_id": "failed-job", "generation_recovery_required": False,
                 }),
@@ -329,7 +341,9 @@ class Stage8JobRetryRecoveryTests(unittest.TestCase):
             }
             harness, project = self._harness(folder, source)
             with (
-                patch("app.ui.premium_v2_host.list_projects", return_value=[project]),
+                patch("app.ui.premium_v2_host.list_projects", side_effect=AssertionError(
+                    "generation retry/recovery must resolve its saved project folder directly"
+                )),
                 patch("app.ui.premium_v2_host.load_state", return_value={
                     "generation_job_id": "interrupted-job", "generation_recovery_required": True,
                 }),
@@ -378,7 +392,9 @@ class Stage8JobRetryRecoveryTests(unittest.TestCase):
             interrupted = dict(source, error={"code": "interrupted"})
             harness, project = self._harness(folder, interrupted)
             with (
-                patch("app.ui.premium_v2_host.list_projects", return_value=[project]),
+                patch("app.ui.premium_v2_host.list_projects", side_effect=AssertionError(
+                    "generation retry/recovery must resolve its saved project folder directly"
+                )),
                 patch("app.ui.premium_v2_host.load_state", return_value={
                     "generation_job_id": "failed-job", "generation_recovery_required": False,
                 }),
@@ -396,7 +412,9 @@ class Stage8JobRetryRecoveryTests(unittest.TestCase):
             }
             harness, project = self._harness(folder, source)
             with (
-                patch("app.ui.premium_v2_host.list_projects", return_value=[project]),
+                patch("app.ui.premium_v2_host.list_projects", side_effect=AssertionError(
+                    "generation retry/recovery must resolve its saved project folder directly"
+                )),
                 patch("app.ui.premium_v2_host.load_state", return_value={
                     "generation_job_id": "newer-generation-job",
                     "generation_recovery_required": False,
@@ -419,7 +437,9 @@ class Stage8JobRetryRecoveryTests(unittest.TestCase):
             }
             harness, project = self._harness(folder, source, {"active-job": active})
             with (
-                patch("app.ui.premium_v2_host.list_projects", return_value=[project]),
+                patch("app.ui.premium_v2_host.list_projects", side_effect=AssertionError(
+                    "generation retry/recovery must resolve its saved project folder directly"
+                )),
                 patch("app.ui.premium_v2_host.load_state", return_value={
                     "generation_job_id": "failed-job", "generation_recovery_required": False,
                 }),
