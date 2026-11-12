@@ -12535,17 +12535,18 @@ class PremiumV2Window(QMainWindow):
         self._frontend_generation += 1
         generation = self._frontend_generation
         self._update_startup_progress("Retrying the interface and reconnecting local services…", 5)
+        # Keep the native loading surface visible for both the packaged HTML
+        # path and the direct-file fallback. Showing Chromium before load/reload
+        # completes can expose a white frame while the renderer is still painting.
+        if hasattr(self, "_web_stack") and hasattr(self, "_loading_page"):
+            self._web_stack.setCurrentWidget(self._loading_page)
         if (
             self._uses_html_startup_loader
             and self._hosted_html_path is not None
             and self._hosted_html_path.is_file()
         ):
-            if hasattr(self, "_web_stack"):
-                self._web_stack.setCurrentWidget(self.web)
             self.web.load(QUrl.fromLocalFile(str(self._hosted_html_path.resolve())))
         else:
-            if hasattr(self, "_web_stack") and hasattr(self, "_loading_page"):
-                self._web_stack.setCurrentWidget(self._loading_page)
             self.web.reload()
         QTimer.singleShot(30000, lambda: self._show_web_failure(
             "The interface retry timed out. Your project data remains on disk. Check the local log and try again."

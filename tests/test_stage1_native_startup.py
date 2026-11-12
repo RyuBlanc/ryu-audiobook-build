@@ -186,6 +186,28 @@ class Stage1NativeStartupAcceptanceTests(unittest.TestCase):
         self.assertIn("expected build number", smoke.casefold())
 
 
+    def test_renderer_retry_keeps_native_splash_visible_before_both_reload_paths(self):
+        host = HOST.read_text(encoding="utf-8")
+        retry_start = host.index("    def _retry_web_renderer(self)")
+        retry_end = host.index("    def _handle_renderer_terminated(", retry_start)
+        retry = host[retry_start:retry_end]
+        self.assertIn(
+            "self._web_stack.setCurrentWidget(self._loading_page)",
+            retry,
+            "Renderer retry must switch to the native splash before starting a reload.",
+        )
+        self.assertNotIn(
+            "self._web_stack.setCurrentWidget(self.web)",
+            retry,
+            "Renderer retry must not expose the WebEngine while Chromium is reloading.",
+        )
+        html_load = retry.index("self.web.load(QUrl.fromLocalFile")
+        direct_reload = retry.index("self.web.reload()")
+        splash_switch = retry.index("self._web_stack.setCurrentWidget(self._loading_page)")
+        self.assertLess(splash_switch, html_load)
+        self.assertLess(splash_switch, direct_reload)
+        self.assertIn("self._web_stack.setCurrentWidget(self._loading_page)", retry)
+
     def test_startup_keeps_native_splash_until_ready_without_numeric_percentage(self):
         host = HOST.read_text(encoding="utf-8")
         window_start = host.index("class PremiumV2Window(")
