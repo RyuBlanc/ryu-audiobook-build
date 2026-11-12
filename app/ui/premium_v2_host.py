@@ -8324,13 +8324,20 @@ class PremiumV2Bridge(QObject):
                 "message": detail,
             })
         elif msg.startswith("m4b-complete"):
-            stage = "Audiobook duration measured · M4B ready"
+            # The assembler has returned a complete file, but the bridge measures
+            # the final M4B duration in _generation_finished immediately after
+            # this progress event. Do not claim that duration has already been
+            # measured before that result is persisted.
+            stage = "Validating final M4B duration"
             changes.update({
                 "progress": 100,
                 "packaging_progress_percent": 100,
                 "eta_seconds": 0,
                 "eta_updated_at": self._now(),
-                "message": "Final M4B assembly and validation completed.",
+                "message": (
+                    "M4B assembly is complete; measuring the final audio duration "
+                    "before marking the audiobook ready."
+                ),
             })
         elif msg.startswith("m4b-failed"):
             stage = "Audiobook assembly failed"
