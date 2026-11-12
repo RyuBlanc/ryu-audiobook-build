@@ -93,7 +93,9 @@ class Stage54GenerationJobUiStateTests(unittest.TestCase):
         self.assertIn("job.elapsed_paused_seconds", renderer)
         self.assertIn("job.elapsed_frozen !== true", renderer)
         self.assertIn("state === 'pause_requested'", renderer)
-        self.assertNotIn("Date.now() - startedAt", renderer)
+        self.assertIn("Date.now() - checkpointAt", renderer)
+        self.assertIn("Date.now() - startedAt", renderer)  # legacy snapshot fallback
+        self.assertLess(renderer.index("checkpointAt"), renderer.index("startedAt"))
         host_source = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         self.assertIn('row["elapsed_paused_seconds"] = paused_seconds', host_source)
         self.assertIn('row["elapsed_updated_at"] = now_iso', host_source)
