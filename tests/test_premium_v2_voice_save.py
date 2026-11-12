@@ -93,6 +93,36 @@ class VoicePreviewSelectionTests(unittest.TestCase):
         self.assertTrue(profile.qwen_profile_id)
         self.assertFalse(profile.qwen_profile_id is None)
 
+    def test_unsaved_qwen_preview_preserves_anchor_path_and_text(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            anchor = Path(temporary) / "saved-voice-anchor.wav"
+            anchor.write_bytes(b"voice identity anchor")
+            anchor_text = "This is the saved voice identity reference."
+
+            with (
+                patch("app.ui.premium_v2_host.ensure_roots"),
+                patch.object(PremiumV2Bridge, "_load_durable_jobs"),
+            ):
+                bridge = PremiumV2Bridge()
+                with patch.object(bridge, "_find_profile", return_value=None):
+                    profile = bridge._preview_profile_from_payload({
+                        "profile_name": "Anchored Qwen Preview",
+                        "provider": "qwen-character",
+                        "voice_id": "Ryan",
+                        "model_id": "auto",
+                        "qwen_mode": "design",
+                        "qwen_prompt": "Warm and clear narration voice.",
+                        "qwen_seed": "7301",
+                        "language": "English",
+                        "qwen_anchor_path": str(anchor),
+                        "qwen_anchor_text": anchor_text,
+                    }, {})
+
+            self.assertEqual(profile.qwen_anchor_path, str(anchor))
+            self.assertEqual(profile.qwen_anchor_text, anchor_text)
+            self.assertEqual(profile.qwen_mode, "design")
+            self.assertTrue(profile.qwen_profile_id)
+
     def test_unsaved_preview_requires_a_real_reference_for_clone_voice(self):
         with (
             patch("app.ui.premium_v2_host.ensure_roots"),

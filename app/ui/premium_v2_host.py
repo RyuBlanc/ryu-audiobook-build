@@ -3533,6 +3533,8 @@ class PremiumV2Bridge(QObject):
             qwen_prompt=str(payload.get("qwen_prompt") or "")[:4000],
             qwen_seed=int(payload["qwen_seed"]) if payload.get("qwen_seed") not in (None, "") else None,
             reference_text=str(payload.get("reference_text") or "")[:10000],
+            qwen_anchor_path=str(payload.get("qwen_anchor_path") or "").strip() or None,
+            qwen_anchor_text=str(payload.get("qwen_anchor_text") or "")[:10000],
             qwen_profile_id=qwen_profile_id,
         )
 
