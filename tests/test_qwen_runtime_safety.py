@@ -189,6 +189,9 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
                 reference,
                 ns=(original.st_atime_ns, original.st_mtime_ns),
             )
+            replaced = reference.stat()
+            self.assertEqual(replaced.st_size, original.st_size)
+            self.assertEqual(replaced.st_mtime_ns, original.st_mtime_ns)
             after = provider.generation_signature()
 
             self.assertNotEqual(
