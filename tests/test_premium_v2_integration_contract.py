@@ -1272,10 +1272,15 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         poll_end = adapter.index("async function refreshJobs()", poll_start)
         poll = adapter[poll_start:poll_end]
         self.assertIn("PRODUCTION_ACTIVE_JOB_STATES.has", poll)
-        self.assertIn("BACKEND_JOB_POLL_ACTIVE_MS = 1500", poll)
-        self.assertIn("BACKEND_JOB_POLL_IDLE_MS = 10000", poll)
-        self.assertIn("BACKEND_JOB_POLL_HIDDEN_ACTIVE_MS = 5000", poll)
-        self.assertIn("BACKEND_JOB_POLL_HIDDEN_IDLE_MS = 30000", poll)
+        for timing_contract in (
+            "const BACKEND_JOB_POLL_ACTIVE_MS = 1500",
+            "const BACKEND_JOB_POLL_IDLE_MS = 10000",
+            "const BACKEND_JOB_POLL_HIDDEN_ACTIVE_MS = 5000",
+            "const BACKEND_JOB_POLL_HIDDEN_IDLE_MS = 30000",
+        ):
+            self.assertIn(timing_contract, adapter)
+        self.assertIn("return active ? BACKEND_JOB_POLL_HIDDEN_ACTIVE_MS : BACKEND_JOB_POLL_HIDDEN_IDLE_MS", poll)
+        self.assertIn("return active ? BACKEND_JOB_POLL_ACTIVE_MS : BACKEND_JOB_POLL_IDLE_MS", poll)
         self.assertIn("document.visibilityState === 'hidden'", poll)
         self.assertIn("clearTimeout(window.__ryuBackendJobTimer)", poll)
         self.assertIn("refreshJobs().catch(error => console.warn", poll)
