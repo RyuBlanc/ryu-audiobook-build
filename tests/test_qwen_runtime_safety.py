@@ -74,6 +74,43 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
                 selected, _reason = accelerator.automatic_accelerator("custom-0.6b", path)
         self.assertEqual(selected.backend, "cuda")
 
+    def test_saved_qwen_anchor_replacement_changes_generation_signature(self):
+        import os
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from app.tts.providers.qwen_character import QwenCharacterProvider
+
+        with TemporaryDirectory() as temporary:
+            anchor = Path(temporary) / "saved-voice-anchor.wav"
+            anchor.write_bytes(b"old-anchor-bytes")
+            provider = QwenCharacterProvider(
+                voice_id="saved-design-profile",
+                model_kind="design-1.7b",
+                qwen_mode="design",
+                qwen_anchor_path=anchor,
+                qwen_profile_id="stable-profile-id",
+                instruct="Warm, clear narrator with a steady identity.",
+            )
+            with patch(
+                "app.tts.providers.qwen_character.best_long_form_clone_kind",
+                return_value="base-0.6b",
+            ):
+                before = provider.generation_signature()
+                original = anchor.stat()
+                anchor.write_bytes(b"new-anchor-bytes")
+                os.utime(
+                    anchor,
+                    ns=(original.st_atime_ns, original.st_mtime_ns + 2_000_000_000),
+                )
+                after = provider.generation_signature()
+
+            self.assertNotEqual(
+                before,
+                after,
+                "Replacing a saved Qwen identity anchor at the same path must invalidate cached chapter audio.",
+            )
+
     def test_qwen_huggingface_cache_uses_configured_model_cache_root(self):
         from pathlib import Path
         from tempfile import TemporaryDirectory
