@@ -280,6 +280,149 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('preview_profile.qwen_mode = "design-preview"', host)
         self.assertIn("performance_target_met", host)
 
+
+    def test_durable_job_restart_marks_only_its_own_project_recoverable(self):
+        import json
+        import threading
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.ui import premium_v2_host as host
+
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project_a = root / "project-a"
+            project_b = root / "project-b"
+            project_a.mkdir()
+            project_b.mkdir()
+            jobs_path = root / "premium_v2_jobs.json"
+            history_path = root / "premium_v2_history.json"
+            now = "2026-11-12T10:00:00+00:00"
+
+            rows = [
+                {
+                    "job_id": "interrupted-a",
+                    "id": "interrupted-a",
+                    "type": "audiobook-generation",
+                    "project_folder": str(project_a),
+                    "state": "running",
+                    "progress": 37,
+                    "retry_count": 1,
+                },
+                {
+                    "job_id": "stale-b",
+                    "id": "stale-b",
+                    "type": "audiobook-generation",
+                    "project_folder": str(project_b),
+                    "state": "paused",
+                    "progress": 62,
+                },
+                {
+                    "job_id": "already-complete",
+                    "id": "already-complete",
+                    "type": "audiobook-generation",
+                    "project_folder": str(project_a),
+                    "state": "completed",
+                    "progress": 100,
+                },
+            ]
+            jobs_path.write_text(json.dumps(rows), encoding="utf-8")
+            history_path.write_text("[]", encoding="utf-8")
+
+            project_states = {
+                project_a.resolve(): {
+                    "generation_job_id": "interrupted-a",
+                    "status": "generating",
+                    "output_path": None,
+                    "voice_profile": "Saved Narrator",
+                },
+                project_b.resolve(): {
+                    # A newer job now owns this project. The stale paused job
+                    # must become a failed queue record without mutating it.
+                    "generation_job_id": "newer-b",
+                    "status": "generating",
+                    "output_path": None,
+                    "voice_profile": "Newer Narrator",
+                },
+            }
+            saved_states = []
+
+            def load_project_state(folder):
+                return dict(project_states[Path(folder).resolve()])
+
+            def save_project_state(folder, state):
+                key = Path(folder).resolve()
+                project_states[key] = dict(state)
+                saved_states.append((key, dict(state)))
+
+            bridge = SimpleNamespace(
+                _jobs_lock=threading.RLock(),
+                _jobs={},
+                _history={},
+                _now=lambda: now,
+                _jobs_path=lambda: jobs_path,
+                _history_path=lambda: history_path,
+                _persist_jobs=lambda: host.PremiumV2Bridge._persist_json_rows(
+                    bridge._jobs_path(), list(bridge._jobs.values())
+                ),
+                _persist_history=lambda: host.PremiumV2Bridge._persist_json_rows(
+                    bridge._history_path(), list(bridge._history.values())
+                ),
+            )
+
+            with (
+                patch.object(host, "load_state", side_effect=load_project_state),
+                patch.object(host, "save_state", side_effect=save_project_state),
+            ):
+                host.PremiumV2Bridge._load_durable_history(bridge)
+                host.PremiumV2Bridge._load_durable_jobs(bridge)
+
+            job_a = bridge._jobs["interrupted-a"]
+            self.assertEqual(job_a["state"], "failed")
+            self.assertEqual(job_a["stage"], "Interrupted by application restart")
+            self.assertTrue(job_a["recoverable"])
+            self.assertEqual(job_a["error"]["code"], "interrupted")
+            self.assertIsNone(job_a["eta_seconds"])
+            self.assertEqual(job_a["progress"], 37)
+            self.assertEqual(job_a["retry_count"], 1)
+
+            job_b = bridge._jobs["stale-b"]
+            self.assertEqual(job_b["state"], "failed")
+            self.assertTrue(job_b["recoverable"])
+            self.assertEqual(job_b["error"]["code"], "interrupted")
+
+            completed = bridge._jobs["already-complete"]
+            self.assertEqual(completed["state"], "completed")
+            self.assertEqual(completed["progress"], 100)
+
+            state_a = project_states[project_a.resolve()]
+            self.assertEqual(state_a["status"], "failed")
+            self.assertTrue(state_a["generation_recovery_required"])
+            self.assertEqual(state_a["generation_job_id"], "interrupted-a")
+            self.assertEqual(state_a["voice_profile"], "Saved Narrator")
+
+            # The stale job did not change project B, which belongs to a newer
+            # generation. Only project A was written by the reconciliation.
+            state_b = project_states[project_b.resolve()]
+            self.assertEqual(state_b["generation_job_id"], "newer-b")
+            self.assertEqual(state_b["status"], "generating")
+            self.assertEqual(state_b["voice_profile"], "Newer Narrator")
+            self.assertEqual(
+                [folder for folder, _state in saved_states],
+                [project_a.resolve()],
+            )
+
+            persisted_jobs = json.loads(jobs_path.read_text(encoding="utf-8"))
+            by_id = {row["job_id"]: row for row in persisted_jobs}
+            self.assertEqual(by_id["interrupted-a"]["state"], "failed")
+            self.assertEqual(by_id["stale-b"]["error"]["code"], "interrupted")
+            persisted_history = json.loads(history_path.read_text(encoding="utf-8"))
+            history_by_id = {row["job_id"]: row for row in persisted_history}
+            self.assertEqual(history_by_id["interrupted-a"]["error"]["code"], "interrupted")
+            self.assertEqual(history_by_id["stale-b"]["error"]["code"], "interrupted")
+
+
     def test_qwen_voice_consistency_uses_design_anchor_and_base_prompt(self):
         import ast
 
