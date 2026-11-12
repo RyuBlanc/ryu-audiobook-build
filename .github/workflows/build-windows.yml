@@ -138,6 +138,64 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Summarize run purpose and change set
+        shell: pwsh
+        env:
+          GH_TOKEN: \${{ github.token }}
+          RUN_REPOSITORY: \${{ github.repository }}
+          RUN_EVENT: \${{ github.event_name }}
+          RUN_SHA: \${{ github.event.pull_request.head.sha || github.sha }}
+          RUN_PR_NUMBER: \${{ github.event.pull_request.number || '' }}
+          RUN_PR_TITLE: \${{ github.event.pull_request.title || '' }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $summaryLines = @(
+            '## Run purpose and changes',
+            '',
+            "- **Workflow event:** $env:RUN_EVENT",
+            "- **Commit:** $env:RUN_SHA"
+          )
+          if (-not [string]::IsNullOrWhiteSpace($env:RUN_PR_NUMBER)) {
+            $summaryLines += "- **Pull request:** #$env:RUN_PR_NUMBER — $env:RUN_PR_TITLE"
+          }
+          try {
+            $headers = @{
+              Accept = 'application/vnd.github+json'
+              Authorization = "Bearer $env:GH_TOKEN"
+              'X-GitHub-Api-Version' = '2022-11-28'
+            }
+            $uri = "https://api.github.com/repos/$env:RUN_REPOSITORY/commits/$env:RUN_SHA"
+            $commit = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers -TimeoutSec 20
+            $message = ([string]$commit.commit.message).Trim()
+            $summaryLines += ''
+            $summaryLines += '### Why this run was pushed'
+            if ([string]::IsNullOrWhiteSpace($message)) {
+              $summaryLines += '_No commit message was returned by GitHub._'
+            } else {
+              $summaryLines += $message
+            }
+            $changedFiles = @($commit.files)
+            $summaryLines += ''
+            $summaryLines += "### Files changed ($($changedFiles.Count))"
+            if ($changedFiles.Count -eq 0) {
+              $summaryLines += '_GitHub did not return a file list for this commit._'
+            } else {
+              $summaryLines += '| File | Change | Added | Deleted |'
+              $summaryLines += '|---|---:|---:|---:|'
+              foreach ($file in $changedFiles) {
+                $summaryLines += "| $($file.filename) | $($file.status) | $($file.additions) | $($file.deletions) |"
+              }
+            }
+          } catch {
+            Write-Warning "Commit detail lookup failed: $($_.Exception.Message)"
+            $summaryLines += ''
+            $summaryLines += '### Commit rationale'
+            $summaryLines += '_Commit details were not returned by the GitHub API. Open the commit above for its rationale and file list._'
+          }
+          $summaryLines += ''
+          $summaryLines += '_Validation results and runtime benchmark measurements appear below._'
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ($summaryLines -join [Environment]::NewLine) -Encoding utf8
+
       - name: Validate installer JavaScript syntax
         shell: pwsh
         run: |
@@ -1133,7 +1191,7 @@ jobs:
           retention-days: 30
 
       - name: Upload Stage 7 real Piper benchmark evidence
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ always() && hashFiles('stage7-piper-benchmark.json') != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: Ryu-Audiobook-Stage7-Piper-Benchmark-${{ github.run_number }}
