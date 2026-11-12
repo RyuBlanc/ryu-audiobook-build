@@ -958,6 +958,76 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
                 self.assertEqual(messages[-1].get("device"), device)
                 self.assertEqual(cpu_loads, [], f"Explicit {backend} must fail closed, never switch to CPU.")
 
+    def test_design_preview_explicit_cuda_rocm_and_xpu_oom_never_retry_on_cpu(self):
+        import io
+        import json
+        from contextlib import redirect_stdout
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.tts import qwen_character_worker as worker
+
+        cases = (
+            ("cuda", "cuda:0", "CUDA out of memory during explicit VoiceDesign preview"),
+            ("rocm", "cuda:0", "HIP out of memory during explicit VoiceDesign preview"),
+            ("xpu", "xpu:0", "XPU out of memory during explicit VoiceDesign preview"),
+        )
+        for backend, device, message in cases:
+            with self.subTest(backend=backend), TemporaryDirectory() as temporary:
+                output_path = Path(temporary) / "explicit-preview.wav"
+                request = {
+                    "text": "The saved character speaks with a steady voice.",
+                    "output": str(output_path),
+                    "speaker": "Saved character",
+                    "language": "English",
+                    "instruct": "Preserve the requested voice design.",
+                    "seed": 20261112,
+                }
+                args = SimpleNamespace(
+                    models_root=temporary,
+                    task="design-preview",
+                    kind="design-1.7b",
+                    backend=backend,
+                    low_memory=False,
+                    clone_kind="base-1.7b",
+                )
+                model = SimpleNamespace(device=device)
+                loaded = []
+                preview_calls = []
+                cpu_loads = []
+
+                def load_accelerator(kind, requested, _root, low_memory=False, progress=None, allow_cpu_fallback=True):
+                    loaded.append((kind, requested, low_memory))
+                    return model, device
+
+                def unexpected_cpu_load(kind, requested, _root, low_memory=False):
+                    cpu_loads.append((kind, requested))
+                    return SimpleNamespace(device="cpu"), "cpu"
+
+                def fail_preview(received_model, received_request, destination):
+                    preview_calls.append((received_model.device, dict(received_request), str(destination)))
+                    raise RuntimeError(message)
+
+                output = io.StringIO()
+                with (
+                    patch.object(worker, "_load_model_with_fallback", side_effect=load_accelerator),
+                    patch.object(worker, "_load_model", side_effect=unexpected_cpu_load),
+                    patch.object(worker, "_generate_design_preview", side_effect=fail_preview),
+                    patch("sys.stdin", io.StringIO(json.dumps(request) + "\n")),
+                    redirect_stdout(output),
+                ):
+                    self.assertEqual(worker.server(args), 0)
+
+                messages = [json.loads(line) for line in output.getvalue().splitlines() if line.strip()]
+                self.assertIs(messages[0].get("worker_ready"), True)
+                self.assertFalse(messages[-1].get("ok"))
+                self.assertIn("out of memory", messages[-1].get("error", "").casefold())
+                self.assertEqual(messages[-1].get("device"), device)
+                self.assertEqual(loaded, [("design-1.7b", backend, False)])
+                self.assertEqual(preview_calls, [(device, request, str(output_path))])
+                self.assertEqual(cpu_loads, [], f"Explicit {backend} preview must fail closed, never switch to CPU.")
+
     def test_design_explicit_gpu_oom_does_not_silently_fallback_to_cpu(self):
         import io
         import json
