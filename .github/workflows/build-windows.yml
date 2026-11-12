@@ -141,12 +141,12 @@ jobs:
       - name: Summarize run purpose and change set
         shell: pwsh
         env:
-          GH_TOKEN: \${{ github.token }}
-          RUN_REPOSITORY: \${{ github.repository }}
-          RUN_EVENT: \${{ github.event_name }}
-          RUN_SHA: \${{ github.event.pull_request.head.sha || github.sha }}
-          RUN_PR_NUMBER: \${{ github.event.pull_request.number || '' }}
-          RUN_PR_TITLE: \${{ github.event.pull_request.title || '' }}
+          GH_TOKEN: ${{ github.token }}
+          RUN_REPOSITORY: ${{ github.repository }}
+          RUN_EVENT: ${{ github.event_name }}
+          RUN_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          RUN_PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          RUN_PR_TITLE: ${{ github.event.pull_request.title || '' }}
         run: |
           $ErrorActionPreference = 'Stop'
           $summaryLines = @(
