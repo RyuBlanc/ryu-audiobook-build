@@ -61,3 +61,12 @@ Original failed runs #3251–#3258 remain recorded as failures. This correction 
 - **Skipped:** optional Stage 7 real Piper benchmark upload and public release publication. This run did not execute dedicated physical Qwen GPU workflows.
 - **Status:** exact-head automated package checkpoint green; PR #35 remains open/draft. User-device Qwen profile, GPU timing, full-novel generation/playback, long-run progress/ETA, durable job interruption/recovery, physical display/DPI and Help & Guide acceptance remain open. Do not substitute the Piper smoke M4B for a full-book Qwen/cast acceptance.
 
+
+
+## Build #3326 failure and #3327 correction record
+
+- **Build #3326:** [run 43159563751](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43159563751), commit `0e93016f613051ae17e40b2f25f3d9183ebd4e63`. The focused preflight steps passed; the full regression step failed, so the Windows package job was skipped. The failing addition was the duplicate durable-job restart regression in `tests/test_regressions.py`; its minimal bridge fixture lacked `_reconcile_interrupted_generation_project`. The existing dedicated `tests/test_stage5_generation_recovery.py` already verifies restart recovery, stale-job project ownership and saved narrator-only recovery. The duplicate was removed rather than adding a shallow fixture shim.
+- **Build #3327:** [run 43159940335](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43159940335), exact head `4acba59fa8dcd0e52cba60bb28a401b8dc43f4c6`. Full suite passed **1,523 tests** and Windows package completed successfully. The original #3326 remains recorded as failed; #3327 is the validated correction.
+- Artifacts: installer 846,171,638 bytes; portable 1,183,868,011 bytes; SHA manifest 3,047 bytes; multi-chapter M4B 8,997,510 bytes. Artifact IDs: `13919385123`, `13918936894`, `13919370271`, `13917718510`.
+- Public release publication and optional Stage 7 real Piper benchmark upload were skipped by workflow conditions. No public release was published.
+- Following #3327, additional test-only Qwen safety coverage was added for automatic one-pass VoiceDesign preview OOM recovery and explicit CUDA/ROCm/XPU fail-closed behaviour; those tests require the next exact-head CI run.
