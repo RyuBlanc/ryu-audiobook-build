@@ -1268,6 +1268,10 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
             encoding="utf-8"
         )
+        active_states_start = adapter.index("const PRODUCTION_ACTIVE_JOB_STATES = new Set(")
+        active_states_end = adapter.index(";", active_states_start)
+        active_states = adapter[active_states_start:active_states_end]
+        self.assertIn("'cancelling'", active_states)
         poll_start = adapter.index("function backendJobPollDelay(")
         poll_end = adapter.index("async function refreshJobs()", poll_start)
         poll = adapter[poll_start:poll_end]

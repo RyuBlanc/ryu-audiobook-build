@@ -6154,7 +6154,7 @@ function renderProductionMetadataGate(active) {
       : minutes + ':' + String(remainder).padStart(2, '0');
   }
 
-  const PRODUCTION_ACTIVE_JOB_STATES = new Set(['queued','running','pause_requested','paused','cancel_requested','retrying']);
+  const PRODUCTION_ACTIVE_JOB_STATES = new Set(['queued','running','pause_requested','paused','cancel_requested','cancelling','retrying']);
   const PRODUCTION_TERMINAL_JOB_STATES = new Set(['completed','failed','cancelled']);
   function productionJobIsActive(job) {
     return Boolean(job && PRODUCTION_ACTIVE_JOB_STATES.has(String(job.state || '').toLowerCase()));
