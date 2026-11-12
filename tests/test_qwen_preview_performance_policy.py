@@ -171,6 +171,7 @@ class QwenPreviewPerformancePolicyTests(unittest.TestCase):
         self.assertIn("qwen-voicedesign-saved-profile-30-second-preview.wav", source)
         self.assertIn("REAL_QWEN_VOICEDESIGN_SAVED_PROFILE_PREVIEW=PASS", source)
         self.assertIn("saved_preview_elapsed", source)
+        self.assertIn("import time", source)
         self.assertIn('execution_backend != "cpu"', source)
 
 if __name__ == "__main__":
