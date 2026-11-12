@@ -33,6 +33,27 @@ from ..qwen_model_preference import normalize_qwen_backend_preference
 from app.core.paths import settings_root
 
 
+def _qwen_audio_file_signature(raw_path: Path | None) -> str:
+    """Fingerprint saved reference audio by content, not mutable file metadata."""
+    if not raw_path:
+        return ""
+    path = Path(raw_path).expanduser()
+    try:
+        resolved = path.resolve()
+    except (OSError, RuntimeError):
+        resolved = path.absolute()
+    if not path.is_file():
+        return f"{resolved}:missing"
+    hasher = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                hasher.update(block)
+    except OSError:
+        return f"{resolved}:unreadable"
+    return f"{resolved}:{hasher.hexdigest()}"
+
+
 class QwenCharacterProvider(TTSProvider):
     """Offline Qwen3-TTS character voices with no API key or cloud service."""
 
@@ -178,27 +199,8 @@ class QwenCharacterProvider(TTSProvider):
 
     def generation_signature(self) -> str:
         self._ensure_model_kind()
-        reference = ""
-        if self.reference_audio and Path(self.reference_audio).exists():
-            try:
-                stat = Path(self.reference_audio).stat()
-                reference = f"{Path(self.reference_audio).resolve()}:{stat.st_size}:{stat.st_mtime_ns}"
-            except OSError:
-                reference = str(self.reference_audio)
-        anchor_reference = ""
-        if self.qwen_anchor_path:
-            anchor_path = Path(self.qwen_anchor_path).expanduser()
-            anchor_reference = f"{anchor_path.resolve()}:missing"
-            if anchor_path.is_file():
-                hasher = hashlib.sha256()
-                try:
-                    with anchor_path.open("rb") as handle:
-                        for block in iter(lambda: handle.read(1024 * 1024), b""):
-                            hasher.update(block)
-                    anchor_reference = f"{anchor_path.resolve()}:{hasher.hexdigest()}"
-                except OSError:
-                    anchor_reference = f"{anchor_path.resolve()}:unreadable"
-
+        reference = _qwen_audio_file_signature(self.reference_audio)
+        anchor_reference = _qwen_audio_file_signature(self.qwen_anchor_path)
         return "|".join(
             [
                 self.provider_id,
@@ -214,6 +216,7 @@ class QwenCharacterProvider(TTSProvider):
                     else ""
                 ),
                 self.instruct,
+                self.reference_text,
                 str(self.qwen_seed),
                 anchor_reference,
                 self.qwen_anchor_text,
@@ -221,7 +224,6 @@ class QwenCharacterProvider(TTSProvider):
                 reference,
             ]
         )
-
 
     def set_status_callback(self, callback) -> None:
         self.status_callback = callback
