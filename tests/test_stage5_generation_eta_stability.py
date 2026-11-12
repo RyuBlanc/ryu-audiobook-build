@@ -11,7 +11,10 @@ from unittest.mock import patch
 from app.chapters.detector import Chapter
 from app.tts.generator import generate_chapter
 from app.ui import premium_v2_host as host
-from app.ui.generation_page import _revise_monotonic_eta
+from app.ui.generation_page import (
+    _generation_active_elapsed_seconds,
+    _revise_monotonic_eta,
+)
 
 
 class _ProgressHarness:
@@ -233,6 +236,21 @@ class Stage5GenerationEtaStabilityTests(unittest.TestCase):
         batch_callback = source.index("on_chunk_timing(", batch_validation)
         self.assertLess(batch_measured, batch_validation)
         self.assertLess(batch_validation, batch_callback)
+
+    def test_active_generation_elapsed_excludes_paused_intervals(self):
+        # 60 wall-clock seconds elapsed: 5 seconds in an earlier pause and
+        # 10 seconds in the current pause are not active generation time.
+        self.assertEqual(
+            _generation_active_elapsed_seconds(100.0, 160.0, 5.0, 150.0),
+            45.0,
+        )
+        # After resume, the just-ended pause is accumulated exactly once.
+        self.assertEqual(
+            _generation_active_elapsed_seconds(100.0, 170.0, 15.0, None),
+            55.0,
+        )
+        self.assertEqual(_generation_active_elapsed_seconds(None, 170.0), 0.0)
+        self.assertEqual(_generation_active_elapsed_seconds(170.0, 160.0), 0.0)
 
     def test_native_eta_never_increases_on_a_slow_chunk_and_smooths_faster_samples(self):
         eta, overruns, recalibrated = _revise_monotonic_eta(None, None, 100.0, 100.0, 0)
