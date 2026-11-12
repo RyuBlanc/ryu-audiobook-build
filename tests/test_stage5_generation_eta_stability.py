@@ -6,12 +6,15 @@ from pathlib import Path
 import tempfile
 import unittest
 import wave
+from threading import Event
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.chapters.detector import Chapter
 from app.tts.generator import generate_chapter
 from app.ui import premium_v2_host as host
 from app.ui.generation_page import (
+    GenerationPage,
     _generation_active_elapsed_seconds,
     _revise_monotonic_eta,
 )
@@ -236,6 +239,21 @@ class Stage5GenerationEtaStabilityTests(unittest.TestCase):
         batch_callback = source.index("on_chunk_timing(", batch_validation)
         self.assertLess(batch_measured, batch_validation)
         self.assertLess(batch_validation, batch_callback)
+
+    def test_late_paused_signal_after_resume_or_cancel_is_ignored(self):
+        # Qt can deliver a worker signal after the user has already resumed
+        # or cancelled, both of which clear the manager's pause event.
+        page = SimpleNamespace(
+            manager=SimpleNamespace(pause_event=Event()),
+            generation_phase="synthesis",
+            _generation_paused_at=None,
+        )
+        GenerationPage.update_progress(
+            page, 1, 2, 0,
+            "paused:Generation paused at a saved chunk/batch checkpoint. Resume to continue.",
+        )
+        self.assertEqual(page.generation_phase, "synthesis")
+        self.assertIsNone(page._generation_paused_at)
 
     def test_active_generation_elapsed_excludes_paused_intervals(self):
         # 60 wall-clock seconds elapsed: 5 seconds in an earlier pause and
