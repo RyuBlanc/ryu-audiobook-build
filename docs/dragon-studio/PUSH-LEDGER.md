@@ -150,3 +150,42 @@ The Windows build workflow now adds a run-purpose section to the job summary, re
 - This is a real bundled Piper local benchmark on a hosted Windows CPU. It must not be interpreted as Qwen speed or accelerator validation.
 
 The PR build summary now contains both (1) commit/rationale/changed-file information and (2) the measured Piper benchmark summary. Raw Stage 7 JSON evidence upload remains skipped for pull requests by design.
+
+
+## Dragon Studio responsiveness and Qwen acceptance — Builds #3358–#3365
+
+All failed attempts below remain failed historical records. The later exact-head pass is a correction, not a rewrite of earlier run outcomes.
+
+| Build / run | Commit topic and changed scope | Confirmed failure or result |
+|---|---|---|
+| [#3358](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43250109002) — `7dd0baadfed00efccef13da77f632c59b27008c0` | `[Stage 7][RESPONSIVENESS] Resolve known project actions without Library scans`; seven known-folder bridge actions now use the validated direct-project resolver/cache. | Failed: five Stage 8 retry/recovery test harnesses lacked `_load_library_project`. |
+| [#3359](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43250645397) — `394513bb93177252e028f0c39c0c852e762eea2d` | `[Stage 7][RESPONSIVENESS] Update retry harness for direct project loading`; added the direct loader to the Stage 6 retry fixture and prohibited fallback to `list_projects()`. | Failed: 15 remaining fixture errors across PlayerBridge, Dashboard, Voice Preview and Stage 5 retry/recovery doubles, all missing the direct-loader method. Full suite ran 1,541 tests. |
+| [#3360](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43252924362) — `be8cea78139269ec7f69a36226d39ea6527aa829` | `[Stage 7][RESPONSIVENESS] Align player and recovery test fixtures with direct loading`; added the direct loader to the remaining player/recovery harnesses. | Failed on one Dashboard playback test: its mocked saved-state map used a non-normalized Windows path key. |
+| [#3361](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43253119507) — `84a078545db443193f36305ecf2719e19b470ed7` | `[Stage C][QWEN-ACCEPTANCE] Import timing module for saved-profile CPU preview`; added the 30-second saved-profile VoiceDesign measurement. | Failed on the remaining Dashboard path-key error and the missing `import time` acceptance contract. Provider #412 also failed at the actual saved-profile smoke with `NameError: time is not defined`. |
+| [#3362](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43253656505) — `2a0f7efc6fab2c37651f9df600334c88029a9f3c` | `[Stage 7][RESPONSIVENESS] Normalize Dashboard playback test path keys`; corrected path normalization in the test fixture. | Failed on one remaining Qwen acceptance assertion: the CPU saved-profile smoke source did not yet import `time`. |
+| [#3363](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43253969983) — `500d97a7f02a026ff22a78d59f15413dbcdc4757` | `[Stage C][QWEN-ACCEPTANCE] Import stopwatch for saved-profile CPU preview`; added the missing stopwatch import. | **Passed:** 1,541 regression tests and complete packaged Windows acceptance. Frozen app, bundled assets, Piper multi-chapter M4B, packaged Sound Design/Music acceptance, core/HTML installer, install/launch/upgrade/uninstall, transparent logo/hash, Defender scan and uploads passed. |
+| [#3364](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43261564599) — `c20481d838769a6e3d5c1b5c5dbfe7c389c367a0` | `[CI][PULL-REQUEST-TOPIC] Show exact change topic before Windows tests`; PR run name now includes PR number/title and the tests job fetches the exact PR head commit subject/files into the summary before running tests. | Tests passed; the topic step logged the exact commit subject. Windows packaging was still running when this ledger snapshot was written. |
+| [#3365](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43263516200) — `98f604fb1fa414fb01d50d8f4a6d7186e107f1b3` | `[Stage 7][RESPONSIVENESS] Keep native splash visible during renderer recovery`; both packaged-HTML and direct-file retry paths now show native loading before WebEngine reload, with a new regression contract. | Queued at ledger snapshot time; exact-head test and package result pending. |
+
+### Exact #3363 packaged artifact evidence
+
+- Installer `Ryu-Audiobook-Installer-3363`: 845,833,198 bytes; artifact ID `13961839015`.
+- Portable `Ryu-Audiobook-Portable-3363`: 1,183,883,104 bytes; artifact ID `13963561567`.
+- SHA-256 manifest `Ryu-Audiobook-Release-SHA256-3363`: 3,042 bytes; artifact ID `13962572291`.
+- Real multi-chapter M4B `Ryu-Stage3-Real-Multichapter-M4B-3363`: 8,968,114 bytes; artifact ID `13962165036`.
+
+### Provider Runtime Smoke #414 — CPU Qwen acceptance in progress
+
+- Run: [Provider Runtime Smoke #414](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43253955703), commit `500d97a7f02a026ff22a78d59f15413dbcdc4757`.
+- Passed: Qwen accelerator discovery/runtime installer tests, expression protocol smoke, real 1.7B VoiceDesign preview, and both 0.6B/1.7B CustomVoice synthesis + saved-profile reload + decoded-audio checks.
+- CPU VoiceDesign one-pass preview generated 30.000s audio in 372.782s warmed time; cold-start plus warm-up was 59.650s; four segments; worker reused. Warm/angry expression audio and Japanese pronunciation diagnostics passed (Japanese synthesis 1.040s).
+- CustomVoice 0.6B output: 7.600s / 364,844 bytes; 1.7B output: 6.400s / 307,244 bytes. Both reported the real CPU backend/device.
+- Final Base Clone + saved VoiceDesign + character-to-M4B production job was still in progress at ledger time. Do not mark the hosted production path complete until its final job and uploaded artifact succeed.
+- This is hosted **CPU** evidence. It does not satisfy the NVIDIA under-60-second target.
+
+### Current hardware and visual acceptance boundary
+
+- NVIDIA acceptance #22 and AMD/Intel acceptance #30 are still pending with zero jobs assigned. No physical CUDA, ROCm or XPU result exists in this evidence set.
+- Hardware acceptance scripts exercise the saved VoiceProfile -> `provider_from_profile` -> identity-locked `design` route and reject CPU fallback; they are not the legacy one-pass `design-preview` benchmark.
+- The 41-viewport CSS/DOM matrix and packaged checks from earlier checkpoints remain automated evidence only. Physical mixed-DPI/multi-monitor behaviour, shell icon appearance, installer layout at the user's display scaling, full-book target-PC generation/playback and forced-interruption recovery remain open.
+- The PR remains open/draft; no public release was published by these PR runs.
