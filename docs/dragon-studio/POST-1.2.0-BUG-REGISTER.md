@@ -150,3 +150,29 @@ The workflow is being adjusted so only PRs whose head starts with `dragon-studio
 
 **Hardware/manual boundary:** automated acceptance is not a substitute for real target-PC multi-monitor/DPI, shell icon, installer visuals, Qwen profiles, long-book generation and playback. NVIDIA/AMD/Intel Qwen accelerator gates remain blocked until matching self-hosted runners are online. Do not close those rows without their evidence.
 
+## Exact-head package acceptance — Build Windows App #3323
+
+- **Run:** [#3323 / 43139856426](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43139856426)
+- **PR:** [#35](https://github.com/RyuBlanc/ryu-audiobook-build/pull/35)
+- **Exact head:** `1c235746646a4a3ba0263178cb1bba045ebffd93`
+- **Result:** Tests and Windows package jobs both completed successfully. Full regression suite: **1,523 tests, OK** in 67.393 seconds.
+- **Test correction:** Replaced the stale exact-source assertion for inline prompt construction with AST-level checks of `create_locked_clone_prompts` and the saved-anchor call path. Added a runtime-shaped Automatic CUDA OOM recovery regression for `base-1.7b`, verifying that the selected model kind, saved anchor path/transcript, profile identity and seed are preserved and the identity prompt is rebuilt on CPU. Existing Automatic CUDA/XPU and explicit-CUDA no-fallback tests also passed.
+- **Windows package acceptance:** Application preparation/build, frozen-app verification, bundled voice assets/critical modules, real bundled-Piper multi-chapter M4B, packaged Sound Design/Music Library acceptance, Inno Setup, core installer, HTML installer, installer UI startup, install/launch/upgrade/uninstall, logo transparency/hash, package-size report, Microsoft Defender, and artifact uploads all passed.
+- **Artifacts:**
+  - Installer: `Ryu-Audiobook-Installer-3323` — 846,232,402 bytes.
+  - Portable: `Ryu-Audiobook-Portable-3323` — 1,183,868,011 bytes.
+  - SHA/package manifest: `Ryu-Audiobook-Release-SHA256-3323` — 3,043 bytes.
+  - Real multi-chapter M4B: `Ryu-Stage3-Real-Multichapter-M4B-3323` — 8,935,889 bytes.
+- The optional Stage 7 real Piper benchmark upload and public release publication steps were skipped by workflow conditions; no release was published by this PR run.
+- **Acceptance boundary:** This is a successful exact-head automated Windows package checkpoint. It does not close physical-target-PC Qwen profile audition/save/reload, real NVIDIA/AMD/Intel performance, a representative full novel with user-selected voices, physical display/DPI and installer visual checks, or long-running pause/resume/recovery acceptance. Do not mark these complete from simulated tests or the bundled Piper fixture.
+
+### Remaining verification queue after #3323
+
+- DS-ETA-001 / DS-PROG-002 / DS-DURATION-003: long real Qwen/Piper target-PC run to verify truthful chunk progress, 1:1 ring, elapsed time, monotonic measured ETA, audiobook listening-duration estimate, and authoritative final M4B duration across chapters, pauses and resumes.
+- DS-QWEN-004: install/run and audition saved CustomVoice, VoiceDesign and Clone profiles; save/reload each and verify selected identity in the actual packaged runtime.
+- DS-QWEN-005: real NVIDIA CUDA, AMD ROCm and Intel XPU acceptance on assigned physical runners; 30-second VoiceDesign preview target remains <60 seconds on supported NVIDIA hardware. Historical CPU timings do not satisfy this target.
+- DS-JOBS-006: packaged pause, resume, cancel, retry, forced interruption, restart/recovery, durable job state and history.
+- DS-M4B-007: representative full-novel chaptered M4B, metadata/cover/chapter/duration validation and actual playback/seek.
+- DS-UI-009 / DS-BRAND-010 / DS-INSTALL-011 / DS-RESP-013: physical target-PC inspection of Production Studio cover-art separation/layout, shell icon alpha, installer geometry, real mixed-DPI/multi-monitor behaviour; automated 41-viewport checks are not physical DPI checks.
+- DS-HELP-014: final Help & Guide audit against the actual shipped features and recovery paths.
+
