@@ -1191,7 +1191,7 @@ jobs:
           retention-days: 30
 
       - name: Upload Stage 7 real Piper benchmark evidence
-        if: ${{ always() && hashFiles('stage7-piper-benchmark.json') != '' }}
+        if: ${{ github.event_name != 'pull_request' }}
         uses: actions/upload-artifact@v4
         with:
           name: Ryu-Audiobook-Stage7-Piper-Benchmark-${{ github.run_number }}
