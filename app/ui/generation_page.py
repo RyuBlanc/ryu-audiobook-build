@@ -3047,6 +3047,10 @@ class GenerationPage(QWidget):
 
     def update_progress(self, chapter: int, total: int, done: int, message: str) -> None:
         if message.startswith("paused:"):
+            # A queued worker signal can arrive after a fast Resume or Cancel.
+            # Ignore it once the manager has cleared the pause request.
+            if not self.manager or not self.manager.pause_event.is_set():
+                return
             note = message.split(":", 1)[1].strip()
             self.generation_phase = "paused"
             if self._generation_paused_at is None:
