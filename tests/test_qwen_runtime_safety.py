@@ -74,6 +74,97 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
                 selected, _reason = accelerator.automatic_accelerator("custom-0.6b", path)
         self.assertEqual(selected.backend, "cuda")
 
+    def test_qwen_custom_design_and_clone_profiles_round_trip_to_runtime_providers(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from app.tts import voice_profile
+        from app.tts.profile_provider import provider_from_profile
+
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary) / "Voices"
+            anchor = root / "VoiceDesign" / "identity.wav"
+            reference = root / "VoiceClone" / "reference.wav"
+            profiles = [
+                voice_profile.VoiceProfile(
+                    name="Round-trip CustomVoice",
+                    provider="qwen-character",
+                    voice_id="Ryan",
+                    model_id="custom-1.7b",
+                    backend="automatic",
+                    language="English",
+                    qwen_mode="custom",
+                    qwen_prompt="Warm, clear CustomVoice narrator.",
+                    qwen_seed=111,
+                    qwen_profile_id="roundtrip-custom-profile",
+                ),
+                voice_profile.VoiceProfile(
+                    name="Round-trip VoiceDesign",
+                    provider="qwen-character",
+                    voice_id="Designed narrator",
+                    model_id="design-1.7b",
+                    backend="automatic",
+                    language="Japanese",
+                    qwen_mode="design",
+                    qwen_prompt="A calm Japanese audiobook narrator.",
+                    qwen_seed=222,
+                    qwen_anchor_path=str(anchor),
+                    qwen_anchor_text="こんにちは。これは保存された声の確認です。",
+                    qwen_profile_id="roundtrip-design-profile",
+                ),
+                voice_profile.VoiceProfile(
+                    name="Round-trip VoiceClone",
+                    provider="qwen-character",
+                    voice_id="Cloned narrator",
+                    model_id="base-1.7b",
+                    backend="automatic",
+                    language="English",
+                    qwen_mode="clone",
+                    qwen_prompt="",
+                    qwen_seed=333,
+                    sample_path=str(reference),
+                    reference_text="This is the saved reference transcript.",
+                    qwen_profile_id="roundtrip-clone-profile",
+                ),
+            ]
+
+            with (
+                patch.object(voice_profile, "voices_root", return_value=root),
+                patch.object(voice_profile, "builtin_voice_profiles", return_value=[]),
+            ):
+                voice_profile.save_profiles(profiles)
+                reloaded = voice_profile.load_saved_profiles()
+
+            self.assertEqual(
+                {profile.name for profile in reloaded},
+                {profile.name for profile in profiles},
+            )
+            by_name = {profile.name: profile for profile in reloaded}
+            with (
+                patch("app.tts.profile_provider.get_qwen_model_preference", return_value="1.7b"),
+                patch("app.tts.profile_provider.get_qwen_backend_preference", return_value="automatic"),
+                patch("app.tts.profile_provider.get_qwen_low_memory_mode", return_value=False),
+            ):
+                for expected in profiles:
+                    with self.subTest(mode=expected.qwen_mode):
+                        saved = by_name[expected.name]
+                        provider, voice_id = provider_from_profile(saved)
+                        self.assertEqual(voice_id, expected.voice_id)
+                        self.assertEqual(provider.qwen_mode, expected.qwen_mode)
+                        self.assertEqual(provider.voice_id, expected.voice_id)
+                        self.assertEqual(provider.language, expected.language)
+                        self.assertEqual(provider.instruct, expected.qwen_prompt)
+                        self.assertEqual(provider.qwen_seed, expected.qwen_seed)
+                        self.assertEqual(provider.qwen_profile_id, expected.qwen_profile_id)
+                        self.assertEqual(provider.model_kind, expected.model_id)
+                        if expected.qwen_mode == "design":
+                            self.assertEqual(provider.qwen_anchor_path, Path(expected.qwen_anchor_path))
+                            self.assertEqual(provider.qwen_anchor_text, expected.qwen_anchor_text)
+                            self.assertEqual(provider.long_form_model_kind, "base-1.7b")
+                        if expected.qwen_mode == "clone":
+                            self.assertEqual(provider.reference_audio, Path(expected.sample_path))
+                            self.assertEqual(provider.reference_text, expected.reference_text)
+
     def test_saved_qwen_anchor_replacement_changes_generation_signature(self):
         import os
         from pathlib import Path
