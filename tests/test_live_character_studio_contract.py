@@ -217,6 +217,10 @@ class LiveCharacterStudioContracts(unittest.TestCase):
         worker = (ROOT / "app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
         preview = (ROOT / "app/tts/preview.py").read_text(encoding="utf-8")
         host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        voice_page = (ROOT / "app/ui/voice_page.py").read_text(encoding="utf-8")
+        voice_preview_start = voice_page.index("    def preview(self) -> None:")
+        voice_preview_end = voice_page.index("\n    def ", voice_preview_start + 10)
+        voice_preview = voice_page[voice_preview_start:voice_preview_end]
 
         self.assertIn('if self.qwen_mode in {"design", "design-preview"}:', provider)
         self.assertIn("self.model_kind = best_voice_design_kind()", provider)
@@ -229,6 +233,12 @@ class LiveCharacterStudioContracts(unittest.TestCase):
         self.assertIn("lock_design_identity(request)", worker)
         self.assertIn('_generate_design_locked(model, locked_clone_prompts, request, output)', worker)
         self.assertNotIn('preview_profile.qwen_mode = "design-preview"', host)
+        self.assertIn("qwen_model_kinds_for_preference(", voice_preview)
+        self.assertIn("model_installed(clone_kind)", voice_preview)
+        self.assertIn("best_long_form_clone_kind()", voice_preview)
+        self.assertIn("preview_profile = profile", voice_preview)
+        self.assertNotIn("preview_profile = replace(", voice_preview)
+        self.assertNotIn('qwen_mode="design-preview"', voice_preview)
         self.assertIn("provider, voice = provider_from_profile(profile)", host)
         self.assertIn('qwen_mode in {"design", "design-preview"}', preview)
         self.assertIn('"provider_setup_seconds": provider_setup_seconds', host)

@@ -5,7 +5,7 @@ import tempfile
 import hashlib
 import json
 import threading
-from dataclasses import asdict, replace
+from dataclasses import asdict
 import re
 from pathlib import Path
 import webbrowser
@@ -53,7 +53,10 @@ from app.tts.voice_profile import (
     VoiceProfile, builtin_voice_profiles, import_reference_audio,
     load_profiles, load_saved_profiles, save_profiles,
 )
-from app.tts.qwen_model_preference import get_qwen_model_preference
+from app.tts.qwen_model_preference import (
+    get_qwen_model_preference,
+    qwen_model_kinds_for_preference,
+)
 from app.tts.providers.edge_tts import EdgeTTSProvider
 from app.tts.providers.elevenlabs import ElevenLabsProvider
 
@@ -2943,24 +2946,41 @@ class VoicePage(QWidget):
                 return
 
             if profile.qwen_mode == "design":
-                # Audition the selected VoiceDesign prompt in a one-pass preview.
-                # Building the long-form Design→Base anchor bank belongs to
-                # production narration, not every short audition. Keep the same
-                # VoiceDesign model/prompt/seed and all quality settings.
-                kind = best_voice_design_kind()
+                # Voice Studio audition must follow the same VoiceDesign→Base
+                # identity-lock path as audiobook production. A one-pass
+                # VoiceDesign sample can sound different from the saved voice.
+                # Resolve the Base model with the same global preference helper
+                # used by provider_from_profile(); Auto uses the same hardware-
+                # aware installed-model selection as the production provider.
+                preferred_design_kind, preferred_base_kind = qwen_model_kinds_for_preference(
+                    "design", get_qwen_model_preference()
+                )
+                kind = preferred_design_kind or best_voice_design_kind()
+                clone_kind = preferred_base_kind or best_long_form_clone_kind()
                 if not model_installed(kind):
                     QMessageBox.warning(
                         self,
                         "Qwen VoiceDesign Not Ready",
-                        "Install the Qwen VoiceDesign model from Models first.",
+                        f"Install the Qwen VoiceDesign model ({kind}) from Models first.",
                     )
                     return
-                preview_profile = replace(
-                    profile,
-                    qwen_mode="design-preview",
-                    model_id=kind,
+                if not model_installed(clone_kind):
+                    QMessageBox.warning(
+                        self,
+                        "Qwen Base Model Required",
+                        (
+                            "VoiceDesign audition uses the same stable identity-locked "
+                            f"Base model as production. Install the selected Qwen Base "
+                            f"model ({clone_kind}) in Models, or change the global "
+                            "model-size preference in Models & Voice Engines."
+                        ),
+                    )
+                    return
+                # Keep the original saved/draft profile intact. This retains its
+                # qwen_mode, qwen_profile_id, prompt, seed and anchor references.
+                preview_model = (
+                    f"{kind} VoiceDesign + {clone_kind} Base • identity-locked audition"
                 )
-                preview_model = f"{kind} • VoiceDesign • one-pass preview"
             elif profile.qwen_mode == "clone":
                 kind = best_clone_kind(vram_gb=0.0)
                 if not model_installed(kind):
