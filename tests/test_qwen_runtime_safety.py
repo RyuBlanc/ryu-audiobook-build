@@ -165,6 +165,32 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
                             self.assertEqual(provider.reference_audio, Path(expected.sample_path))
                             self.assertEqual(provider.reference_text, expected.reference_text)
 
+    def test_qwen_clone_reference_transcript_changes_generation_signature(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from app.tts.providers.qwen_character import QwenCharacterProvider
+
+        with TemporaryDirectory() as temporary:
+            reference = Path(temporary) / "clone-reference.wav"
+            reference.write_bytes(b"same-reference-audio")
+            provider = QwenCharacterProvider(
+                voice_id="saved-clone-profile",
+                model_kind="base-1.7b",
+                qwen_mode="clone",
+                reference_audio=reference,
+                reference_text="The original reference transcript.",
+                qwen_profile_id="stable-clone-profile-id",
+            )
+            before = provider.generation_signature()
+            provider.reference_text = "The corrected reference transcript."
+            after = provider.generation_signature()
+
+            self.assertNotEqual(
+                before,
+                after,
+                "Changing the Qwen Clone reference transcript must invalidate cached chapter audio.",
+            )
+
     def test_saved_qwen_clone_reference_replacement_changes_generation_signature(self):
         import os
         from pathlib import Path
