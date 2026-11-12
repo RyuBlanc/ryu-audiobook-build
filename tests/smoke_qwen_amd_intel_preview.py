@@ -18,12 +18,15 @@ def main() -> None:
     from app.chapters.detector import Chapter
     from app.tts.generator import generate_chapter
     from app.tts.qwen_accelerator import best_accelerator
+    from app.tts.expression import DEFAULT_VOICE_DESIGN_ANCHOR_TEXT
     from app.tts.preview import build_voice_preview
-    from app.tts.qwen_character_runtime import MODEL_IDS, RUNTIME_ROOT
+    from app.tts.profile_provider import provider_from_profile
+    from app.tts import profile_provider as profile_provider_module
+    from app.tts.qwen_character_runtime import MODEL_IDS
     from app.tts import qwen_character_runtime as runtime
-    from app.tts import providers
     from app.tts.providers import qwen_character as provider_module
     from app.tts.providers.qwen_character import QwenCharacterProvider
+    from app.tts.voice_profile import VoiceProfile, load_saved_profile, save_profiles
 
     selected = best_accelerator()
     expected = os.environ.get("RYU_QWEN_EXPECT_BACKEND", "").casefold()
@@ -61,14 +64,21 @@ def main() -> None:
             allow_patterns=["*.json", "*.safetensors", "*.txt", "*.model", "*.npz", "*.bin", "tokenizer*", "vocab*"],
         )
 
-    model_dirs = {key: root / key for key in MODEL_IDS}
-    env = os.environ.copy()
     import unittest.mock as mock
 
+    output_root = Path(os.environ.get(
+        "RYU_QWEN_GPU_OUTPUT", Path.cwd() / "qwen-non-nvidia-acceptance"
+    ))
+    output_root.mkdir(parents=True, exist_ok=True)
+    saved_root = output_root / "saved-profiles"
     runtime_model_dirs = {key: root / key for key in MODEL_IDS}
     runtime_env = os.environ.copy()
     runtime_env["HF_HOME"] = str(root / "huggingface")
     runtime_env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+    runtime_env["PYTHONUTF8"] = "1"
+    runtime_env["PYTHONIOENCODING"] = "utf-8"
+    runtime_env["TOKENIZERS_PARALLELISM"] = "false"
+    preview_metrics = {}
 
     with (
         mock.patch.object(runtime, "RUNTIME_ROOT", root),
@@ -81,30 +91,46 @@ def main() -> None:
         mock.patch.object(provider_module, "runtime_python", return_value=Path(sys.executable)),
         mock.patch.object(provider_module, "runtime_environment", return_value=runtime_env),
         mock.patch.object(provider_module, "model_installed", side_effect=lambda kind: runtime.model_installed(kind)),
+        mock.patch.object(profile_provider_module, "get_qwen_model_preference", return_value="1.7b"),
+        mock.patch.object(profile_provider_module, "get_qwen_backend_preference", return_value="automatic"),
+        mock.patch.object(profile_provider_module, "get_qwen_low_memory_mode", return_value=False),
+        mock.patch("app.tts.voice_profile.voices_root", return_value=saved_root),
+        mock.patch("app.tts.voice_profile.builtin_voice_profiles", return_value=[]),
     ):
-        provider = QwenCharacterProvider(
-            voice_id="Stage 3 AMD/Intel VoiceDesign",
-            language="English",
-            instruct="Warm, clear audiobook narration with natural articulation and steady pacing.",
+        missing = [kind for kind in ("design-1.7b", "base-1.7b") if not runtime.model_installed(kind)]
+        if missing:
+            raise RuntimeError("Qwen model integrity verification failed: " + ", ".join(missing))
+        design_profile = VoiceProfile(
+            name=f"Stage 3 {selected.backend.upper()} Saved VoiceDesign",
+            provider="qwen-character",
+            voice_id="Ryan",
+            model_id="design-1.7b",
             backend="automatic",
-            model_kind="design-1.7b",
-            qwen_mode="design-preview",
+            language="English",
+            notes="Saved AMD/Intel acceptance VoiceDesign identity.",
+            authorized=True,
+            qwen_mode="design",
+            qwen_prompt="A warm, clear audiobook narrator with natural English articulation, restrained emotion and a stable natural timbre.",
             qwen_seed=20261101,
-            qwen_profile_id=f"stage3-{selected.backend}-30s-preview",
+            qwen_anchor_text=DEFAULT_VOICE_DESIGN_ANCHOR_TEXT,
         )
-        status = []
-        provider.set_status_callback(status.append)
-        output_root = Path(os.environ.get(
-            "RYU_QWEN_GPU_OUTPUT", Path.cwd() / "qwen-non-nvidia-acceptance"
-        ))
-        output_root.mkdir(parents=True, exist_ok=True)
+        save_profiles([design_profile])
+        reloaded_design = load_saved_profile(design_profile.name)
+        if not reloaded_design or not reloaded_design.qwen_profile_id:
+            raise RuntimeError("Saved AMD/Intel VoiceDesign profile did not survive reload.")
+        provider, voice = provider_from_profile(reloaded_design)
+        if provider.qwen_mode != "design" or provider.model_kind != "design-1.7b":
+            raise RuntimeError("AMD/Intel benchmark did not resolve the saved VoiceDesign profile.")
+        if provider.long_form_model_kind != "base-1.7b":
+            raise RuntimeError(f"Expected the selected 1.7B Base identity-lock path; got {provider.long_form_model_kind!r}.")
+        provider.set_status_callback(lambda message: None)
         try:
             warm = output_root / "qwen-non-nvidia-warmup.wav"
             started = time.perf_counter()
             provider.synthesize(
                 "Hello. This is a short warm-up sample for the selected Qwen narrator.",
                 warm,
-                provider.voice_id,
+                voice,
             )
             warm_elapsed = time.perf_counter() - started
             with wave.open(str(warm), "rb") as audio:
@@ -122,7 +148,7 @@ def main() -> None:
             result = build_voice_preview(
                 source,
                 provider,
-                provider.voice_id,
+                voice,
                 preview,
                 narration_speed=1.0,
                 pacing_profile="off",
@@ -133,20 +159,15 @@ def main() -> None:
             with wave.open(str(result.output_path), "rb") as audio:
                 duration = audio.getnframes() / float(audio.getframerate())
 
-            expected_device = "cuda" if selected.backend == "rocm" else "xpu"
-            worker_log = (
-                Path.home() / "Ryu's Audiobook" / "Settings"
-                / "qwen_character_worker.log"
-            )
-            log_text = worker_log.read_text(
-                encoding="utf-8", errors="replace"
-            ) if worker_log.is_file() else ""
-            if expected_device not in log_text.casefold() and not any(
-                expected_device in message.casefold() for message in status
-            ):
+            if not provider.execution_backend_verified or provider.execution_backend != selected.backend:
                 raise RuntimeError(
-                    f"Worker evidence does not prove Qwen ran on {selected.backend}."
+                    "Saved-profile preview did not prove the selected accelerator backend; "
+                    f"expected={selected.backend!r} actual={provider.execution_backend!r}."
                 )
+            if provider.last_execution_context.get("task") != "design":
+                raise RuntimeError("Qwen preview did not execute the saved identity-locked design task.")
+            if provider._worker is None or provider._worker.poll() is not None:
+                raise RuntimeError("Qwen saved-profile worker exited during the preview.")
             if not 27.0 <= duration <= 33.0:
                 raise RuntimeError(
                     f"Preview duration out of tolerance: {duration:.3f}s."
@@ -155,11 +176,27 @@ def main() -> None:
                 raise RuntimeError(
                     f"30-second preview took {elapsed:.3f}s; target is under 60s."
                 )
+            preview_metrics = {
+                "backend": provider.execution_backend,
+                "device": provider.last_execution_context.get("device"),
+                "model_kind": provider.last_execution_context.get("model_kind"),
+                "long_form_base_model": provider.long_form_model_kind,
+                "profile_id": reloaded_design.qwen_profile_id,
+                "profile_saved_and_reloaded": True,
+                "identity_locked_design_task": True,
+                "elapsed_seconds": round(elapsed, 3),
+                "audio_seconds": round(duration, 3),
+                "segments": result.segments,
+                "warmup_seconds": round(warm_elapsed, 3),
+                "pass_under_60_seconds": elapsed < 60.0,
+            }
             print(
-                f"REAL_QWEN_{selected.backend.upper()}_PREVIEW=PASS "
+                f"REAL_QWEN_{selected.backend.upper()}_SAVED_PROFILE_PREVIEW=PASS "
                 f"adapter={selected.name} memory_gb={selected.memory_gb:.2f} "
+                f"device={provider.last_execution_context.get('device')} "
+                f"base_model={provider.long_form_model_kind} "
                 f"actual={duration:.3f}s elapsed={elapsed:.3f}s "
-                f"warmup={warm_elapsed:.3f}s worker_device={expected_device}"
+                "profile_reload=true identity_locked=true"
             )
         finally:
             provider.close()
@@ -261,10 +298,8 @@ def main() -> None:
                 "voice_design_model": MODEL_IDS["design-1.7b"],
                 "long_form_base_model": MODEL_IDS[clone_kind],
                 "preview_30s": {
-                    "elapsed_seconds": round(elapsed, 3),
-                    "audio_seconds": round(duration, 3),
+                    **preview_metrics,
                     "real_time_factor": round(elapsed / duration, 4),
-                    "pass_under_60_seconds": elapsed < 60.0,
                 },
                 "long_form_warmed_chapter": long_form_results[-1],
                 "long_form_chapters": long_form_results,

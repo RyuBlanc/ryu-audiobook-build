@@ -199,21 +199,72 @@ def main() -> None:
         try:
             preview_result = build_voice_preview(
                 "The lantern glowed beside the quiet road. Mira listened before she answered.",
-                preview_engine,
-                preview_voice,
-                preview_output,
-                narration_speed=1.0,
-                pacing_profile="off",
-                max_chars=500,
-                target_seconds=3.0,
+                preview_engine, preview_voice, preview_output,
+                narration_speed=1.0, pacing_profile="off", max_chars=500, target_seconds=3.0,
+            )
+            preview_duration = _valid_wav(preview_output)
+            if preview_result.segments < 1:
+                raise RuntimeError("Saved VoiceDesign profile preview did not synthesize any segments.")
+
+            # Measure Voice Studio's real saved-profile route after its stable
+            # identity anchor has been initialized by the short preview above.
+            sentences = (
+                "The lantern glowed softly beside the quiet road.",
+                "Mira listened carefully before she answered.",
+                "Rain moved gently across the distant valley.",
+                "The old wooden door opened into the hall.",
+                "A calm narrator guided the story forward.",
+                "The village lights shimmered beyond the river.",
+            )
+            preview_source = " ".join(sentences[index % len(sentences)] for index in range(240))
+            saved_profile_preview = OUTPUT_ROOT / "qwen-voicedesign-saved-profile-30-second-preview.wav"
+            saved_preview_started = time.perf_counter()
+            saved_preview_result = build_voice_preview(
+                preview_source, preview_engine, preview_voice, saved_profile_preview,
+                narration_speed=1.0, pacing_profile="off", max_chars=1400, target_seconds=30.0,
+            )
+            saved_preview_elapsed = time.perf_counter() - saved_preview_started
+            saved_preview_duration = _valid_wav(saved_profile_preview)
+            if not 27.0 <= saved_preview_duration <= 33.0:
+                raise RuntimeError(
+                    "Saved VoiceDesign 30-second preview duration out of tolerance: "
+                    f"{saved_preview_duration:.3f}s."
+                )
+            if saved_preview_result.segments < 1:
+                raise RuntimeError("Saved VoiceDesign 30-second preview generated no segments.")
+            if not preview_engine.execution_backend_verified or preview_engine.execution_backend != "cpu":
+                raise RuntimeError(
+                    "Hosted CPU VoiceDesign benchmark did not prove real CPU inference; "
+                    f"backend={preview_engine.execution_backend!r}."
+                )
+            print(
+                "REAL_QWEN_VOICEDESIGN_SAVED_PROFILE_PREVIEW=PASS "
+                f"device={preview_engine.last_execution_context.get('device')} "
+                f"base_model={preview_engine.long_form_model_kind or 'automatic'} "
+                f"requested=30s actual={saved_preview_duration:.3f}s "
+                f"warm_preview_elapsed={saved_preview_elapsed:.3f}s "
+                f"segments={saved_preview_result.segments} profile_reload=true identity_locked=true"
+            )
+            (OUTPUT_ROOT / "qwen-saved-profile-performance.json").write_text(
+                json.dumps({
+                    "backend": preview_engine.execution_backend,
+                    "device": preview_engine.last_execution_context.get("device"),
+                    "model_kind": preview_engine.last_execution_context.get("model_kind"),
+                    "saved_profile_id": reloaded_design.qwen_profile_id,
+                    "saved_profile_reloaded": True,
+                    "identity_locked_design_task": True,
+                    "preview_30s": {
+                        "elapsed_seconds": round(saved_preview_elapsed, 3),
+                        "audio_seconds": round(saved_preview_duration, 3),
+                        "segments": saved_preview_result.segments,
+                    },
+                }, ensure_ascii=False, indent=2),
+                encoding="utf-8",
             )
         finally:
             close = getattr(preview_engine, "close", None)
             if callable(close):
                 close()
-        preview_duration = _valid_wav(preview_output)
-        if preview_result.segments < 1:
-            raise RuntimeError("Saved VoiceDesign profile preview did not synthesize any segments.")
 
         from app.tts.qwen_character_worker import _anchor_path
         anchor_request = {

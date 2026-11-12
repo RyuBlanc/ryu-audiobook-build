@@ -146,5 +146,32 @@ class QwenPreviewPerformancePolicyTests(unittest.TestCase):
         start_worker.assert_not_called()
 
 
+
+    def test_accelerator_qwen_preview_benchmarks_use_the_saved_profile_identity_path(self):
+        root = Path(__file__).resolve().parents[1]
+        for relative in (
+            "tests/smoke_qwen_gpu_preview.py",
+            "tests/smoke_qwen_amd_intel_preview.py",
+        ):
+            with self.subTest(script=relative):
+                source = (root / relative).read_text(encoding="utf-8")
+                self.assertNotIn('qwen_mode="design-preview"', source)
+                self.assertIn("provider_from_profile(reloaded_design)", source)
+                self.assertIn("save_profiles([design_profile])", source)
+                self.assertIn("load_saved_profile(design_profile.name)", source)
+                self.assertIn('qwen_mode="design"', source)
+                self.assertIn('return_value="1.7b"', source)
+                self.assertIn("target_seconds=30.0", source)
+
+    def test_hosted_cpu_qwen_acceptance_measures_saved_profile_30_second_preview(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "tests/smoke_qwen_real_clone_design_production.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("qwen-voicedesign-saved-profile-30-second-preview.wav", source)
+        self.assertIn("REAL_QWEN_VOICEDESIGN_SAVED_PROFILE_PREVIEW=PASS", source)
+        self.assertIn("saved_preview_elapsed", source)
+        self.assertIn('execution_backend != "cpu"', source)
+
 if __name__ == "__main__":
     unittest.main()
