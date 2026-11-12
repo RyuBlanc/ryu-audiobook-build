@@ -30,7 +30,8 @@ on:
       - stage-4/step-3-preview-assembly
       - stage-4/step-4-audio-assembly
       - stage-5/**
-      - dragon-studio/**
+      # Dragon Studio is validated once per commit by the PR synchronize event below.
+      # Avoid a duplicate push-only suite that does not produce the packaged artifact.
       - stage-6/**
       - stage-7/**
       - fix/application-wide-closure-2026-11-08
