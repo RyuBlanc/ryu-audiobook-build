@@ -5,6 +5,7 @@ the Library for each chapter, voice, cast, sound, or generation request.
 """
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -133,6 +134,81 @@ class ActiveProjectLookupPerformanceTests(unittest.TestCase):
             with patch("app.core.project.project_library_roots", return_value=(root,)):
                 self.assertEqual(resolve_library_project_folder(project_folder), project_folder.resolve())
                 self.assertIsNone(resolve_library_project_folder(outside / "Book"))
+
+    def test_known_project_actions_resolve_directly_without_enumerating_the_library(self):
+        """A command with an exact saved folder must load only that project."""
+        source = (Path(__file__).resolve().parents[1] / "app/ui/premium_v2_host.py").read_text(
+            encoding="utf-8"
+        )
+        tree = ast.parse(source)
+        method_names = {
+            "_project_trash",
+            "_project_delete",
+            "_production_generate_book",
+            "_restart_generation_from_job",
+            "_player_get_active",
+            "_player_position_save",
+            "_character_library_save",
+        }
+        methods = {
+            node.name: node
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name in method_names
+        }
+        self.assertEqual(set(methods), method_names)
+        for name, method in methods.items():
+            with self.subTest(method=name):
+                full_library_scans = [
+                    node for node in ast.walk(method)
+                    if isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "list_projects"
+                ]
+                direct_project_loads = [
+                    node for node in ast.walk(method)
+                    if isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "self"
+                    and node.func.attr == "_load_library_project"
+                ]
+                self.assertFalse(
+                    full_library_scans,
+                    f"{name} has a known project folder but still enumerates every Library project",
+                )
+                self.assertTrue(
+                    direct_project_loads,
+                    f"{name} must use the validated direct-child project resolver",
+                )
+
+    def test_known_project_folder_actions_still_use_the_library_boundary_resolver(self):
+        from app.ui.premium_v2_host import PremiumV2Bridge
+
+        with TemporaryDirectory() as temp:
+            root = Path(temp) / "library"
+            source = Path(temp) / "source.txt"
+            source.write_text("Chapter 1\\nA real chapter body.", encoding="utf-8")
+            with patch("app.core.project.library_root", return_value=root):
+                created = create_project(
+                    "Direct Folder Book", source,
+                    [Chapter(1, "Chapter 1", "A real chapter body.")],
+                )
+            bridge = PremiumV2Bridge.__new__(PremiumV2Bridge)
+            bridge._active_project_cache_lock = threading.RLock()
+            bridge._active_project_cache = None
+            bridge._active_project_migrated_folders = set()
+            bridge.settings = _Settings({})
+            with (
+                patch("app.core.project.project_library_roots", return_value=(root,)),
+                patch("app.ui.premium_v2_host.list_projects", side_effect=AssertionError(
+                    "known-folder operations must not enumerate the entire Library"
+                )),
+            ):
+                loaded = PremiumV2Bridge._load_library_project(bridge, created.folder)
+                rejected = PremiumV2Bridge._load_library_project(bridge, root.parent / "outside")
+            self.assertEqual(loaded.folder.resolve(), created.folder.resolve())
+            self.assertIsNone(rejected)
 
     def test_project_reload_without_migration_does_not_walk_narration_or_rewrite_legacy_bgm(self):
         from app.core.state import save_state

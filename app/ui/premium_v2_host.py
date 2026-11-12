@@ -1196,10 +1196,7 @@ class PremiumV2Bridge(QObject):
             target = Path(requested).expanduser().resolve()
         except (OSError, RuntimeError, ValueError) as exc:
             raise ValueError("The selected project path is invalid.") from exc
-        project = next(
-            (item for item in list_projects() if Path(item.folder).resolve() == target),
-            None,
-        )
+        project = self._load_library_project(target)
         if project is None:
             raise ValueError("That project is no longer present in the active Library.")
         active_folder_value = str(self.settings.value("project/active_folder") or "").strip()
@@ -1240,10 +1237,7 @@ class PremiumV2Bridge(QObject):
             target = Path(requested).expanduser().resolve()
         except (OSError, RuntimeError, ValueError) as exc:
             raise ValueError("The selected project path is invalid.") from exc
-        project = next(
-            (item for item in list_projects() if Path(item.folder).resolve() == target),
-            None,
-        )
+        project = self._load_library_project(target)
         if project is None:
             raise ValueError("That project is no longer present in the active Library.")
         active_folder_value = str(self.settings.value("project/active_folder") or "").strip()
@@ -6392,11 +6386,7 @@ class PremiumV2Bridge(QObject):
             series = scope
         if not series or series.casefold() in {"global character library", "all series"}:
             active_folder = str(self.settings.value("project/active_folder") or "").strip()
-            active_project = next(
-                (project for project in list_projects()
-                 if active_folder and str(Path(project.folder).resolve()) == str(Path(active_folder).resolve())),
-                None,
-            )
+            active_project = self._load_library_project(active_folder) if active_folder else None
             if active_project:
                 series = self._project_series_name(active_project, load_state(active_project.folder))
             else:
@@ -6424,11 +6414,7 @@ class PremiumV2Bridge(QObject):
             record = update_reusable_character(existing["id"], changes)
         else:
             active_folder = str(self.settings.value("project/active_folder") or "").strip()
-            active_project = next(
-                (project for project in list_projects()
-                 if active_folder and str(Path(project.folder).resolve()) == str(Path(active_folder).resolve())),
-                None,
-            )
+            active_project = self._load_library_project(active_folder) if active_folder else None
             sync_reusable_characters(
                 series,
                 [{
@@ -6463,11 +6449,7 @@ class PremiumV2Bridge(QObject):
         project_updated = False
         if "voice_profile" in payload and voice_profile:
             active_folder = str(self.settings.value("project/active_folder") or "").strip()
-            active_project = next(
-                (project for project in list_projects()
-                 if active_folder and str(Path(project.folder).resolve()) == str(Path(active_folder).resolve())),
-                None,
-            )
+            active_project = self._load_library_project(active_folder) if active_folder else None
             if active_project is not None:
                 state = load_state(active_project.folder)
                 cast = state.get("characters") or []
@@ -7689,10 +7671,7 @@ class PremiumV2Bridge(QObject):
         requested_project_folder = str(payload.get("_project_folder") or "").strip()
         if requested_project_folder:
             requested_path = Path(requested_project_folder).expanduser().resolve()
-            project = next(
-                (item for item in list_projects() if str(item.folder.resolve()) == str(requested_path)),
-                None,
-            )
+            project = self._load_library_project(requested_path)
             if project is None:
                 raise ValueError("The project for this generation job is no longer available in the local library.")
         else:
@@ -8828,10 +8807,7 @@ class PremiumV2Bridge(QObject):
             raise ValueError("The original generation job does not contain a saved project reference.")
 
         requested_path = Path(project_folder_value).expanduser().resolve()
-        project = next(
-            (item for item in list_projects() if str(item.folder.resolve()) == str(requested_path)),
-            None,
-        )
+        project = self._load_library_project(requested_path)
         if project is None:
             raise ValueError("The original project is no longer available in the local library.")
 
@@ -8918,11 +8894,7 @@ class PremiumV2Bridge(QObject):
         requested_folder = str(payload.get("folder") or "").strip()
         if requested_folder:
             requested_path = Path(requested_folder).expanduser()
-            project = next(
-                (item for item in list_projects()
-                 if str(item.folder.resolve()) == str(requested_path.resolve())),
-                None,
-            )
+            project = self._load_library_project(requested_path)
             if project is None:
                 raise ValueError("The selected audiobook is no longer available in the local library.")
         else:
@@ -9019,11 +8991,7 @@ class PremiumV2Bridge(QObject):
         if not folder_value:
             raise ValueError("Select an audiobook before saving playback position.")
         requested_folder = Path(folder_value).expanduser().resolve()
-        project = next(
-            (item for item in list_projects()
-             if str(item.folder.resolve()) == str(requested_folder)),
-            None,
-        )
+        project = self._load_library_project(requested_folder)
         if project is None:
             raise ValueError("The selected audiobook is no longer available in the local library.")
         raw_position = payload.get("position_seconds", 0)
