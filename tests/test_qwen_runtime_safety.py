@@ -165,6 +165,38 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
                             self.assertEqual(provider.reference_audio, Path(expected.sample_path))
                             self.assertEqual(provider.reference_text, expected.reference_text)
 
+    def test_saved_qwen_clone_reference_replacement_changes_generation_signature(self):
+        import os
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from app.tts.providers.qwen_character import QwenCharacterProvider
+
+        with TemporaryDirectory() as temporary:
+            reference = Path(temporary) / "saved-clone-reference.wav"
+            reference.write_bytes(b"original-clone-audio")
+            provider = QwenCharacterProvider(
+                voice_id="saved-clone-profile",
+                model_kind="base-1.7b",
+                qwen_mode="clone",
+                reference_audio=reference,
+                reference_text="The saved reference transcript.",
+                qwen_profile_id="stable-clone-profile-id",
+            )
+            before = provider.generation_signature()
+            original = reference.stat()
+            reference.write_bytes(b"replacement-clone-audio")
+            os.utime(
+                reference,
+                ns=(original.st_atime_ns, original.st_mtime_ns),
+            )
+            after = provider.generation_signature()
+
+            self.assertNotEqual(
+                before,
+                after,
+                "Replacing a saved Qwen Clone reference with the same path, size and timestamp must invalidate cached chapter audio.",
+            )
+
     def test_saved_qwen_anchor_replacement_changes_generation_signature(self):
         import os
         from pathlib import Path
@@ -192,7 +224,7 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
                 anchor.write_bytes(b"new-anchor-bytes")
                 os.utime(
                     anchor,
-                    ns=(original.st_atime_ns, original.st_mtime_ns + 2_000_000_000),
+                    ns=(original.st_atime_ns, original.st_mtime_ns),
                 )
                 after = provider.generation_signature()
 
