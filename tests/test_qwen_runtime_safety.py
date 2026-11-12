@@ -870,8 +870,7 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
                     patch.object(worker, "_load_model_with_fallback", side_effect=initial_load),
                     patch.object(worker, "_load_model", side_effect=retry_load),
                     patch.object(worker, "_generate_design_preview", side_effect=synthesize),
-                    patch.object(worker, "clear_model_cache", return_value=None),
-                    patch("sys.stdin", io.StringIO(json.dumps(request) + "\\n")),
+                    patch("sys.stdin", io.StringIO(json.dumps(request) + "\n")),
                     redirect_stdout(output),
                 ):
                     self.assertEqual(worker.server(args), 0)
