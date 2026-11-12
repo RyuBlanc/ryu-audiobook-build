@@ -6169,10 +6169,23 @@ function renderProductionMetadataGate(active) {
     if (!job) return NaN;
     const raw = job.elapsed_seconds;
     const stored = raw !== null && raw !== undefined && raw !== '' ? Number(raw) : NaN;
-    if (String(job.state || '').toLowerCase() === 'running') {
+    const state = String(job.state || '').toLowerCase();
+    const live = state === 'running' || state === 'pause_requested' ||
+      (state === 'cancel_requested' && job.elapsed_frozen !== true);
+    if (live) {
+      // New snapshots provide a checkpoint that already excludes completed
+      // pauses. Continue from it instead of counting from started_at.
+      const checkpointAt = Date.parse(job.elapsed_updated_at || '');
+      if (Number.isFinite(checkpointAt)) {
+        const base = Number.isFinite(stored) ? stored : 0;
+        const liveSinceCheckpoint = Math.max(0, Math.floor((Date.now() - checkpointAt) / 1000));
+        return base + liveSinceCheckpoint;
+      }
+      // Compatibility for job records saved before pause-aware checkpoints.
       const startedAt = Date.parse(job.started_at || '');
       if (Number.isFinite(startedAt)) {
-        const liveElapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+        const pausedTotal = Math.max(0, Number(job.elapsed_paused_seconds) || 0);
+        const liveElapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000 - pausedTotal));
         return Number.isFinite(stored) ? Math.max(stored, liveElapsed) : liveElapsed;
       }
     }
