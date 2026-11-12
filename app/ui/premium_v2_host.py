@@ -2246,13 +2246,84 @@ class PremiumV2Bridge(QObject):
             row = self._jobs.get(str(job_id))
             if row is None:
                 raise ValueError("Background job no longer exists.")
+
+            previous_state = str(row.get("state") or "").casefold()
+            next_state = str(changes.get("state", previous_state) or "").casefold()
+            now_dt = datetime.now(timezone.utc)
+            now_iso = now_dt.isoformat()
+            paused_seconds = row.get("elapsed_paused_seconds", 0.0)
+            try:
+                paused_seconds = max(0.0, float(paused_seconds or 0.0))
+            except (TypeError, ValueError, OverflowError):
+                paused_seconds = 0.0
+
+            # Count only confirmed paused intervals. A pause request remains
+            # active until GenerationManager reports its saved checkpoint.
+            if previous_state == "paused" and next_state == "running":
+                paused_at = row.get("elapsed_paused_at")
+                if paused_at:
+                    try:
+                        paused_start = datetime.fromisoformat(str(paused_at))
+                        if paused_start.tzinfo is None:
+                            paused_start = paused_start.replace(tzinfo=timezone.utc)
+                        paused_seconds += max(
+                            0.0, (now_dt - paused_start.astimezone(timezone.utc)).total_seconds()
+                        )
+                    except (TypeError, ValueError, OverflowError):
+                        pass
+                row["elapsed_paused_seconds"] = paused_seconds
+                row["elapsed_paused_at"] = None
+                row["elapsed_frozen"] = False
+            elif next_state == "paused":
+                if previous_state != "paused":
+                    row["elapsed_paused_at"] = now_iso
+                row["elapsed_frozen"] = True
+            elif previous_state == "paused" and next_state != "running":
+                # Cancelling while paused must not count shutdown time as work.
+                row["elapsed_paused_at"] = None
+                row["elapsed_frozen"] = True
+            elif next_state in {"running", "pause_requested", "cancel_requested"}:
+                row["elapsed_frozen"] = False
+
             row.update(changes)
             row["updated_at"] = self._now()
-            if row.get("state") == "running" and row.get("started_at"):
+
+            active_states = {"running", "pause_requested", "cancel_requested"}
+            terminal_states = {"completed", "failed", "cancelled"}
+            should_measure_elapsed = (
+                next_state in active_states
+                or next_state == "paused"
+                or (next_state in terminal_states and previous_state in active_states)
+            )
+            if should_measure_elapsed and row.get("started_at") and row.get("elapsed_frozen") is not True:
                 try:
-                    row["elapsed_seconds"] = max(0, int((datetime.now(timezone.utc) - datetime.fromisoformat(row["started_at"])).total_seconds()))
-                except (TypeError, ValueError):
+                    started_at = datetime.fromisoformat(str(row["started_at"]))
+                    if started_at.tzinfo is None:
+                        started_at = started_at.replace(tzinfo=timezone.utc)
+                    active_elapsed = (
+                        now_dt - started_at.astimezone(timezone.utc)
+                    ).total_seconds() - paused_seconds
+                    row["elapsed_seconds"] = max(0, int(active_elapsed))
+                    row["elapsed_updated_at"] = now_iso
+                except (TypeError, ValueError, OverflowError):
                     pass
+            elif next_state == "paused" and previous_state != "paused" and row.get("started_at"):
+                # Freeze the elapsed display at the acknowledged pause boundary.
+                try:
+                    started_at = datetime.fromisoformat(str(row["started_at"]))
+                    if started_at.tzinfo is None:
+                        started_at = started_at.replace(tzinfo=timezone.utc)
+                    active_elapsed = (
+                        now_dt - started_at.astimezone(timezone.utc)
+                    ).total_seconds() - paused_seconds
+                    row["elapsed_seconds"] = max(0, int(active_elapsed))
+                    row["elapsed_updated_at"] = now_iso
+                except (TypeError, ValueError, OverflowError):
+                    pass
+            elif previous_state == "paused":
+                row["elapsed_updated_at"] = now_iso
+
+            if next_state in {"running", "pause_requested"} and row.get("elapsed_frozen") is not True:
                 job_type = str(row.get("type") or "").casefold()
                 if job_type in {
                     "audiobook-generation", "voice-preview",
@@ -2272,7 +2343,7 @@ class PremiumV2Bridge(QObject):
                         )
                     except (TypeError, ValueError, ZeroDivisionError):
                         row["eta_seconds"] = None
-            if row.get("state") in {"completed", "failed", "cancelled"}:
+            if row.get("state") in terminal_states:
                 row["completed_at"] = row.get("completed_at") or row["updated_at"]
                 row["eta_seconds"] = 0
                 self._record_history_job(row)
