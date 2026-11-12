@@ -85,6 +85,20 @@ class Stage54GenerationJobUiStateTests(unittest.TestCase):
         self.assertIn("delete control.dataset.dashboardGenerationAction", renderer)
         self.assertIn("button.dataset.dashboardGenerationControl === '1'", self.adapter)
 
+    def test_production_elapsed_display_uses_pause_adjusted_server_checkpoint(self):
+        start = self.adapter.index("function productionElapsedSeconds(job)")
+        end = self.adapter.index("function productionJobEtaSeconds(job)", start)
+        renderer = self.adapter[start:end]
+        self.assertIn("job.elapsed_updated_at", renderer)
+        self.assertIn("job.elapsed_paused_seconds", renderer)
+        self.assertIn("job.elapsed_frozen !== true", renderer)
+        self.assertIn("state === 'pause_requested'", renderer)
+        self.assertNotIn("Date.now() - startedAt", renderer)
+        host_source = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn('row["elapsed_paused_seconds"] = paused_seconds', host_source)
+        self.assertIn('row["elapsed_updated_at"] = now_iso', host_source)
+        self.assertIn('row["elapsed_frozen"] = True', host_source)
+
     def test_frozen_app_acceptance_exercises_real_job_ui_and_bridge_dispatch(self):
         self.assertIn("runStage53JobUiAcceptance()", self.packaged)
         self.assertIn("stage53_background_job_state_controls", self.packaged)
