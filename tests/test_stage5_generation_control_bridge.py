@@ -6,7 +6,9 @@ import tempfile
 import threading
 import unittest
 import wave
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from app.chapters.detector import Chapter
 from app.tts.manager import GenerationManager
@@ -61,6 +63,83 @@ class GenerationControlBridgeHarness:
             row = self._jobs[job_id]
             row.update(changes)
             return dict(row)
+
+
+class _FixedDateTime(datetime):
+    current = datetime(2026, 11, 12, 12, 0, 0, tzinfo=timezone.utc)
+
+    @classmethod
+    def now(cls, tz=None):
+        if tz is None:
+            return cls.current.replace(tzinfo=None)
+        return cls.current.astimezone(tz)
+
+
+class _ElapsedClockBridgeHarness:
+    _job_update = host.PremiumV2Bridge._job_update
+
+    def __init__(self, started_at: datetime) -> None:
+        self._jobs_lock = threading.RLock()
+        self._jobs = {
+            "elapsed-clock-job": {
+                "job_id": "elapsed-clock-job",
+                "type": "audiobook-generation",
+                "state": "running",
+                "started_at": started_at.isoformat(),
+                "elapsed_seconds": 0,
+                "progress": 1,
+            }
+        }
+
+    def _now(self) -> str:
+        return _FixedDateTime.now(timezone.utc).isoformat(timespec="seconds")
+
+    def _record_history_job(self, _row) -> None:
+        pass
+
+    def _persist_jobs(self) -> None:
+        pass
+
+
+class Stage53GenerationElapsedClockTests(unittest.TestCase):
+    def test_job_elapsed_checkpoint_excludes_pauses_and_freezes_when_cancelled_paused(self) -> None:
+        started = datetime(2026, 11, 12, 12, 0, 0, tzinfo=timezone.utc)
+        _FixedDateTime.current = started
+        bridge = _ElapsedClockBridgeHarness(started)
+
+        with patch.object(host, "datetime", _FixedDateTime):
+            _FixedDateTime.current = started + timedelta(seconds=10)
+            paused = bridge._job_update("elapsed-clock-job", state="paused")
+            self.assertEqual(paused["elapsed_seconds"], 10)
+            self.assertEqual(paused["state"], "paused")
+            self.assertTrue(paused["elapsed_frozen"])
+            self.assertIsNotNone(paused["elapsed_paused_at"])
+
+            _FixedDateTime.current = started + timedelta(minutes=7, seconds=10)
+            resumed = bridge._job_update("elapsed-clock-job", state="running")
+            self.assertEqual(resumed["elapsed_seconds"], 10)
+            self.assertEqual(resumed["elapsed_paused_seconds"], 420.0)
+            self.assertIsNone(resumed["elapsed_paused_at"])
+            self.assertFalse(resumed["elapsed_frozen"])
+
+            _FixedDateTime.current = started + timedelta(minutes=7, seconds=30)
+            progress = bridge._job_update("elapsed-clock-job", progress=50)
+            self.assertEqual(progress["elapsed_seconds"], 30)
+
+            _FixedDateTime.current = started + timedelta(minutes=7, seconds=35)
+            paused_again = bridge._job_update("elapsed-clock-job", state="paused")
+            self.assertEqual(paused_again["elapsed_seconds"], 35)
+
+            _FixedDateTime.current = started + timedelta(minutes=47, seconds=35)
+            cancelling = bridge._job_update("elapsed-clock-job", state="cancel_requested")
+            self.assertEqual(cancelling["elapsed_seconds"], 35)
+            self.assertTrue(cancelling["elapsed_frozen"])
+            self.assertIsNone(cancelling["elapsed_paused_at"])
+
+            _FixedDateTime.current += timedelta(seconds=7)
+            cancelled = bridge._job_update("elapsed-clock-job", state="cancelled")
+            self.assertEqual(cancelled["elapsed_seconds"], 35)
+            self.assertTrue(cancelled["elapsed_frozen"])
 
 
 class Stage53GenerationControlBridgeTests(unittest.TestCase):
