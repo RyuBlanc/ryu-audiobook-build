@@ -1,5 +1,9 @@
 name: Build Windows App
-run-name: ${{ github.event.head_commit.message || github.event_name }}
+run-name: >-
+  ${{ github.event_name == 'pull_request'
+      && format('Build Windows App - PR #{0} - {1}', github.event.pull_request.number, github.event.pull_request.title)
+      || github.event.head_commit.message
+      || github.event_name }}
 
 on:
   push:
@@ -61,6 +65,42 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Identify pull-request change topic
+        if: ${{ github.event_name == 'pull_request' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_REPOSITORY: ${{ github.repository }}
+          RUN_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $headers = @{
+            Accept = 'application/vnd.github+json'
+            Authorization = "Bearer $env:GH_TOKEN"
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          $uri = "https://api.github.com/repos/$env:RUN_REPOSITORY/commits/$env:RUN_SHA"
+          $commit = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers -TimeoutSec 20
+          $topic = ([string]$commit.commit.message).Trim()
+          if ([string]::IsNullOrWhiteSpace($topic)) {
+            throw "GitHub returned no commit subject for PR #$env:RUN_PR_NUMBER at $env:RUN_SHA."
+          }
+          Write-Host "PULL REQUEST CHANGE TOPIC: $topic"
+          $summary = @(
+            '## Pull-request change topic',
+            '',
+            "- **PR:** #$env:RUN_PR_NUMBER - $env:RUN_PR_TITLE",
+            "- **Exact commit:** $env:RUN_SHA",
+            "- **Change topic:** $topic",
+            '',
+            '### Files changed'
+          )
+          foreach ($file in @($commit.files)) {
+            $summary += "- $($file.filename) ($($file.status); +$($file.additions)/-$($file.deletions))"
+          }
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ($summary -join [Environment]::NewLine) -Encoding utf8
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
