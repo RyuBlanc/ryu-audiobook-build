@@ -7288,6 +7288,35 @@ function renderProductionMetadataGate(active) {
     }, true);
   }
 
+  const BACKEND_JOB_POLL_ACTIVE_MS = 1500;
+  const BACKEND_JOB_POLL_IDLE_MS = 10000;
+  const BACKEND_JOB_POLL_HIDDEN_ACTIVE_MS = 5000;
+  const BACKEND_JOB_POLL_HIDDEN_IDLE_MS = 30000;
+
+  function backendJobPollDelay(jobs) {
+    const active = Array.isArray(jobs) && jobs.some(job =>
+      PRODUCTION_ACTIVE_JOB_STATES.has(String(job?.state || '').toLowerCase())
+    );
+    if (document.visibilityState === 'hidden') {
+      return active ? BACKEND_JOB_POLL_HIDDEN_ACTIVE_MS : BACKEND_JOB_POLL_HIDDEN_IDLE_MS;
+    }
+    return active ? BACKEND_JOB_POLL_ACTIVE_MS : BACKEND_JOB_POLL_IDLE_MS;
+  }
+
+  function scheduleBackendJobRefresh(jobs, delayOverride) {
+    if (window.__ryuBackendJobPollingStarted !== true) return;
+    if (window.__ryuBackendJobTimer !== null && window.__ryuBackendJobTimer !== undefined) {
+      clearTimeout(window.__ryuBackendJobTimer);
+    }
+    const requestedDelay = delayOverride === null || delayOverride === undefined
+      ? backendJobPollDelay(jobs)
+      : Math.max(0, Number(delayOverride) || 0);
+    window.__ryuBackendJobTimer = setTimeout(() => {
+      window.__ryuBackendJobTimer = null;
+      refreshJobs().catch(error => console.warn('[Ryu background job polling]', error));
+    }, requestedDelay);
+  }
+
   async function refreshJobs() {
     // Coalesce overlapping calls without dropping state changes. A Task Manager
     // filter can change while job.list is in flight; that request must receive
@@ -7304,11 +7333,17 @@ function renderProductionMetadataGate(active) {
     })();
     jobsRefreshPromise = refreshPromise;
     try { return await refreshPromise; }
-    finally { if (jobsRefreshPromise === refreshPromise) jobsRefreshPromise = null; }
+    finally {
+      if (jobsRefreshPromise === refreshPromise) {
+        jobsRefreshPromise = null;
+        scheduleBackendJobRefresh(window.__ryuBackendLastJobs || []);
+      }
+    }
   }
   async function refreshJobsImpl() {
     ensureFailedJobsFilter();
     const allJobs = await call('job.list', {include_hidden:false});
+    window.__ryuBackendLastJobs = allJobs;
     if (allJobs.some(job => String(job.type || '').toLowerCase() === 'import' && job.state === 'completed')) {
       await refreshLatestImport();
     }
@@ -13121,7 +13156,22 @@ function renderProductionMetadataGate(active) {
         attributes:true, attributeFilter:['class']
       });
     }
-    if (!window.__ryuBackendJobTimer) window.__ryuBackendJobTimer=setInterval(()=>refreshJobs().catch(()=>{}),1500);
+    if (window.__ryuBackendJobPollingStarted !== true) {
+      window.__ryuBackendJobPollingStarted = true;
+      if (window.__ryuBackendJobVisibilityBound !== true) {
+        window.__ryuBackendJobVisibilityBound = true;
+        document.addEventListener('visibilitychange', () => {
+          const rows = window.__ryuBackendLastJobs || [];
+          scheduleBackendJobRefresh(
+            rows,
+            document.visibilityState === 'visible' ? 0 : undefined
+          );
+        });
+      }
+      // The first snapshot is immediate; subsequent delays follow active/idle
+      // job state and page visibility. Explicit action refreshes reschedule too.
+      scheduleBackendJobRefresh([], 0);
+    }
     const jobsBox = $('backgroundJobsList');
     if (jobsBox && !window.__ryuBackendJobsObserver) {
       window.__ryuBackendJobsObserver = new MutationObserver(() => {
