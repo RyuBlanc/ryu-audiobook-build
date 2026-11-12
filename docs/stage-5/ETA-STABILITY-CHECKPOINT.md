@@ -37,3 +37,12 @@ This checkpoint repairs the Production Studio estimate shown while a long-form a
 - When the estimate reaches zero before the workload finishes, the UI retains its existing "past the last measured estimate" state rather than jumping back to a positive number.
 - Faster measurements can shorten the estimate with the existing 25% downward smoothing; slower measurements cannot increase an active estimate. A replacement estimate is published only after three further completed chunks confirm the prior estimate was exceeded; it is explicitly marked as recalibrated.
 - Regression coverage verifies the reported 23-second countdown case, isolated slow-chunk handling, and sustained-overrun recalibration.
+
+## Exact-head packaged checkpoint — Build #3323 (12 Nov 2026)
+
+- Exact tested head: `1c235746646a4a3ba0263178cb1bba045ebffd93`; PR run [#3323](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43139856426).
+- The regression suite passed 1,523 tests and the Windows package job passed, including the package's UI/installer and real bundled-Piper two-chapter M4B acceptance.
+- The package run confirms the measured ETA/progress implementation remains buildable and its automated regressions remain green. It does **not** verify a long-duration real Qwen generation on the target PC.
+- Still required: observe several chapters of real generation and verify measured chunk progress, stable/decreasing remaining ETA, warm-up handling, elapsed synthesis, pause/resume, audiobook listening-duration projection and final measured M4B duration. Compare ETA behaviour on real selected provider/backend, not simulated timings.
+- Hardware target remains separate: real NVIDIA/AMD/Intel Qwen results are required; hosted CPU and mocked backend tests do not establish GPU preview performance.
+
