@@ -737,6 +737,7 @@ def server(args) -> int:
     active_kind = args.kind
     locked_clone_prompts = None
     locked_anchors = None
+    locked_profile_key: str | None = None
     design_identity_cache: dict[str, tuple[dict, dict, str]] = {}
 
     def load_model(kind: str, *, allow_cpu_fallback: bool = True) -> None:
@@ -782,8 +783,24 @@ def server(args) -> int:
         except Exception:
             pass
 
+    def create_locked_clone_prompts(target_model, request: dict, paths: dict[str, Path]) -> dict:
+        """Build identity-lock prompts on the device that owns the Base model."""
+        explicit_anchor = bool(str(request.get("anchor_path") or "").strip())
+        prompts = {}
+        for style, path in paths.items():
+            transcript = _expression_anchor_text(request, style)
+            use_xvector_only = explicit_anchor and style == "neutral" and not str(
+                request.get("anchor_text") or ""
+            ).strip()
+            prompts[style] = target_model.create_voice_clone_prompt(
+                ref_audio=str(path),
+                ref_text=None if use_xvector_only else transcript,
+                x_vector_only_mode=use_xvector_only,
+            )
+        return prompts
+
     def lock_design_identity(request: dict) -> None:
-        nonlocal model, device, locked_clone_prompts, locked_anchors, active_kind
+        nonlocal model, device, locked_clone_prompts, locked_anchors, locked_profile_key, active_kind
         profile_key = str(request.get("profile_id") or "").strip()
         if not profile_key:
             profile_key = hashlib.sha256(
@@ -799,6 +816,7 @@ def server(args) -> int:
         cached_identity = design_identity_cache.get(profile_key)
         if cached_identity is not None:
             locked_clone_prompts, locked_anchors, cached_kind = cached_identity
+            locked_profile_key = profile_key
             if model is None or active_kind != cached_kind:
                 if model is not None:
                     del model
@@ -852,19 +870,9 @@ def server(args) -> int:
             load_model(clone_kind)
         active_kind = clone_kind
 
-        explicit_anchor = bool(str(request.get("anchor_path") or "").strip())
-        locked_clone_prompts = {}
-        for style, path in paths.items():
-            transcript = _expression_anchor_text(request, style)
-            use_xvector_only = explicit_anchor and style == "neutral" and not str(
-                request.get("anchor_text") or ""
-            ).strip()
-            locked_clone_prompts[style] = model.create_voice_clone_prompt(
-                ref_audio=str(path),
-                ref_text=None if use_xvector_only else transcript,
-                x_vector_only_mode=use_xvector_only,
-            )
+        locked_clone_prompts = create_locked_clone_prompts(model, request, paths)
         locked_anchors = paths
+        locked_profile_key = profile_key
         design_identity_cache[profile_key] = (locked_clone_prompts, paths, clone_kind)
 
     # VoiceDesign loads lazily on the first request. A separate protocol
@@ -1072,27 +1080,54 @@ def server(args) -> int:
                 }), flush=True)
                 continue
 
-            if _is_cuda_oom(exc) and device.startswith("cuda"):
+            requested_backend = str(args.backend or "automatic").strip().casefold()
+            automatic_backend = requested_backend in {"automatic", "auto"}
+            accelerator_device = str(device or "").casefold().startswith(("cuda", "xpu"))
+            if _is_cuda_oom(exc) and automatic_backend and accelerator_device:
+                # Automatic may retry the same selected model on CPU after an
+                # accelerator OOM. Explicit CUDA/ROCm/XPU choices fail closed;
+                # they must never silently become a slower CPU generation.
+                clear_model_cache(device)
                 try:
-                    import torch
-                    torch.cuda.empty_cache()
-                except Exception:
-                    pass
-                try:
+                    print(
+                        json.dumps({
+                            "progress": (
+                                "Automatic accelerator synthesis ran out of memory; "
+                                "retrying the same selected model on CPU without changing voice identity."
+                            )
+                        }),
+                        flush=True,
+                    )
                     if active_task == "design-preview":
-                        # A preview may fall back to CPU, but keep it on the same
-                        # VoiceDesign model/prompt path; never swap into the
-                        # production Base-anchor identity workflow during audition.
+                        # Preview stays on the same VoiceDesign model/prompt path.
                         model, device = _load_model(str(args.kind), "cpu", root, low_memory=args.low_memory)
                         active_kind = str(args.kind)
                         _generate_design_preview(model, request, Path(str(request.get("output"))))
                     elif active_task == "design":
-                        # Production narration retains the stable VoiceDesign/Base identity lock.
+                        # Rebuild the Base clone prompt on CPU from the exact same
+                        # saved acoustic anchor. Prompt tensors/cache objects can
+                        # be device-bound and must not be reused after a GPU->CPU
+                        # model transition.
+                        if not locked_anchors or not locked_profile_key or locked_clone_prompts is None:
+                            raise RuntimeError(
+                                "The stable VoiceDesign identity could not be restored after accelerator memory fallback."
+                            )
                         model, device = _load_model(str(args.clone_kind), "cpu", root, low_memory=args.low_memory)
                         active_kind = str(args.clone_kind)
-                        if locked_clone_prompts is None:
-                            raise RuntimeError("The stable VoiceDesign identity could not be restored after GPU memory fallback.")
-                        _generate_design_locked(model, locked_clone_prompts, request, Path(str(request.get("output"))))
+                        locked_clone_prompts = create_locked_clone_prompts(
+                            model, request, locked_anchors
+                        )
+                        design_identity_cache[locked_profile_key] = (
+                            locked_clone_prompts,
+                            locked_anchors,
+                            str(args.clone_kind),
+                        )
+                        _generate_design_locked(
+                            model,
+                            locked_clone_prompts,
+                            request,
+                            Path(str(request.get("output"))),
+                        )
                     else:
                         model, device = _load_model(active_kind, "cpu", root, low_memory=args.low_memory)
                         if active_task == "custom":
@@ -1105,6 +1140,14 @@ def server(args) -> int:
                         "device": device, "backend": _actual_backend(device),
                         "kind": active_kind,
                         "task": active_task,
+                        "anchor": (
+                            str(locked_anchors.get("neutral"))
+                            if active_task == "design" and locked_anchors else None
+                        ),
+                        "voice_lock": (
+                            bool(locked_clone_prompts is not None)
+                            if active_task == "design" else False
+                        ),
                     }), flush=True)
                     continue
                 except Exception as retry_exc:
