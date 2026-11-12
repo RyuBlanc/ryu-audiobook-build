@@ -266,7 +266,7 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn("qwen_design_preview_duration", source)
         self.assertNotIn("test_profile_button", source)
 
-    def test_qwen_design_preview_uses_one_pass_voice_design_model(self):
+    def test_qwen_design_preview_keeps_legacy_worker_but_auditions_with_saved_identity(self):
         provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
         host = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
@@ -277,7 +277,12 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("_generate_design_preview(model, request, output)", worker)
         self.assertIn('elif active_task == "design":', worker)
         self.assertIn("_generate_design_locked(model, locked_clone_prompts, request, output)", worker)
-        self.assertIn('preview_profile.qwen_mode = "design-preview"', host)
+        self.assertNotIn('preview_profile.qwen_mode = "design-preview"', host)
+        self.assertIn("provider, voice = provider_from_profile(profile)", host)
+        self.assertIn("lock_design_identity(request)", worker)
+        self.assertIn('qwen_mode in {"design", "design-preview"}',
+                      Path("app/tts/preview.py").read_text(encoding="utf-8"))
+        self.assertIn("recommended_preview_batch_size", provider)
         self.assertIn("performance_target_met", host)
 
 
@@ -636,7 +641,12 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("_create_expression_anchors", worker)
         self.assertIn('"outputs": [str(Path(str(path)).resolve()) for path in batch_outputs]', worker)
         self.assertIn('qwen_mode="design"', voice_page)
-        self.assertIn('preview_profile.qwen_mode = "design-preview"', host)
+        self.assertNotIn('preview_profile.qwen_mode = "design-preview"', host)
+        self.assertIn("provider, voice = provider_from_profile(profile)", host)
+        self.assertIn("lock_design_identity(request)", worker)
+        self.assertIn('qwen_mode in {"design", "design-preview"}',
+                      Path("app/tts/preview.py").read_text(encoding="utf-8"))
+        self.assertIn("recommended_preview_batch_size", provider)
         self.assertIn('best_long_form_clone_kind()', provider)
         self.assertIn('"--clone-kind", clone_kind or "base-0.6b"', provider)
         self.assertNotIn('clone_kind or best_clone_kind()', provider)
@@ -1611,7 +1621,9 @@ class RegressionTests(unittest.TestCase):
         generator = Path("app/tts/generator.py").read_text(encoding="utf-8")
         self.assertIn("def synthesize_batch", provider)
         self.assertIn("def recommended_preview_batch_size", provider)
-        self.assertIn("_detected_vram_gb() >= 7.0", provider)
+        self.assertIn("threshold_gb = 12.0", provider)
+        self.assertIn("threshold_gb = 7.0", provider)
+        self.assertIn("_detected_vram_gb() >= threshold_gb", provider)
         self.assertIn('batch_texts = request.get("texts")', worker)
         self.assertIn('if active_task == "design-preview":', worker)
         self.assertIn("model.generate_voice_design(", worker)
