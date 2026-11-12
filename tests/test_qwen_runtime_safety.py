@@ -764,7 +764,7 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
                 cpu_model = FakeModel("cpu")
                 loaded_on_cpu = []
 
-                def load_accelerator(_kind, _backend, _root, low_memory=False, progress=None):
+                def load_accelerator(_kind, _backend, _root, low_memory=False, progress=None, allow_cpu_fallback=True):
                     return accelerator_model, accelerator_device
 
                 def load_cpu(_kind, backend, _root, low_memory=False):
@@ -846,7 +846,7 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
             )
             load_cpu = []
 
-            def load_accelerator(_kind, _backend, _root, low_memory=False, progress=None):
+            def load_accelerator(_kind, _backend, _root, low_memory=False, progress=None, allow_cpu_fallback=True):
                 return FakeModel(), "cuda:0"
 
             def unexpected_cpu_load(_kind, backend, _root, low_memory=False):
