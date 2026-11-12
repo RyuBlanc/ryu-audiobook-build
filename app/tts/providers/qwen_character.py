@@ -185,6 +185,20 @@ class QwenCharacterProvider(TTSProvider):
                 reference = f"{Path(self.reference_audio).resolve()}:{stat.st_size}:{stat.st_mtime_ns}"
             except OSError:
                 reference = str(self.reference_audio)
+        anchor_reference = ""
+        if self.qwen_anchor_path:
+            anchor_path = Path(self.qwen_anchor_path).expanduser()
+            anchor_reference = f"{anchor_path.resolve()}:missing"
+            if anchor_path.is_file():
+                hasher = hashlib.sha256()
+                try:
+                    with anchor_path.open("rb") as handle:
+                        for block in iter(lambda: handle.read(1024 * 1024), b""):
+                            hasher.update(block)
+                    anchor_reference = f"{anchor_path.resolve()}:{hasher.hexdigest()}"
+                except OSError:
+                    anchor_reference = f"{anchor_path.resolve()}:unreadable"
+
         return "|".join(
             [
                 self.provider_id,
@@ -201,7 +215,7 @@ class QwenCharacterProvider(TTSProvider):
                 ),
                 self.instruct,
                 str(self.qwen_seed),
-                str(self.qwen_anchor_path or ""),
+                anchor_reference,
                 self.qwen_anchor_text,
                 self.qwen_profile_id,
                 reference,
