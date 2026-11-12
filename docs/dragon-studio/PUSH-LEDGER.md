@@ -80,3 +80,11 @@ This sequence adds coverage only; production runtime files have not been changed
 - **#3329** — commit `f7c0e989b701a7282fb093cc7f099f373b0b60cc`, [run](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43165511615): same inherited test code and same six failures; it did not contain the later correction.
 - **#3330** — commit `10eeee38bda357596b879cf4d0d2b93e792513e3`, [run](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43165748149): preview OOM test errors removed; remaining three subtest failures isolated to the still-escaped newline in the explicit-backend test.
 - **Correction:** commit `562cfcff9ad378924ffa661d18eaef46cbfcd953` replaces that final escaped literal with a real newline. It is test-harness-only. Exact-head Build #3331 and Qwen workflow #32 are the validations for this correction; status is pending at ledger update time.
+
+
+## Explicit-backend VoiceDesign fixture correction — #3331 / #3332 / #3333
+
+- **#3331** — [run 43166519551](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43166519551), commit `562cfcff9ad378924ffa661d18eaef46cbfcd953`: 1,525 tests; three failures remain in explicit CUDA/ROCm/XPU OOM subtests. The worker reached the identity-preparation phase, but the new fake model was a bare `SimpleNamespace` and did not implement `create_voice_clone_prompt`. The OOM injection therefore never ran.
+- **#3332** — [run 43166598215](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43166598215), commit `1b9c0a05e4f0a8a79d7afd9960353668480c0c43`: same regression failure inherited from #3331; this head only added run-ledger documentation.
+- **Correction:** commit `8b48dc7dfcdb3472fd405a0f1d8c56d6045f373a` introduces a minimal fake VoiceDesign model implementing `create_voice_clone_prompt`, allowing the test to reach the injected OOM during synthesis. It still asserts the selected GPU is preserved and the CPU loader is never called for explicit backend selections.
+- Exact-head Build #3333 and Qwen workflow #33 are the validations for this correction; they are pending at the time of this ledger entry. No production Qwen runtime code has been changed in this test sequence.
