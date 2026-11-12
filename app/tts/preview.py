@@ -292,7 +292,7 @@ def build_voice_preview(
         # long-form generation and multi-speaker passages retain serial behavior.
         can_batch_qwen_preview = (
             target > 0
-            and qwen_mode == "design-preview"
+            and qwen_mode in {"design", "design-preview"}
             and callable(batch_synthesizer)
             and preview_batch_size >= 2
             and len(units) > 1

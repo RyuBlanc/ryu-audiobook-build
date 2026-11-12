@@ -109,14 +109,41 @@ class QwenPreviewPerformancePolicyTests(unittest.TestCase):
             ):
                 self.assertEqual(provider.recommended_batch_size, 1)
 
-    def test_qwen_preview_batch_policy_remains_vram_gated(self):
-        provider = self._provider()
-        for memory_gb, expected in ((0.0, 1), (6.99, 1), (7.0, 2), (16.0, 2)):
-            with self.subTest(memory_gb=memory_gb), patch(
-                "app.tts.providers.qwen_character._detected_vram_gb",
-                return_value=memory_gb,
-            ):
-                self.assertEqual(provider.recommended_preview_batch_size, expected)
+    def test_qwen_preview_batch_policy_respects_the_selected_voice_design_engine(self):
+        policies = {
+            "design": ((0.0, 1), (7.0, 1), (11.99, 1), (12.0, 2), (24.0, 2)),
+            "design-preview": ((0.0, 1), (6.99, 1), (7.0, 2), (16.0, 2)),
+        }
+        for mode, samples in policies.items():
+            provider = self._provider(mode=mode)
+            for memory_gb, expected in samples:
+                with self.subTest(mode=mode, memory_gb=memory_gb), patch(
+                    "app.tts.providers.qwen_character._detected_vram_gb",
+                    return_value=memory_gb,
+                ):
+                    self.assertEqual(provider.recommended_preview_batch_size, expected)
+
+    def test_voice_design_audition_uses_the_same_identity_locked_profile_as_production(self):
+        root = Path(__file__).resolve().parents[1]
+        host_source = (root / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        preview_start = host_source.index("def _preview_worker(")
+        preview_worker = host_source[preview_start:]
+        self.assertNotIn('preview_profile.qwen_mode = "design-preview"', preview_worker)
+        self.assertIn("provider, voice = provider_from_profile(profile)", preview_worker)
+
+        preview_source = (root / "app" / "tts" / "preview.py").read_text(encoding="utf-8")
+        self.assertIn('qwen_mode in {"design", "design-preview"}', preview_source)
+        worker_source = (root / "app" / "tts" / "qwen_character_worker.py").read_text(encoding="utf-8")
+        self.assertIn('if active_task == "design":', worker_source)
+        self.assertIn("lock_design_identity(request)", worker_source)
+
+    def test_qwen_clone_reference_is_checked_before_worker_startup(self):
+        provider = self._provider(mode="clone")
+        provider.reference_audio = Path(__file__).with_name("missing-qwen-clone-reference.wav")
+        with patch.object(provider, "_start_worker") as start_worker:
+            with self.assertRaisesRegex(RuntimeError, "reference recording is missing or empty"):
+                provider.synthesize("A short clone preview.", Path("preview.wav"))
+        start_worker.assert_not_called()
 
 
 if __name__ == "__main__":

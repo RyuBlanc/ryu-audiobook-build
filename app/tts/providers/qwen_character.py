@@ -177,14 +177,17 @@ class QwenCharacterProvider(TTSProvider):
 
     @property
     def recommended_preview_batch_size(self) -> int:
-        """Batch short VoiceDesign previews only on GPUs with comfortable VRAM."""
-        if self.qwen_mode != "design-preview":
+        """Batch short VoiceDesign previews when the selected identity path has headroom."""
+        if self.qwen_mode == "design":
+            threshold_gb = 12.0  # Match production batching for the Base identity-lock engine.
+        elif self.qwen_mode == "design-preview":
+            threshold_gb = 7.0   # Legacy one-pass VoiceDesign preview engine.
+        else:
             return 1
         try:
-            # VoiceDesign is a 1.7B model. Prefer serial inference on 4 GB
-            # GPUs / CPU; two sentences can share a call on 8 GB-class GPUs.
-            # The preview caller falls back if the device reports CUDA OOM.
-            return 2 if _detected_vram_gb() >= 7.0 else 1
+            # The identity-locked path loads the Base clone model. Keep its batch
+            # threshold aligned with production; batch OOM retries serially.
+            return 2 if _detected_vram_gb() >= threshold_gb else 1
         except Exception:
             return 1
 
@@ -532,6 +535,21 @@ class QwenCharacterProvider(TTSProvider):
         )
 
     def synthesize(self, text: str, output_path: Path, voice: str | None = None) -> Path:
+        reference_path: Path | None = None
+        if self.qwen_mode == "clone":
+            if not self.reference_audio:
+                raise RuntimeError("Qwen Base voice cloning requires a reference audio recording.")
+            reference_path = Path(self.reference_audio).expanduser().resolve()
+            try:
+                reference_size = reference_path.stat().st_size if reference_path.is_file() else 0
+            except OSError:
+                reference_size = 0
+            if reference_size <= 0:
+                raise RuntimeError(
+                    "The saved Qwen Voice Clone reference recording is missing or empty. "
+                    "Re-import the audio in Voice Studio before preview or generation."
+                )
+        # Validate Clone references before starting/loading the heavyweight model.
         self._start_worker()
         if not self._worker or not self._worker.stdin:
             raise RuntimeError("Offline character worker is unavailable.")
@@ -557,9 +575,8 @@ class QwenCharacterProvider(TTSProvider):
             "expression_style": classify_expression(text),
         }
         if self.qwen_mode == "clone":
-            if not self.reference_audio:
-                raise RuntimeError("Qwen Base voice cloning requires a reference audio recording.")
-            request["reference"] = str(self.reference_audio.resolve())
+            assert reference_path is not None
+            request["reference"] = str(reference_path)
             request["ref_text"] = self.reference_text
             request["x_vector_only_mode"] = not bool(self.reference_text.strip())
         self._status(

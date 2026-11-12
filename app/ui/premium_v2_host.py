@@ -4290,16 +4290,11 @@ class PremiumV2Bridge(QObject):
                 close_cache = getattr(self, "close_preview_provider_cache", None)
                 if callable(close_cache):
                     close_cache()
-                preview_profile = profile
-                if (str(getattr(profile, "provider", "") or "").casefold() == "qwen-character"
-                        and str(getattr(profile, "qwen_mode", "") or "").casefold() == "design"):
-                    # Keep the full-quality VoiceDesign profile/prompt/seed but use
-                    # the dedicated one-pass audition path for preview jobs. Production
-                    # narration continues to build/reuse the stable Base identity bank.
-                    import copy
-                    preview_profile = copy.copy(profile)
-                    preview_profile.qwen_mode = "design-preview"
-                provider, voice = provider_from_profile(preview_profile)
+                # VoiceDesign audition and full-book narration must use the same
+                # stable profile identity and content-addressed VoiceDesign/Base anchor
+                # bank. The one-pass design-preview engine can sound different from the
+                # saved production voice, so do not rewrite the selected profile mode.
+                provider, voice = provider_from_profile(profile)
                 if cast_assignments:
                     from app.tts.cast_provider import CastAwareProvider
                     provider = CastAwareProvider(
