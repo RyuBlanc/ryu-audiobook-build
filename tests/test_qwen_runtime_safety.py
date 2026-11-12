@@ -173,7 +173,7 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
 
         with TemporaryDirectory() as temporary:
             reference = Path(temporary) / "saved-clone-reference.wav"
-            reference.write_bytes(b"original-clone-audio")
+            reference.write_bytes(b"old-clone-reference")
             provider = QwenCharacterProvider(
                 voice_id="saved-clone-profile",
                 model_kind="base-1.7b",
@@ -184,7 +184,7 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
             )
             before = provider.generation_signature()
             original = reference.stat()
-            reference.write_bytes(b"replacement-clone-audio")
+            reference.write_bytes(b"new-clone-reference")
             os.utime(
                 reference,
                 ns=(original.st_atime_ns, original.st_mtime_ns),
