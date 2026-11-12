@@ -176,3 +176,24 @@ The workflow is being adjusted so only PRs whose head starts with `dragon-studio
 - DS-UI-009 / DS-BRAND-010 / DS-INSTALL-011 / DS-RESP-013: physical target-PC inspection of Production Studio cover-art separation/layout, shell icon alpha, installer geometry, real mixed-DPI/multi-monitor behaviour; automated 41-viewport checks are not physical DPI checks.
 - DS-HELP-014: final Help & Guide audit against the actual shipped features and recovery paths.
 
+
+
+## Exact-head Windows package checkpoint — Build #3327
+
+- **PR:** [#35](https://github.com/RyuBlanc/ryu-audiobook-build/pull/35)
+- **Run:** [Build Windows App #3327](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43159940335)
+- **Exact head:** `4acba59fa8dcd0e52cba60bb28a401b8dc43f4c6`
+- **Regression suite:** **1,523 passed**. JavaScript syntax, isolated native Qt lifecycle and Stage 6 History/Task Manager preflight passed.
+- **Windows package:** success. Frozen application, bundled voice assets/modules, real bundled-Piper multi-chapter M4B, packaged Sound Design/Music acceptance, Inno Setup installer, functional HTML installer startup, install/launch/upgrade/uninstall, logo transparency/hashes, package size report and Microsoft Defender scan passed.
+- **Artifacts:** installer `Ryu-Audiobook-Installer-3327` (846,171,638 bytes; artifact `13919385123`); portable `Ryu-Audiobook-Portable-3327` (1,183,868,011 bytes; `13918936894`); SHA manifest `Ryu-Audiobook-Release-SHA256-3327` (3,047 bytes; `13919370271`); multi-chapter M4B evidence `Ryu-Stage3-Real-Multichapter-M4B-3327` (8,997,510 bytes; `13917718510`).
+- **Skipped by workflow condition:** optional Stage 7 real Piper benchmark upload and public release publication. No release was published.
+- **PR state:** open and draft. This is an exact-head CI/package pass, not physical Qwen GPU or full-book target-PC acceptance.
+- **Open acceptance:** physical Qwen profile save/reload/audition; CUDA/ROCm/XPU hardware runs and NVIDIA <60-second preview; long real-generation progress/ETA/duration; forced interruption/recovery; full novel M4B/playback; cast routing; cover-art/branding/installer visual checks; physical display/DPI; final Help & Guide review.
+
+## Follow-up Qwen safety coverage
+
+After #3327, focused regression tests were added for:
+- one-pass VoiceDesign preview automatic OOM recovery: retain the same `design-1.7b` model and the full preview request, retry on CPU, and verify a real output file is written;
+- explicit CUDA, ROCm and XPU VoiceDesign OOM: fail closed on the selected accelerator and prove no CPU model loader is called.
+
+These tests are awaiting the next exact-head regression and Windows package run. They do not claim physical hardware validation.
