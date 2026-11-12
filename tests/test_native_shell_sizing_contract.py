@@ -245,7 +245,7 @@ class NativeShellSizingContracts(unittest.TestCase):
         provider = (ROOT / "app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
         worker = (ROOT / "app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
         preview_start = voice.index("    def preview(self) -> None:")
-        preview_end = voice.index("\\n    def ", preview_start + 10)
+        preview_end = voice.index(chr(10) + "    def ", preview_start + 10)
         preview = voice[preview_start:preview_end]
 
         # The native audition must preserve the saved design profile and use
