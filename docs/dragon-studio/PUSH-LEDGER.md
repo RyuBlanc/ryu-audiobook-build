@@ -51,3 +51,13 @@ Original failed runs #3251–#3258 remain recorded as failures. This correction 
 
 #3267 is the latest PR validation. Its tests job passed all 1,498 tests; build job `130525480144` remains in `Prepare, validate and build application`. The CPU Qwen real-preview step in run #12 (`43020566273`) remains in progress after focused contract tests and expression protocol smoke passed. No package or real-Qwen result is to be inferred until these jobs finish.
 
+## Exact-head PR package checkpoint — Build #3323
+
+- **Commit:** `1c235746646a4a3ba0263178cb1bba045ebffd93` — NEW FIX, test contract only: `tests/test_regressions.py`.
+- **Run:** [#3323 / 43139856426](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43139856426), PR #35.
+- **Regression:** all **1,523 tests passed** (67.393s); JS syntax, isolated Qt lifecycle and Stage 6 focused preflight passed.
+- **Windows package:** success. Frozen app/critical bundled assets, real two-chapter Piper M4B, packaged Sound Design/Music acceptance, HTML/core installer, install/launch/upgrade/uninstall, logo/hash, package size and Defender scan passed.
+- **Artifacts:** installer 846,232,402 bytes; portable 1,183,868,011 bytes; SHA manifest 3,043 bytes; real M4B 8,935,889 bytes. GitHub artifact IDs: installer `13911295415`, portable `13910333194`, M4B `13910015598`, manifest `13909829921`.
+- **Skipped:** optional Stage 7 real Piper benchmark upload and public release publication. This run did not execute dedicated physical Qwen GPU workflows.
+- **Status:** exact-head automated package checkpoint green; PR #35 remains open/draft. User-device Qwen profile, GPU timing, full-novel generation/playback, long-run progress/ETA, durable job interruption/recovery, physical display/DPI and Help & Guide acceptance remain open. Do not substitute the Piper smoke M4B for a full-book Qwen/cast acceptance.
+
