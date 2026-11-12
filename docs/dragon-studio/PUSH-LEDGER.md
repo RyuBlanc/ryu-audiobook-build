@@ -87,4 +87,41 @@ This sequence adds coverage only; production runtime files have not been changed
 - **#3331** — [run 43166519551](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43166519551), commit `562cfcff9ad378924ffa661d18eaef46cbfcd953`: 1,525 tests; three failures remain in explicit CUDA/ROCm/XPU OOM subtests. The worker reached the identity-preparation phase, but the new fake model was a bare `SimpleNamespace` and did not implement `create_voice_clone_prompt`. The OOM injection therefore never ran.
 - **#3332** — [run 43166598215](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43166598215), commit `1b9c0a05e4f0a8a79d7afd9960353668480c0c43`: same regression failure inherited from #3331; this head only added run-ledger documentation.
 - **Correction:** commit `8b48dc7dfcdb3472fd405a0f1d8c56d6045f373a` introduces a minimal fake VoiceDesign model implementing `create_voice_clone_prompt`, allowing the test to reach the injected OOM during synthesis. It still asserts the selected GPU is preserved and the CPU loader is never called for explicit backend selections.
-- Exact-head Build #3333 and Qwen workflow #33 are the validations for this correction; they are pending at the time of this ledger entry. No production Qwen runtime code has been changed in this test sequence.
+- **Validation outcome:** [Build #3333](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43166950641) passed all **1,525 tests** and the complete Windows package on commit `8b48dc7dfcdb3472fd405a0f1d8c56d6045f373a`. [Qwen workflow #33](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43166944780) passed 70 focused tests, expression-audio smoke and a real 30-second VoiceDesign CPU preview. The preview took 342.812 seconds warm; this confirms CPU speech generation but fails the under-60-second performance target. Japanese pronunciation diagnostic passed. The test sequence did not change production Qwen runtime code.
+
+
+## Completed exact-head builds #3333 and #3334 — what changed and why
+
+### Build Windows App #3333
+
+- **Run:** [#3333](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43166950641)
+- **Validated commit:** `8b48dc7dfcdb3472fd405a0f1d8c56d6045f373a`
+- **What was pushed:** `tests/test_qwen_runtime_safety.py` gives the explicit CUDA/ROCm/XPU VoiceDesign OOM fixture the `create_voice_clone_prompt` method expected by the actual VoiceDesign identity-preparation route.
+- **Why it was pushed:** #3331 reached production prompt preparation but failed before the simulated OOM because its fake model lacked this interface. The correction makes the test exercise synthesis OOM and prove explicit backends do not silently load CPU.
+- **Validation:** 1,525 regression tests passed; frozen app, voice assets, real Piper multi-chapter M4B, packaged Sound Design/Music UI, HTML/core installer, installer startup, install/launch/upgrade/uninstall, logo transparency/hashes, package-size report and Defender scan passed.
+- **Artifacts:** installer 846,218,501 bytes (`13921009972`); portable 1,183,868,009 bytes (`13921897190`); SHA manifest 3,047 bytes (`13921811779`); multi-chapter M4B 8,968,384 bytes (`13921395544`).
+- **Stage 7 real bundled Piper benchmark:** `en_US-amy-medium`; synthesis 3.458s; audio 12.631s; RTF 0.274; verified backend CPU; provider `CPUExecutionProvider`; RSS 365,604,864 bytes; RAM available after synthesis 13,392,416,768 of 17,174,360,064 bytes. No GPU provider was used.
+- Public release publication was skipped; this PR run did not publish a release.
+
+### Build Windows App #3334
+
+- **Run:** [#3334](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43167024722)
+- **Validated commit:** `2a1925673c5c9cedaf7cf8bbbcedf10d68e7d0a5`
+- **What was pushed:** `docs/dragon-studio/PUSH-LEDGER.md` records the confirmed #3331/#3332 failure cause and the #3333 correction.
+- **Why it was pushed:** preserve a durable audit trail of the test failure, exact correction and passing evidence so later work does not repeat the same fixture investigation.
+- **Validation:** again passed all 1,525 tests and complete Windows package acceptance.
+- **Artifacts:** installer 845,868,645 bytes (`13921513254`); portable 1,183,868,011 bytes (`13922350730`); SHA manifest 3,045 bytes (`13921677653`); multi-chapter M4B 9,008,288 bytes (`13920338603`).
+- **Stage 7 real bundled Piper benchmark:** `en_US-amy-medium`; synthesis 2.837s; audio 12.701s; RTF 0.223; verified backend CPU; provider `CPUExecutionProvider`; RSS 366,682,112 bytes; RAM available after synthesis 13,196,435,456 of 17,174,360,064 bytes. No GPU provider was used.
+- Public release publication was skipped; this PR run did not publish a release.
+
+### Qwen CPU workflow #33
+
+- **Run:** [Stage 7 Qwen Real CPU Preview #33](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43166944780), commit `8b48dc7dfcdb3472fd405a0f1d8c56d6045f373a`.
+- **What was pushed:** no additional Qwen production code; this workflow exercised the corrected accelerator-contract tests and actual CPU VoiceDesign runtime.
+- **Why it ran:** verify that the same Qwen model can generate actual speech under CPU execution and capture expression/Japanese diagnostics.
+- **Result:** 70 focused tests passed; real `Qwen3-TTS-12Hz-1.7B-VoiceDesign` produced 30.000s audio; warm preview 342.812s; warm/angry expression audio passed; Japanese pronunciation diagnostic passed. Artifact `Ryu-Stage7-Qwen-Real-CPU-Preview-33`, ID `13921256252`.
+- **Open limitation:** 342.812s is far above the under-60-second target. This hosted CPU run proves functionality only; NVIDIA/ROCm/XPU hardware acceptance remains open.
+
+## Build summary improvements
+
+The Windows build workflow now adds a run-purpose section to the job summary, reading the exact head commit message and changed-file list. The existing measured Piper benchmark summary remains below it. Stage 7 JSON evidence will be uploaded on PR runs whenever the benchmark file exists.
