@@ -124,4 +124,29 @@ This sequence adds coverage only; production runtime files have not been changed
 
 ## Build summary improvements
 
-The Windows build workflow now adds a run-purpose section to the job summary, reading the exact head commit message and changed-file list. The existing measured Piper benchmark summary remains below it. Stage 7 JSON evidence will be uploaded on PR runs whenever the benchmark file exists.
+The Windows build workflow now adds a run-purpose section to the job summary, reading the exact head commit message and changed-file list. The measured Piper benchmark summary remains below it. On pull-request runs, the benchmark metrics remain visible in the job summary, while the raw Stage 7 JSON artifact upload stays disabled by the existing PR artifact policy; the raw JSON upload is reserved for eligible non-PR runs.
+
+
+## Build Windows App #3335–#3339 — build-summary change and PR policy repair
+
+| Run | Commit purpose | Why pushed | Result |
+|---|---|---|---|
+| [#3335](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43173516940) | Add the run-purpose/change-set section to the Windows job summary and attempt to upload raw Stage 7 Piper JSON whenever generated | User requested every build summary to show what changed and why the run was pushed; also sought persistent Piper benchmark evidence | Failed one existing regression assertion because PR runs must not upload raw Piper benchmark JSON |
+| [#3336](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43173608205) | Update DS-QWEN and packaged acceptance status in the bug register | Record #3333/#3334 evidence and remaining hardware acceptance | Same single inherited assertion failure; only docs changed |
+| [#3337](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43173777908) | Add explicit CUDA/ROCm/XPU OOM fail-closed coverage to the one-pass VoiceDesign preview route | Prove an explicitly selected accelerator reports failure instead of silently switching to CPU on preview OOM | Same single inherited PR-artifact-policy assertion failed; the Qwen-specific workflow #34 independently passed 71 tests and actual 30-second CPU VoiceDesign audio |
+| [#3338](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43173968701) | Correct escaped GitHub Actions expression markers in the run-summary environment variables | Ensure token/repository/event/commit/PR fields are expanded by Actions, not passed as literal text | Same single inherited PR-artifact-policy assertion failed |
+| [#3339](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43174166569) | Restore the original PR-only exclusion for Stage 7 raw JSON artifact upload | Preserve repository test/security policy while retaining Piper metrics in the PR job summary | **Success: 1,526 tests and Windows package passed** |
+
+### Exact #3339 build summary benchmark
+
+- Voice: `en_US-amy-medium`
+- Synthesis: 2.635s
+- Generated audio: 12.724s
+- Real-time factor: 0.207
+- Verified inference backend: CPU
+- ONNX provider: `CPUExecutionProvider`
+- Process RSS after synthesis: 365,465,600 bytes
+- Available RAM after synthesis: 13,188,767,744 / 17,174,360,064 bytes
+- This is a real bundled Piper local benchmark on a hosted Windows CPU. It must not be interpreted as Qwen speed or accelerator validation.
+
+The PR build summary now contains both (1) commit/rationale/changed-file information and (2) the measured Piper benchmark summary. Raw Stage 7 JSON evidence upload remains skipped for pull requests by design.
