@@ -11,6 +11,7 @@ from unittest.mock import patch
 from app.chapters.detector import Chapter
 from app.tts.generator import generate_chapter
 from app.ui import premium_v2_host as host
+from app.ui.generation_page import _revise_monotonic_eta
 
 
 class _ProgressHarness:
@@ -232,6 +233,41 @@ class Stage5GenerationEtaStabilityTests(unittest.TestCase):
         batch_callback = source.index("on_chunk_timing(", batch_validation)
         self.assertLess(batch_measured, batch_validation)
         self.assertLess(batch_validation, batch_callback)
+
+    def test_native_eta_never_increases_on_a_slow_chunk_and_smooths_faster_samples(self):
+        eta, overruns, recalibrated = _revise_monotonic_eta(None, None, 100.0, 100.0, 0)
+        self.assertEqual((eta, overruns, recalibrated), (100.0, 0, False))
+
+        # A slower measured rate cannot push a still-active 100-second forecast
+        # backwards after 23 seconds; the displayed value continues at 77s.
+        eta, overruns, recalibrated = _revise_monotonic_eta(100.0, 100.0, 160.0, 123.0, 0)
+        self.assertEqual((eta, overruns, recalibrated), (77.0, 0, False))
+
+        # A faster measured rate shortens the countdown gradually, not abruptly.
+        eta, overruns, recalibrated = _revise_monotonic_eta(77.0, 123.0, 30.0, 133.0, 0)
+        self.assertAlmostEqual(eta, 57.75)
+        self.assertEqual((overruns, recalibrated), (0, False))
+
+    def test_native_eta_recalibrates_only_after_three_chunks_exceed_expired_forecast(self):
+        eta, overruns, recalibrated = _revise_monotonic_eta(10.0, 0.0, 40.0, 20.0, 0)
+        self.assertEqual((eta, overruns, recalibrated), (0.0, 1, False))
+        eta, overruns, recalibrated = _revise_monotonic_eta(eta, 20.0, 40.0, 30.0, overruns)
+        self.assertEqual((eta, overruns, recalibrated), (0.0, 2, False))
+        eta, overruns, recalibrated = _revise_monotonic_eta(eta, 30.0, 40.0, 40.0, overruns)
+        self.assertEqual((eta, overruns, recalibrated), (40.0, 0, True))
+
+    def test_native_packaging_progress_does_not_fall_through_to_chapter_handler(self):
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "app"
+            / "ui"
+            / "generation_page.py"
+        ).read_text(encoding="utf-8")
+        start = source.index('if message.startswith("m4b-package:"):')
+        end = source.index('if message.startswith("m4b-complete"):', start)
+        packaging_handler = source[start:end]
+        self.assertIn("self.progress.setValue(self.progress.maximum())", packaging_handler)
+        self.assertIn("return", packaging_handler)
 
     def test_frontend_counts_eta_down_between_measured_chunks(self):
         adapter = (
