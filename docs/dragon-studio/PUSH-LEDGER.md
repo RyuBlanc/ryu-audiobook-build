@@ -70,3 +70,13 @@ Original failed runs #3251–#3258 remain recorded as failures. This correction 
 - Artifacts: installer 846,171,638 bytes; portable 1,183,868,011 bytes; SHA manifest 3,047 bytes; multi-chapter M4B 8,997,510 bytes. Artifact IDs: `13919385123`, `13918936894`, `13919370271`, `13917718510`.
 - Public release publication and optional Stage 7 real Piper benchmark upload were skipped by workflow conditions. No public release was published.
 - Following #3327, additional test-only Qwen safety coverage was added for automatic one-pass VoiceDesign preview OOM recovery and explicit CUDA/ROCm/XPU fail-closed behaviour; those tests require the next exact-head CI run.
+
+
+## Qwen OOM regression-test attempts — Builds #3328–#3331
+
+This sequence adds coverage only; production runtime files have not been changed in these commits.
+
+- **#3328** — commit `849944bb6fa55d827b4e4a12e1ac429e2fa37d87`, [run](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43165388158): 1,525 tests; three failures and three errors. The preview test incorrectly patched nonexistent module-level `clear_model_cache`; the explicit CUDA/ROCm/XPU cases supplied the literal characters `\\n` rather than a newline, so stdin contained invalid JSON records.
+- **#3329** — commit `f7c0e989b701a7282fb093cc7f099f373b0b60cc`, [run](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43165511615): same inherited test code and same six failures; it did not contain the later correction.
+- **#3330** — commit `10eeee38bda357596b879cf4d0d2b93e792513e3`, [run](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43165748149): preview OOM test errors removed; remaining three subtest failures isolated to the still-escaped newline in the explicit-backend test.
+- **Correction:** commit `562cfcff9ad378924ffa661d18eaef46cbfcd953` replaces that final escaped literal with a real newline. It is test-harness-only. Exact-head Build #3331 and Qwen workflow #32 are the validations for this correction; status is pending at ledger update time.
