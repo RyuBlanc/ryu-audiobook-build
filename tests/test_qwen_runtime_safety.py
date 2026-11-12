@@ -926,8 +926,12 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
                 )
                 cpu_loads = []
 
+                class FakePromptModel:
+                    def create_voice_clone_prompt(self, **_kwargs):
+                        return SimpleNamespace(device=device)
+
                 def accelerator_load(_kind, _backend, _root, low_memory=False, progress=None, allow_cpu_fallback=True):
-                    return SimpleNamespace(), device
+                    return FakePromptModel(), device
 
                 def unexpected_cpu_load(_kind, requested, _root, low_memory=False):
                     cpu_loads.append(requested)
