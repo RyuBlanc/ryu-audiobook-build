@@ -943,7 +943,7 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
                     patch.object(worker, "_load_model_with_fallback", side_effect=accelerator_load),
                     patch.object(worker, "_load_model", side_effect=unexpected_cpu_load),
                     patch.object(worker, "_generate_design_locked", side_effect=fail_with_oom),
-                    patch("sys.stdin", io.StringIO(json.dumps(request) + "\\n")),
+                    patch("sys.stdin", io.StringIO(json.dumps(request) + "\n")),
                     redirect_stdout(output),
                 ):
                     self.assertEqual(worker.server(args), 0)
