@@ -89,6 +89,29 @@ def _revise_monotonic_eta(
     return 0.0, next_overrun, False
 
 
+def _generation_active_elapsed_seconds(
+    started_at: float | None,
+    now: float,
+    paused_seconds: float = 0.0,
+    paused_at: float | None = None,
+) -> float:
+    """Return processing time excluding completed and currently active pauses."""
+    try:
+        elapsed = max(0.0, float(now) - float(started_at)) if started_at is not None else 0.0
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+    try:
+        paused = max(0.0, float(paused_seconds))
+    except (TypeError, ValueError, OverflowError):
+        paused = 0.0
+    if paused_at is not None:
+        try:
+            paused += max(0.0, float(now) - float(paused_at))
+        except (TypeError, ValueError, OverflowError):
+            pass
+    return max(0.0, elapsed - paused)
+
+
 class VoicePreviewWorker(QThread):
     finished_ok = Signal(object)
     failed = Signal(str)
@@ -328,6 +351,8 @@ class GenerationPage(QWidget):
         self.signals = GenerationSignals()
         self.manager: GenerationManager | None = None
         self.started_at: float | None = None
+        self._generation_paused_at: float | None = None
+        self._generation_paused_seconds = 0.0
         self.last_progress_value = 0
         self.initial_progress_value = 0
         self.generation_phase = "idle"
@@ -2927,6 +2952,8 @@ class GenerationPage(QWidget):
         self._eta_overrun_samples = 0
         self.generation_phase = "synthesis"
         self.started_at = time.monotonic()
+        self._generation_paused_at = None
+        self._generation_paused_seconds = 0.0
         self._active_calibration_key = self._generation_calibration_key()
         self._active_calibration_is_resume = bool(is_resume)
         self._update_overview()
@@ -2992,6 +3019,10 @@ class GenerationPage(QWidget):
         if not self.manager:
             return
         if self.manager.pause_event.is_set():
+            now = time.monotonic()
+            if self._generation_paused_at is not None:
+                self._generation_paused_seconds += max(0.0, now - self._generation_paused_at)
+                self._generation_paused_at = None
             self.manager.resume()
             self.generation_phase = "synthesis"
             # Restart the countdown from the frozen value; paused wall time is
@@ -3018,7 +3049,9 @@ class GenerationPage(QWidget):
         if message.startswith("paused:"):
             note = message.split(":", 1)[1].strip()
             self.generation_phase = "paused"
-            self._eta_last_countdown_monotonic = time.monotonic()
+            if self._generation_paused_at is None:
+                self._generation_paused_at = time.monotonic()
+            self._eta_last_countdown_monotonic = self._generation_paused_at
             self.status.setText(note)
             self.stage.setText("Generation paused at a chapter checkpoint")
             self.remaining.setText("Remaining: paused at checkpoint")
@@ -3214,7 +3247,13 @@ class GenerationPage(QWidget):
     def _update_live_stats(self) -> None:
         if self.started_at is None:
             return
-        elapsed = int(time.monotonic() - self.started_at)
+        now = time.monotonic()
+        elapsed = int(_generation_active_elapsed_seconds(
+            self.started_at,
+            now,
+            self._generation_paused_seconds,
+            self._generation_paused_at,
+        ))
         self.elapsed.setText(f"Elapsed: {elapsed // 60}:{elapsed % 60:02d}")
 
         if self.generation_phase == "paused":
@@ -3279,7 +3318,12 @@ class GenerationPage(QWidget):
                     and self.started_at is not None
                     and summary.output_path.is_file()
                 ):
-                    elapsed_seconds = max(1.0, time.monotonic() - self.started_at)
+                    elapsed_seconds = max(1.0, _generation_active_elapsed_seconds(
+                        self.started_at,
+                        time.monotonic(),
+                        self._generation_paused_seconds,
+                        self._generation_paused_at,
+                    ))
                     listening_seconds = max(1.0, _duration_ms(summary.output_path) / 1000.0)
                     words = max(1, sum(len(chapter.text.split()) for chapter in self.chapters))
                     actual_factor = max(0.4, min(20.0, elapsed_seconds / listening_seconds))
@@ -3328,7 +3372,12 @@ class GenerationPage(QWidget):
                 details.append(f"Chapter {number}: {reason}")
             elapsed = 0
             if self.started_at is not None:
-                elapsed = max(0, int(time.monotonic() - self.started_at))
+                elapsed = int(_generation_active_elapsed_seconds(
+                    self.started_at,
+                    time.monotonic(),
+                    self._generation_paused_seconds,
+                    self._generation_paused_at,
+                ))
             self.remaining.setText("Remaining: paused at checkpoint")
             self.speed.setText("Speed: checkpoint saved")
             self.elapsed.setText(f"Elapsed: {elapsed // 3600:02d}:{(elapsed // 60) % 60:02d}:{elapsed % 60:02d}")
