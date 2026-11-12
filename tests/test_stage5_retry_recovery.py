@@ -25,6 +25,24 @@ class RetryRecoveryBridgeHarness:
         self._generators = {}
         self._production_generate_book = self._create_new_job
 
+    def _load_library_project(self, requested_folder):
+        try:
+            requested = Path(requested_folder).expanduser().resolve()
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return None
+        for row in self._jobs.values():
+            try:
+                recorded = Path(str(row.get("project_folder") or "")).expanduser().resolve()
+            except (OSError, RuntimeError, TypeError, ValueError):
+                continue
+            if recorded == requested and requested.is_dir():
+                return SimpleNamespace(
+                    folder=requested,
+                    title=str(row.get("project_title") or "Saved Book"),
+                    chapters=[],
+                )
+        return None
+
     def _create_new_job(self, payload):
         self._jobs["new-generation-job"] = {
             "job_id": "new-generation-job",
@@ -112,7 +130,9 @@ class Stage54RetryRecoveryTests(unittest.TestCase):
             row = _source_row(original.folder)
             bridge = RetryRecoveryBridgeHarness(row)
 
-            with patch.object(host, "list_projects", return_value=[current, original]), patch.object(
+            with patch.object(host, "list_projects", side_effect=AssertionError(
+                    "retry must load the project recorded in the failed job, not enumerate the Library"
+                )), patch.object(
                 host, "load_state", return_value={"generation_job_id": row["job_id"]}
             ):
                 result = bridge._job_retry({"job_id": row["job_id"]})
@@ -129,7 +149,9 @@ class Stage54RetryRecoveryTests(unittest.TestCase):
             row = _source_row(project.folder, code="interrupted", recoverable=True)
             bridge = RetryRecoveryBridgeHarness(row)
 
-            with patch.object(host, "list_projects", return_value=[project]), patch.object(
+            with patch.object(host, "list_projects", side_effect=AssertionError(
+                    "recovery must load the project recorded in the interrupted job directly"
+                )), patch.object(
                 host, "load_state",
                 return_value={
                     "generation_job_id": row["job_id"],
@@ -159,7 +181,9 @@ class Stage54RetryRecoveryTests(unittest.TestCase):
             project = self._project(root / "project")
             row = _source_row(project.folder)
             bridge = RetryRecoveryBridgeHarness(row)
-            with patch.object(host, "list_projects", return_value=[project]), patch.object(
+            with patch.object(host, "list_projects", side_effect=AssertionError(
+                    "recovery must load the project recorded in the interrupted job directly"
+                )), patch.object(
                 host, "load_state", return_value={"generation_job_id": "newer-job"}
             ):
                 with self.assertRaisesRegex(ValueError, "newer generation job"):

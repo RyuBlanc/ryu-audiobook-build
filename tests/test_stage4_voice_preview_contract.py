@@ -346,6 +346,10 @@ class VoicePreviewContractTests(unittest.TestCase):
 
             bridge = SimpleNamespace(
                 _character_library_bootstrap=lambda: None,
+                _load_library_project=lambda requested_folder: (
+                    project if Path(requested_folder).expanduser().resolve() == Path(project.folder).expanduser().resolve()
+                    else None
+                ),
                 settings=SimpleNamespace(value=lambda key: str(project.folder) if key == "project/active_folder" else ""),
                 _find_profile=lambda name: SimpleNamespace(name=name),
                 _project_series_name=lambda active_project, active_state: "Series A",
@@ -355,7 +359,9 @@ class VoicePreviewContractTests(unittest.TestCase):
             )
             with patch.object(premium_v2_host, "list_reusable_characters", side_effect=lambda: records), \
                  patch.object(premium_v2_host, "sync_reusable_characters", side_effect=sync_characters), \
-                 patch.object(premium_v2_host, "list_projects", return_value=[project]), \
+                 patch.object(premium_v2_host, "list_projects", side_effect=AssertionError(
+                    "Character Library save must resolve the active project folder directly"
+                )), \
                  patch.object(premium_v2_host, "load_state", return_value=state), \
                  patch.object(premium_v2_host, "save_state") as save_state:
                 result = premium_v2_host.PremiumV2Bridge._character_library_save(

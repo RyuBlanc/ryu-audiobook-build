@@ -179,6 +179,14 @@ class PlayerBridgeHarness:
     _player_get_active = host.PremiumV2Bridge._player_get_active
     _player_position_save = host.PremiumV2Bridge._player_position_save
 
+    def _load_library_project(self, requested_folder):
+        try:
+            requested = Path(requested_folder).expanduser().resolve()
+            expected = Path(self.project.folder).expanduser().resolve()
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return None
+        return self.project if requested == expected else None
+
     def __init__(self, project):
         self.project = project
         self._project_summary = Mock(return_value={"readiness": {"ready": True}})
@@ -219,7 +227,9 @@ class AudiobookPlayerBridgeTests(unittest.TestCase):
             bridge = PlayerBridgeHarness(project)
 
             with (
-                patch.object(host, "list_projects", return_value=[project]),
+                patch.object(host, "list_projects", side_effect=AssertionError(
+                    "player folder operations must resolve the requested book directly"
+                )),
                 patch.object(host, "load_state", return_value=state),
                 patch.object(host, "_read_audio_chapter_metadata", return_value=[]),
                 patch.object(host, "is_iso_bmff_file", return_value=False),
@@ -265,7 +275,9 @@ class AudiobookPlayerBridgeTests(unittest.TestCase):
             bridge = PlayerBridgeHarness(project)
 
             with (
-                patch.object(host, "list_projects", return_value=[project]),
+                patch.object(host, "list_projects", side_effect=AssertionError(
+                    "player folder operations must resolve the requested book directly"
+                )),
                 patch.object(host, "load_state", return_value=state),
                 patch.object(host, "save_state") as save,
                 patch.object(host, "_read_audio_chapter_metadata", return_value=embedded_chapters),
@@ -295,7 +307,9 @@ class AudiobookPlayerBridgeTests(unittest.TestCase):
             bridge = PlayerBridgeHarness(project)
 
             with (
-                patch.object(host, "list_projects", return_value=[project]),
+                patch.object(host, "list_projects", side_effect=AssertionError(
+                    "player folder operations must resolve the requested book directly"
+                )),
                 patch.object(host, "load_state", return_value=state),
                 patch.object(host, "save_state") as save,
             ):
@@ -318,7 +332,9 @@ class AudiobookPlayerBridgeTests(unittest.TestCase):
                 project = self._project(root, output)
                 bridge = PlayerBridgeHarness(project)
                 with (
-                    patch.object(host, "list_projects", return_value=[project]),
+                    patch.object(host, "list_projects", side_effect=AssertionError(
+                    "player folder operations must resolve the requested book directly"
+                )),
                     patch.object(host, "load_state", return_value={}),
                     patch.object(host, "save_state") as save,
                 ):

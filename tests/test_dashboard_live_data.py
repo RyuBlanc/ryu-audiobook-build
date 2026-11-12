@@ -1,6 +1,7 @@
 """Regression coverage for live Dashboard data and selected audiobook playback."""
 from pathlib import Path
 import tempfile
+import threading
 import unittest
 import zipfile
 from unittest import mock
@@ -188,7 +189,15 @@ class DashboardLiveDataTests(unittest.TestCase):
             from app.core.state import save_state
             save_state(project.folder, original_state)
             bridge = PremiumV2Bridge.__new__(PremiumV2Bridge)
-            with mock.patch("app.ui.premium_v2_host.list_projects", return_value=[project]):
+            bridge._active_project_cache_lock = threading.RLock()
+            bridge._active_project_cache = None
+            bridge._active_project_migrated_folders = set()
+            with (
+                mock.patch("app.core.project.project_library_roots", return_value=(library,)),
+                mock.patch("app.ui.premium_v2_host.list_projects", side_effect=AssertionError(
+                    "player position saves must not enumerate the entire Library"
+                )),
+            ):
                 result = bridge._player_position_save({
                     "folder": str(project.folder),
                     "position_seconds": 123.45,
@@ -276,10 +285,18 @@ class DashboardLiveDataTests(unittest.TestCase):
                 str(second.folder): {"status": "completed", "output_path": str(output_b), "narrator": "Voice B"},
             }
             bridge = PremiumV2Bridge.__new__(PremiumV2Bridge)
+            bridge._active_project_cache_lock = threading.RLock()
+            bridge._active_project_cache = None
+            bridge._active_project_migrated_folders = set()
             bridge.settings = mock.Mock()
             bridge.settings.value.side_effect = lambda _key, default=None: default
-            with mock.patch("app.ui.premium_v2_host.list_projects", return_value=[first, second]):
-                with mock.patch("app.ui.premium_v2_host.load_state", side_effect=lambda folder: states[str(folder)]):
+            with (
+                mock.patch("app.core.project.project_library_roots", return_value=(library,)),
+                mock.patch("app.ui.premium_v2_host.list_projects", side_effect=AssertionError(
+                    "selected audiobook playback must load only the requested project"
+                )),
+                mock.patch("app.ui.premium_v2_host.load_state", side_effect=lambda folder: states[str(folder)]),
+            ):
                     selected = bridge._player_get_active({"folder": str(second.folder)})
 
             self.assertEqual(selected["title"], "Book B")

@@ -302,6 +302,14 @@ class GenerationRecoveryLaunchHarness:
     _production_generate_book = host.PremiumV2Bridge._production_generate_book
     _resolve_narrator_for_generation = host.PremiumV2Bridge._resolve_narrator_for_generation
 
+    def _load_library_project(self, requested_folder):
+        try:
+            requested = Path(requested_folder).expanduser().resolve()
+            expected = Path(self.project.folder).expanduser().resolve()
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return None
+        return self.project if requested == expected else None
+
     def __init__(self, project, original_job_id: str, narrator_profile) -> None:
         self.project = project
         self.original_job_id = original_job_id
@@ -456,7 +464,9 @@ class Stage53GenerationRecoveryLaunchTests(unittest.TestCase):
             manager = Mock()
 
             with (
-                patch.object(host, "list_projects", return_value=[project]),
+                patch.object(host, "list_projects", side_effect=AssertionError(
+                    "generation recovery must load its original saved project directly"
+                )),
                 patch.object(host, "load_state", return_value=state),
                 patch.object(host, "save_state"),
                 patch.object(host, "provider_from_profile", return_value=(object(), narrator.voice_id)),
