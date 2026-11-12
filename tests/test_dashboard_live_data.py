@@ -281,8 +281,8 @@ class DashboardLiveDataTests(unittest.TestCase):
             output_a.write_bytes(b"audio A")
             output_b.write_bytes(b"audio B")
             states = {
-                str(first.folder): {"status": "completed", "output_path": str(output_a), "narrator": "Voice A"},
-                str(second.folder): {"status": "completed", "output_path": str(output_b), "narrator": "Voice B"},
+                str(first.folder.resolve()): {"status": "completed", "output_path": str(output_a), "narrator": "Voice A"},
+                str(second.folder.resolve()): {"status": "completed", "output_path": str(output_b), "narrator": "Voice B"},
             }
             bridge = PremiumV2Bridge.__new__(PremiumV2Bridge)
             bridge._active_project_cache_lock = threading.RLock()
@@ -295,7 +295,7 @@ class DashboardLiveDataTests(unittest.TestCase):
                 mock.patch("app.ui.premium_v2_host.list_projects", side_effect=AssertionError(
                     "selected audiobook playback must load only the requested project"
                 )),
-                mock.patch("app.ui.premium_v2_host.load_state", side_effect=lambda folder: states[str(folder)]),
+                mock.patch("app.ui.premium_v2_host.load_state", side_effect=lambda folder: states[str(Path(folder).resolve())]),
             ):
                     selected = bridge._player_get_active({"folder": str(second.folder)})
 
