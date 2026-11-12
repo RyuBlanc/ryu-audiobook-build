@@ -810,6 +810,151 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
                 )
                 self.assertGreater(output_path.stat().st_size, 1024)
 
+
+    def test_design_preview_automatic_oom_retries_same_voicedesign_model_on_cpu(self):
+        import io
+        import json
+        from contextlib import redirect_stdout
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.tts import qwen_character_worker as worker
+
+        for device, message in (
+            ("cuda:0", "CUDA out of memory during VoiceDesign preview"),
+            ("xpu:0", "XPU out of memory during VoiceDesign preview"),
+            ("cuda:0", "ROCm out of memory during VoiceDesign preview"),
+        ):
+            with self.subTest(device=device, message=message), TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                output_path = root / "preview.wav"
+                request = {
+                    "text": "A stable preview sentence.",
+                    "output": str(output_path),
+                    "speaker": "Saved narrator",
+                    "language": "Japanese",
+                    "instruct": "Warm, steady, natural narration.",
+                    "seed": 20261112,
+                    "profile_id": "preview-oom-profile",
+                }
+                args = SimpleNamespace(
+                    models_root=temporary,
+                    task="design-preview",
+                    kind="design-1.7b",
+                    backend="automatic",
+                    low_memory=False,
+                    clone_kind="base-1.7b",
+                )
+                accelerator_model = SimpleNamespace(device=device)
+                cpu_model = SimpleNamespace(device="cpu")
+                loads = []
+                syntheses = []
+
+                def initial_load(kind, backend, _root, low_memory=False, progress=None, allow_cpu_fallback=True):
+                    loads.append((kind, backend, low_memory))
+                    return accelerator_model, device
+
+                def retry_load(kind, backend, _root, low_memory=False):
+                    loads.append((kind, backend, low_memory))
+                    return cpu_model, "cpu"
+
+                def synthesize(model, received_request, destination):
+                    syntheses.append((model.device, dict(received_request)))
+                    if model.device != "cpu":
+                        raise RuntimeError(message)
+                    Path(destination).write_bytes(b"valid-preview-audio" * 128)
+
+                output = io.StringIO()
+                with (
+                    patch.object(worker, "_load_model_with_fallback", side_effect=initial_load),
+                    patch.object(worker, "_load_model", side_effect=retry_load),
+                    patch.object(worker, "_generate_design_preview", side_effect=synthesize),
+                    patch.object(worker, "clear_model_cache", return_value=None),
+                    patch("sys.stdin", io.StringIO(json.dumps(request) + "\\n")),
+                    redirect_stdout(output),
+                ):
+                    self.assertEqual(worker.server(args), 0)
+
+                messages = [json.loads(line) for line in output.getvalue().splitlines() if line.strip()]
+                self.assertTrue(messages[0].get("worker_ready"))
+                self.assertTrue(messages[-1].get("ok"))
+                self.assertEqual(loads, [
+                    ("design-1.7b", "automatic", False),
+                    ("design-1.7b", "cpu", False),
+                ])
+                self.assertEqual([entry[0] for entry in syntheses], [device, "cpu"])
+                self.assertEqual(syntheses[-1][1], request)
+                self.assertEqual(messages[-1].get("kind"), "design-1.7b")
+                self.assertEqual(messages[-1].get("device"), "cpu")
+                self.assertGreater(output_path.stat().st_size, 1024)
+
+    def test_design_explicit_cuda_rocm_and_xpu_oom_never_retry_on_cpu(self):
+        import io
+        import json
+        from contextlib import redirect_stdout
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.tts import qwen_character_worker as worker
+
+        cases = (
+            ("cuda", "cuda:0", "CUDA out of memory during VoiceDesign synthesis"),
+            ("rocm", "cuda:0", "HIP out of memory during VoiceDesign synthesis"),
+            ("xpu", "xpu:0", "XPU out of memory during VoiceDesign synthesis"),
+        )
+        for backend, device, message in cases:
+            with self.subTest(backend=backend), TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                anchor = root / "saved-identity.wav"
+                anchor.write_bytes(b"identity-anchor" * 256)
+                request = {
+                    "text": "The saved character speaks.",
+                    "output": str(root / "chapter.wav"),
+                    "speaker": "Saved character",
+                    "language": "English",
+                    "instruct": "Preserve the saved character identity.",
+                    "profile_id": "explicit-" + backend + "-profile",
+                }
+                args = SimpleNamespace(
+                    models_root=temporary,
+                    task="design",
+                    kind="design-1.7b",
+                    backend=backend,
+                    low_memory=False,
+                    clone_kind="base-1.7b",
+                )
+                cpu_loads = []
+
+                def accelerator_load(_kind, _backend, _root, low_memory=False, progress=None, allow_cpu_fallback=True):
+                    return SimpleNamespace(), device
+
+                def unexpected_cpu_load(_kind, requested, _root, low_memory=False):
+                    cpu_loads.append(requested)
+                    return SimpleNamespace(), "cpu"
+
+                def fail_with_oom(*_args, **_kwargs):
+                    raise RuntimeError(message)
+
+                output = io.StringIO()
+                with (
+                    patch.object(worker, "_anchor_path", return_value=anchor),
+                    patch.object(worker, "_expression_anchor_text", return_value="A stable identity reference."),
+                    patch.object(worker, "_load_model_with_fallback", side_effect=accelerator_load),
+                    patch.object(worker, "_load_model", side_effect=unexpected_cpu_load),
+                    patch.object(worker, "_generate_design_locked", side_effect=fail_with_oom),
+                    patch("sys.stdin", io.StringIO(json.dumps(request) + "\\n")),
+                    redirect_stdout(output),
+                ):
+                    self.assertEqual(worker.server(args), 0)
+
+                messages = [json.loads(line) for line in output.getvalue().splitlines() if line.strip()]
+                self.assertFalse(messages[-1].get("ok"))
+                self.assertIn("out of memory", messages[-1].get("error", "").casefold())
+                self.assertEqual(messages[-1].get("device"), device)
+                self.assertEqual(cpu_loads, [], f"Explicit {backend} must fail closed, never switch to CPU.")
+
     def test_design_explicit_gpu_oom_does_not_silently_fallback_to_cpu(self):
         import io
         import json
