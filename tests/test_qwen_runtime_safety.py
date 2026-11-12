@@ -710,6 +710,174 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
                 })
             self.assertFalse((Path(temporary) / "qwen_last_inference.json").exists())
 
+    def test_design_automatic_cuda_and_xpu_oom_rebuilds_identity_prompts_on_cpu(self):
+        import io
+        import json
+        from contextlib import redirect_stdout
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.tts import qwen_character_worker as worker
+
+        class FakePrompt:
+            def __init__(self, device):
+                self.device = device
+
+        class FakeModel:
+            def __init__(self, device):
+                self.device = device
+                self.prompt_devices = []
+
+            def create_voice_clone_prompt(self, **_kwargs):
+                self.prompt_devices.append(self.device)
+                return FakePrompt(self.device)
+
+        for accelerator_device, oom_message in (
+            ("cuda:0", "CUDA out of memory during synthetic inference"),
+            ("xpu:0", "XPU out of memory during synthetic inference"),
+        ):
+            with self.subTest(device=accelerator_device), TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                anchor = root / "saved-identity.wav"
+                anchor.write_bytes(b"identity-anchor" * 256)
+                output_path = root / "chapter.wav"
+                request = {
+                    "text": "The saved character speaks.",
+                    "output": str(output_path),
+                    "speaker": "Saved character",
+                    "language": "English",
+                    "instruct": "Preserve the saved character identity.",
+                    "seed": 20261112,
+                    "anchor_text": "A stable identity reference.",
+                    "profile_id": "oom-profile",
+                }
+                args = SimpleNamespace(
+                    models_root=temporary,
+                    task="design",
+                    kind="design-1.7b",
+                    backend="automatic",
+                    low_memory=False,
+                    clone_kind="base-0.6b",
+                )
+                accelerator_model = FakeModel(accelerator_device)
+                cpu_model = FakeModel("cpu")
+                loaded_on_cpu = []
+
+                def load_accelerator(_kind, _backend, _root, low_memory=False, progress=None):
+                    return accelerator_model, accelerator_device
+
+                def load_cpu(_kind, backend, _root, low_memory=False):
+                    loaded_on_cpu.append(backend)
+                    return cpu_model, "cpu"
+
+                def synthesize_with_locked_identity(model, prompts, _request, destination):
+                    prompt = prompts.get("neutral")
+                    if model.device == accelerator_device:
+                        raise RuntimeError(oom_message)
+                    if prompt is None or prompt.device != model.device:
+                        raise RuntimeError(
+                            f"voice prompt device mismatch: prompt={getattr(prompt, 'device', None)} model={model.device}"
+                        )
+                    Path(destination).write_bytes(b"valid-synthetic-audio" * 128)
+
+                output = io.StringIO()
+                with (
+                    patch.object(worker, "_anchor_path", return_value=anchor),
+                    patch.object(worker, "_expression_anchor_text", return_value="A stable identity reference."),
+                    patch.object(worker, "_load_model_with_fallback", side_effect=load_accelerator),
+                    patch.object(worker, "_load_model", side_effect=load_cpu),
+                    patch.object(worker, "_generate_design_locked", side_effect=synthesize_with_locked_identity),
+                    patch("sys.stdin", io.StringIO(json.dumps(request) + "\n")),
+                    redirect_stdout(output),
+                ):
+                    self.assertEqual(worker.server(args), 0)
+
+                messages = [
+                    json.loads(line)
+                    for line in output.getvalue().splitlines()
+                    if line.strip().startswith("{")
+                ]
+                self.assertIs(messages[0].get("worker_ready"), True)
+                self.assertIs(messages[-1].get("ok"), True)
+                self.assertEqual(messages[-1].get("device"), "cpu")
+                self.assertEqual(loaded_on_cpu, ["cpu"])
+                self.assertEqual(accelerator_model.prompt_devices, [accelerator_device])
+                self.assertEqual(
+                    cpu_model.prompt_devices,
+                    ["cpu"],
+                    "Automatic OOM fallback must rebuild the saved identity prompt on CPU.",
+                )
+                self.assertGreater(output_path.stat().st_size, 1024)
+
+    def test_design_explicit_gpu_oom_does_not_silently_fallback_to_cpu(self):
+        import io
+        import json
+        from contextlib import redirect_stdout
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.tts import qwen_character_worker as worker
+
+        class FakeModel:
+            def create_voice_clone_prompt(self, **_kwargs):
+                return object()
+
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            anchor = root / "saved-identity.wav"
+            anchor.write_bytes(b"identity-anchor" * 256)
+            request = {
+                "text": "The saved character speaks.",
+                "output": str(root / "chapter.wav"),
+                "speaker": "Saved character",
+                "language": "English",
+                "instruct": "Preserve the saved character identity.",
+                "profile_id": "explicit-gpu-profile",
+            }
+            args = SimpleNamespace(
+                models_root=temporary,
+                task="design",
+                kind="design-1.7b",
+                backend="cuda",
+                low_memory=False,
+                clone_kind="base-0.6b",
+            )
+            load_cpu = []
+
+            def load_accelerator(_kind, _backend, _root, low_memory=False, progress=None):
+                return FakeModel(), "cuda:0"
+
+            def unexpected_cpu_load(_kind, backend, _root, low_memory=False):
+                load_cpu.append(backend)
+                return FakeModel(), "cpu"
+
+            def fail_with_oom(_model, _prompts, _request, _destination):
+                raise RuntimeError("CUDA out of memory during synthetic inference")
+
+            output = io.StringIO()
+            with (
+                patch.object(worker, "_anchor_path", return_value=anchor),
+                patch.object(worker, "_expression_anchor_text", return_value="A stable identity reference."),
+                patch.object(worker, "_load_model_with_fallback", side_effect=load_accelerator),
+                patch.object(worker, "_load_model", side_effect=unexpected_cpu_load),
+                patch.object(worker, "_generate_design_locked", side_effect=fail_with_oom),
+                patch("sys.stdin", io.StringIO(json.dumps(request) + "\n")),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(worker.server(args), 0)
+
+            messages = [
+                json.loads(line)
+                for line in output.getvalue().splitlines()
+                if line.strip().startswith("{")
+            ]
+            self.assertIs(messages[-1].get("ok"), False)
+            self.assertIn("out of memory", messages[-1].get("error", "").casefold())
+            self.assertEqual(messages[-1].get("device"), "cuda:0")
+            self.assertEqual(load_cpu, [], "Explicit CUDA must not silently switch to CPU after OOM.")
+
     def test_lazy_voicedesign_worker_acknowledges_protocol_readiness_without_device_claim(self):
         import io
         import json
