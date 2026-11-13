@@ -37,7 +37,7 @@ from app.ui.frontend_assets import (
     prepare_native_host_html,
 )
 from app.core.project import Project, create_project, list_projects, resolve_library_project_folder
-from app.core.character_identity import character_identity_key
+from app.core.character_identity import character_identity_key, parse_character_identity_key
 from app.core.character_library import (
     character_library_path as reusable_character_library_path,
     list_characters as list_reusable_characters,
@@ -7358,23 +7358,74 @@ class PremiumV2Bridge(QObject):
             if isinstance(row, dict)
         ]
 
-        # Normalize older alternate assignment fields on Character Studio rows.
+        # Merge the saved Voice Cast roster. Manually added characters may not
+        # exist in the older state["characters"] analysis snapshot.
+        roster = state.get("voice_cast_character_roster")
+        if isinstance(roster, list):
+            for saved_row in roster:
+                if not isinstance(saved_row, dict):
+                    continue
+                name = str(saved_row.get("name") or saved_row.get("primary_name") or "").strip()
+                series = str(saved_row.get("series") or default_series or "").strip()
+                if not name or name.casefold() == "narrator" or not series:
+                    continue
+                roster_names = {name.casefold()}
+                roster_names.update(str(alias or "").strip().casefold() for alias in (saved_row.get("aliases") or []))
+                matching_rows = [
+                    row for row in rows
+                    if self._character_series_for_voice_assignment(row, default_series).casefold() == series.casefold()
+                    and bool(roster_names.intersection(
+                        {str(row.get("name") or row.get("primary_name") or "").strip().casefold()}
+                        | {str(alias or "").strip().casefold() for alias in (row.get("aliases") or [])}
+                    ))
+                ]
+                if len(matching_rows) > 1:
+                    issues.append(f"Character roster identity '{name}' in series '{series}' matches multiple production rows.")
+                elif not matching_rows:
+                    rows.append({
+                        "name": name,
+                        "role": str(saved_row.get("role") or "Possible Character"),
+                        "series": series,
+                        "dialogue_count": saved_row.get("dialogue_count", 0),
+                        "examples": list(saved_row.get("examples") or []),
+                        "confidence": saved_row.get("confidence", 0.0),
+                        "aliases": list(saved_row.get("aliases") or []),
+                        "voice_profile": "",
+                    })
+
+        scoped_assignments: dict[str, dict[str, str]] = {}
+        raw_scoped_assignments = state.get("voice_cast_identity_assignments")
+        if isinstance(raw_scoped_assignments, dict):
+            for raw_identity, raw_profile in raw_scoped_assignments.items():
+                parsed = parse_character_identity_key(str(raw_identity or ""))
+                if parsed is None:
+                    issues.append("A saved series-scoped Voice Cast assignment has an invalid character identity key.")
+                    continue
+                series, name = parsed
+                identity = character_identity_key(name, series)
+                if identity in scoped_assignments:
+                    issues.append(f"Character '{name}' in series '{series}' has duplicate series-scoped voice assignments.")
+                    continue
+                scoped_assignments[identity] = {"name": name, "series": series, "profile_name": str(raw_profile or "").strip()}
+
+        def scoped_entries_for_row(row: dict[str, Any]) -> list[dict[str, str]]:
+            canonical = str(row.get("name") or row.get("primary_name") or "").strip().casefold()
+            series = self._character_series_for_voice_assignment(row, default_series).casefold()
+            return [entry for entry in scoped_assignments.values() if entry["series"].casefold() == series and entry["name"].casefold() == canonical]
+
+        # A scoped empty value is an explicit Unassigned choice; do not resurrect
+        # an older profile from a name-only key or alternate legacy field.
         for row in rows:
+            if scoped_entries_for_row(row):
+                row["voice_profile"] = ""
+                row["_voice_cast_identity_explicit"] = True
+                continue
             existing = str(row.get("voice_profile") or "").strip()
             if not existing:
-                existing = next((
-                    str(row.get(key) or "").strip()
-                    for key in ("voice_profile_name", "assigned_voice_profile", "profile_name", "voice_name")
-                    if str(row.get(key) or "").strip()
-                ), "")
+                existing = next((str(row.get(key) or "").strip() for key in ("voice_profile_name", "assigned_voice_profile", "profile_name", "voice_name") if str(row.get(key) or "").strip()), "")
             profile = resolve_profile(existing) if existing else None
             if existing and profile is None:
-                issues.append(
-                    f"Character '{row.get('name') or 'Unknown'}' references unavailable saved voice profile '{existing}'."
-                )
-                # The stale reference is not a valid configured profile. Keep
-                # the returned generation snapshot empty so this character is
-                # safely routed through the explicit Unassigned Character voice.
+                issues.append(f"Character '{row.get('name') or 'Unknown'}' references unavailable saved voice profile '{existing}'.")
                 row["voice_profile"] = ""
             elif profile is not None:
                 row["voice_profile"] = str(profile.name)
@@ -7383,11 +7434,45 @@ class PremiumV2Bridge(QObject):
                 if legacy_voice_id:
                     profile = resolve_profile(legacy_voice_id, allow_voice_id=True)
                     if profile is None:
-                        issues.append(
-                            f"Character '{row.get('name') or 'Unknown'}' has an unresolvable legacy voice ID '{legacy_voice_id}'."
-                        )
+                        issues.append(f"Character '{row.get('name') or 'Unknown'}' has an unresolvable legacy voice ID '{legacy_voice_id}'.")
                     else:
                         row["voice_profile"] = str(profile.name)
+
+        # Apply exact (series, character) identities before legacy name mappings.
+        for identity, entry in scoped_assignments.items():
+            name, series = entry["name"], entry["series"]
+            matching_rows = []
+            for row in rows:
+                canonical = str(row.get("name") or row.get("primary_name") or "").strip()
+                aliases = row.get("aliases") or []
+                aliases = aliases if isinstance(aliases, (list, tuple)) else ([aliases] if aliases else [])
+                identity_names = {canonical.casefold()}
+                identity_names.update(str(alias or "").strip().casefold() for alias in aliases)
+                if name.casefold() not in identity_names:
+                    continue
+                if self._character_series_for_voice_assignment(row, default_series).casefold() != series.casefold():
+                    continue
+                matching_rows.append(row)
+            if len(matching_rows) > 1:
+                issues.append(f"Series-scoped Voice Cast identity '{name}' in series '{series}' matches multiple characters.")
+                continue
+            if not matching_rows:
+                row = {"name": name, "aliases": [], "series": series, "scope": "Series · " + series, "voice_profile": ""}
+                rows.append(row)
+                matching_rows = [row]
+            row = matching_rows[0]
+            row["_voice_cast_identity_explicit"] = True
+            if not entry["profile_name"]:
+                row["voice_profile"] = ""
+                continue
+            profile = resolve_profile(entry["profile_name"])
+            if profile is None:
+                issues.append(f"Character '{name}' in series '{series}' references unavailable saved voice profile '{entry['profile_name']}'." )
+                row["voice_profile"] = ""
+            else:
+                row["voice_profile"] = str(profile.name)
+                if not str(row.get("series") or row.get("series_name") or "").strip():
+                    row["series"] = series
 
         legacy_cast = state.get("voice_cast")
         legacy_cast = legacy_cast if isinstance(legacy_cast, dict) else {}
@@ -7436,6 +7521,9 @@ class PremiumV2Bridge(QObject):
                     continue
                 matching_rows.append(row)
 
+            if matching_rows and all(row.get("_voice_cast_identity_explicit") for row in matching_rows):
+                # Scoped records are newer and more precise than name-only values.
+                continue
             if len(matching_rows) > 1:
                 issues.append(
                     f"Legacy Voice Cast entry '{name}' matches multiple characters; specify its series in Character Studio."
@@ -7465,6 +7553,9 @@ class PremiumV2Bridge(QObject):
                 "voice_profile": str(profile.name),
                 "legacy_voice_cast": True,
             })
+
+        for row in rows:
+            row.pop("_voice_cast_identity_explicit", None)
 
         if strict and issues:
             raise ValueError(

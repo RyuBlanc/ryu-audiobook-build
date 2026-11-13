@@ -242,3 +242,10 @@ All failed attempts below remain failed historical records. The later exact-head
 - Setup, JavaScript validation, native Qt lifecycle (1/1), Stage B (16/16) and Stage 6 (48/48) passed.
 - New Stage C1 workflow step failed before executing unittest because `$pythonExe` was defined in an earlier Actions step and was not available in the new step's PowerShell process. No C1 test, full regression or package result is claimed.
 - Fixed by resolving and validating `python.exe` within the C1 step itself. No app source changes are being made for this workflow failure. Re-run the exact candidate before promoting the PR.
+
+## Stage C1 follow-on — route scoped Voice Cast identities into production
+
+- Confirmed production's effective cast resolver read state.characters and legacy name-only voice_cast but ignored voice_cast_identity_assignments and voice_cast_character_roster, despite Voice Cast saving those series-scoped records. Same-named characters in separate series could therefore lose their chosen profile in production. Explicit empty choices could be overwritten by stale legacy name mappings.
+- Candidate source fix imports the saved roster, resolves normalized (series, character) keys, preserves explicit empty/unassigned values, and prevents legacy name-only mappings from overriding scoped entries. Ambiguous or stale references remain errors; no narrator fallback is introduced.
+- Added regressions for independent same-name profiles routed through CastAwareProvider and explicit unassignment overriding a stale legacy mapping.
+- Focused, full regression and exact-head Windows package validation are pending for this follow-on commit.

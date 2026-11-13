@@ -329,7 +329,10 @@ These code and regression results demonstrate that repeated unrelated-project lo
 - Correction in this candidate: resolve the same VoiceDesign/Base model pair as Voice Studio using `qwen_model_kinds_for_preference`; in Auto mode use the same runtime helpers. Require both models to be installed, retain the original profile object/mode/profile ID, and send that unchanged profile through `VoicePreviewWorker`.
 - Regression coverage: explicit 0.6B/1.7B model-size preference selection, Auto hardware-aware fallback, both model-readiness guards, and a source contract prohibiting the `design-preview` rewrite.
 - The web Voice Studio profile-edit path was also audited: edits to VoiceDesign prompt/language/seed detach the prior saved profile before save, so no defect was confirmed there and that path is not changed.
-- C1 exact-head focused test, full regression and packaged Windows acceptance remain pending this candidate's Actions run. Do not close C1 until all pass.
+- The #3375 candidate passed focused C1 7/7, Stage B 16/16, Stage 6 48/48, full regression 1,546/1,546 and all hosted Windows package gates.
+- Additional confirmed production-routing gap: Voice Cast writes series-scoped voice identities, but Production's effective cast resolver did not read that map or the saved roster. Same-named characters across series could therefore lose their chosen voice in production; explicit unassigned values could be overridden by stale name-only assignments.
+- This follow-on correction imports the roster, resolves exact Unicode-normalized (series, character) keys, preserves explicit empty assignments, and keeps legacy name-only mappings subordinate. Added focused tests route both same-named characters through CastAwareProvider to their selected profiles and verify explicit unassignment.
+- This follow-on correction still needs focused, full-suite and exact-head packaged validation. Do not close C1 until those gates pass.
 
 ## Stage C acceptance boundary after #3372
 
@@ -344,3 +347,10 @@ These code and regression results demonstrate that repeated unrelated-project lo
 - Failure: the new `Run focused Stage C1 Qwen Character Studio identity regression` PowerShell step invoked `$pythonExe` without defining it in that step. GitHub Actions step processes do not share PowerShell variables; the interpreter command never ran. The C1 test module therefore has **no result** from #3373. Full regression and the build/package job were correctly skipped.
 - Correction: resolve and validate `python.exe` inside the focused C1 step before invoking unittest. This is a workflow harness repair; it does not change the Qwen runtime or weaken the regression.
 - #3373 remains a failed historical run. The corrected candidate requires a new push run, focused C1 result, full suite and exact-head package before PR promotion.
+
+## Stage C1 follow-on — series-scoped Voice Cast production routing
+
+- Exact-head source trace found that Voice Cast persists series-scoped assignments in voice_cast_identity_assignments using character_identity_key(name, series), but production's _effective_generation_character_rows did not consume the scoped map or voice_cast_character_roster. Same-named characters in separate series could display independent voices in Voice Cast while their selections were absent from the production cast.
+- The resolver now imports the saved roster, applies each normalized (series, character) assignment, and treats an explicit empty value as the authoritative Unassigned choice. A stale name-only key cannot override a scoped record. Invalid/duplicate identity keys, duplicate matching rows, unresolved profile names and uncovered ambiguous legacy mappings remain strict-generation errors.
+- Added regressions route the same character name in two series through CastAwareProvider using separate saved profiles, and verify an explicit empty scoped assignment overrides a stale legacy name-only mapping.
+- The #3375 VoiceDesign preview correction remains independently validated. This follow-on production-router change has not yet been validated by Actions and requires a new exact-head package before Stage C1 can close.
