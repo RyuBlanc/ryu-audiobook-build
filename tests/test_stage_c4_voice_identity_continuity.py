@@ -31,6 +31,21 @@ class QwenMultilingualIdentityAnchorTests(unittest.TestCase):
         self.assertEqual(default_voice_design_anchor_text("zh"), expected)
         self.assertEqual(default_voice_design_anchor_text("cmn"), expected)
 
+
+    def test_all_other_qwen_supported_languages_have_native_anchors_and_region_aliases(self):
+        cases = (
+            ("German", "de-DE", "Hallo. Dies ist eine kurze Stimmprobe. Ich spreche ruhig, natürlich und deutlich."),
+            ("French", "fr-FR", "Bonjour. Ceci est un court échantillon de voix. Je parle calmement, naturellement et clairement."),
+            ("Russian", "ru-RU", "Здравствуйте. Это короткий образец голоса. Я говорю спокойно, естественно и чётко."),
+            ("Portuguese", "pt-BR", "Olá. Esta é uma breve amostra de voz. Falo com calma, naturalidade e clareza."),
+            ("Spanish", "es-ES", "Hola. Esta es una breve muestra de voz. Hablo con calma, naturalidad y claridad."),
+            ("Italian", "it-IT", "Ciao. Questo è un breve campione vocale. Parlo con calma, naturalezza e chiarezza."),
+        )
+        for language, regional_code, expected in cases:
+            with self.subTest(language=language):
+                self.assertEqual(default_voice_design_anchor_text(language), expected)
+                self.assertEqual(default_voice_design_anchor_text(regional_code), expected)
+
     def test_english_default_remains_unchanged(self):
         self.assertEqual(default_voice_design_anchor_text("English"), DEFAULT_VOICE_DESIGN_ANCHOR_TEXT)
         self.assertEqual(default_voice_design_anchor_text(None), DEFAULT_VOICE_DESIGN_ANCHOR_TEXT)
@@ -98,6 +113,107 @@ class QwenMultilingualIdentityAnchorTests(unittest.TestCase):
 
 
 class MultilingualExpressionCueTests(unittest.TestCase):
+
+    def test_other_six_qwen_languages_classify_sentence_level_emotion(self):
+        cases = {
+            "German": (
+                ("Sie war traurig und weinte.", "sad"),
+                ("Er war wütend.", "angry"),
+                ("Sie hatte Angst.", "concerned"),
+                ("Panik ergriff sie; es war gefährlich.", "tense"),
+                ("Er lachte.", "amused"),
+                ("Sie war überrascht.", "excited"),
+                ("Er war glücklich.", "warm"),
+                ("Sie war gelangweilt.", "bored"),
+                ("Er blieb ruhig.", "calm"),
+                ("Vielleicht kommt er zurück…", "thoughtful"),
+                ("Sie war neugierig.", "curious"),
+                ("Er antwortete ernsthaft.", "serious"),
+                ("Sie erinnerte sich an früher.", "reflective"),
+            ),
+            "French": (
+                ("Elle était triste et pleurait.", "sad"),
+                ("Il était furieux.", "angry"),
+                ("Elle avait peur.", "concerned"),
+                ("Elle paniqua face au danger.", "tense"),
+                ("Il sourit.", "amused"),
+                ("Elle fut surprise.", "excited"),
+                ("Il était heureux.", "warm"),
+                ("Elle s'ennuyait.", "bored"),
+                ("Il resta calme.", "calm"),
+                ("Peut-être reviendra-t-il…", "thoughtful"),
+                ("Elle était curieuse.", "curious"),
+                ("Il répondit sérieusement.", "serious"),
+                ("Elle se souvint de son enfance.", "reflective"),
+            ),
+            "Spanish": (
+                ("Estaba triste y lloró.", "sad"),
+                ("Estaba furioso.", "angry"),
+                ("Tenía miedo.", "concerned"),
+                ("Entró en pánico y había peligro.", "tense"),
+                ("Él se rió.", "amused"),
+                ("Ella estaba sorprendida.", "excited"),
+                ("Estaba feliz.", "warm"),
+                ("Estaba aburrida.", "bored"),
+                ("Permaneció tranquila.", "calm"),
+                ("Quizás vuelva…", "thoughtful"),
+                ("Tenía curiosidad.", "curious"),
+                ("Respondió seriamente.", "serious"),
+                ("Recordó su infancia.", "reflective"),
+            ),
+            "Portuguese": (
+                ("Ela estava triste e chorou.", "sad"),
+                ("Ele estava furioso.", "angry"),
+                ("Ela sentia medo.", "concerned"),
+                ("Entrou em pânico diante do perigo.", "tense"),
+                ("Ele riu.", "amused"),
+                ("Ela ficou surpresa.", "excited"),
+                ("Ele estava feliz.", "warm"),
+                ("Ela estava entediada.", "bored"),
+                ("Ele permaneceu calmo.", "calm"),
+                ("Talvez ele volte…", "thoughtful"),
+                ("Ela estava curiosa.", "curious"),
+                ("Ele respondeu seriamente.", "serious"),
+                ("Ela lembrou da infância.", "reflective"),
+            ),
+            "Italian": (
+                ("Era triste e pianse.", "sad"),
+                ("Era arrabbiato.", "angry"),
+                ("Aveva paura.", "concerned"),
+                ("Era in panico e c'era pericolo.", "tense"),
+                ("Lui rise.", "amused"),
+                ("Era sorpresa.", "excited"),
+                ("Era felice.", "warm"),
+                ("Era annoiata.", "bored"),
+                ("Rimase calmo.", "calm"),
+                ("Forse tornerà…", "thoughtful"),
+                ("Era curiosa.", "curious"),
+                ("Rispose seriamente.", "serious"),
+                ("Ricordò la sua infanzia.", "reflective"),
+            ),
+            "Russian": (
+                ("Она грустила и плакала.", "sad"),
+                ("Он был зол.", "angry"),
+                ("Она боялась.", "concerned"),
+                ("Началась паника, была опасность.", "tense"),
+                ("Он смеялся.", "amused"),
+                ("Она была удивлена.", "excited"),
+                ("Он был счастлив.", "warm"),
+                ("Ей было скучно.", "bored"),
+                ("Он говорил спокойно.", "calm"),
+                ("Возможно, он вернётся…", "thoughtful"),
+                ("Ей было любопытно.", "curious"),
+                ("Он ответил серьёзно.", "serious"),
+                ("Она вспомнила детство.", "reflective"),
+            ),
+        }
+        from app.tts.expression import classify_expression
+
+        for language, examples in cases.items():
+            for source, expected in examples:
+                with self.subTest(language=language, source=source):
+                    self.assertEqual(classify_expression(source), expected)
+
     def test_chinese_story_cues_keep_sentence_level_emotion(self):
         cases = (
             ("她很伤心，忍不住哭了。", "sad"),
