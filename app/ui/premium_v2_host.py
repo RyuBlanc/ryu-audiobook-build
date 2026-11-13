@@ -7410,8 +7410,15 @@ class PremiumV2Bridge(QObject):
 
         def scoped_entries_for_row(row: dict[str, Any]) -> list[dict[str, str]]:
             canonical = str(row.get("name") or row.get("primary_name") or "").strip().casefold()
+            aliases = row.get("aliases") or []
+            aliases = aliases if isinstance(aliases, (list, tuple)) else ([aliases] if aliases else [])
+            identity_names = {canonical}
+            identity_names.update(str(alias or "").strip().casefold() for alias in aliases)
             series = self._character_series_for_voice_assignment(row, default_series).casefold()
-            return [entry for entry in scoped_assignments.values() if entry["series"].casefold() == series and entry["name"].casefold() == canonical]
+            return [
+                entry for entry in scoped_assignments.values()
+                if entry["series"].casefold() == series and entry["name"].casefold() in identity_names
+            ]
 
         # A scoped empty value is an explicit Unassigned choice; do not resurrect
         # an older profile from a name-only key or alternate legacy field.

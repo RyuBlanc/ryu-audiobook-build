@@ -147,6 +147,27 @@ class LegacyVoiceCastGenerationRoutingTests(unittest.TestCase):
         self.assertEqual({row["series"]: row.get("voice_profile", "") for row in rows},
                          {"Series One": "", "Series Two": "Ren Character"})
 
+    def test_scoped_voice_cast_assignment_matches_confirmed_character_alias(self):
+        state = {
+            "characters": [{
+                "name": "Mira", "series": "Series One",
+                "aliases": ["Captain Mira"], "voice_profile": "Mira Character",
+            }],
+            "voice_cast_character_roster": [{
+                "name": "Mira", "series": "Series One", "aliases": ["Captain Mira"],
+            }],
+            "voice_cast": {},
+            "voice_cast_identity_assignments": {
+                character_identity_key("Captain Mira", "Series One"): "Ren Character",
+            },
+        }
+        rows, issues = self.bridge._effective_generation_character_rows(
+            state, "Series One", available_profiles=self.profiles
+        )
+        self.assertEqual(issues, [])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["voice_profile"], "Ren Character")
+
     def test_explicit_series_on_legacy_cast_dict_resolves_same_name_safely(self):
         profiles = [SimpleNamespace(name="Mira One", voice_id="m1"), SimpleNamespace(name="Mira Two", voice_id="m2")]
         rows, issues = self.bridge._effective_generation_character_rows(

@@ -354,3 +354,13 @@ These code and regression results demonstrate that repeated unrelated-project lo
 - The resolver now imports the saved roster, applies each normalized (series, character) assignment, and treats an explicit empty value as the authoritative Unassigned choice. A stale name-only key cannot override a scoped record. Invalid/duplicate identity keys, duplicate matching rows, unresolved profile names and uncovered ambiguous legacy mappings remain strict-generation errors.
 - Added regressions route the same character name in two series through CastAwareProvider using separate saved profiles, and verify an explicit empty scoped assignment overrides a stale legacy name-only mapping.
 - The #3375 VoiceDesign preview correction remains independently validated. This follow-on production-router change has not yet been validated by Actions and requires a new exact-head package before Stage C1 can close.
+
+
+## Stage C1 — Voice Studio assignment entry-point follow-on
+
+- Candidate #3376 on exact SHA 54ff7e2da9d2d78ddbe27540f5f430ca0cbd2336 passed run 43372658193: Stage B 16/16, Stage 6 48/48, focused C1 7/7, full regression 1,548/1,548 and all hosted Windows package gates.
+- Preserved #3376 artifacts: installer ID 14014730865; portable ID 14013769936; SHA-256 manifest ID 14014641192; real multi-chapter M4B evidence ID 14013926395; Piper benchmark ID 14014158132.
+- Further C1 audit found Voice Studio Assign to Character used a name-only choice and wrote only the legacy voice_cast map. Same-named characters across series could collapse to one option and leave the newer scoped assignment map stale.
+- Candidate fix builds choices by exact (series, character) identity, displays series for duplicate names, writes through VoiceCastPage._save_cast(update_voice=True), and uses a scoped-map fallback only when Voice Cast is unavailable. Legacy name-only values are written only when unambiguous.
+- Production scoped-map preflight recognizes confirmed aliases as identity matches. Focused tests cover duplicate-name selection, both assignment persistence paths, and alias-keyed scoped assignment overriding stale legacy profile data.
+- This follow-on requires focused C1, full regression and exact-head packaged Windows validation before C1 can close.

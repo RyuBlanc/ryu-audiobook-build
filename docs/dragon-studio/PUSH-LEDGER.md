@@ -249,3 +249,11 @@ All failed attempts below remain failed historical records. The later exact-head
 - Candidate source fix imports the saved roster, resolves normalized (series, character) keys, preserves explicit empty/unassigned values, and prevents legacy name-only mappings from overriding scoped entries. Ambiguous or stale references remain errors; no narrator fallback is introduced.
 - Added regressions for independent same-name profiles routed through CastAwareProvider and explicit unassignment overriding a stale legacy mapping.
 - Focused, full regression and exact-head Windows package validation are pending for this follow-on commit.
+
+
+## Stage C1 — Voice Studio assignment entry-point follow-on
+
+- #3376 on exact SHA 54ff7e2da9d2d78ddbe27540f5f430ca0cbd2336 passed run 43372658193: focused C1 7/7, Stage B 16/16, Stage 6 48/48, full regression 1,548/1,548 and hosted Windows packaging. Artifact IDs: installer 14014730865; portable 14013769936; SHA manifest 14014641192; M4B 14013926395; Piper benchmark 14014158132.
+- Confirmed issue: Voice Studio Assign to Character offered only names, collapsing same-named series identities and updating only legacy voice_cast. The authoritative scoped identity map could therefore remain stale.
+- Candidate fix disambiguates choices by series, persists through the canonical Voice Cast scoped writer, and provides a scoped-map fallback if Voice Cast is unavailable. Production scoped matching now includes aliases.
+- Focused regressions exercise both assignment persistence paths, duplicate-name selection, and alias-keyed assignment precedence. Full regression and exact-head package validation are pending.
