@@ -75,3 +75,10 @@ Build Windows App #3405 / [run 43462518581](https://github.com/RyuBlanc/ryu-audi
 - Do not claim GPU speed from CPU inference; keep CPU timing and GPU acceptance separate.
 - Do not use the two-chapter M4B fixture as proof of representative full-novel completion.
 - Preserve failed runs, exact SHAs, and all focused/full/package gates; do not remove or weaken tests to obtain a green result.
+
+
+## Exact-head revalidation request — 14 November 2026
+
+- The application source tree is unchanged from Build Windows App #3405 (45a0d5ee66363f3c258e1512e28347e457212027); commits after it update only this acceptance document, the bug register and the push ledger.
+- This tagged documentation-only push requests the real Provider Runtime Smoke chain and the full regression job on the current branch tip. It does not contain an artifact-checkpoint marker, so no Windows package is requested in this intermediate validation.
+- Result status at commit time: pending. Record actual run IDs, exact head SHA, completed jobs, audio evidence artifacts, per-language anchor hashes and elapsed/device telemetry after the workflows complete. Do not infer success from workflow dispatch or job startup.
