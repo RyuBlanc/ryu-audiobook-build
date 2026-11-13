@@ -290,4 +290,23 @@ All failed attempts below remain failed historical records. The later exact-head
 - C1's hosted source/test/package acceptance is complete; manual installed-app audition/restart/production identity remains open and is not replaced by CI evidence.
 - C2 audit found repair_runtime(force_repair=True) deleted the previous venv and marker before the replacement was validated. The candidate changes this to a backup/verify/rollback transaction and refuses destructive repair during active Qwen synthesis.
 - New focused C2 tests cover repair success, rollback, active-job protection, interrupted-repair recovery, per-mode model selection, safe model/runtime uninstall preservation, and a fresh-interpreter reload of saved CustomVoice, VoiceDesign and Clone identities.
-- Candidate branch: dragon-studio/candidate-c2-profile-lifecycle-2026-11-13, based on the exact #3380 SHA. Focused C2, full regression and exact-head Windows package validation are pending; physical hardware and installed-PC acceptance remain separate.
+- Candidate branch: `dragon-studio/candidate-c2-profile-lifecycle-2026-11-13`, based on exact #3380 SHA. Build Windows App #3382 / run 43400140506 passed at exact SHA `05a15fac65305e428752f194b8852884c40c7c5d`: C2 focused lifecycle/restart 9/9, C1 10/10, Stage B 16/16, Stage 6 48/48, full regression 1,563/1,563, and all Windows package/install/Defender/artifact gates. C2 hosted acceptance is closed; physical target-PC acceptance remains separate.
+
+## Stage C2 exact-head closeout and Stage C3 candidate start — 13 November 2026
+
+- Parent C1 Build #3381 completed successfully on `e7ce7896d2bcb9ea93a47ab9dae9d5e5a502726c`.
+- C2 branch `dragon-studio/candidate-c2-profile-lifecycle-2026-11-13`, exact SHA `05a15fac65305e428752f194b8852884c40c7c5d`.
+- Build Windows App #3382 / run [43400140506](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43400140506) completed successfully.
+- Focused C2 lifecycle/restart **9/9**; Stage B **16/16**; Stage 6 **48/48**; C1 **10/10**; full regression **1,563/1,563**.
+- Windows package and hosted install/launch/upgrade/uninstall, Production/Sound Design, M4B, Defender, logo/hash and package-size gates passed.
+- Artifacts: installer ID `14026626426` (846,161,241 bytes); portable ID `14026367342` (1,183,914,174 bytes); SHA manifest ID `14026132844`; M4B evidence ID `14024234780`; Piper benchmark ID `14026810708`.
+- C2 hosted checkpoint is closed. Manual installed-PC runtime/repair/restart and profile audition remain separate; physical GPU acceptance remains open.
+
+## Stage C3 candidate — Qwen accelerator detection, profile preview and hardware evidence
+
+- Candidate branch `dragon-studio/candidate-c3-qwen-accelerator-acceptance-2026-11-13`, based exactly on C2 SHA `05a15fac65305e428752f194b8852884c40c7c5d`.
+- Benchmark history rejects evidence more than five minutes in the future or older than 30 days and compares parsed timezone-aware timestamps.
+- New focused coverage exercises active CUDA/ROCm/XPU, NVIDIA card-without-CUDA candidate reporting, current Windows AMD/Intel device predicates, and future-dated benchmark rejection.
+- Added a real saved-profile 0.6B CustomVoice preview measurement path with verified device telemetry, 27–33s audio duration and strict under-60s acceptance when configured. NVIDIA lower-memory acceptance is separate from the existing 1.7B VoiceDesign gate.
+- Latest CPU comparator: run #38 / [43400140577](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43400140577) generated 30.000s of actual saved-profile audio in **255.415s**; this misses the target and is not GPU evidence.
+- Physical NVIDIA CUDA, supported AMD ROCm and Intel XPU jobs remain dispatch/tag gated. No hardware success is claimed by a hosted CPU contract run.
