@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 import hashlib
-from dataclasses import replace
 from html import escape
 from pathlib import Path
 import re
@@ -28,12 +27,27 @@ from app.chapters.character_learning import (
 from app.chapters.dialogue import dialogue_segments
 from app.core.character_library import list_characters
 from app.core.state import load_state, save_state
-from app.tts.qwen_character_runtime import best_voice_design_kind, model_installed, runtime_ready
+from app.tts.qwen_character_runtime import (
+    best_long_form_clone_kind, best_voice_design_kind, model_installed, runtime_ready,
+)
+from app.tts.qwen_model_preference import (
+    get_qwen_model_preference, qwen_model_kinds_for_preference,
+)
 from app.tts.voice_profile import load_profiles
 from app.ui.voice_page import VoicePreviewWorker
 
 
 _QUOTE_FALLBACK = re.compile(r"“[^”\n]{2,}”|「[^」\n]{2,}」|『[^』\n]{2,}』|\"[^\"\n]{2,}\"")
+
+def _qwen_voice_design_preview_model_kinds() -> tuple[str, str]:
+    """Resolve the exact VoiceDesign and long-form Base models used by production."""
+    preferred_design, preferred_base = qwen_model_kinds_for_preference(
+        "design", get_qwen_model_preference()
+    )
+    return (
+        preferred_design or best_voice_design_kind(),
+        preferred_base or best_long_form_clone_kind(),
+    )
 
 
 def _dialogue_link(chapter_number: int, start: int, end: int) -> str:
@@ -1394,12 +1408,21 @@ class NativeCharacterDialoguePanel(QWidget):
                 if status_label:
                     status_label.setText("Qwen runtime is not ready. Install the required model in Models, then retry.")
                 return
-            kind = best_voice_design_kind()
+            kind, base_kind = _qwen_voice_design_preview_model_kinds()
             if not model_installed(kind):
                 if status_label:
                     status_label.setText(f"Install the local Qwen VoiceDesign model ({kind}) from Models first.")
                 return
-            preview_profile = replace(profile, qwen_mode="design-preview", model_id=kind)
+            if not model_installed(base_kind):
+                if status_label:
+                    status_label.setText(
+                        f"Install the Qwen Base model ({base_kind}) from Models to audition this saved "
+                        "VoiceDesign identity consistently with audiobook production."
+                    )
+                return
+            # Keep the saved profile, mode and qwen_profile_id intact. VoicePreviewWorker
+            # resolves the original design profile through provider_from_profile(), which
+            # uses the same identity-locked VoiceDesign/Base anchor path as production.
         if self._preview_dir:
             try:
                 self._player.stop()

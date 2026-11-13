@@ -37,6 +37,43 @@ class NativeCharacterStudioContractTests(unittest.TestCase):
         self.assertIn("Test assigned sentence", cast)
         self.assertIn("VoicePreviewWorker(preview_profile, sample_text, output, 10)", panel)
 
+    def test_qwen_voice_design_preview_model_selection_matches_production_preferences(self):
+        from unittest.mock import patch
+        from app.ui.native_character_studio import _qwen_voice_design_preview_model_kinds
+
+        for preference, expected_base in (("0.6b", "base-0.6b"), ("1.7b", "base-1.7b")):
+            with self.subTest(preference=preference), patch(
+                "app.ui.native_character_studio.get_qwen_model_preference",
+                return_value=preference,
+            ):
+                self.assertEqual(
+                    _qwen_voice_design_preview_model_kinds(),
+                    ("design-1.7b", expected_base),
+                )
+
+        with (
+            patch("app.ui.native_character_studio.get_qwen_model_preference", return_value="auto"),
+            patch("app.ui.native_character_studio.best_voice_design_kind", return_value="design-1.7b"),
+            patch("app.ui.native_character_studio.best_long_form_clone_kind", return_value="base-0.6b"),
+        ):
+            self.assertEqual(
+                _qwen_voice_design_preview_model_kinds(),
+                ("design-1.7b", "base-0.6b"),
+            )
+
+    def test_native_character_qwen_design_audition_keeps_the_saved_identity_locked_profile(self):
+        panel = (ROOT / "app/ui/native_character_studio.py").read_text(encoding="utf-8")
+        start = panel.index("    def test_voice_profile(")
+        end = panel.index("    def _play_character_preview(", start)
+        method = panel[start:end]
+        self.assertIn("_qwen_voice_design_preview_model_kinds()", method)
+        self.assertIn("if not model_installed(kind)", method)
+        self.assertIn("if not model_installed(base_kind)", method)
+        self.assertIn("preview_profile = profile", method)
+        self.assertNotIn('qwen_mode="design-preview"', method)
+        self.assertNotIn("replace(profile", method)
+        self.assertIn("VoicePreviewWorker(preview_profile, sample_text, output, 10)", method)
+
     def test_assigned_sentence_preview_uses_real_synthesis_and_player(self):
         panel = (ROOT / "app/ui/native_character_studio.py").read_text(encoding="utf-8")
         self.assertIn("self._player.setSource(QUrl.fromLocalFile(path))", panel)

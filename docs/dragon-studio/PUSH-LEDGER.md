@@ -220,3 +220,19 @@ All failed attempts below remain failed historical records. The later exact-head
   - Two-chapter M4B evidence ID `14005200121`, ZIP 8,992,198 bytes (M4B payload 504,269 bytes; FFmpeg chapter markers=2).
 - Stage A/B hosted checkpoint is now closed at the exact SHA. Preserve the artifacts; do not clean earlier runs/artifacts as part of this status update.
 - Remaining work stays open: Stage C Qwen model/profile identity and real selected-profile production; physical accelerator performance; Stage D full-book acceptance; Stage E remaining product/UI/data defects; Stage F target-PC/physical release acceptance. A green PR workflow is not a public release and does not replace device acceptance.
+
+## Build #3372 — exact-head A/B reconfirmation
+
+- Run: [#3372 / 43355282923](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43355282923), exact SHA `65adc53da81e8faeca09bc50cf4f21f663cc5138`.
+- Focused Stage B **16/16**, focused Stage 6 **48/48**, full regression **1,544/1,544**; full hosted Windows package passed.
+- Artifacts: installer `14007141961`; portable `14007426176`; SHA manifest `14007535608`; two-chapter M4B evidence `14006256981`.
+- This SHA is the exact parent/baseline for the Stage C1 candidate; no A/B runtime code was changed by the C1 audit.
+
+## Stage C1 candidate — Native Character Studio VoiceDesign identity parity
+
+- Confirmed source defect: Native Character Studio's saved Qwen VoiceDesign sentence audition rewrote the profile to the one-pass `design-preview` mode. Production and the primary Voice Studio preview use the identity-locked VoiceDesign/Base path keyed by the saved `qwen_profile_id`; the one-pass route can produce a different timbre and did not require the Base model used for long-form identity lock.
+- Candidate correction: resolve preferred VoiceDesign and Base model kinds from the same global Qwen preference used by `provider_from_profile`; in Auto mode use the shared runtime selection helpers. Require both models to be installed and pass the unchanged saved profile to `VoicePreviewWorker`.
+- Focused C1 tests are added for explicit 0.6B and 1.7B Base preferences, Auto fallback, Base readiness and preventing any `design-preview` substitution.
+- The web Voice Studio edit handler was checked: prompt/language/seed changes detach the saved profile before a draft save. No change is justified there.
+- Candidate commit is tagged `[artifact-checkpoint]` so the Dragon Studio push workflow runs focused C1 tests, the full regression suite and the exact-head Windows package before PR promotion. C1 is not complete until all gates pass.
+

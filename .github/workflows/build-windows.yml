@@ -34,8 +34,9 @@ on:
       - stage-4/step-3-preview-assembly
       - stage-4/step-4-audio-assembly
       - stage-5/**
-      # Dragon Studio is validated once per commit by the PR synchronize event below.
-      # Avoid a duplicate push-only suite that does not produce the packaged artifact.
+      # Dragon Studio candidates may request an exact-head package on push with
+      # [artifact-checkpoint]; ordinary work continues through PR synchronize.
+      - 'dragon-studio/**'
       - stage-6/**
       - stage-7/**
       - fix/application-wide-closure-2026-11-08
@@ -165,6 +166,15 @@ jobs:
           $env:PYTHONDONTWRITEBYTECODE = '1'
           & $pythonExe -B -m unittest -v tests.test_p0_ui_refresh_stability tests.test_stage6_history_task_manager
           if ($LASTEXITCODE -ne 0) { throw "Focused Stage 6 History/Task Manager preflight failed with exit code $LASTEXITCODE." }
+
+      - name: Run focused Stage C1 Qwen Character Studio identity regression
+        shell: pwsh
+        run: |
+          $repoRoot = $env:GITHUB_WORKSPACE
+          $env:PYTHONPATH = $repoRoot
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -B -m unittest discover -s tests -p test_native_character_studio_contract.py -v
+          if ($LASTEXITCODE -ne 0) { throw "Focused Stage C1 Qwen Character Studio identity regression failed with exit code $LASTEXITCODE." }
 
       - name: Run full regression suite (remaining tests)
         shell: pwsh
