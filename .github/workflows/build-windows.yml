@@ -170,6 +170,11 @@ jobs:
       - name: Run focused Stage C1 Qwen Character Studio identity regression
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          if ($pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "setup-python did not provide a real Python interpreter: $pythonExe"
+          }
           $repoRoot = $env:GITHUB_WORKSPACE
           $env:PYTHONPATH = $repoRoot
           $env:PYTHONDONTWRITEBYTECODE = '1'

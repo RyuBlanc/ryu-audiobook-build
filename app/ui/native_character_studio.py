@@ -39,6 +39,7 @@ from app.ui.voice_page import VoicePreviewWorker
 
 _QUOTE_FALLBACK = re.compile(r"“[^”\n]{2,}”|「[^」\n]{2,}」|『[^』\n]{2,}』|\"[^\"\n]{2,}\"")
 
+
 def _qwen_voice_design_preview_model_kinds() -> tuple[str, str]:
     """Resolve the exact VoiceDesign and long-form Base models used by production."""
     preferred_design, preferred_base = qwen_model_kinds_for_preference(

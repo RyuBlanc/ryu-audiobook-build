@@ -336,3 +336,11 @@ These code and regression results demonstrate that repeated unrelated-project lo
 - C2 remains open: install/repair and persisted selected-profile behaviour after restart across CustomVoice, VoiceDesign and Clone.
 - C3 remains open: real NVIDIA CUDA, supported AMD ROCm and Intel XPU performance/backend acceptance. Hosted CPU preview timings do not meet the 30-second preview under-60-second target.
 - C4 remains open: narrator/character identity consistency, emotional continuity, Japanese and other non-English pronunciation, and no voice drift on representative material.
+
+### Stage C1 candidate workflow attempt #3373 — failed before the C1 tests ran
+
+- Run: [#3373 / 43363581227](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43363581227), candidate SHA `188998bc55377d6e9e27d1ebae2b6349040647bd`.
+- Passed before the failure: dependency setup, frontend JavaScript syntax, isolated Qt lifecycle (**1/1**), focused Stage B (**16/16**) and focused Stage 6 (**48/48**).
+- Failure: the new `Run focused Stage C1 Qwen Character Studio identity regression` PowerShell step invoked `$pythonExe` without defining it in that step. GitHub Actions step processes do not share PowerShell variables; the interpreter command never ran. The C1 test module therefore has **no result** from #3373. Full regression and the build/package job were correctly skipped.
+- Correction: resolve and validate `python.exe` inside the focused C1 step before invoking unittest. This is a workflow harness repair; it does not change the Qwen runtime or weaken the regression.
+- #3373 remains a failed historical run. The corrected candidate requires a new push run, focused C1 result, full suite and exact-head package before PR promotion.

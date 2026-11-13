@@ -236,3 +236,9 @@ All failed attempts below remain failed historical records. The later exact-head
 - The web Voice Studio edit handler was checked: prompt/language/seed changes detach the saved profile before a draft save. No change is justified there.
 - Candidate commit is tagged `[artifact-checkpoint]` so the Dragon Studio push workflow runs focused C1 tests, the full regression suite and the exact-head Windows package before PR promotion. C1 is not complete until all gates pass.
 
+## Stage C1 candidate run #3373 — focused step did not launch
+
+- Run [#3373 / 43363581227](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43363581227), candidate SHA `188998bc55377d6e9e27d1ebae2b6349040647bd`.
+- Setup, JavaScript validation, native Qt lifecycle (1/1), Stage B (16/16) and Stage 6 (48/48) passed.
+- New Stage C1 workflow step failed before executing unittest because `$pythonExe` was defined in an earlier Actions step and was not available in the new step's PowerShell process. No C1 test, full regression or package result is claimed.
+- Fixed by resolving and validating `python.exe` within the C1 step itself. No app source changes are being made for this workflow failure. Re-run the exact candidate before promoting the PR.
