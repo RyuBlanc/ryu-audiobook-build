@@ -17,24 +17,26 @@ def default_voice_design_anchor_text(language: str | None) -> str:
     reference text for every non-English supported language so the saved
     acoustic identity is not initialized from an unrelated English sample.
     """
-    key = re.sub(r"[^a-z]", "", str(language or "English").casefold())
-    if key in {"japanese", "ja", "jajp", "jpn"} or key.startswith("japanese"):
+    raw_language = str(language or "English").strip().casefold()
+    locale_code = re.split(r"[-_]", raw_language, maxsplit=1)[0]
+    key = re.sub(r"[^a-z]", "", raw_language)
+    if key in {"japanese", "ja", "jajp", "jpn"} or key.startswith("japanese") or locale_code in {"ja", "jpn"}:
         return "こんにちは。これは声のテストです。落ち着いて、自然に、はっきりと話します。"
-    if key in {"korean", "ko", "kokr", "kor"} or key.startswith("korean"):
+    if key in {"korean", "ko", "kokr", "kor"} or key.startswith("korean") or locale_code in {"ko", "kor"}:
         return "안녕하세요. 이것은 자연스러운 목소리 테스트입니다. 차분하고 또렷하게 말합니다."
-    if key in {"chinese", "mandarin", "zh", "zhcn", "zhtw", "cmn", "simplifiedchinese", "traditionalchinese"} or key.startswith(("chinese", "mandarin")):
+    if key in {"chinese", "mandarin", "zh", "zhcn", "zhtw", "zhhans", "zhhant", "cmn", "simplifiedchinese", "traditionalchinese"} or key.startswith(("chinese", "mandarin")) or locale_code in {"zh", "cmn"}:
         return "你好。这是一段自然的声音测试。我会用清晰、稳定、富有表现力的方式说话。"
-    if key in {"german", "de", "dede", "deu", "ger"} or key.startswith(("german", "deutsch")):
+    if key in {"german", "de", "dede", "deu", "ger"} or key.startswith(("german", "deutsch")) or locale_code in {"de", "deu", "ger"}:
         return "Hallo. Dies ist eine kurze Stimmprobe. Ich spreche ruhig, natürlich und deutlich."
-    if key in {"french", "fr", "frfr", "fra", "fre"} or key.startswith("french"):
+    if key in {"french", "fr", "frfr", "fra", "fre"} or key.startswith("french") or locale_code in {"fr", "fra", "fre"}:
         return "Bonjour. Ceci est un court échantillon de voix. Je parle calmement, naturellement et clairement."
-    if key in {"russian", "ru", "ruru", "rus"} or key.startswith("russian"):
+    if key in {"russian", "ru", "ruru", "rus"} or key.startswith("russian") or locale_code in {"ru", "rus"}:
         return "Здравствуйте. Это короткий образец голоса. Я говорю спокойно, естественно и чётко."
-    if key in {"portuguese", "pt", "ptpt", "ptbr", "por"} or key.startswith("portuguese"):
+    if key in {"portuguese", "pt", "ptpt", "ptbr", "por"} or key.startswith("portuguese") or locale_code in {"pt", "por"}:
         return "Olá. Esta é uma breve amostra de voz. Falo com calma, naturalidade e clareza."
-    if key in {"spanish", "es", "eses", "esmx", "spa"} or key.startswith("spanish"):
+    if key in {"spanish", "es", "eses", "esmx", "spa"} or key.startswith("spanish") or locale_code in {"es", "spa"}:
         return "Hola. Esta es una breve muestra de voz. Hablo con calma, naturalidad y claridad."
-    if key in {"italian", "it", "itit", "ita"} or key.startswith("italian"):
+    if key in {"italian", "it", "itit", "ita"} or key.startswith("italian") or locale_code in {"it", "ita"}:
         return "Ciao. Questo è un breve campione vocale. Parlo con calma, naturalezza e chiarezza."
     return DEFAULT_VOICE_DESIGN_ANCHOR_TEXT
 

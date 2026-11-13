@@ -46,6 +46,29 @@ class QwenMultilingualIdentityAnchorTests(unittest.TestCase):
                 self.assertEqual(default_voice_design_anchor_text(language), expected)
                 self.assertEqual(default_voice_design_anchor_text(regional_code), expected)
 
+    def test_all_supported_region_codes_use_their_native_voice_design_anchor(self):
+        cases = (
+            ("ja-JP", "Japanese"),
+            ("ko-KR", "Korean"),
+            ("zh-Hans", "Chinese"),
+            ("zh-Hant", "Chinese"),
+            ("de-AT", "German"),
+            ("de-CH", "German"),
+            ("fr-CA", "French"),
+            ("fr-BE", "French"),
+            ("ru-UA", "Russian"),
+            ("pt-AO", "Portuguese"),
+            ("es-AR", "Spanish"),
+            ("it-CH", "Italian"),
+        )
+        for regional_code, base_language in cases:
+            with self.subTest(regional_code=regional_code):
+                self.assertEqual(
+                    default_voice_design_anchor_text(regional_code),
+                    default_voice_design_anchor_text(base_language),
+                )
+
+
     def test_english_default_remains_unchanged(self):
         self.assertEqual(default_voice_design_anchor_text("English"), DEFAULT_VOICE_DESIGN_ANCHOR_TEXT)
         self.assertEqual(default_voice_design_anchor_text(None), DEFAULT_VOICE_DESIGN_ANCHOR_TEXT)
@@ -54,26 +77,40 @@ class QwenMultilingualIdentityAnchorTests(unittest.TestCase):
         from app.tts.profile_provider import provider_from_profile
         from app.tts.voice_profile import VoiceProfile
 
-        profile = VoiceProfile(
-            name="Japanese VoiceDesign",
-            provider="qwen-character",
-            voice_id="Designed Japanese speaker",
-            model_id="design-1.7b",
-            language="Japanese",
-            qwen_mode="design",
-            qwen_prompt="A calm, natural Japanese audiobook voice.",
-            qwen_profile_id="c4-japanese-profile",
+        languages = (
+            "English", "Japanese", "Korean", "Chinese", "German",
+            "French", "Russian", "Portuguese", "Spanish", "Italian",
         )
         with (
             patch("app.tts.profile_provider.get_qwen_model_preference", return_value="1.7b"),
             patch("app.tts.profile_provider.get_qwen_backend_preference", return_value="automatic"),
             patch("app.tts.profile_provider.get_qwen_low_memory_mode", return_value=False),
         ):
-            provider, voice = provider_from_profile(profile)
+            for language in languages:
+                with self.subTest(language=language):
+                    profile = VoiceProfile(
+                        name=f"{language} VoiceDesign",
+                        provider="qwen-character",
+                        voice_id=f"Designed {language} speaker",
+                        model_id="design-1.7b",
+                        language=language,
+                        qwen_mode="design",
+                        qwen_prompt=f"A natural {language} audiobook voice.",
+                        qwen_profile_id=f"c4-{language.casefold()}-profile",
+                    )
+                    provider, voice = provider_from_profile(profile)
+                    self.assertEqual(voice, profile.voice_id)
+                    self.assertEqual(provider.qwen_anchor_text, default_voice_design_anchor_text(language))
+                    self.assertEqual(provider.language, language)
 
-        self.assertEqual(voice, profile.voice_id)
-        self.assertEqual(provider.qwen_anchor_text, default_voice_design_anchor_text("Japanese"))
-        self.assertEqual(provider.language, "Japanese")
+    def test_non_cjk_qwen_languages_do_not_receive_japanese_phonetic_fallbacks(self):
+        from app.tts.pronunciation_suggester import nativeish_pronunciation
+
+        source = "Himejima Hanezu"
+        for language in ("German", "French", "Russian", "Portuguese", "Spanish", "Italian"):
+            with self.subTest(language=language):
+                self.assertEqual(nativeish_pronunciation(source, language), source)
+
 
     def test_explicit_anchor_transcript_is_preserved(self):
         from app.tts.providers.qwen_character import QwenCharacterProvider
@@ -120,14 +157,16 @@ class QwenMultilingualIdentityAnchorTests(unittest.TestCase):
     def test_worker_fallback_uses_the_same_language_aware_reference(self):
         from app.tts.qwen_character_worker import _expression_anchor_text
 
-        self.assertEqual(
-            _expression_anchor_text({"language": "Japanese"}, "neutral"),
-            default_voice_design_anchor_text("Japanese"),
+        languages = (
+            "English", "Japanese", "Korean", "Chinese", "German",
+            "French", "Russian", "Portuguese", "Spanish", "Italian",
         )
-        self.assertEqual(
-            _expression_anchor_text({"language": "Korean"}, "neutral"),
-            default_voice_design_anchor_text("Korean"),
-        )
+        for language in languages:
+            with self.subTest(language=language):
+                self.assertEqual(
+                    _expression_anchor_text({"language": language}, "neutral"),
+                    default_voice_design_anchor_text(language),
+                )
 
 
 class MultilingualExpressionCueTests(unittest.TestCase):
