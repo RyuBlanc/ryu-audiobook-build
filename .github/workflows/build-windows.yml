@@ -144,6 +144,17 @@ jobs:
           & $pythonExe -B -m unittest test_regressions.RegressionTests.test_voice_preview_invalidation_ignores_deleted_qt_status_widget -v
           if ($LASTEXITCODE -ne 0) { throw "Isolated Qt lifecycle regression failed with exit code $LASTEXITCODE." }
 
+      - name: Run focused Stage B measured generation progress and ETA regression
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          $repoRoot = (Get-Location).Path
+          $env:PYTHONPATH = "$repoRoot"
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -B -m unittest -v tests.test_stage5_generation_eta_stability
+          if ($LASTEXITCODE -ne 0) { throw "Focused Stage B generation progress/ETA regression failed with exit code $LASTEXITCODE." }
+
       - name: Run focused Stage 6 History and Task Manager preflight
         shell: pwsh
         run: |

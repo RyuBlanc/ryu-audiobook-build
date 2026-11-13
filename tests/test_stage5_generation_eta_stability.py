@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 import wave
-from threading import Event
+from threading import Event, RLock
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -22,6 +22,7 @@ from app.ui.generation_page import (
 
 class _ProgressHarness:
     _generation_progress = host.PremiumV2Bridge._generation_progress
+    _job_resume = host.PremiumV2Bridge._job_resume
     _now = staticmethod(host.PremiumV2Bridge._now)
 
     def __init__(self) -> None:
@@ -36,6 +37,8 @@ class _ProgressHarness:
             }
         }
         self._generation_progress_timing = {}
+        self._jobs_lock = RLock()
+        self._generators = {"eta-test": SimpleNamespace(resume=lambda: None)}
 
     def _job_update(self, job_id: str, **changes):
         row = self._jobs[job_id]
@@ -269,6 +272,64 @@ class Stage5GenerationEtaStabilityTests(unittest.TestCase):
         )
         self.assertEqual(_generation_active_elapsed_seconds(None, 170.0), 0.0)
         self.assertEqual(_generation_active_elapsed_seconds(170.0, 160.0), 0.0)
+
+    def test_pause_resume_excludes_paused_time_from_eta_countdown(self):
+        bridge = _ProgressHarness()
+        clock = {"now": 0.0}
+
+        def monotonic_now():
+            return clock["now"]
+
+        with patch(
+            "app.ui.premium_v2_host.time.monotonic",
+            side_effect=monotonic_now,
+        ), patch(
+            "app.ui.premium_v2_host._generation_worker_is_alive",
+            return_value=True,
+        ):
+            bridge._generation_progress("eta-test", 0, 10, 0, "plan:10000:0:10")
+
+            # The first chunk is warm-up. Three measured chunks establish 60s.
+            for chunk_number in range(1, 5):
+                clock["now"] = float(chunk_number * 10)
+                self._publish_chunk(
+                    bridge, chunk_number, chunk_number * 1000, 10.0
+                )
+            initial = bridge._jobs["eta-test"]
+            self.assertEqual(initial["eta_seconds"], 60)
+            self.assertIsNotNone(initial["eta_updated_at"])
+
+            # Pausing freezes the measured remainder and removes its live clock.
+            clock["now"] = 45.0
+            bridge._generation_progress(
+                "eta-test",
+                1,
+                10,
+                4000,
+                "paused:Generation paused at a saved synthesis checkpoint.",
+            )
+            paused = bridge._jobs["eta-test"]
+            self.assertEqual(paused["state"], "paused")
+            self.assertEqual(paused["eta_seconds"], 60)
+            self.assertIsNone(paused["eta_updated_at"])
+
+            # Resume starts new wall and monotonic clocks; the long suspended
+            # interval must not consume the retained estimate.
+            clock["now"] = 10000.0
+            resumed = bridge._job_resume({"job_id": "eta-test"})
+            self.assertEqual(resumed["state"], "running")
+            self.assertEqual(resumed["eta_seconds"], 60)
+            self.assertIsNotNone(resumed["eta_updated_at"])
+            self.assertEqual(
+                bridge._generation_progress_timing["eta-test"]["eta_last_monotonic"],
+                10000.0,
+            )
+
+            # Ten seconds of active work after resume reduces 60s to 50s;
+            # the many paused seconds are not charged against the countdown.
+            clock["now"] = 10010.0
+            self._publish_chunk(bridge, 5, 5000, 10.0)
+            self.assertEqual(bridge._jobs["eta-test"]["eta_seconds"], 50)
 
     def test_native_eta_never_increases_on_a_slow_chunk_and_smooths_faster_samples(self):
         eta, overruns, recalibrated = _revise_monotonic_eta(None, None, 100.0, 100.0, 0)

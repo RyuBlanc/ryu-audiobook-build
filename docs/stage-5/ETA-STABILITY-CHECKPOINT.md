@@ -20,7 +20,7 @@ This checkpoint repairs the Production Studio estimate shown while a long-form a
 
 ## Automated regression coverage
 
-`tests/test_stage5_generation_eta_stability.py` covers actual synthesis timing callbacks, outlier resistance, frontend countdown, the native page's measured-sample contract, runtime estimates and the 1:1 progress-ring contract.
+`tests/test_stage5_generation_eta_stability.py` covers actual synthesis timing callbacks, outlier resistance, frontend countdown, the native page's measured-sample contract, runtime estimates, the 1:1 progress-ring contract, and the paused-job ETA clock reset on resume.
 
 ## Acceptance still required
 
@@ -46,3 +46,12 @@ This checkpoint repairs the Production Studio estimate shown while a long-form a
 - Still required: observe several chapters of real generation and verify measured chunk progress, stable/decreasing remaining ETA, warm-up handling, elapsed synthesis, pause/resume, audiobook listening-duration projection and final measured M4B duration. Compare ETA behaviour on real selected provider/backend, not simulated timings.
 - Hardware target remains separate: real NVIDIA/AMD/Intel Qwen results are required; hosted CPU and mocked backend tests do not establish GPU preview performance.
 
+
+
+## A/B continuation regression — 13 November 2026
+
+- The new `test_pause_resume_excludes_paused_time_from_eta_countdown` verifies the saved estimate is frozen during pause, its wall-clock timestamp is cleared, and resume establishes a fresh wall-clock timestamp plus a fresh monotonic anchor.
+- The regression simulates a long suspended interval and proves that only active post-resume time is deducted from the measured remainder.
+- The Windows workflow runs `tests.test_stage5_generation_eta_stability` as a dedicated focused Stage B step before the full regression suite. Packaging remains gated on the full tests job.
+- No interpolation of narration percentage during a currently rendering Qwen chunk is introduced. Percentage remains a truthful completed-work ratio; validated chunk count and active synthesis status provide additional context.
+- Target-PC long-book listening, Qwen hardware timing, physical DPI and manual audio acceptance remain separate from this automated A/B checkpoint.
