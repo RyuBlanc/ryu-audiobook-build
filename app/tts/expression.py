@@ -346,28 +346,59 @@ def classify_expression(text: str) -> str:
     return "neutral"
 
 
-def voice_design_anchor_instruction(base_voice_description: str) -> str:
-    """Describe one stable identity with a modest, audible range of story delivery.
+def voice_design_anchor_instruction(
+    base_voice_description: str,
+    *,
+    anchor_text: str | None = None,
+    language: str | None = None,
+) -> str:
+    """Describe one stable identity without imposing emotions absent from its reference.
 
-    VoiceDesign accepts natural-language instructions. We use that capability
-    once to create the shared reference, then reuse that single reference in
-    Base cloning so per-sentence emotion does not switch to a separately
-    generated voice or change the requested gender/pitch presentation.
+    The original English identity sample contains four sentences deliberately
+    written to demonstrate a modest range of delivery. Keep that instruction
+    only for that exact sample. Native-language and user-supplied references
+    can be a single sentence; they must be recorded as one calm identity sample
+    rather than being told to perform nonexistent "Wait..." or warm sentences.
     """
     base = str(base_voice_description or "").strip()
-    anchor_direction = (
+    supplied_anchor = str(anchor_text or "").strip()
+    language_key = str(language or "").strip().casefold()
+    use_english_mood_range = (
+        (not supplied_anchor or supplied_anchor == DEFAULT_VOICE_DESIGN_ANCHOR_TEXT)
+        and (
+            not language_key
+            or language_key in {"english", "en", "eng"}
+            or language_key.startswith(("english", "en-", "en_"))
+        )
+    )
+    identity_rules = (
         "Create one consistent audiobook character voice matching the description above. "
         "Preserve its specified gender presentation, perceived age, pitch range, timbre, "
-        "resonance, accent, and vocal placement in every sentence; do not raise the pitch "
-        "outside the described range or change into a different-sounding speaker. "
-        "Speak the supplied reference text as one continuous performance with subtle, "
-        "believable delivery changes: begin calm and conversational; let the next sentence "
-        "carry warm, pleasantly surprised energy; make the sentence beginning 'Wait...' "
-        "sound briefly concerned; finish reflective and settled. Keep these changes in "
-        "intonation, emphasis, rhythm, and energy rather than exaggerated acting. "
-        "Do not add words, stage directions, laughter, singing, or dramatic effects. "
-        "This should sound like one character reacting naturally, not four different voices."
+        "resonance, accent, and vocal placement; do not raise the pitch outside the "
+        "described range or change into a different-sounding speaker. "
     )
+    if use_english_mood_range:
+        anchor_direction = (
+            identity_rules
+            + "Speak the supplied reference text as one continuous performance with subtle, "
+            "believable delivery changes: begin calm and conversational; let the next sentence "
+            "carry warm, pleasantly surprised energy; make the sentence beginning 'Wait...' "
+            "sound briefly concerned; finish reflective and settled. Keep these changes in "
+            "intonation, emphasis, rhythm, and energy rather than exaggerated acting. "
+            "Do not add words, stage directions, laughter, singing, or dramatic effects. "
+            "This should sound like one character reacting naturally, not four different voices."
+        )
+    else:
+        selected_language = str(language or "selected").strip()
+        anchor_direction = (
+            identity_rules
+            + f"Speak the supplied {selected_language} reference text exactly as written, "
+            "as one calm, natural, neutral identity sample. Use clear articulation and a "
+            "steady, believable cadence appropriate to that language. Do not invent emotional "
+            "transitions, stage directions, extra words, laughter, singing, or dramatic effects. "
+            "This recording is the canonical acoustic identity anchor to be reused across "
+            "narration and character dialogue; emotional delivery must not change the speaker."
+        )
     return f"{base}\n{anchor_direction}".strip()
 
 

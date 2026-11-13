@@ -29,7 +29,7 @@ from app.tts.expression import (
 )
 from app.tts.qwen_accelerator import automatic_accelerator, best_accelerator
 
-EXPRESSION_BANK_VERSION = "v8-emotion-range-anchor"
+EXPRESSION_BANK_VERSION = "v9-language-matched-anchor-direction"
 
 # The Base model locks speaker identity from one acoustic reference, but does
 # not expose VoiceDesign's per-line natural-language instruction channel.
@@ -591,7 +591,11 @@ def _create_expression_anchors(model, request: dict, root: Path) -> dict[str, Pa
         }
         base_description = str(request.get("instruct") or "")
         instruct = (
-            voice_design_anchor_instruction(base_description)
+            voice_design_anchor_instruction(
+                base_description,
+                anchor_text=anchor_text,
+                language=language,
+            )
             if style == "neutral"
             else expression_instruction(base_description, style)
         )

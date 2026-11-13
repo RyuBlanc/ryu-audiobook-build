@@ -112,6 +112,34 @@ class QwenMultilingualIdentityAnchorTests(unittest.TestCase):
                 self.assertEqual(nativeish_pronunciation(source, language), source)
 
 
+    def test_native_language_anchor_instruction_matches_the_single_sentence_reference(self):
+        from app.tts.expression import voice_design_anchor_instruction
+
+        languages = (
+            "Japanese", "Korean", "Chinese", "German", "French",
+            "Russian", "Portuguese", "Spanish", "Italian",
+        )
+        for language in languages:
+            with self.subTest(language=language):
+                anchor = default_voice_design_anchor_text(language)
+                instruction = voice_design_anchor_instruction(
+                    "A consistent audiobook character voice.",
+                    anchor_text=anchor,
+                    language=language,
+                )
+                self.assertIn(f"supplied {language} reference text", instruction)
+                self.assertIn("one calm, natural, neutral identity sample", instruction)
+                self.assertNotIn("Wait...", instruction)
+                self.assertNotIn("warm, pleasantly surprised energy", instruction)
+
+    def test_default_english_anchor_retains_its_four_sentence_mood_range_instruction(self):
+        from app.tts.expression import voice_design_anchor_instruction
+
+        instruction = voice_design_anchor_instruction("A consistent English audiobook voice.")
+        self.assertIn("warm, pleasantly surprised energy", instruction)
+        self.assertIn("sentence beginning 'Wait...'", instruction)
+        self.assertIn("not four different voices", instruction)
+
     def test_explicit_anchor_transcript_is_preserved(self):
         from app.tts.providers.qwen_character import QwenCharacterProvider
 

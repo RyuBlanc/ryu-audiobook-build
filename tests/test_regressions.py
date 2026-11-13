@@ -828,7 +828,10 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("briefly concerned", instruction)
         self.assertIn("not four different voices", instruction)
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
-        self.assertIn("voice_design_anchor_instruction(base_description)", worker)
+        self.assertIn("voice_design_anchor_instruction(", worker)
+        self.assertIn("anchor_text=anchor_text", worker)
+        self.assertIn("language=language", worker)
+        self.assertIn('EXPRESSION_BANK_VERSION = "v9-language-matched-anchor-direction"', worker)
         self.assertIn('"temperature": temperature', worker)
 
     def test_changing_qwen_preset_clears_old_saved_voice_selection(self):
