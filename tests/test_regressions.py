@@ -1625,7 +1625,7 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("saved canonical character identity", worker)
         self.assertIn("ready = all(", worker)
         self.assertIn('ANCHOR_STYLES = ("neutral",)', worker)
-        self.assertIn("v8-emotion-range-anchor", worker)
+        self.assertIn('EXPRESSION_BANK_VERSION = "v9-language-matched-anchor-direction"', worker)
         self.assertIn('if active_task in {"design", "design-preview"}:', worker)
         self.assertIn('"worker_ready": True', worker)
         self.assertIn('if vram_gb >= 10.0 and model_installed("base-1.7b")', runtime)
