@@ -65,3 +65,13 @@ This checkpoint repairs the Production Studio estimate shown while a long-form a
 - The Windows package did not complete: packaged Sound Design acceptance failed at the final mismatched Task Manager View-action repair. This check had also failed in #3368 and passed in #3369 while the frontend source remained unchanged, indicating a timing-sensitive acceptance trigger rather than a confirmed A/B application regression.
 - The packaged test incorrectly waited 10 seconds for the next periodic poll while assuming 1.5-second active-job polling. The production scheduler intentionally backs off to 10 seconds when idle and 30 seconds while hidden and idle. The acceptance now requests a real immediate refresh through the existing Task Manager button after each deliberate View-action mutation, then still proves the same row and action identity are preserved.
 - The Stage A/B Windows package checkpoint stays **open** until the corrected exact-head run passes the complete packaged acceptance and creates the Windows installer/portable/hash artifacts.
+
+
+## Exact-head A/B package checkpoint — Build #3371 (13 Nov 2026)
+
+- Exact tested head: `550cccc0508d0341889e7c88bfe44bea9ff93da1`; [Build Windows App #3371](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43351171744).
+- Focused Stage B measured-generation progress/ETA suite passed **16/16**, including the long-pause/resume clock-anchor regression. Focused Stage 6 preflight passed **48/48** and the full suite passed **1,544/1,544**.
+- The exact-head Windows package also passed frozen-app verification, bundled voice modules, real two-chapter Piper M4B generation/decode, packaged Sound Design/Music Library acceptance, installer creation/startup, hosted install/launch/upgrade/uninstall, logo/hash checks, package-size report and Microsoft Defender scans.
+- Both packaged Task Manager View-action repairs passed. The acceptance now triggers the normal immediate refresh; the adaptive production polling intervals remain unchanged.
+- The Stage A/B automated and hosted Windows package checkpoint is **passed** at this SHA.
+- This does not close real long-running Qwen generation, target-PC ETA/progress/listening-duration comparison, GPU performance, full-book output, or physical DPI/display acceptance. Keep those as separate acceptance gates.
