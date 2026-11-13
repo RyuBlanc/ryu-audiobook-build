@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-EXPRESSION_PIPELINE_VERSION = "story-expression-v2"
+EXPRESSION_PIPELINE_VERSION = "story-expression-v3"
 DEFAULT_VOICE_DESIGN_ANCHOR_TEXT = (
     "Hello. I thought I understood what was happening. "
     "Oh, really? That's actually wonderful. "

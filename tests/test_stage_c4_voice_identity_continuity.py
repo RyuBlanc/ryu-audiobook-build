@@ -182,6 +182,83 @@ class QwenMultilingualIdentityAnchorTests(unittest.TestCase):
                 self.assertEqual(_request_language_for_text(language, source), expected)
 
 
+    def test_qwen_design_resume_signature_tracks_expression_pipeline_version(self):
+        from app.tts.generator import _provider_signature
+        from app.tts.providers.qwen_character import QwenCharacterProvider
+
+        design = QwenCharacterProvider(
+            voice_id="Japanese saved design",
+            language="Japanese",
+            backend="cpu",
+            model_kind="design-1.7b",
+            qwen_mode="design",
+            qwen_profile_id="c4-cache-design",
+            long_form_model_kind="base-0.6b",
+        )
+        chunks = [("彼女は興味を持った。", "Japanese saved design")]
+        with patch("app.tts.providers.qwen_character.EXPRESSION_PIPELINE_VERSION", "story-expression-v2"):
+            previous = _provider_signature(design, "Japanese saved design", chunks)
+        with patch("app.tts.providers.qwen_character.EXPRESSION_PIPELINE_VERSION", "story-expression-v3"):
+            updated = _provider_signature(design, "Japanese saved design", chunks)
+        self.assertNotEqual(
+            previous,
+            updated,
+            "Changing Qwen Design expression cues must invalidate resumable Qwen chapter chunks.",
+        )
+
+        custom = QwenCharacterProvider(
+            voice_id="Ryan",
+            language="English",
+            backend="cpu",
+            model_kind="custom-0.6b",
+            qwen_mode="custom",
+            qwen_profile_id="c4-cache-custom",
+        )
+        with patch("app.tts.providers.qwen_character.EXPRESSION_PIPELINE_VERSION", "story-expression-v2"):
+            custom_previous = _provider_signature(custom, "Ryan", [("Hello.", "Ryan")])
+        with patch("app.tts.providers.qwen_character.EXPRESSION_PIPELINE_VERSION", "story-expression-v3"):
+            custom_updated = _provider_signature(custom, "Ryan", [("Hello.", "Ryan")])
+        self.assertEqual(
+            custom_previous,
+            custom_updated,
+            "A classifier-only change must not invalidate unrelated CustomVoice audio.",
+        )
+
+    def test_casted_qwen_design_resume_signature_tracks_expression_pipeline_version(self):
+        from app.tts.cast_provider import CastAwareProvider
+        from app.tts.voice_profile import VoiceProfile
+
+        profile = VoiceProfile(
+            name="Japanese saved design",
+            provider="qwen-character",
+            voice_id="Japanese speaker",
+            model_id="design-1.7b",
+            language="Japanese",
+            qwen_mode="design",
+            qwen_profile_id="c4-cast-design-cache",
+        )
+        with patch("app.tts.cast_provider.EXPRESSION_PIPELINE_VERSION", "story-expression-v2"):
+            previous = CastAwareProvider._profile_signature(profile)
+        with patch("app.tts.cast_provider.EXPRESSION_PIPELINE_VERSION", "story-expression-v3"):
+            updated = CastAwareProvider._profile_signature(profile)
+        self.assertNotEqual(previous, updated)
+
+        custom_profile = VoiceProfile(
+            name="Saved CustomVoice",
+            provider="qwen-character",
+            voice_id="Ryan",
+            model_id="custom-0.6b",
+            language="English",
+            qwen_mode="custom",
+            qwen_profile_id="c4-cast-custom-cache",
+        )
+        with patch("app.tts.cast_provider.EXPRESSION_PIPELINE_VERSION", "story-expression-v2"):
+            custom_previous = CastAwareProvider._profile_signature(custom_profile)
+        with patch("app.tts.cast_provider.EXPRESSION_PIPELINE_VERSION", "story-expression-v3"):
+            custom_updated = CastAwareProvider._profile_signature(custom_profile)
+        self.assertEqual(custom_previous, custom_updated)
+
+
     def test_real_qwen_smoke_contains_saved_japanese_identity_and_reload_gate(self):
         source = (
             Path(__file__).resolve().parents[1]

@@ -13,6 +13,7 @@ from app.tts.base import TTSProvider
 from app.tts.profile_provider import provider_from_profile
 from app.tts.voice_profile import VoiceProfile
 from app.tts.providers.qwen_character import QwenCharacterProvider
+from app.tts.expression import EXPRESSION_PIPELINE_VERSION
 from app.tts.qwen_model_preference import get_qwen_model_preference
 
 QUOTE_PATTERNS = (
@@ -154,6 +155,11 @@ class CastAwareProvider(TTSProvider):
             "qwen_anchor_text": profile.qwen_anchor_text,
             "qwen_profile_id": profile.qwen_profile_id,
         }
+        if (
+            str(profile.provider or "").casefold() == "qwen-character"
+            and str(profile.qwen_mode or "").casefold() in {"design", "design-preview"}
+        ):
+            data["expression_pipeline_version"] = EXPRESSION_PIPELINE_VERSION
         # A reference can be replaced in-place while its path stays the same.
         # Include content digests so resumed chunks cannot silently keep audio
         # rendered with the previous reference recording.

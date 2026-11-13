@@ -28,7 +28,11 @@ from ..qwen_character_runtime import (
     register_qwen_worker,
     unregister_qwen_worker,
 )
-from ..expression import classify_expression, default_voice_design_anchor_text
+from ..expression import (
+    EXPRESSION_PIPELINE_VERSION,
+    classify_expression,
+    default_voice_design_anchor_text,
+)
 from ..qwen_model_preference import normalize_qwen_backend_preference
 from app.core.paths import settings_root
 
@@ -233,6 +237,11 @@ class QwenCharacterProvider(TTSProvider):
                 self.voice_id,
                 self.language,
                 self.qwen_mode,
+                (
+                    EXPRESSION_PIPELINE_VERSION
+                    if self.qwen_mode in {"design", "design-preview"}
+                    else ""
+                ),
                 self.model_kind,
                 str(self.backend or "automatic"),
                 str(self.low_memory),
