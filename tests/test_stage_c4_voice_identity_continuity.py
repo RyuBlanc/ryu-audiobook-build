@@ -99,6 +99,24 @@ class QwenMultilingualIdentityAnchorTests(unittest.TestCase):
         )
         self.assertEqual(provider.qwen_anchor_text, "")
 
+    def test_native_script_does_not_override_an_explicit_saved_qwen_language(self):
+        from app.tts.providers.qwen_character import _request_language_for_text
+
+        cases = (
+            ("Japanese", "こんにちは。", "Japanese"),
+            ("Korean", "안녕하세요.", "Korean"),
+            ("Chinese", "你好。", "Chinese"),
+            ("ja-JP", "こんにちは。", "ja-JP"),
+            ("en-US", "Mira said ありがとう.", "Auto"),
+            ("English", "Mira said 你好.", "Auto"),
+            ("Auto", "こんにちは。", "Auto"),
+            ("French", "Mira said ありがとう.", "French"),
+        )
+        for language, source, expected in cases:
+            with self.subTest(language=language, source=source):
+                self.assertEqual(_request_language_for_text(language, source), expected)
+
+
     def test_worker_fallback_uses_the_same_language_aware_reference(self):
         from app.tts.qwen_character_worker import _expression_anchor_text
 

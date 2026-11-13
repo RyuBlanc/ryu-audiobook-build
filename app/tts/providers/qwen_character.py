@@ -54,6 +54,26 @@ def _qwen_audio_file_signature(raw_path: Path | None) -> str:
     return f"{resolved}:{hasher.hexdigest()}"
 
 
+def _request_language_for_text(language: str | None, text: str) -> str:
+    """Keep an explicitly selected Qwen language for native-script narration.
+
+    Auto-detection is a compatibility aid for English profiles that contain
+    occasional CJK names or phrases; it must not override a saved Japanese,
+    Korean, or Chinese language selection.
+    """
+    selected = str(language or "English").strip() or "English"
+    key = selected.casefold()
+    has_cjk = any(
+        "\u3040" <= char <= "\u30ff"
+        or "\u4e00" <= char <= "\u9fff"
+        or "\uac00" <= char <= "\ud7af"
+        for char in str(text or "")
+    )
+    is_english = key.startswith("english") or key in {"en", "eng"} or key.startswith(("en-", "en_"))
+    is_automatic = key in {"auto", "auto-detect", "autodetect"}
+    return "Auto" if has_cjk and (is_english or is_automatic) else selected
+
+
 class QwenCharacterProvider(TTSProvider):
     """Offline Qwen3-TTS character voices with no API key or cloud service."""
 
@@ -556,13 +576,7 @@ class QwenCharacterProvider(TTSProvider):
         self._start_worker()
         if not self._worker or not self._worker.stdin:
             raise RuntimeError("Offline character worker is unavailable.")
-        request_language = self.language
-        # Qwen supports automatic language selection. Use it when an English
-        # narration chunk visibly contains Japanese/Chinese/Korean text so
-        # names and short foreign-language phrases are not forced through the
-        # English phoneme path.
-        if any("\u3040" <= ch <= "\u30ff" or "\u4e00" <= ch <= "\u9fff" or "\uac00" <= ch <= "\ud7af" for ch in text):
-            request_language = "Auto"
+        request_language = _request_language_for_text(self.language, text)
         request = {
             "text": text,
             "output": str(output_path.resolve()),
@@ -638,12 +652,7 @@ class QwenCharacterProvider(TTSProvider):
         if any(not text for text in texts):
             raise ValueError("Qwen batch contains empty narration text.")
 
-        batch_language = self.language
-        if any(
-            any("\u3040" <= ch <= "\u30ff" or "\u4e00" <= ch <= "\u9fff" or "\uac00" <= ch <= "\ud7af" for ch in text)
-            for text in texts
-        ):
-            batch_language = "Auto"
+        batch_language = _request_language_for_text(self.language, "\n".join(texts))
         request = {
             "texts": texts,
             "outputs": outputs,

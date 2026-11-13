@@ -52,7 +52,7 @@ _NON_ENGLISH_EXPRESSION_CUES = {
         r"colère|en colère|s'énerva|furioso|furiosa|rabia|enfadado|enfadada|"
         r"enojado|enojada|gritó|bravo|brava|raiva|irritado|irritada|gritou|"
         r"arrabbiato|arrabbiata|rabbia|adirato|adirata|gridò)\b|"
-        r"(?:зл|ярост|гнев|разозлил|рассердил|закричал|закричала)"
+        r"(?:зл|зол|ярост|гнев|разозлил|рассердил|закричал|закричала)"
     ),
     "fear": (
         r"\b(?:ängstlich|angst|fürcht\w*|erschrocken|zitter\w*|peur|effrayé|"
@@ -61,7 +61,7 @@ _NON_ENGLISH_EXPRESSION_CUES = {
         r"timore|паник\w*|страш\w*|боялся|боялась|дрожал|дрожала)"
     ),
     "tense": (
-        r"\b(?:panik|gefährlich|danger|dangereux|dangereuse|peligro|perigo|"
+        r"\b(?:panik|paniqu|pánico|panico|pânico|gefährlich|danger|dangereux|dangereuse|peligro|perigo|"
         r"pericolo|террор)\w*\b|(?:паник|опасн)"
     ),
     "amused": (
@@ -76,7 +76,7 @@ _NON_ENGLISH_EXPRESSION_CUES = {
         r"\b(?:überrascht|erstaunt|verblüfft|fassungslos|surpris|surprise|"
         r"étonné|étonnée|stupéfait|stupéfaite|sorprendido|sorprendida|"
         r"sorpresa|asombrado|asombrada|surpreso|espantado|espantada|"
-        r"surpreendido|surpreendida|stupito|stupita|sbalordito)\b|(?:удивл|изумл|поражен|поражён)"
+        r"surpreendido|surpreendida|surpresa|stupito|stupita|sbalordito)\b|(?:удивл|изумл|поражен|поражён)"
     ),
     "warm": (
         r"\b(?:glücklich|fröhlich|freudig|begeistert|zufrieden|heureux|heureuse|"
@@ -86,7 +86,7 @@ _NON_ENGLISH_EXPRESSION_CUES = {
         r"(?:счастлив|радост|довольн|весел|восторг)"
     ),
     "bored": (
-        r"\b(?:gelangweilt|langweilig|lustlos|ennuyé|ennuyée|ennuy|ennui|"
+        r"\b(?:gelangweilt|langweilig|lustlos|ennuy\w*|ennui|"
         r"lassé|lassée|aburrido|aburrida|aburrimiento|desinteresado|"
         r"desinteresada|entediado|entediada|tédio|annoiato|annoiata|noia|"
         r"disinteressato|disinteressata)\b|(?:скучно|скучал|скучала|надоело)"
@@ -105,7 +105,7 @@ _NON_ENGLISH_EXPRESSION_CUES = {
     "curious": (
         r"\b(?:neugierig|wunderte sich|curieux|curieuse|se demanda|interessé|"
         r"interessée|curioso|curiosa|se preguntó|interesado|interessada|"
-        r"perguntou-se|si chiese|interessato)\b|(?:любопыт|интересно|заинтересован)"
+        r"perguntou-se|si chiese|interessato|curiosidad)\b|(?:любопыт|интересно|заинтересован)"
     ),
     "serious": (
         r"\b(?:ernst|ernsthaft|feierlich|sérieux|sérieuse|sérieusement|grave|"
@@ -264,6 +264,10 @@ def classify_expression(text: str) -> str:
         low,
     ) or re.search(_NON_ENGLISH_EXPRESSION_CUES["anger"], low):
         return "angry"
+    # Panic and peril are urgent-delivery cues in their own right; they
+    # must not require an additional fear word in the same sentence.
+    if re.search(_NON_ENGLISH_EXPRESSION_CUES["tense"], low):
+        return "tense"
     if re.search(
         r"\b(?:terrified|panicked|desperate|urgent|in a panic|danger|dangerous|"
         r"run away|get back|help me|don't touch|do not touch|worried|afraid|"
