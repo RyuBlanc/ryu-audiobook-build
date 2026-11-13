@@ -28,7 +28,7 @@ from ..qwen_character_runtime import (
     register_qwen_worker,
     unregister_qwen_worker,
 )
-from ..expression import DEFAULT_VOICE_DESIGN_ANCHOR_TEXT, classify_expression
+from ..expression import classify_expression, default_voice_design_anchor_text
 from ..qwen_model_preference import normalize_qwen_backend_preference
 from app.core.paths import settings_root
 
@@ -110,10 +110,13 @@ class QwenCharacterProvider(TTSProvider):
         self.qwen_mode = (qwen_mode or "custom").casefold()
         self.qwen_seed = qwen_seed
         self.qwen_anchor_path = qwen_anchor_path
-        self.qwen_anchor_text = (
-            qwen_anchor_text
-            or (DEFAULT_VOICE_DESIGN_ANCHOR_TEXT if self.qwen_mode == "design" else "")
-        )
+        self.qwen_anchor_text = str(qwen_anchor_text or "").strip()
+        # New VoiceDesign profiles need a canonical reference in their selected
+        # language. When the user supplied an explicit anchor file without a
+        # transcript, keep the transcript empty so the worker uses x-vector-only
+        # conditioning instead of pairing that audio with a guessed sentence.
+        if self.qwen_mode == "design" and not self.qwen_anchor_text and not self.qwen_anchor_path:
+            self.qwen_anchor_text = default_voice_design_anchor_text(self.language)
         self.qwen_profile_id = qwen_profile_id or ""
         self.long_form_model_kind = (
             long_form_model_kind
