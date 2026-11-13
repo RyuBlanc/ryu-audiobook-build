@@ -203,3 +203,20 @@ All failed attempts below remain failed historical records. The later exact-head
 - Root cause: test assumed an active 1.5s backend poll but waited exactly 10s; the production scheduler intentionally backs off to 10s idle and 30s hidden-idle. #3368 failed the same assertion; #3369 passed with the same frontend/acceptance source, showing the timing-sensitive test was nondeterministic.
 - Correction: explicitly request an immediate backend refresh using the existing Task Manager button after each deliberate View-action corruption; retain strict same-row identity and no-rebuild assertions. The normal adaptive polling values are preserved.
 - A new exact-head Windows run is required to close the A/B package checkpoint.
+
+
+## Build Windows App #3371 — Stage A/B exact-head package checkpoint passed
+
+- Run: [#3371 / 43351171744](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43351171744).
+- Exact head: `550cccc0508d0341889e7c88bfe44bea9ff93da1`; PR #35 head matched this SHA.
+- Purpose: validate the Stage B pause/resume ETA regression and the deterministic Task Manager View-action repair on the complete cumulative PR application.
+- Test job: focused Stage B **16/16**, focused Stage 6 **48/48**, full regression **1,544/1,544**; every step passed.
+- Build job: frozen app, bundled assets, real two-chapter Piper M4B/FFmpeg decode, packaged Sound Design/Music Library, installer, hosted install/launch/upgrade/uninstall, logo/hash, package-size, Defender and all three Windows artifact uploads passed. Public release publication was skipped because this is a PR run.
+- Task Manager: missing View action and mismatched View action were both repaired in place; original native row identity was retained.
+- Artifacts:
+  - Installer ID `14005930515`, 845,998,580 bytes.
+  - Portable ID `14004749158`, 1,183,885,216 bytes.
+  - SHA-256 manifest ID `14005436978`, 3,040 bytes.
+  - Two-chapter M4B evidence ID `14005200121`, ZIP 8,992,198 bytes (M4B payload 504,269 bytes; FFmpeg chapter markers=2).
+- Stage A/B hosted checkpoint is now closed at the exact SHA. Preserve the artifacts; do not clean earlier runs/artifacts as part of this status update.
+- Remaining work stays open: Stage C Qwen model/profile identity and real selected-profile production; physical accelerator performance; Stage D full-book acceptance; Stage E remaining product/UI/data defects; Stage F target-PC/physical release acceptance. A green PR workflow is not a public release and does not replace device acceptance.
