@@ -318,6 +318,29 @@ class MultilingualExpressionCueTests(unittest.TestCase):
                 with self.subTest(language=language, source=source):
                     self.assertEqual(classify_expression(source), expected)
 
+    def test_japanese_story_cues_cover_sentence_level_emotion_and_delivery(self):
+        from app.tts.expression import classify_expression
+
+        cases = (
+            ("彼女は悲しくて泣いた。", "sad"),
+            ("彼は怒って叫んだ。", "angry"),
+            ("彼女は恐怖で震えた。", "tense"),
+            ("彼は笑った。", "amused"),
+            ("彼女は驚いた。", "excited"),
+            ("彼は嬉しかった。", "warm"),
+            ("彼は退屈していた。", "bored"),
+            ("彼女は落ち着いていた。", "calm"),
+            ("彼女は答えを決められず迷っていた。", "thoughtful"),
+            ("彼女は興味を持った。", "curious"),
+            ("彼は真剣に答えた。", "serious"),
+            ("彼女は昔のことを思い返した。", "reflective"),
+            ("彼女は小声でささやいた。", "soft"),
+        )
+        for source, expected in cases:
+            with self.subTest(source=source):
+                self.assertEqual(classify_expression(source), expected)
+
+
     def test_chinese_story_cues_keep_sentence_level_emotion(self):
         cases = (
             ("她很伤心，忍不住哭了。", "sad"),

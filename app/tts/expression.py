@@ -64,7 +64,7 @@ _NON_ENGLISH_EXPRESSION_CUES = {
     ),
     "tense": (
         r"\b(?:panik|paniqu|pánico|panico|pânico|gefährlich|danger|dangereux|dangereuse|peligro|perigo|"
-        r"pericolo|террор)\w*\b|(?:паник|опасн)"
+        r"pericolo|террор)\w*\b|(?:паник|опасн)|(?:パニック|危機)"
     ),
     "amused": (
         r"\b(?:lachte|lachen|lächelt|lächelte|witzelte|scherzte|kicher\w*|"
@@ -102,12 +102,14 @@ _NON_ENGLISH_EXPRESSION_CUES = {
         r"\b(?:vielleicht|möglicherweise|unsicher|zögerte|zögern|überlegte|"
         r"peut-être|incertain|incertaine|hésita|hésiter|quizás|quizas|tal vez|"
         r"dudó|dudar|talvez|hesitou|hesitar|forse|incerto|incerta|esitò|"
-        r"esitare)\b|(?:возможно|наверное|кажется|не уверен|не уверена|сомнева|колебал)"
+        r"esitare)\b|(?:возможно|наверное|кажется|не уверен|не уверена|сомнева|колебал)|"
+        r"(?:迷っ|ためら|考え込|かもしれない)"
     ),
     "curious": (
         r"\b(?:neugierig|wunderte sich|curieux|curieuse|se demanda|interessé|"
         r"interessée|curioso|curiosa|se preguntó|interesado|interessada|"
-        r"perguntou-se|si chiese|interessato|curiosidad)\b|(?:любопыт|интересно|заинтересован)"
+        r"perguntou-se|si chiese|interessato|curiosidad)\b|(?:любопыт|интересно|заинтересован)|"
+        r"(?:好奇|興味|気にな|知りた)"
     ),
     "serious": (
         r"\b(?:ernst|ernsthaft|feierlich|sérieux|sérieuse|sérieusement|grave|"
@@ -118,7 +120,7 @@ _NON_ENGLISH_EXPRESSION_CUES = {
         r"\b(?:erinnerte sich|rückblickend|nachdenklich|se souvint|en repensant|"
         r"réfléchit|rappelait|recordó|recordaba|reflexionó|pensativo|pensativa|"
         r"lembrou|refletiu|ricordò|ricordava|rifletté|pensieroso|pensierosa)\b|"
-        r"(?:вспомнил|вспомнила|вспоминал|размышлял|задумал)"
+        r"(?:вспомнил|вспомнила|вспоминал|размышлял|задумал)|(?:思い返|振り返|思い出し|回想)"
     ),
 }
 
@@ -248,7 +250,7 @@ def classify_expression(text: str) -> str:
     low = value.casefold()
 
     # Explicit delivery/action cues take priority over punctuation.
-    if re.search(r"\b(whisper(?:ed|ing)?|murmur(?:ed|ing)?|softly|quietly|under (?:her|his|their) breath|hushed)\b", low):
+    if re.search(r"\b(whisper(?:ed|ing)?|murmur(?:ed|ing)?|softly|quietly|under (?:her|his|their) breath|hushed)\b|(?:ささや|小声|ひそひそ)", low):
         return "soft"
     if re.search(
         r"\b(?:sob(?:bed|bing)?|cry|cries|cried|crying|wept|weep(?:ing)?|tears?|"
