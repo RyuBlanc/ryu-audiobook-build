@@ -182,6 +182,25 @@ class QwenMultilingualIdentityAnchorTests(unittest.TestCase):
                 self.assertEqual(_request_language_for_text(language, source), expected)
 
 
+    def test_real_qwen_smoke_contains_saved_japanese_identity_and_reload_gate(self):
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "tests"
+            / "smoke_qwen_real_clone_design_production.py"
+        ).read_text(encoding="utf-8")
+        for required in (
+            "REAL_QWEN_JAPANESE_SAVED_PROFILE_IDENTITY=PASS",
+            "qwen-japanese-voice-identity-continuity.json",
+            "same_anchor_sha256=true",
+            "default_voice_design_anchor_text(\"Japanese\")",
+            'language="Japanese"',
+            'return_value="cpu"',
+            'return_value="0.6b"',
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, source)
+
+
     def test_worker_fallback_uses_the_same_language_aware_reference(self):
         from app.tts.qwen_character_worker import _expression_anchor_text
 
