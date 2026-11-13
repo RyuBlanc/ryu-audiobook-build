@@ -317,6 +317,8 @@ class QwenMultilingualIdentityAnchorTests(unittest.TestCase):
             ("Ele tremeu durante a noite.", "concerned"),
             ("Tu tremes quando está frio.", "concerned"),
             ("Nós trememos ao ouvir o barulho.", "concerned"),
+            ("Senti um tremor nas mãos.", "concerned"),
+            ("A tremedeira não parava.", "concerned"),
         )
         for source, expected in cases:
             with self.subTest(source=source):
