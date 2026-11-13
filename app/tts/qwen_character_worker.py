@@ -19,9 +19,9 @@ if str(_APPLICATION_ROOT) not in sys.path:
     sys.path.insert(0, str(_APPLICATION_ROOT))
 
 from app.tts.expression import (
-    DEFAULT_VOICE_DESIGN_ANCHOR_TEXT,
     EXPRESSION_STYLES,
     classify_expression,
+    default_voice_design_anchor_text,
     expression_instruction,
     expression_temperature,
     reference_style,
@@ -40,7 +40,6 @@ EXPRESSION_BANK_VERSION = "v8-emotion-range-anchor"
 # or even gender presentation; emotion boundaries and sampling variation must
 # not replace the saved character identity.
 ANCHOR_STYLES = ("neutral",)
-ANCHOR_TEXTS = {"neutral": DEFAULT_VOICE_DESIGN_ANCHOR_TEXT}
 
 
 MODEL_IDS = {
@@ -428,20 +427,6 @@ def _set_seed(seed):
             pass
 
 
-def _default_anchor_text(language: str) -> str:
-    key = (language or "English").casefold()
-    if key.startswith("japanese"):
-        return "こんにちは。これは声のテストです。落ち着いて、自然に、はっきりと話します。"
-    if key.startswith("korean"):
-        return "안녕하세요. 이것은 자연스러운 목소리 테스트입니다. 차분하고 또렷하게 말합니다."
-    if key.startswith("chinese"):
-        return "你好。这是一段自然的声音测试。我会用清晰、稳定、富有表现力的方式说话。"
-    return (
-        "Hello. This is a short voice identity sample for Ryu's Audiobook. "
-        "The character speaks clearly, naturally, and with a steady identity from one sentence to the next."
-    )
-
-
 def _anchor_path(root: Path, request: dict, style: str = "neutral") -> Path:
     explicit = str(request.get("anchor_path") or "").strip()
     if explicit and style == "neutral":
@@ -554,7 +539,7 @@ def _expression_anchor_text(request: dict, style: str) -> str:
         requested = str(request.get("anchor_text") or "").strip()
         if requested:
             return requested
-    return ANCHOR_TEXTS.get(style, ANCHOR_TEXTS["neutral"])
+    return default_voice_design_anchor_text(request.get("language"))
 
 
 def _create_expression_anchors(model, request: dict, root: Path) -> dict[str, Path]:
