@@ -287,20 +287,39 @@ class QwenMultilingualIdentityAnchorTests(unittest.TestCase):
         for required in (
             "REAL_QWEN_MULTILINGUAL_SAVED_PROFILE_IDENTITY=PASS",
             "qwen-multilingual-voice-identity-continuity.json",
-            '("English", "Today I walked along a quiet street.", "He was angry and furious.")',
-            '("Korean", "오늘은 조용한 거리를 걷고 있습니다.", "그는 몹시 화가 났다.")',
-            '("Chinese", "今天我在安静的街道上散步。", "他非常愤怒。")',
-            '("German", "Heute gehe ich durch die ruhige Stadt.", "Er war wütend.")',
-            '("French", "Aujourd\'hui, je marche dans la ville calme.", "Il était furieux.")',
-            '("Russian", "Сегодня я иду по тихой улице.", "Он был зол.")',
-            '("Portuguese", "Hoje caminho pela rua tranquila.", "Ele estava furioso.")',
-            '("Spanish", "Hoy camino por la calle tranquila.", "Estaba furioso.")',
-            '("Italian", "Oggi cammino lungo la strada tranquilla.", "Era arrabbiato.")',
+            '("English", "Today I took the train into the city.", "He was angry and furious.")',
+            '("Korean", "오늘은 기차를 타고 도심으로 갑니다.", "그는 몹시 화가 났다.")',
+            '("Chinese", "今天我乘坐火车前往市中心。", "他非常愤怒。")',
+            '("German", "Heute fahre ich mit dem Zug ins Stadtzentrum.", "Er war wütend.")',
+            '("French", "Aujourd\'hui, je prends le train pour le centre-ville.", "Il était furieux.")',
+            '("Russian", "Сегодня я еду на поезде в центр города.", "Он был зол.")',
+            '("Portuguese", "Hoje vou de trem até o centro da cidade.", "Ele estava furioso.")',
+            '("Spanish", "Hoy voy en tren hasta la avenida principal.", "Estaba furioso.")',
+            '("Italian", "Oggi prendo il treno per il centro della città.", "Era arrabbiato.")',
             "same_anchor_sha256_after_reload",
             "expression_pipeline_version",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, source)
+
+
+    def test_real_multilingual_smoke_neutral_sentences_are_not_expression_cues(self):
+        from app.tts.expression import classify_expression
+
+        cases = (
+            ("English", "Today I took the train into the city."),
+            ("Korean", "오늘은 기차를 타고 도심으로 갑니다."),
+            ("Chinese", "今天我乘坐火车前往市中心。"),
+            ("German", "Heute fahre ich mit dem Zug ins Stadtzentrum."),
+            ("French", "Aujourd'hui, je prends le train pour le centre-ville."),
+            ("Russian", "Сегодня я еду на поезде в центр города."),
+            ("Portuguese", "Hoje vou de trem até o centro da cidade."),
+            ("Spanish", "Hoy voy en tren hasta la avenida principal."),
+            ("Italian", "Oggi prendo il treno per il centro della città."),
+        )
+        for language, source in cases:
+            with self.subTest(language=language, source=source):
+                self.assertEqual(classify_expression(source), "neutral")
 
 
     def test_worker_fallback_uses_the_same_language_aware_reference(self):

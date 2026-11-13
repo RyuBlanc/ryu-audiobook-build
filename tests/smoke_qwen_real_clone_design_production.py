@@ -471,15 +471,15 @@ def main() -> None:
         # cache. Japanese above additionally exercises a fresh worker after
         # reload, so this matrix complements rather than replaces that check.
         multilingual_cases = (
-            ("English", "Today I walked along a quiet street.", "He was angry and furious."),
-            ("Korean", "오늘은 조용한 거리를 걷고 있습니다.", "그는 몹시 화가 났다."),
-            ("Chinese", "今天我在安静的街道上散步。", "他非常愤怒。"),
-            ("German", "Heute gehe ich durch die ruhige Stadt.", "Er war wütend."),
-            ("French", "Aujourd'hui, je marche dans la ville calme.", "Il était furieux."),
-            ("Russian", "Сегодня я иду по тихой улице.", "Он был зол."),
-            ("Portuguese", "Hoje caminho pela rua tranquila.", "Ele estava furioso."),
-            ("Spanish", "Hoy camino por la calle tranquila.", "Estaba furioso."),
-            ("Italian", "Oggi cammino lungo la strada tranquilla.", "Era arrabbiato."),
+            ("English", "Today I took the train into the city.", "He was angry and furious."),
+            ("Korean", "오늘은 기차를 타고 도심으로 갑니다.", "그는 몹시 화가 났다."),
+            ("Chinese", "今天我乘坐火车前往市中心。", "他非常愤怒。"),
+            ("German", "Heute fahre ich mit dem Zug ins Stadtzentrum.", "Er war wütend."),
+            ("French", "Aujourd'hui, je prends le train pour le centre-ville.", "Il était furieux."),
+            ("Russian", "Сегодня я еду на поезде в центр города.", "Он был зол."),
+            ("Portuguese", "Hoje vou de trem até o centro da cidade.", "Ele estava furioso."),
+            ("Spanish", "Hoy voy en tren hasta la avenida principal.", "Estaba furioso."),
+            ("Italian", "Oggi prendo il treno per il centro della città.", "Era arrabbiato."),
         )
         multilingual_engine = None
         multilingual_evidence = []
