@@ -9,6 +9,22 @@ DEFAULT_VOICE_DESIGN_ANCHOR_TEXT = (
     "Wait... something isn't right. Let's think for a moment."
 )
 
+def default_voice_design_anchor_text(language: str | None) -> str:
+    """Return a neutral identity reference in the selected Qwen speaker language.
+
+    The reference is reused as the one canonical acoustic identity anchor for
+    long-form VoiceDesign. Native-language text avoids seeding Japanese,
+    Korean, or Chinese profiles with an unrelated English sample.
+    """
+    key = re.sub(r"[^a-z]", "", str(language or "English").casefold())
+    if key in {"japanese", "ja", "jpn"}:
+        return "こんにちは。これは声のテストです。落ち着いて、自然に、はっきりと話します。"
+    if key in {"korean", "ko", "kor"}:
+        return "안녕하세요. 이것은 자연스러운 목소리 테스트입니다. 차분하고 또렷하게 말합니다."
+    if key in {"chinese", "mandarin", "zh", "cmn"}:
+        return "你好。这是一段自然的声音测试。我会用清晰、稳定、富有表现力的方式说话。"
+    return DEFAULT_VOICE_DESIGN_ANCHOR_TEXT
+
 # The four reference styles preserve one character identity while providing
 # audible differences in delivery. Other labels are mapped to these anchors.
 EXPRESSION_STYLES = {
@@ -140,64 +156,79 @@ def classify_expression(text: str) -> str:
     if re.search(
         r"\b(?:sob(?:bed|bing)?|cry|cries|cried|crying|wept|weep(?:ing)?|tears?|"
         r"heartbroken|grief-stricken|mournful|sad|sadly|sorrow|regret(?:ted|fully)?|"
-        r"lonely|miss(?:ed|ing) you|disappointed)\b|[泣涙悲愴寂]",
+        r"lonely|miss(?:ed|ing) you|disappointed)\b|[泣涙悲愴寂]|"
+        r"(?:伤心|傷心|难过|難過|悲伤|悲傷|悲哀|眼泪|眼淚|哭泣)|"
+        r"(?:슬프|눈물|울었|울고)",
         low,
     ):
         return "sad"
     if re.search(
         r"\b(?:angry|anger|furious|enraged|angrily|snapped|barked|how dare you|"
-        r"damn you|shut up)\b|(?:激怒|怒鳴|怒|腹を立)",
+        r"damn you|shut up)\b|(?:激怒|怒鳴|怒|腹を立|愤怒|憤怒|生气|生氣|发火)|"
+        r"(?:분노|화가\s*났|화냈|화났다)",
         low,
     ):
         return "angry"
     if re.search(
         r"\b(?:terrified|panicked|desperate|urgent|in a panic|danger|dangerous|"
         r"run away|get back|help me|don't touch|do not touch|worried|afraid|"
-        r"fearful|anxious|trembl(?:ed|ing)|hurt|pain)\b|[怖恐怯震]|不安",
+        r"fearful|anxious|trembl(?:ed|ing)|hurt|pain)\b|[怖恐怯震]|不安|"
+        r"(?:害怕|恐惧|恐懼|惊慌|驚慌|颤抖|顫抖|危险|危險)|"
+        r"(?:무서|두렵|공포|떨|불안)",
         low,
     ):
         return "tense" if re.search(
             r"\b(?:terrified|panicked|desperate|urgent|run away|get back|help me|"
-            r"don't touch|do not touch)\b|[怖恐怯]",
+            r"don't touch|do not touch)\b|[怖恐怯]|"
+            r"(?:害怕|恐惧|恐懼|惊慌|驚慌|危险|危險)|(?:무서|두렵|공포)",
             low,
         ) else "concerned"
     if re.search(
         r"\b(?:laughed|laughing|chuckled|chuckling|smiled|smiling|grinned|amused|"
-        r"joked|teased|teasing|heh|haha)\b|[笑]|くすくす|爆笑",
+        r"joked|teased|teasing|heh|haha)\b|[笑]|くすくす|爆笑|"
+        r"(?:哈哈|开玩笑|逗笑)|(?:웃|킥킥|하하)",
         low,
     ):
         return "amused"
     if re.search(
         r"\b(?:surpris(?:ed|ing)?|astonish(?:ed|ing)?|startl(?:ed|ing)|stunned|"
-        r"taken aback)\b|驚|びっくり|仰天",
+        r"taken aback)\b|驚|びっくり|仰天|"
+        r"(?:惊讶|驚訝|震惊|震驚|吃惊|吃驚)|(?:놀랐|깜짝|놀라)",
         low,
     ):
         return "excited"
     if re.search(
         r"\b(?:happy|happily|joyful|joyfully|glad|pleased|delighted|thrilled|"
-        r"cheerful|beamed)\b|幸せ|嬉",
+        r"cheerful|beamed)\b|幸せ|嬉|"
+        r"(?:开心|開心|快乐|快樂|高兴|高興|幸福|喜悦)|"
+        r"(?:행복|기쁘|즐겁|신나)",
         low,
     ):
         return "warm"
     if re.search(
-        r"\b(?:bored|boredom|uninterested|listless|tedious)\b|退屈|つまらな|飽きた",
+        r"\b(?:bored|boredom|uninterested|listless|tedious)\b|退屈|つまらな|飽きた|"
+        r"(?:无聊|無聊|厌倦|厭倦)|(?:지루|따분|싫증)",
         low,
     ):
         return "bored"
     if re.search(
-        r"\b(?:calm|calmly|peaceful|serene|tranquil|composed|settled)\b|穏やか|落ち着|安心",
+        r"\b(?:calm|calmly|peaceful|serene|tranquil|composed|settled)\b|穏やか|落ち着|安心|"
+        r"(?:平静|平靜|冷静|冷靜|宁静|寧靜)|(?:차분|평온|침착|고요)",
         low,
     ):
         return "calm"
-    if re.search(r"\b(maybe|perhaps|i think|i wonder|not sure|could it be|i guess|hesitat(?:ed|ing)|uncertain|hesitant)\b", low) or "…" in value or "..." in value:
+    if re.search(r"\b(maybe|perhaps|i think|i wonder|not sure|could it be|i guess|hesitat(?:ed|ing)|uncertain|hesitant)\b|"
+                  r"(?:也许|也許|或许|或許|犹豫|猶豫|不知道)|(?:아마|어쩌면|글쎄|망설)", low) or "…" in value or "..." in value:
         return "thoughtful"
-    if re.search(r"\b(curious|wondered|intrigued|eager to know)\b", low):
+    if re.search(r"\b(curious|wondered|intrigued|eager to know)\b|(?:好奇|想知道)|(?:궁금|호기심)", low):
         return "curious"
     if re.search(r"\b(sad|sadly|sorrow|regret(?:ted|fully)?|lonely|miss(?:ed|ing) you|disappointed)\b", low):
         return "sad"
-    if re.search(r"\b(serious|seriously|in a low voice|firmly|solemnly|gravely|matter-of-fact)\b|真剣|厳か|冷静", low):
+    if re.search(r"\b(serious|seriously|in a low voice|firmly|solemnly|gravely|matter-of-fact)\b|真剣|厳か|冷静|"
+                  r"(?:认真|認真|严肃|嚴肅|郑重|鄭重)|(?:진지|엄숙|심각)", low):
         return "serious"
-    if re.search(r"\b(reflected|thought to himself|thought to herself|remembered|in retrospect)\b", low):
+    if re.search(r"\b(reflected|thought to himself|thought to herself|remembered|in retrospect)\b|"
+                  r"(?:回想|回忆|回憶|沉思)|(?:회상|돌이켜|생각)", low):
         return "reflective"
 
     # Punctuation helps only after semantic/action cues. A single exclamation
