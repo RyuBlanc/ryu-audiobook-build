@@ -351,7 +351,9 @@ class RegressionTests(unittest.TestCase):
             "Automatic OOM recovery must rebuild prompts from the exact saved anchor paths.",
         )
         self.assertIn("reference_style(style)", worker)
-        self.assertIn("ANCHOR_TEXTS", worker)
+        self.assertIn("default_voice_design_anchor_text", worker)
+        self.assertIn("return default_voice_design_anchor_text(request.get(\"language\"))", worker)
+        self.assertNotIn("ANCHOR_TEXTS", worker)
         self.assertIn("recommended_chunk_chars = 2400", provider)
         self.assertIn("recommended_chunk_sentences = 10", provider)
         self.assertIn("recommended_preview_chunk_chars = 2400", provider)
