@@ -278,6 +278,31 @@ class QwenMultilingualIdentityAnchorTests(unittest.TestCase):
                 self.assertIn(required, source)
 
 
+    def test_real_qwen_smoke_covers_all_remaining_saved_design_languages(self):
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "tests"
+            / "smoke_qwen_real_clone_design_production.py"
+        ).read_text(encoding="utf-8")
+        for required in (
+            "REAL_QWEN_MULTILINGUAL_SAVED_PROFILE_IDENTITY=PASS",
+            "qwen-multilingual-voice-identity-continuity.json",
+            '("English", "Today I walked along a quiet street.", "He was angry and furious.")',
+            '("Korean", "오늘은 조용한 거리를 걷고 있습니다.", "그는 몹시 화가 났다.")',
+            '("Chinese", "今天我在安静的街道上散步。", "他非常愤怒。")',
+            '("German", "Heute gehe ich durch die ruhige Stadt.", "Er war wütend.")',
+            '("French", "Aujourd\'hui, je marche dans la ville calme.", "Il était furieux.")',
+            '("Russian", "Сегодня я иду по тихой улице.", "Он был зол.")',
+            '("Portuguese", "Hoje caminho pela rua tranquila.", "Ele estava furioso.")',
+            '("Spanish", "Hoy camino por la calle tranquila.", "Estaba furioso.")',
+            '("Italian", "Oggi cammino lungo la strada tranquilla.", "Era arrabbiato.")',
+            "same_anchor_sha256_after_reload",
+            "expression_pipeline_version",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, source)
+
+
     def test_worker_fallback_uses_the_same_language_aware_reference(self):
         from app.tts.qwen_character_worker import _expression_anchor_text
 

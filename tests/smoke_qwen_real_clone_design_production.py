@@ -464,6 +464,209 @@ def main() -> None:
             f"anchor_version={EXPRESSION_BANK_VERSION}"
         )
 
+        # Validate every remaining supported Qwen language with a real saved
+        # VoiceDesign profile. Reuse one live Design/Base worker pair across
+        # profiles to avoid reloading the heavyweight models between languages;
+        # the worker keeps each profile's identity anchor in its profile-keyed
+        # cache. Japanese above additionally exercises a fresh worker after
+        # reload, so this matrix complements rather than replaces that check.
+        multilingual_cases = (
+            ("English", "Today I walked along a quiet street.", "He was angry and furious."),
+            ("Korean", "오늘은 조용한 거리를 걷고 있습니다.", "그는 몹시 화가 났다."),
+            ("Chinese", "今天我在安静的街道上散步。", "他非常愤怒。"),
+            ("German", "Heute gehe ich durch die ruhige Stadt.", "Er war wütend."),
+            ("French", "Aujourd'hui, je marche dans la ville calme.", "Il était furieux."),
+            ("Russian", "Сегодня я иду по тихой улице.", "Он был зол."),
+            ("Portuguese", "Hoje caminho pela rua tranquila.", "Ele estava furioso."),
+            ("Spanish", "Hoy camino por la calle tranquila.", "Estaba furioso."),
+            ("Italian", "Oggi cammino lungo la strada tranquilla.", "Era arrabbiato."),
+        )
+        multilingual_engine = None
+        multilingual_evidence = []
+        try:
+            for index, (language, neutral_text, emotion_text) in enumerate(multilingual_cases, start=1):
+                profile_name = f"Stage C4 {language} Saved VoiceDesign"
+                profile = VoiceProfile(
+                    name=profile_name,
+                    provider="qwen-character",
+                    voice_id=f"Stage C4 {language} Character",
+                    model_id="design-1.7b",
+                    backend="cpu",
+                    language=language,
+                    notes=f"Native {language} VoiceDesign identity continuity acceptance.",
+                    authorized=True,
+                    qwen_mode="design",
+                    qwen_prompt=(
+                        f"A natural {language} audiobook character voice. Keep a steady, "
+                        f"clear adult timbre, native {language} articulation and consistent pitch."
+                    ),
+                    qwen_seed=20261120 + index,
+                )
+                current_profiles = [
+                    item for item in load_saved_profiles()
+                    if item.name.casefold() != profile_name.casefold()
+                ]
+                save_profiles([*current_profiles, profile])
+                saved = load_saved_profile(profile_name)
+                if not saved or not saved.qwen_profile_id:
+                    raise RuntimeError(f"{language} VoiceDesign profile did not persist its identity ID.")
+                if saved.qwen_anchor_text or saved.qwen_anchor_path:
+                    raise RuntimeError(f"{language} test profile unexpectedly persisted a custom anchor.")
+
+                with (
+                    patch("app.tts.profile_provider.get_qwen_model_preference", return_value="0.6b"),
+                    patch("app.tts.profile_provider.get_qwen_backend_preference", return_value="cpu"),
+                    patch("app.tts.profile_provider.get_qwen_low_memory_mode", return_value=False),
+                ):
+                    configured_engine, configured_voice = provider_from_profile(saved)
+                expected_anchor = default_voice_design_anchor_text(language)
+                if configured_engine.qwen_anchor_text != expected_anchor:
+                    configured_engine.close()
+                    raise RuntimeError(f"{language} saved profile did not resolve its native identity anchor.")
+                if configured_engine.model_kind != "design-1.7b" or configured_engine.long_form_model_kind != "base-0.6b":
+                    configured_engine.close()
+                    raise RuntimeError(
+                        f"{language} profile selected unexpected model kinds: "
+                        f"design={configured_engine.model_kind} base={configured_engine.long_form_model_kind}"
+                    )
+                if configured_engine.backend != "cpu":
+                    configured_engine.close()
+                    raise RuntimeError(f"{language} profile did not retain the explicit CPU acceptance backend.")
+
+                def _adopt_profile(target, source):
+                    target.voice_id = source.voice_id
+                    target.language = source.language
+                    target.instruct = source.instruct
+                    target.qwen_seed = source.qwen_seed
+                    target.qwen_anchor_path = source.qwen_anchor_path
+                    target.qwen_anchor_text = source.qwen_anchor_text
+                    target.qwen_profile_id = source.qwen_profile_id
+
+                if multilingual_engine is None:
+                    multilingual_engine = configured_engine
+                else:
+                    _adopt_profile(multilingual_engine, configured_engine)
+                    configured_engine.close()
+
+                neutral_output = OUTPUT_ROOT / f"qwen-{language.casefold()}-voicedesign-neutral.wav"
+                neutral_started = time.perf_counter()
+                multilingual_engine.synthesize(neutral_text, neutral_output, configured_voice)
+                neutral_elapsed = time.perf_counter() - neutral_started
+                neutral_duration = _valid_wav(neutral_output)
+                if neutral_output.stat().st_size < 1024:
+                    raise RuntimeError(f"{language} neutral VoiceDesign output is unexpectedly small.")
+                if not multilingual_engine.execution_backend_verified or multilingual_engine.execution_backend != "cpu":
+                    raise RuntimeError(
+                        f"{language} neutral synthesis did not prove CPU inference: "
+                        f"backend={multilingual_engine.execution_backend!r}"
+                    )
+                neutral_device = multilingual_engine.last_execution_context.get("device")
+
+                anchor_request = {
+                    "speaker": multilingual_engine.voice_id,
+                    "language": multilingual_engine.language,
+                    "instruct": multilingual_engine.instruct,
+                    "seed": multilingual_engine.qwen_seed,
+                    "anchor_text": multilingual_engine.qwen_anchor_text,
+                    "profile_id": multilingual_engine.qwen_profile_id,
+                }
+                anchor_path = _anchor_path(MODEL_ROOT, anchor_request, "neutral")
+                if not anchor_path.is_file() or anchor_path.stat().st_size < 1024:
+                    raise RuntimeError(f"{language} VoiceDesign did not persist a canonical native-language anchor.")
+                anchor_sha_before = hashlib.sha256(anchor_path.read_bytes()).hexdigest()
+
+                reloaded = load_saved_profile(profile_name)
+                if not reloaded or reloaded.qwen_profile_id != saved.qwen_profile_id:
+                    raise RuntimeError(f"Reloading {language} VoiceDesign changed its saved profile identity ID.")
+                if reloaded.qwen_anchor_text or reloaded.qwen_anchor_path:
+                    raise RuntimeError(f"Reloaded {language} profile unexpectedly gained an explicit anchor.")
+                with (
+                    patch("app.tts.profile_provider.get_qwen_model_preference", return_value="0.6b"),
+                    patch("app.tts.profile_provider.get_qwen_backend_preference", return_value="cpu"),
+                    patch("app.tts.profile_provider.get_qwen_low_memory_mode", return_value=False),
+                ):
+                    reload_config, reload_voice = provider_from_profile(reloaded)
+                if reload_config.qwen_anchor_text != expected_anchor:
+                    reload_config.close()
+                    raise RuntimeError(f"Reloaded {language} profile changed its native anchor text.")
+                if reload_config.model_kind != "design-1.7b" or reload_config.long_form_model_kind != "base-0.6b":
+                    reload_config.close()
+                    raise RuntimeError(f"Reloaded {language} profile changed its Design/Base model selection.")
+                _adopt_profile(multilingual_engine, reload_config)
+                reload_config.close()
+
+                detected_emotion = classify_expression(emotion_text)
+                if detected_emotion != "angry":
+                    raise RuntimeError(
+                        f"{language} emotion fixture expected angry, got {detected_emotion!r}: {emotion_text!r}"
+                    )
+                emotion_output = OUTPUT_ROOT / f"qwen-{language.casefold()}-voicedesign-angry.wav"
+                emotion_started = time.perf_counter()
+                multilingual_engine.synthesize(emotion_text, emotion_output, reload_voice)
+                emotion_elapsed = time.perf_counter() - emotion_started
+                emotion_duration = _valid_wav(emotion_output)
+                if emotion_output.stat().st_size < 1024:
+                    raise RuntimeError(f"{language} angry VoiceDesign output is unexpectedly small.")
+                if not multilingual_engine.execution_backend_verified or multilingual_engine.execution_backend != "cpu":
+                    raise RuntimeError(
+                        f"{language} reloaded emotional synthesis did not prove CPU inference: "
+                        f"backend={multilingual_engine.execution_backend!r}"
+                    )
+                emotion_device = multilingual_engine.last_execution_context.get("device")
+                anchor_sha_after = hashlib.sha256(anchor_path.read_bytes()).hexdigest()
+                if anchor_sha_before != anchor_sha_after:
+                    raise RuntimeError(f"{language} VoiceDesign regenerated its canonical anchor after profile reload.")
+
+                multilingual_evidence.append({
+                    "language": language,
+                    "saved_profile_id": saved.qwen_profile_id,
+                    "profile_reloaded": True,
+                    "anchor_text": expected_anchor,
+                    "anchor_path": str(anchor_path),
+                    "anchor_sha256": anchor_sha_before,
+                    "anchor_sha256_after_reload": anchor_sha_after,
+                    "same_anchor_sha256": True,
+                    "neutral_audio": {
+                        "seconds": round(neutral_duration, 3),
+                        "elapsed_seconds": round(neutral_elapsed, 3),
+                        "device": neutral_device,
+                    },
+                    "angry_audio": {
+                        "seconds": round(emotion_duration, 3),
+                        "elapsed_seconds": round(emotion_elapsed, 3),
+                        "device": emotion_device,
+                    },
+                    "backend": "cpu",
+                })
+        finally:
+            if multilingual_engine is not None:
+                multilingual_engine.close()
+
+        multilingual_identity_evidence = {
+            "languages": multilingual_evidence,
+            "language_count": len(multilingual_evidence),
+            "all_profiles_reloaded": len(multilingual_evidence) == len(multilingual_cases),
+            "same_anchor_sha256_after_reload": all(item["same_anchor_sha256"] for item in multilingual_evidence),
+            "backend": "cpu",
+            "anchor_instruction_version": EXPRESSION_BANK_VERSION,
+            "expression_pipeline_version": "story-expression-v3",
+        }
+        if len(multilingual_evidence) != len(multilingual_cases):
+            raise RuntimeError(
+                f"Real multilingual Qwen saved-profile acceptance covered {len(multilingual_evidence)} "
+                f"of {len(multilingual_cases)} required languages."
+            )
+        (OUTPUT_ROOT / "qwen-multilingual-voice-identity-continuity.json").write_text(
+            json.dumps(multilingual_identity_evidence, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        print(
+            "REAL_QWEN_MULTILINGUAL_SAVED_PROFILE_IDENTITY=PASS "
+            f"languages={','.join(item['language'] for item in multilingual_evidence)} "
+            f"profiles_reloaded={len(multilingual_evidence)} same_anchor_sha256=true "
+            f"backend=cpu anchor_version={EXPRESSION_BANK_VERSION}"
+        )
+
         # 3. Exercise assigned Qwen character dialogue through the same
         # CastAwareProvider + GenerationManager production route, then inspect
         # the actual multi-chapter M4B container.
