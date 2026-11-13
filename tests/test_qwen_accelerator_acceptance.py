@@ -66,8 +66,15 @@ class QwenAcceleratorAcceptanceTests(unittest.TestCase):
         self.assertEqual((gpu.backend, gpu.device), ("xpu", "xpu:0"))
         self.assertAlmostEqual(gpu.memory_gb, 12.0, places=2)
 
+    def test_nvidia_smi_memory_output_is_normalized_to_gib(self):
+        gpu_name = "NVIDIA GeForce RTX 3050 Laptop GPU"
+        with patch.object(accelerator, "_run", return_value=f"{gpu_name}, 4096"):
+            self.assertEqual(accelerator._nvidia_smi_devices(), [(gpu_name, 4.0)])
+
     def test_nvidia_without_cuda_runtime_is_candidate_not_active_device(self):
-        devices = self.detect(_fake_torch(), (("NVIDIA GeForce RTX 3050 Laptop GPU", 4096),))
+        # _nvidia_smi_devices() returns GiB; this mock deliberately models its
+        # normalized contract rather than the raw MiB text from nvidia-smi.
+        devices = self.detect(_fake_torch(), (("NVIDIA GeForce RTX 3050 Laptop GPU", 4.0),))
         candidate = next(item for item in devices if item.backend == "cuda-candidate")
         self.assertFalse(candidate.supported)
         self.assertEqual(candidate.device, "cpu")

@@ -310,3 +310,11 @@ All failed attempts below remain failed historical records. The later exact-head
 - Added a real saved-profile 0.6B CustomVoice preview measurement path with verified device telemetry, 27–33s audio duration and strict under-60s acceptance when configured. NVIDIA lower-memory acceptance is separate from the existing 1.7B VoiceDesign gate.
 - Latest CPU comparator: run #38 / [43400140577](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43400140577) generated 30.000s of actual saved-profile audio in **255.415s**; this misses the target and is not GPU evidence.
 - Physical NVIDIA CUDA, supported AMD ROCm and Intel XPU jobs remain dispatch/tag gated. No hardware success is claimed by a hosted CPU contract run.
+
+## C3 candidate first validation and correction — Build Windows App #3384
+
+- Run [43415226253](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43415226253) on exact head `cf26fe3b60444d2e6c04147a306edbcd599e5c79`.
+- Earlier focused steps remained green: Stage B **16/16**, Stage 6 **48/48**, C1 **10/10**, C2 **9/9**.
+- C3 test result: **6/7** passed. The NVIDIA-candidate test mock passed raw 4,096 MiB into a function whose contract is normalized GiB. The detector’s `_nvidia_smi_devices()` parser already performs the MiB-to-GiB conversion.
+- Failure was confined to test data setup; no runtime detection defect was established. Full regression and Windows packaging were skipped correctly.
+- Correction: mock candidate memory as 4.0 GiB and add a dedicated test asserting raw `nvidia-smi` output `4096` becomes `4.0` GiB. Preserve #3384 as a failed historical run; next push must validate the corrected exact head.

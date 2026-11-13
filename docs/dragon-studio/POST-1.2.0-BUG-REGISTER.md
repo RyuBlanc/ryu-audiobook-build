@@ -430,3 +430,10 @@ These code and regression results demonstrate that repeated unrelated-project lo
 - Existing 1.7B VoiceDesign CUDA gate remains unchanged: saved profile reload, VoiceDesign/Base identity lock, real 27–33s WAV, verified device `cuda`, no CPU substitution and warmed preview under 60s. A separate 0.6B CustomVoice gate covers the lower-memory NVIDIA path where the model actually loads.
 - CPU contract run #38 / [43400140577](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43400140577) produced 30.000s of saved-profile VoiceDesign audio in 255.415s and explicitly marked the hosted CPU 60s target as not met. This is comparison-only, not GPU acceptance.
 - C3 cannot close until an exact-head Windows package and actual device-verified self-hosted run(s) prove each claimed hardware backend, including saved-profile preview audio, timing JSON/logs, device/runtime metadata and uploaded evidence. Do not count a hosted CPU run or hardware candidate as accelerator acceptance.
+
+### C3 first exact-head validation — Build Windows App #3384
+
+- Run [43415226253](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43415226253) on `cf26fe3b60444d2e6c04147a306edbcd599e5c79` passed JavaScript syntax, native Qt lifecycle, Stage B **16/16**, Stage 6 **48/48**, C1 **10/10** and C2 **9/9**.
+- The focused C3 suite ran seven tests; six passed. The only failure was a test-fixture contract mismatch: `_nvidia_smi_devices()` returns VRAM already normalized in GiB, but the mocked result supplied the raw `nvidia-smi` MiB value `4096` and expected `4.0`. The real parser divides the driver value by 1024.
+- No application detector regression was proven by this run. Full regression and Windows packaging were correctly skipped after the focused test failed.
+- Corrective test change supplies `4.0` GiB to the mocked detector and adds a separate parser regression proving raw `4096` MiB is normalized to `4.0` GiB. No test is removed or relaxed; the candidate must rerun at a new exact SHA.
