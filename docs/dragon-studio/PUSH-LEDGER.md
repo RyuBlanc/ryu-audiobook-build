@@ -264,3 +264,10 @@ All failed attempts below remain failed historical records. The later exact-head
 - Stage B 16/16 and Stage 6 48/48 passed; JS syntax and Qt lifecycle passed.
 - Two newly added assignment-flow tests raised NameError because tempfile was not imported. The same-name option builder test passed; failure occurred before the mocked assignment flows ran.
 - Fixed with the missing tempfile import; no application logic changed and no test was removed. Next exact-head run includes the full package marker.
+
+## Build #3378 — one stale Voice Library assignment contract
+
+- Run [#3378 / 43383155116](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43383155116) on SHA `2e9d1e746efbc409352e7e96ba2c8c295b83120d`: focused C1 **10/10**, Stage B **16/16**, Stage 6 **48/48**; full suite executed **1,552 tests**, one failure.
+- Sole failure was a legacy static test expecting the removed name-only Character Library sync implementation. The new Voice Studio assignment tests and scoped resolver tests passed.
+- Corrected the flow to persist Voice Cast's full scoped state with `_save_cast(update_voice=False)` (no bulk voice overwrite), then sync exactly the selected `(series, character)` row with `update_voice=True`. The no-CastPage path uses the same one-row operation. Contract and dynamic tests now assert that only the selected Library voice is updated.
+- #3378 package was skipped after the suite failure; next candidate must pass full regression and exact-head package.

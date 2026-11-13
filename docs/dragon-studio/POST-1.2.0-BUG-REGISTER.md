@@ -371,3 +371,11 @@ These code and regression results demonstrate that repeated unrelated-project lo
 - Passed before C1 failure: JavaScript syntax, isolated Qt lifecycle, Stage B 16/16, and Stage 6 48/48.
 - Focused C1 executed 10 tests: the seven pre-existing C1 checks and the new same-name-choice helper passed; two new mocked assignment-flow tests errored at fixture setup because tempfile.TemporaryDirectory was used without importing tempfile. No application-code assertion failed. Full regression and package were correctly skipped.
 - Correction: add the missing standard-library tempfile import. Do not remove either end-to-end mocked assignment test or reduce the focused suite.
+
+## Build Windows App #3378 — one stale assignment contract
+
+- Run [#3378 / 43383155116](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43383155116), candidate SHA `2e9d1e746efbc409352e7e96ba2c8c295b83120d`.
+- Focused Stage C1 passed **10/10**, Stage B **16/16**, Stage 6 **48/48**. Full regression executed **1,552 tests** and had exactly one failure.
+- The only failure was `test_native_voice_assignment_syncs_only_assigned_character_to_series_library`, whose static assertion expected the removed name-only `source_row` implementation. The new exact-series UI tests passed. The requirement to avoid changing unrelated Character Library voices is preserved.
+- Follow-on correction uses `_save_cast(update_voice=False)` to persist the complete scoped Voice Cast state without bulk-overwriting Library voice records, then syncs exactly the selected `(series, character)` row with `update_voice=True`. The no-Voice-Cast fallback uses the same one-row operation.
+- The two live assignment tests and the Stage 4 source contract now assert the exact selected series and single-row payload. Full regression and exact-head package remain open; #3378 stays recorded as failed.

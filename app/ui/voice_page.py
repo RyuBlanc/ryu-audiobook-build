@@ -1401,8 +1401,11 @@ class VoicePage(QWidget):
         selected_series = str(target["series"])
         identity = character_identity_key(character, selected_series)
 
-        # Use the canonical Voice Cast writer so roster, scoped assignment and
-        # legacy compatibility data cannot drift apart.
+        # Persist the full canonical Voice Cast state and scoped assignment map,
+        # but synchronize only this selected voice to the series library. A bulk
+        # update_voice=True here could overwrite unrelated library voice records
+        # with stale values from other project rows.
+        assignment_aliases: list[str] = []
         if cast_page is not None:
             matching_rows = [
                 row for row in getattr(cast_page, "rows", [])
@@ -1416,17 +1419,22 @@ class VoicePage(QWidget):
                 )
                 return
             if not matching_rows:
-                cast_page.rows.append({
+                selected_row = {
                     "name": character, "role": target.get("role") or "Manually Added Character",
                     "series": selected_series, "dialogue_count": int(target.get("dialogue_count") or 0),
                     "examples": list(target.get("examples") or []), "voice": saved_profile.name,
                     "confidence": float(target.get("confidence", 1.0)),
                     "aliases": list(target.get("aliases") or []),
-                })
+                }
+                cast_page.rows.append(selected_row)
             else:
-                matching_rows[0]["series"] = selected_series
-                matching_rows[0]["voice"] = saved_profile.name
-            cast_page._save_cast(update_voice=True)
+                selected_row = matching_rows[0]
+                selected_row["series"] = selected_series
+                selected_row["voice"] = saved_profile.name
+            assignment_aliases = list(selected_row.get("aliases") or [])
+            # Persist roster + scoped identity assignments without overwriting
+            # other Character Library voice records as part of this one edit.
+            cast_page._save_cast(update_voice=False)
             cast_page._refresh_labels()
         else:
             identity_assignments = state.get("voice_cast_identity_assignments", {})
@@ -1452,6 +1460,7 @@ class VoicePage(QWidget):
                     "aliases": list(target.get("aliases") or []),
                 }
                 roster.append(roster_row)
+            assignment_aliases = list(roster_row.get("aliases") or [])
             state["voice_cast_character_roster"] = roster
             known_series = {
                 str(row.get("series") or default_series).strip().casefold()
@@ -1467,21 +1476,25 @@ class VoicePage(QWidget):
                 assignments.pop(character, None)
             state["voice_cast"] = assignments
             save_state(folder, state)
-            try:
-                sync_characters(
-                    selected_series,
-                    [{"name": character, "aliases": list(roster_row.get("aliases") or []), "voice": saved_profile.name}],
-                    source_project_folder=str(folder),
-                    source_project_title=str(getattr(project, "title", "") or ""),
-                    update_voice=True,
-                )
-            except Exception as exc:
-                self.status.setText(
-                    f"Assigned '{saved_profile.name}' to {character} [{selected_series}], "
-                    f"but Character Library sync failed: {exc}"
-                )
-                self._refresh_assignment_actions()
-                return
+
+        source_row = {"name": character, "voice": saved_profile.name}
+        if assignment_aliases:
+            source_row["aliases"] = assignment_aliases
+        try:
+            sync_characters(
+                selected_series,
+                [source_row],
+                source_project_folder=str(folder),
+                source_project_title=str(getattr(project, "title", "") or ""),
+                update_voice=True,
+            )
+        except Exception as exc:
+            self.status.setText(
+                f"Assigned '{saved_profile.name}' to {character} [{selected_series}], "
+                f"but Character Library sync failed: {exc}"
+            )
+            self._refresh_assignment_actions()
+            return
 
         generation = getattr(window, "generation", None)
         if generation is not None:

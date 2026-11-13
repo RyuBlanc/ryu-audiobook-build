@@ -130,12 +130,17 @@ class NativeCharacterStudioContractTests(unittest.TestCase):
                 patch("app.ui.voice_page.load_saved_profiles", return_value=[saved]),
                 patch("app.ui.voice_page.load_state", return_value={"series_name": "Series One", "voice_cast": {}}),
                 patch("app.ui.voice_page.QInputDialog.getItem", return_value=("Mira — Series Two", True)),
+                patch("app.ui.voice_page.sync_characters") as sync_library,
             ):
                 VoicePage.assign_to_character(page)
 
             self.assertEqual(first["voice"], "Old One")
             self.assertEqual(second["voice"], saved.name)
-            cast._save_cast.assert_called_once_with(update_voice=True)
+            cast._save_cast.assert_called_once_with(update_voice=False)
+            sync_library.assert_called_once_with(
+                "Series Two", [{"name": "Mira", "voice": saved.name}],
+                source_project_folder=str(folder), source_project_title="Series One", update_voice=True,
+            )
             cast._refresh_labels.assert_called_once()
             generation._load_voice_cast_summary.assert_called_once()
             generation._refresh_readiness.assert_called_once()
@@ -171,7 +176,7 @@ class NativeCharacterStudioContractTests(unittest.TestCase):
                 patch("app.ui.voice_page.load_saved_profiles", return_value=[saved]),
                 patch("app.ui.voice_page.load_state", return_value=state),
                 patch("app.ui.voice_page.save_state", side_effect=lambda _folder, value: persisted.update(value)),
-                patch("app.ui.voice_page.sync_characters"),
+                patch("app.ui.voice_page.sync_characters") as sync_library,
                 patch("app.ui.voice_page.QInputDialog.getItem", return_value=("Mira — Series Two", True)),
             ):
                 VoicePage.assign_to_character(page)
@@ -181,6 +186,10 @@ class NativeCharacterStudioContractTests(unittest.TestCase):
                 {character_identity_key("Mira", "Series Two"): saved.name},
             )
             self.assertNotIn("Mira", persisted["voice_cast"])
+            sync_library.assert_called_once_with(
+                "Series Two", [{"name": "Mira", "voice": saved.name}],
+                source_project_folder=str(folder), source_project_title="Series One", update_voice=True,
+            )
             self.assertEqual(
                 {item["series"] for item in persisted["voice_cast_character_roster"]},
                 {"Series One", "Series Two"},
