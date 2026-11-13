@@ -181,6 +181,21 @@ jobs:
           & $pythonExe -B -m unittest discover -s tests -p test_native_character_studio_contract.py -v
           if ($LASTEXITCODE -ne 0) { throw "Focused Stage C1 Qwen Character Studio identity regression failed with exit code $LASTEXITCODE." }
 
+
+      - name: Run focused Stage C2 Qwen profile restart and install-repair lifecycle regression
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          if ($pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "setup-python did not provide a real Python interpreter: $pythonExe"
+          }
+          $repoRoot = $env:GITHUB_WORKSPACE
+          $env:PYTHONPATH = $repoRoot
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -B -m unittest -v tests.test_qwen_profile_restart_acceptance tests.test_qwen_install_repair_lifecycle
+          if ($LASTEXITCODE -ne 0) { throw "Focused Stage C2 Qwen profile restart/install-repair lifecycle regression failed with exit code $LASTEXITCODE." }
+
       - name: Run full regression suite (remaining tests)
         shell: pwsh
         run: |

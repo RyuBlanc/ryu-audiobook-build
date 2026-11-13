@@ -866,6 +866,7 @@ def _run(command: list[str], progress=None, timeout: int = 3600) -> None:
 _ACTIVE_QWEN_WORKERS: set[int] = set()
 _ACTIVE_QWEN_WORKERS_LOCK = threading.RLock()
 _GPU_RUNTIME_UPGRADE_LOCK = threading.RLock()
+_RUNTIME_INSTALL_LOCK = threading.RLock()
 
 
 def register_qwen_worker(pid: int | None) -> None:
@@ -894,45 +895,184 @@ def _active_qwen_worker_pids() -> list[int]:
     return active
 
 
-def install_runtime(
-    progress=None, force_repair: bool = False, preferred_backend: str | None = None
-) -> None:
-    RUNTIME_ROOT.mkdir(parents=True, exist_ok=True)
+def _runtime_repair_backup_root() -> Path:
+    return RUNTIME_ROOT / "runtime-repair-backup"
 
-    if force_repair:
-        if progress:
-            progress("Repairing Qwen3-TTS isolated runtime • model files will be kept…")
-        MARKER.unlink(missing_ok=True)
-        if VENV_ROOT.exists():
-            shutil.rmtree(VENV_ROOT, ignore_errors=True)
 
-    if _runtime_version_is_current() and not force_repair:
-        if progress:
-            progress("Qwen3-TTS local runtime is already installed.")
+def _remove_runtime_repair_target(path: Path) -> None:
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    else:
+        path.unlink(missing_ok=True)
+
+
+def _restore_runtime_repair_backup(backup_root: Path) -> None:
+    manifest_path = backup_root / "manifest.json"
+    if not manifest_path.is_file():
+        # The transaction was interrupted before its manifest was committed;
+        # no existing runtime paths were moved yet.
+        shutil.rmtree(backup_root, ignore_errors=True)
         return
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        original_targets = manifest["targets"]
+        if manifest.get("schema_version") != 1 or not isinstance(original_targets, dict):
+            raise ValueError("Unsupported repair backup manifest.")
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            "Qwen repair backup metadata is unreadable. The backup was preserved at "
+            f"{backup_root}; no saved runtime was deleted. {exc}"
+        ) from exc
 
+    targets = (
+        ("python312", PYTHON_ROOT),
+        ("runtime", VENV_ROOT),
+        ("runtime.json", MARKER),
+    )
+    for name, destination in reversed(targets):
+        saved = backup_root / name
+        was_present = original_targets.get(name) is True
+        if was_present:
+            if saved.exists():
+                _remove_runtime_repair_target(destination)
+                saved.replace(destination)
+            elif not destination.exists():
+                raise RuntimeError(
+                    "The previous Qwen runtime could not be restored because its "
+                    f"backup entry is missing: {saved}"
+                )
+        else:
+            _remove_runtime_repair_target(destination)
+
+    shutil.rmtree(backup_root, ignore_errors=True)
+
+
+def _recover_interrupted_runtime_repair() -> None:
+    backup_root = _runtime_repair_backup_root()
+    if not backup_root.exists():
+        return
+    if _runtime_version_is_current():
+        # The new runtime passed its self-test; only backup cleanup was
+        # interrupted. Keep the validated runtime and discard the old copy.
+        shutil.rmtree(backup_root, ignore_errors=True)
+        return
+    _restore_runtime_repair_backup(backup_root)
+
+
+def _write_runtime_marker(selected_backend: str, installed_torch: str, installed_torchaudio: str) -> None:
+    payload = {
+        "ready": True,
+        "bootstrap_version": BOOTSTRAP_VERSION,
+        "python": PYTHON_VERSION,
+        "qwen_tts": QWEN_TTS_VERSION,
+        "torch": installed_torch,
+        "torchaudio": installed_torchaudio,
+        "tokenizer": TOKENIZER_ID,
+        "accelerator": selected_backend,
+    }
+    temporary = MARKER.with_name(MARKER.name + ".tmp")
+    try:
+        encoded = json.dumps(payload, indent=2)
+        temporary.write_text(encoded, encoding="utf-8")
+        if json.loads(temporary.read_text(encoding="utf-8")) != payload:
+            raise IOError("Qwen runtime marker verification failed.")
+        temporary.replace(MARKER)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _install_qwen_runtime_build(progress=None, preferred_backend: str | None = None) -> None:
     python = _install_portable_python(progress)
     python = _create_or_repair_venv(progress)
     selected_backend, installed_torch, installed_torchaudio = _install_runtime_packages(
         python, progress, preferred_backend=preferred_backend
     )
+    _write_runtime_marker(selected_backend, installed_torch, installed_torchaudio)
+    if not _runtime_version_is_current():
+        raise RuntimeError(
+            "The replacement Qwen runtime did not pass its final version/backend "
+            "self-check. The previous runtime will be restored."
+        )
 
-    MARKER.write_text(
-        json.dumps(
-            {
-                "ready": True,
-                "bootstrap_version": BOOTSTRAP_VERSION,
-                "python": PYTHON_VERSION,
-                "qwen_tts": QWEN_TTS_VERSION,
-                "torch": installed_torch,
-                "torchaudio": installed_torchaudio,
-                "tokenizer": TOKENIZER_ID,
-                "accelerator": selected_backend,
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+
+def install_runtime(
+    progress=None, force_repair: bool = False, preferred_backend: str | None = None
+) -> None:
+    with _RUNTIME_INSTALL_LOCK:
+        RUNTIME_ROOT.mkdir(parents=True, exist_ok=True)
+        backup_root = _runtime_repair_backup_root()
+
+        # Recover an interrupted repair before starting another operation. A
+        # fully validated replacement wins; otherwise restore the last known
+        # good Python, venv and readiness marker.
+        current = _runtime_version_is_current()
+        active_pids = _active_qwen_worker_pids()
+        if active_pids and (force_repair or not current or backup_root.exists()):
+            raise RuntimeError(
+                "Qwen install/repair is blocked while a Qwen synthesis worker is "
+                "active. Finish or cancel the current preview/generation first."
+            )
+        if backup_root.exists():
+            _recover_interrupted_runtime_repair()
+            current = _runtime_version_is_current()
+
+        if current and not force_repair:
+            if progress:
+                progress("Qwen3-TTS local runtime is already installed and verified.")
+            return
+
+        if active_pids:
+            raise RuntimeError(
+                "Qwen install/repair is blocked while a Qwen synthesis worker is active."
+            )
+
+        if not force_repair:
+            _install_qwen_runtime_build(progress, preferred_backend)
+            return
+
+        if progress:
+            progress(
+                "Repairing Qwen3-TTS • preserving the current verified runtime until "
+                "the replacement passes its self-check…"
+            )
+
+        original_targets = {
+            "python312": PYTHON_ROOT.exists(),
+            "runtime": VENV_ROOT.exists(),
+            "runtime.json": MARKER.exists(),
+        }
+        backup_root.mkdir(parents=True, exist_ok=False)
+        manifest = {"schema_version": 1, "targets": original_targets}
+        manifest_tmp = backup_root / "manifest.json.tmp"
+        try:
+            manifest_tmp.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+            if json.loads(manifest_tmp.read_text(encoding="utf-8")) != manifest:
+                raise IOError("Qwen repair transaction manifest verification failed.")
+            manifest_tmp.replace(backup_root / "manifest.json")
+
+            for name, source in (
+                ("python312", PYTHON_ROOT),
+                ("runtime", VENV_ROOT),
+                ("runtime.json", MARKER),
+            ):
+                if source.exists():
+                    source.replace(backup_root / name)
+
+            _install_qwen_runtime_build(progress, preferred_backend)
+        except Exception as exc:
+            try:
+                _restore_runtime_repair_backup(backup_root)
+            except Exception as restore_error:
+                raise RuntimeError(
+                    "Qwen repair failed and automatic rollback could not finish. "
+                    "The previous runtime backup is preserved at "
+                    f"{backup_root}. Repair error: {exc}; rollback error: {restore_error}"
+                ) from exc
+            raise
+        else:
+            shutil.rmtree(backup_root, ignore_errors=True)
+            if progress:
+                progress("Qwen3-TTS repair passed its self-check; previous runtime backup removed.")
 
 
 def ensure_best_runtime_for_gpu(

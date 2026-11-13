@@ -280,3 +280,14 @@ All failed attempts below remain failed historical records. The later exact-head
 - Packaged Sound Design and most Production checks passed. The only failed package gate was the Stage 5.4 fixture's Generate-button readiness timeout. Current project diagnostics were valid; no listed job was active, but the old Production audio-operation lock persisted in the frontend snapshot.
 - Root cause: `bindMiniPlayerNavigation()` had never been called from `wire()`, so its Production job refresh on page navigation was dead code. The native bridge does not expose `voice.select.get` or `production.readiness`; those were only unsupported diagnostic calls, not the application readiness implementation.
 - Corrective candidate activates the wrapper, refreshes project-scoped jobs after Generate/Production navigation, and derives test diagnostics from supported `project.get_active` fields. Focused regression contracts added. Exact-head package revalidation required.
+
+
+## Stage C1 exact-head result and Stage C2 transactional repair candidate — 13 November 2026
+
+- Build Windows App [#3380 / run 43387876985](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43387876985) passed on e7ce7896d2bcb9ea93a47ab9dae9d5e5a502726c (dragon-studio/candidate-c1-voice-identity-2026-11-13).
+- Focused C1, Stage B 16/16, Stage 6 48/48 and the complete **1,554-test** regression passed. The Windows package passed Production/Sound Design acceptance, real multi-chapter M4B/FFmpeg decode, restart/recovery, installer, hosted install/launch/upgrade/uninstall and Defender. Artifacts: installer 14021615118 (845,837,741 bytes), portable 14020772794 (1,183,905,233 bytes), SHA manifest 14021485351, M4B 14019064513 (8,992,314 bytes), Piper evidence 14021325746.
+- #3380 fixes #3379's stale project-scoped Production job snapshot by activating the existing Generate navigation refresh. The active-job lock remains intact.
+- C1's hosted source/test/package acceptance is complete; manual installed-app audition/restart/production identity remains open and is not replaced by CI evidence.
+- C2 audit found repair_runtime(force_repair=True) deleted the previous venv and marker before the replacement was validated. The candidate changes this to a backup/verify/rollback transaction and refuses destructive repair during active Qwen synthesis.
+- New focused C2 tests cover repair success, rollback, active-job protection, interrupted-repair recovery, per-mode model selection, safe model/runtime uninstall preservation, and a fresh-interpreter reload of saved CustomVoice, VoiceDesign and Clone identities.
+- Candidate branch: dragon-studio/candidate-c2-profile-lifecycle-2026-11-13, based on the exact #3380 SHA. Focused C2, full regression and exact-head Windows package validation are pending; physical hardware and installed-PC acceptance remain separate.
