@@ -162,6 +162,31 @@ class Stage6HistoryTaskManagerTests(unittest.TestCase):
             self.assertIn(marker, packaged)
             self.assertIn(marker, runner)
 
+        # Repair acceptance must actively request a real, same-row refresh.
+        # The application intentionally backs off its normal poll while idle;
+        # a 10-second wait must not be used as a proxy for an active 1.5-second poll.
+        missing_start = packaged.index("stage6OriginalView.remove();")
+        missing_end = packaged.index(
+            'record("stage6_task_manager_repairs_missing_view_action_in_place"',
+            missing_start,
+        )
+        missing_repair = packaged[missing_start:missing_end]
+        self.assertIn("stage6JobsButton.click();", missing_repair)
+        self.assertIn("stage6TaskRepairRow.isConnected", missing_repair)
+        self.assertIn("}, 5000);", missing_repair)
+
+        mismatched_start = packaged.index(
+            'stage6RepairedView.dataset.jobView = "stale-"'
+        )
+        mismatched_end = packaged.index(
+            'record("stage6_task_manager_repairs_mismatched_view_action_in_place"',
+            mismatched_start,
+        )
+        mismatched_repair = packaged[mismatched_start:mismatched_end]
+        self.assertIn("stage6JobsButton.click();", mismatched_repair)
+        self.assertIn("stage6TaskRepairRow.isConnected", mismatched_repair)
+        self.assertIn("}, 5000);", mismatched_repair)
+
 
     def test_packaged_acceptance_requires_responsive_viewport_matrix(self) -> None:
         packaged = (ROOT / "tests" / "stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")

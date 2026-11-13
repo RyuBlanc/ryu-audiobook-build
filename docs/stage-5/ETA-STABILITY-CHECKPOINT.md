@@ -55,3 +55,13 @@ This checkpoint repairs the Production Studio estimate shown while a long-form a
 - The Windows workflow runs `tests.test_stage5_generation_eta_stability` as a dedicated focused Stage B step before the full regression suite. Packaging remains gated on the full tests job.
 - No interpolation of narration percentage during a currently rendering Qwen chunk is introduced. Percentage remains a truthful completed-work ratio; validated chunk count and active synthesis status provide additional context.
 - Target-PC long-book listening, Qwen hardware timing, physical DPI and manual audio acceptance remain separate from this automated A/B checkpoint.
+
+
+
+## Build #3370 A/B continuation — package gate result
+
+- The exact-head focused Stage B module passed **16/16**, including `test_pause_resume_excludes_paused_time_from_eta_countdown`; the full regression suite passed **1,544/1,544**.
+- The same run built and verified the frozen application and passed the real bundled-Piper two-chapter M4B acceptance. Its M4B evidence artifact was uploaded (artifact ID `14002562242`).
+- The Windows package did not complete: packaged Sound Design acceptance failed at the final mismatched Task Manager View-action repair. This check had also failed in #3368 and passed in #3369 while the frontend source remained unchanged, indicating a timing-sensitive acceptance trigger rather than a confirmed A/B application regression.
+- The packaged test incorrectly waited 10 seconds for the next periodic poll while assuming 1.5-second active-job polling. The production scheduler intentionally backs off to 10 seconds when idle and 30 seconds while hidden and idle. The acceptance now requests a real immediate refresh through the existing Task Manager button after each deliberate View-action mutation, then still proves the same row and action identity are preserved.
+- The Stage A/B Windows package checkpoint stays **open** until the corrected exact-head run passes the complete packaged acceptance and creates the Windows installer/portable/hash artifacts.

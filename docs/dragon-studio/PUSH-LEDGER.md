@@ -189,3 +189,17 @@ All failed attempts below remain failed historical records. The later exact-head
 - Hardware acceptance scripts exercise the saved VoiceProfile -> `provider_from_profile` -> identity-locked `design` route and reject CPU fallback; they are not the legacy one-pass `design-preview` benchmark.
 - The 41-viewport CSS/DOM matrix and packaged checks from earlier checkpoints remain automated evidence only. Physical mixed-DPI/multi-monitor behaviour, shell icon appearance, installer layout at the user's display scaling, full-book target-PC generation/playback and forced-interruption recovery remain open.
 - The PR remains open/draft; no public release was published by these PR runs.
+
+
+
+## Build Windows App #3370 — exact-head A/B continuation result
+
+- PR #35 synchronize run: [#3370 / 43347009057](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43347009057), exact head `f644d9af9d12fe0af03484a60173b3619c4d6811`.
+- Trigger: the new Stage A/B commit was pushed to PR #35; the pull_request synchronize event automatically ran the branch's full Windows workflow. This was not a second unrelated app fix.
+- Commit scope: Stage A master-register reconciliation, Stage B pause/resume ETA regression and checkpoint record, and the dedicated Stage B CI step. The packaged executable contained the cumulative application source already on PR #35.
+- Tests: focused Stage B 16/16; focused Stage 6 48/48; full regression 1,544/1,544. All test job steps passed.
+- Build: frozen executable, frozen verification, bundled voice assets and real two-chapter Piper M4B all passed. Artifact `Ryu-Stage3-Real-Multichapter-M4B-3370` (ID `14002562242`, 9,037,412 bytes) was uploaded.
+- Failure: packaged Sound Design acceptance timed out at `stage6_task_manager_repairs_mismatched_view_action_in_place`; the remaining installer/release steps were skipped. Do not call #3370 a Windows package pass.
+- Root cause: test assumed an active 1.5s backend poll but waited exactly 10s; the production scheduler intentionally backs off to 10s idle and 30s hidden-idle. #3368 failed the same assertion; #3369 passed with the same frontend/acceptance source, showing the timing-sensitive test was nondeterministic.
+- Correction: explicitly request an immediate backend refresh using the existing Task Manager button after each deliberate View-action corruption; retain strict same-row identity and no-rebuild assertions. The normal adaptive polling values are preserved.
+- A new exact-head Windows run is required to close the A/B package checkpoint.
