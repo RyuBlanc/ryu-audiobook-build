@@ -257,3 +257,10 @@ All failed attempts below remain failed historical records. The later exact-head
 - Confirmed issue: Voice Studio Assign to Character offered only names, collapsing same-named series identities and updating only legacy voice_cast. The authoritative scoped identity map could therefore remain stale.
 - Candidate fix disambiguates choices by series, persists through the canonical Voice Cast scoped writer, and provides a scoped-map fallback if Voice Cast is unavailable. Production scoped matching now includes aliases.
 - Focused regressions exercise both assignment persistence paths, duplicate-name selection, and alias-keyed assignment precedence. Full regression and exact-head package validation are pending.
+
+## Stage C1 candidate run #3377 — fixture import error
+
+- Run 43382873285 / #3377 failed in the focused Stage C1 module on SHA 6424cc83ef0222603cabf39316c4941ac06dda6d.
+- Stage B 16/16 and Stage 6 48/48 passed; JS syntax and Qt lifecycle passed.
+- Two newly added assignment-flow tests raised NameError because tempfile was not imported. The same-name option builder test passed; failure occurred before the mocked assignment flows ran.
+- Fixed with the missing tempfile import; no application logic changed and no test was removed. Next exact-head run includes the full package marker.

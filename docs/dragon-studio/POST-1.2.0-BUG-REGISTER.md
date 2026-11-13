@@ -364,3 +364,10 @@ These code and regression results demonstrate that repeated unrelated-project lo
 - Candidate fix builds choices by exact (series, character) identity, displays series for duplicate names, writes through VoiceCastPage._save_cast(update_voice=True), and uses a scoped-map fallback only when Voice Cast is unavailable. Legacy name-only values are written only when unambiguous.
 - Production scoped-map preflight recognizes confirmed aliases as identity matches. Focused tests cover duplicate-name selection, both assignment persistence paths, and alias-keyed scoped assignment overriding stale legacy profile data.
 - This follow-on requires focused C1, full regression and exact-head packaged Windows validation before C1 can close.
+
+## Stage C1 candidate run #3377 — focused test fixture import failure
+
+- Run [#3377 / 43382873285](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43382873285), exact candidate SHA 6424cc83ef0222603cabf39316c4941ac06dda6d.
+- Passed before C1 failure: JavaScript syntax, isolated Qt lifecycle, Stage B 16/16, and Stage 6 48/48.
+- Focused C1 executed 10 tests: the seven pre-existing C1 checks and the new same-name-choice helper passed; two new mocked assignment-flow tests errored at fixture setup because tempfile.TemporaryDirectory was used without importing tempfile. No application-code assertion failed. Full regression and package were correctly skipped.
+- Correction: add the missing standard-library tempfile import. Do not remove either end-to-end mocked assignment test or reduce the focused suite.
