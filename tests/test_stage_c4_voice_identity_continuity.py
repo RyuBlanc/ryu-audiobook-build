@@ -303,6 +303,26 @@ class QwenMultilingualIdentityAnchorTests(unittest.TestCase):
                 self.assertIn(required, source)
 
 
+    def test_portuguese_trembling_forms_are_concerned_without_matching_train_noun(self):
+        from app.tts.expression import classify_expression
+
+        self.assertEqual(
+            classify_expression("Hoje vou de trem até o centro da cidade."),
+            "neutral",
+        )
+        cases = (
+            ("Ela começou a tremer.", "concerned"),
+            ("Ele estava tremendo.", "concerned"),
+            ("As mãos tremiam.", "concerned"),
+            ("Ele tremeu durante a noite.", "concerned"),
+            ("Tu tremes quando está frio.", "concerned"),
+            ("Nós trememos ao ouvir o barulho.", "concerned"),
+        )
+        for source, expected in cases:
+            with self.subTest(source=source):
+                self.assertEqual(classify_expression(source), expected)
+
+
     def test_real_multilingual_smoke_neutral_sentences_are_not_expression_cues(self):
         from app.tts.expression import classify_expression
 

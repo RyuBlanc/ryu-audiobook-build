@@ -59,7 +59,7 @@ _NON_ENGLISH_EXPRESSION_CUES = {
     "fear": (
         r"\b(?:ängstlich|angst|fürcht\w*|erschrocken|zitter\w*|peur|effrayé|"
         r"effrayée|terreur|trembl\w*|paniqu\w*|miedo|asustado|asustada|temor|"
-        r"tembl\w*|medo|assustado|assustada|trem\w*|paura|spaventato|spaventata|"
+        r"tembl\w*|medo|assustado|assustada|trem(?:endo|eram|er|eu|ia|iam|em|es|e|o|am|emos|ido)|paura|spaventato|spaventata|"
         r"timore|паник\w*|страш\w*|боялся|боялась|дрожал|дрожала)"
     ),
     "tense": (
