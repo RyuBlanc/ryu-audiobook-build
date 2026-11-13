@@ -12,6 +12,7 @@ on:
       - 'requirements*.txt'
       - 'build.py'
       - '.github/workflows/provider-smoke-windows.yml'
+      - 'docs/dragon-studio/STAGE-C4-QWEN-VOICE-IDENTITY-CONTINUITY.md'
       - 'run_app.py'
   workflow_dispatch:
 
