@@ -123,6 +123,26 @@ class Stage54GenerationJobUiStateTests(unittest.TestCase):
         self.assertIn("Library project card list", self.packaged)
         self.assertIn("data-job-action=\"recover\"", self.packaged)
 
+    def test_generate_navigation_refreshes_job_snapshots_for_the_new_active_project(self):
+        start = self.adapter.index("function bindMiniPlayerNavigation()")
+        end = self.adapter.index("function ", start + len("function bindMiniPlayerNavigation()"))
+        navigation = self.adapter[start:end]
+        wire = self.adapter[self.adapter.index("async function wire()"):]
+        jobs_refresh = self.adapter[self.adapter.index("async function refreshJobsImpl()"):]
+        self.assertIn("generate:'production'", navigation)
+        self.assertIn("['generate','production','generator','generation'].includes(page)", navigation)
+        self.assertIn("refreshJobs().catch(error => console.warn('[Ryu Production navigation job refresh]'", navigation)
+        self.assertIn("bindMiniPlayerNavigation();", wire)
+        self.assertIn("const projectRows = jobs.filter(row =>", self.adapter)
+        self.assertIn("renderProductionGeneration(allJobs)", jobs_refresh)
+
+    def test_packaged_production_gate_diagnostics_use_supported_project_readiness_fields(self):
+        self.assertNotIn('invoke("voice.select.get"', self.packaged)
+        self.assertNotIn('invoke("production.readiness"', self.packaged)
+        self.assertIn('invoke("project.get_active", {})', self.packaged)
+        self.assertIn("narrator_profile_available", self.packaged)
+        self.assertIn("dialogue_routing_ready", self.packaged)
+
     def test_production_preview_monitor_acceptance_reopens_page_before_render_assertion(self):
         preview_start = self.packaged.index("real Production Preview job start")
         reopen = self.packaged.index('window.go("generate")', preview_start)

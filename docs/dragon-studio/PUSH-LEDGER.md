@@ -271,3 +271,12 @@ All failed attempts below remain failed historical records. The later exact-head
 - Sole failure was a legacy static test expecting the removed name-only Character Library sync implementation. The new Voice Studio assignment tests and scoped resolver tests passed.
 - Corrected the flow to persist Voice Cast's full scoped state with `_save_cast(update_voice=False)` (no bulk voice overwrite), then sync exactly the selected `(series, character)` row with `update_voice=True`. The no-CastPage path uses the same one-row operation. Contract and dynamic tests now assert that only the selected Library voice is updated.
 - #3378 package was skipped after the suite failure; next candidate must pass full regression and exact-head package.
+
+## Build #3379 — Stage C1 regression passed; packaged Production navigation gate failed
+
+- Run [#3379 / 43384228609](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43384228609), SHA `0533ecceed87dc56a684cb6ecca229ee45e7a294`.
+- Focused C1 **10/10**, Stage B **16/16**, Stage 6 **48/48**, full regression **1,552/1,552** all passed.
+- Build/frozen verification, three startup launches, bundled assets, real Piper previews, two-chapter M4B and FFmpeg chapter markers passed. M4B artifact `14018382062` uploaded (8,998,989-byte ZIP).
+- Packaged Sound Design and most Production checks passed. The only failed package gate was the Stage 5.4 fixture's Generate-button readiness timeout. Current project diagnostics were valid; no listed job was active, but the old Production audio-operation lock persisted in the frontend snapshot.
+- Root cause: `bindMiniPlayerNavigation()` had never been called from `wire()`, so its Production job refresh on page navigation was dead code. The native bridge does not expose `voice.select.get` or `production.readiness`; those were only unsupported diagnostic calls, not the application readiness implementation.
+- Corrective candidate activates the wrapper, refreshes project-scoped jobs after Generate/Production navigation, and derives test diagnostics from supported `project.get_active` fields. Focused regression contracts added. Exact-head package revalidation required.

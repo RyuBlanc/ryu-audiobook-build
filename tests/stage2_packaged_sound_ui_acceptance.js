@@ -3660,12 +3660,29 @@
         return Boolean(button && !button.disabled);
       }, 20000);
     } catch (gateError) {
-      const [activeGate, narratorGate, readinessGate, gateJobs] = await Promise.all([
+      const [activeGate, gateJobs] = await Promise.all([
         invoke("project.get_active", {}).catch(error => ({error:String(error)})),
-        invoke("voice.select.get", {}).catch(error => ({error:String(error)})),
-        invoke("production.readiness", {}).catch(error => ({error:String(error)})),
         invoke("job.list", {include_hidden:true}).catch(error => ({error:String(error)}))
       ]);
+      // project.get_active is the native, authoritative Production readiness
+      // snapshot. Do not call prototype-only voice.select.get / production.readiness
+      // commands that are not part of the desktop bridge.
+      const narratorGate = activeGate && {
+        profile_name:String(activeGate.voice_profile || activeGate.narrator || ""),
+        source:activeGate.narrator_profile_source || null,
+        configured:activeGate.narrator_voice_configured === true,
+        available:activeGate.narrator_profile_available === true
+      };
+      const readinessGate = activeGate && {
+        metadata_complete:activeGate.metadata_complete === true,
+        metadata_missing_fields:Array.isArray(activeGate.metadata_missing_fields) ? activeGate.metadata_missing_fields : [],
+        eligible_chapter_count:Number(activeGate.eligible_chapter_count || 0),
+        output_configured:activeGate.output_configured === true,
+        output_format_supported:activeGate.output_format_supported === true,
+        output_folder_ready:activeGate.output_folder_ready === true,
+        dialogue_routing_ready:activeGate.dialogue_routing_ready === true,
+        character_assignment_issue_count:Number(activeGate.character_assignment_issue_count || 0)
+      };
       const gateButton = document.querySelector("#startGenerate");
       const gateDiagnostic = {
         active:activeGate,
@@ -3697,10 +3714,25 @@
         String(job.project_folder || "") === String(config.control_project_folder || ""))
       .map(job => String(job.job_id || "")));
     const controlGenerateButton = document.querySelector("#startGenerate");
+    const controlProject = await invoke("project.get_active", {});
     const controlPreflight = {
-      project: await invoke("project.get_active", {}),
-      narrator: await invoke("voice.select.get", {}).catch(error => ({error:String(error)})),
-      readiness: await invoke("production.readiness", {}).catch(error => ({error:String(error)})),
+      project:controlProject,
+      narrator:{
+        profile_name:String(controlProject?.voice_profile || controlProject?.narrator || ""),
+        source:controlProject?.narrator_profile_source || null,
+        configured:controlProject?.narrator_voice_configured === true,
+        available:controlProject?.narrator_profile_available === true
+      },
+      readiness:{
+        metadata_complete:controlProject?.metadata_complete === true,
+        metadata_missing_fields:Array.isArray(controlProject?.metadata_missing_fields) ? controlProject.metadata_missing_fields : [],
+        eligible_chapter_count:Number(controlProject?.eligible_chapter_count || 0),
+        output_configured:controlProject?.output_configured === true,
+        output_format_supported:controlProject?.output_format_supported === true,
+        output_folder_ready:controlProject?.output_folder_ready === true,
+        dialogue_routing_ready:controlProject?.dialogue_routing_ready === true,
+        character_assignment_issue_count:Number(controlProject?.character_assignment_issue_count || 0)
+      },
       button: controlGenerateButton ? {
         disabled: controlGenerateButton.disabled,
         title: controlGenerateButton.title,

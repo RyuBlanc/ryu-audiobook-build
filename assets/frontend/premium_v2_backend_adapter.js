@@ -1292,7 +1292,7 @@
         const aliases = {
           import:'import', chapters:'chapters', voice:'narrator', narrator:'narrator',
           characters:'characters', character:'characters', sound:'sound', sounds:'sound',
-          production:'production', generator:'production', generation:'production', player:'player'
+          generate:'production', production:'production', generator:'production', generation:'production', player:'player'
         };
         const stage = aliases[page];
         if (stage && dashboardProject?.folder) writeResumeCheckpoint(dashboardProject.folder, stage);
@@ -1305,6 +1305,12 @@
             refreshProjects().catch(() => {});
           }
           if (page === 'history') refreshHistory().catch(() => {});
+          // Production controls are scoped to the newly active project. Re-read
+          // the real job list after navigation so a preview/job snapshot from the
+          // previous project can never keep Generate disabled.
+          if (['generate','production','generator','generation'].includes(page)) {
+            refreshJobs().catch(error => console.warn('[Ryu Production navigation job refresh]', error));
+          }
         },0);
         return result;
       };
@@ -10663,6 +10669,7 @@ function renderProductionMetadataGate(active) {
     // any asynchronous backend initialization or real handler registration.
     suppressLegacyVoicePreviewHandlers();
     await call('app.get_info');
+    bindMiniPlayerNavigation();
     await refreshCurrentProjectCard();
     installProjectCardStatusObserver();
 
