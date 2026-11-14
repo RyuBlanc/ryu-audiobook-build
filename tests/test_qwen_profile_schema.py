@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from app.tts.profile_provider import ProfileBoundProvider
+from app.tts.profile_provider import ProfileBoundProvider, provider_from_profile
 from app.tts.qwen_profile_schema import (
     CURRENT_QWEN_PROFILE_SCHEMA_VERSION,
     QWEN_MODEL_IDS,
@@ -74,6 +74,8 @@ class QwenProfileSchemaTests(unittest.TestCase):
             self.assertEqual(persisted["future_profile_metadata"], future)
             self.assertEqual(persisted["qwen_profile_schema_version"], 99)
             self.assertNotIn("extra_fields", persisted)
+            with self.assertRaisesRegex(RuntimeError, "cannot safely execute"):
+                provider_from_profile(loaded[0])
 
     def test_revision_is_independent_of_machine_local_paths_but_tracks_asset_hashes(self):
         first = VoiceProfile(
@@ -93,6 +95,11 @@ class QwenProfileSchemaTests(unittest.TestCase):
             qwen_profile_revision_id(first, original_digest),
             qwen_profile_revision_id(moved, original_digest),
         )
+        moved.qwen_profile_schema_version = 99
+        self.assertEqual(
+            qwen_profile_revision_id(first, original_digest),
+            qwen_profile_revision_id(moved, original_digest),
+        )
         changed_asset = {"sample_path": "b" * 64}
         self.assertNotEqual(
             qwen_profile_revision_id(first, original_digest),
@@ -103,6 +110,17 @@ class QwenProfileSchemaTests(unittest.TestCase):
             qwen_profile_revision_id(first, original_digest),
             qwen_profile_revision_id(moved, original_digest),
         )
+
+    def test_revision_rejects_missing_or_malformed_asset_hashes(self):
+        profile = VoiceProfile(
+            name="Clone", provider="qwen-character", voice_id="Clone",
+            model_id="base-0.6b", qwen_mode="clone", sample_path="C:/source/reference.wav",
+        )
+        with self.assertRaisesRegex(ValueError, "requires SHA-256"):
+            qwen_profile_revision_id(profile)
+        with self.assertRaisesRegex(ValueError, "valid SHA-256"):
+            qwen_profile_revision_id(profile, {"sample_path": "not-a-hash"})
+
 
     def test_customvoice_model_compatibility_reports_variants_and_source_preference(self):
         profile = VoiceProfile(

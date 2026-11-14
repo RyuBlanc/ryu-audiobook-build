@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 
 from app.tts.qwen_model_preference import normalize_qwen_model_preference
 
@@ -100,9 +101,25 @@ def qwen_profile_revision_id(profile, asset_sha256: dict[str, str] | None = None
     record = profile_record(profile)
     record.pop("sample_path", None)
     record.pop("qwen_anchor_path", None)
+    # A schema migration is not a user edit and must not create a new profile revision.
+    record.pop("qwen_profile_schema_version", None)
+    supplied_assets = dict(asset_sha256 or {})
+    required_asset_keys = []
+    if profile.sample_path:
+        required_asset_keys.append("sample_path")
+    if profile.qwen_anchor_path:
+        required_asset_keys.append("qwen_anchor_path")
+    missing_assets = [key for key in required_asset_keys if not supplied_assets.get(key)]
+    if missing_assets:
+        raise ValueError(
+            "Profile revision requires SHA-256 for referenced assets: " + ", ".join(missing_assets)
+        )
+    for key, digest in supplied_assets.items():
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", str(digest or "")):
+            raise ValueError(f"Asset '{key}' does not have a valid SHA-256 digest.")
     normalized_assets = {
         str(key): str(value).strip().casefold()
-        for key, value in sorted((asset_sha256 or {}).items(), key=lambda item: str(item[0]))
+        for key, value in sorted(supplied_assets.items(), key=lambda item: str(item[0]))
     }
     payload = {
         "revision_schema_version": 1,

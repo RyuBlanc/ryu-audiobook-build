@@ -10,6 +10,7 @@ from app.tts.providers.chatterbox import ChatterboxProvider
 from app.tts.providers.edge_tts import EdgeTTSProvider
 from app.tts.providers.elevenlabs import ElevenLabsProvider
 from app.tts.providers.qwen_character import QwenCharacterProvider
+from app.tts.qwen_profile_schema import CURRENT_QWEN_PROFILE_SCHEMA_VERSION
 from app.tts.qwen_model_preference import (
     get_qwen_model_preference,
     get_qwen_backend_preference,
@@ -29,6 +30,13 @@ def provider_from_profile(profile: VoiceProfile):
         return ElevenLabsProvider(), profile.voice_id
 
     if profile.provider == "qwen-character":
+        schema_version = int(getattr(profile, "qwen_profile_schema_version", 1) or 0)
+        if schema_version < 1 or schema_version > CURRENT_QWEN_PROFILE_SCHEMA_VERSION:
+            raise RuntimeError(
+                f"Qwen profile '{profile.name}' uses profile schema version {schema_version}, "
+                f"which this app cannot safely execute (supported: 1–{CURRENT_QWEN_PROFILE_SCHEMA_VERSION}). "
+                "Update Ryu's Audiobook before preview or generation. The saved profile was not modified."
+            )
         # Resolve the global setting at provider creation time so it applies
         # equally to legacy/saved profiles and profiles created in the future.
         mode = profile.qwen_mode or "custom"
