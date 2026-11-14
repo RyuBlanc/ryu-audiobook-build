@@ -363,3 +363,22 @@ Candidate branch: dragon-studio/candidate-c4-voice-identity-continuity-2026-11-1
 - Preserve both failures in history. The next [artifact-checkpoint] push must verify the corrected exact head from full tests through HTML-installer build/UI startup, install/upgrade/uninstall, Defender, package-size/hash, and installer/portable/SHA/M4B uploads. Do not infer success from M4B upload or from the tests job alone.
 
 - Workflow correction push event: this ledger-only follow-up carries the verified workflow/test fix commit above into GitHub Actions with [artifact-checkpoint]; no additional application source changes.
+
+
+## Corrected Stage C4 package checkpoints #3413/#3414 — 14 November 2026
+
+### Build Windows App #3413
+
+- Run [43567790011](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43567790011), commit 88b1c55bed87a7adc77cf7e4d2769cd90811e2f7, candidate branch dragon-studio/candidate-c4-voice-identity-continuity-2026-11-13.
+- Tests and build jobs both completed successfully. Package artifacts: installer Ryu-Audiobook-Installer-3413, ID 14104201610, 847,156,135 bytes; portable ID 14103621614, 1,190,866,285 bytes; SHA/package manifest ID 14103767394; real multi-chapter M4B ID 14102279598, 8,949,332 bytes.
+
+### Build Windows App #3414 — authoritative latest candidate package checkpoint
+
+- Run [43567794677](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43567794677), exact commit 1ab7c27ead88e55df644f703c339bc608bfef897, candidate branch dragon-studio/candidate-c4-voice-identity-continuity-2026-11-13.
+- Tests job ID 132365334362 passed; build job ID 132365845870 passed. The build passed the late Restore Python for HTML installer packaging step, functional HTML installer creation and startup, Windows install/launch/upgrade/uninstall, transparent-logo/hash validation, package-size generation, Microsoft Defender scan, and installer/portable/SHA/M4B/Piper artifact uploads.
+- Exact tests: Stage B 16/16; Stage 6 48/48; C1 10/10; C2 9/9; C3 8/8; C4 37/37; full regression 1,596/1,596. Regression test test_html_installer_python_restore_does_not_enable_pip_cache passed.
+- Artifacts: installer 14103528384 / 847,025,536 bytes / sha256:bba96e421929586e95058c4e6f05500adc3fac046a0595b4309e52b991fb8677; portable 14103967421 / 1,190,866,285 bytes / sha256:4108c66874c4bc28845072259a3a3d069cb076b1ce224f7f24e2c86ecfaab5f2; SHA/package manifest 14103383915 / 3,050 bytes; real Piper M4B 14102583924 / 8,989,270 bytes; Stage 7 Piper benchmark 14104316864.
+- The C4 Provider Runtime Smoke #448 real audio evidence is on SHA 6348eb0bd9f915d76f432ce1d899f023552a5e89. Compare to #3414 SHA shows four follow-on commits touching workflow/tests/docs only, with no Qwen application-source changes.
+- Branch promotion: PR #35 tracking branch was fast-forwarded from expected 65adc53da81e8faeca09bc50cf4f21f663cc5138 to 1ab7c27ead88e55df644f703c339bc608bfef897. PR #35 remains open/draft and unmerged.
+- Stage C is **hosted CI/provider/package-green but not overall closed**. Required manual acceptance remains: installed-PC C1/C2 profile and repair/restart checks; real CUDA/ROCm/XPU evidence with actual device telemetry and no CPU fallback (30-second preview <60s); C4 installed-app voice audition and narrator/cast consistency; representative full-novel generation and M4B listening/playback/seek; real long-job progress/ETA/duration and forced interruption/recovery; physical DPI/multi-monitor, shell-icon and installer-visual inspection; final Help & Guide check.
+- No Stage D start is authorized by this checkpoint. Keep PR #35 draft. Do not mark physical/hardware/full-book items passed from hosted Windows runners or the bundled Piper fixture.

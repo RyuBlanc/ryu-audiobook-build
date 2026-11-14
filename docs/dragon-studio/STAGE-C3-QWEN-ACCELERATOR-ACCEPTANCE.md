@@ -58,3 +58,11 @@ C3 can close only after the exact candidate SHA:
 - records unsupported hardware/workloads transparently rather than disguising a fallback as a pass.
 
 C1/C2 installed-PC checks, representative full-novel Qwen acceptance and Stage C4 narrator/character consistency remain separate work. C3 does not close them.
+
+## Exact-head hosted package checkpoint — 14 November 2026
+
+- Build Windows App **#3413** / run [43567790011](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43567790011), commit 88b1c55bed87a7adc77cf7e4d2769cd90811e2f7, completed successfully: tests and Windows package jobs both passed. Artifacts: installer 14104201610 (847,156,135 bytes), portable 14103621614 (1,190,866,285 bytes), SHA/package manifest 14103767394, real M4B 14102279598 (8,949,332 bytes).
+- Build Windows App **#3414** / run [43567794677](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43567794677), exact commit 1ab7c27ead88e55df644f703c339bc608bfef897, completed successfully. Hosted test results: Stage B 16/16, Stage 6 48/48, C1 10/10, C2 9/9, C3 8/8, C4 37/37, full regression 1,596/1,596. The pip-cache regression contract also passed.
+- The #3414 Windows build passed frozen application and bundled assets verification, real bundled-Piper M4B/FFmpeg acceptance, packaged Sound Design/Music Library acceptance, Inno Setup/core installer, the formerly failing late Python restore, functional HTML installer build/startup, install/launch/upgrade/uninstall, logo transparency/hash, package-size report, Microsoft Defender and all expected artifact uploads.
+- #3414 artifacts: installer 14103528384 (847,025,536 bytes; digest sha256:bba96e421929586e95058c4e6f05500adc3fac046a0595b4309e52b991fb8677); portable 14103967421 (1,190,866,285 bytes; digest sha256:4108c66874c4bc28845072259a3a3d069cb076b1ce224f7f24e2c86ecfaab5f2); SHA/package manifest 14103383915; M4B 14102583924 (8,989,270 bytes).
+- **C3 closure remains blocked on physical devices.** These package/test runs are hosted Windows acceptance, not CUDA, ROCm or XPU inference. The manual self-hosted matrix and the under-60-second 30-second preview threshold remain required for each supported backend claimed.
