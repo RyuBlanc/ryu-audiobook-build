@@ -1,6 +1,6 @@
 # Stage C4 — Qwen multilingual voice identity and expressive continuity
 
-**Status:** Candidate in progress. The current candidate source/test head passed its focused C4 tests and the full regression suite, but exact-head real-provider and Windows package acceptance are still pending.
+**Status:** Exact-head hosted regression and real CPU Qwen provider acceptance passed at candidate HEAD `6348eb0bd9f915d76f432ce1d899f023552a5e89`. The Windows artifact checkpoint is the remaining hosted C4 gate. Physical target-PC and accelerator acceptance remain open.
 
 **Candidate branch:** dragon-studio/candidate-c4-voice-identity-continuity-2026-11-13  
 **Source/test baseline:** Build Windows App #3405, SHA 45a0d5ee66363f3c258e1512e28347e457212027.  
@@ -46,7 +46,22 @@ No failed run is reclassified as green. #3404's Provider Runtime Smoke #446 was 
 - The 30-second VoiceDesign preview took **241.443 seconds on CPU**. No GPU result is implied.
 - Artifacts: 14057106365 VoiceDesign; 14057117830 CustomVoice; 14060436461 Clone/Design/M4B.
 
-These successful real runs predate the latest Portuguese classifier correction. They do not establish exact-head real acceptance at #3405.
+These #441 and #444 runs predate the latest Portuguese classifier correction. Exact-head real-provider acceptance was subsequently completed by Provider Runtime Smoke #448 below.
+
+### Provider Runtime Smoke #448 — exact-head real CPU acceptance
+
+- Run: [43499302368](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43499302368), exact candidate SHA `6348eb0bd9f915d76f432ce1d899f023552a5e89`.
+- All five relevant Qwen jobs passed: expression protocol, real 1.7B VoiceDesign preview, accelerator discovery/software tests, 0.6B + 1.7B CustomVoice, and Base Clone + saved VoiceDesign + character-to-M4B. Unrelated Chatterbox and Kokoro jobs were skipped.
+- Actual 0.6B and 1.7B CustomVoice audio passed, with saved-profile reload, decoded audio and actual backend/device `cpu`; logged audio durations were 7.600s and 6.400s.
+- Authorized Qwen Base Clone passed using the 0.6B Base model, with profile reload and a 2.960s reference-derived output.
+- Japanese saved VoiceDesign passed after profile reload with Design 1.7B + Base 0.6B, neutral 2.320s and angry 1.840s output, unchanged canonical anchor SHA and anchor version `v9-language-matched-anchor-direction`.
+- Nine more saved profiles passed neutral/emotional real synthesis and reload: English, Korean, Chinese, German, French, Russian, Portuguese, Spanish and Italian. The smoke reports all nine profiles reloaded with unchanged anchor SHA.
+- A separate saved VoiceDesign production path generated a 30.000s preview in 187.318s on CPU, with profile reload and identity lock.
+- The standalone 1.7B VoiceDesign smoke generated 30.000s in 336.607s warmed-preview elapsed; it also recorded 55.298s cold-start-plus-warmup. Both preview paths are CPU-only and exceed the 60-second target. The log explicitly reports `QWEN_VS01_CPU_60S_TARGET=NOT_MET_ON_HOSTED_CPU`.
+- Character-to-M4B passed: two chapters, two Qwen dialogue calls, four chapter markers and FFmpeg decode.
+- Artifacts: VoiceDesign ID `14073723116` (1,593,194 bytes); CustomVoice ID `14073609412` (480,524 bytes); Clone/Design/M4B ID `14076896484` (4,950,282 bytes). All were successfully uploaded and were unexpired when checked.
+
+This establishes exact-head CPU functional/identity continuity. It does not establish CUDA/ROCm/XPU inference or performance acceptance.
 
 ## Latest candidate test result
 
@@ -63,9 +78,9 @@ Build Windows App #3405 / [run 43462518581](https://github.com/RyuBlanc/ryu-audi
 
 ## Exact-head next gates
 
-1. Run Provider Runtime Smoke on top of the exact #3405 source head with [qwen-acceptance]. Require all three Qwen jobs to complete: actual VoiceDesign, both CustomVoice models, then Base Clone + saved VoiceDesign (Japanese plus the nine-language matrix) + character-to-M4B. Inspect logs, audio/evidence artifacts, actual backend telemetry and every per-language anchor hash.
-2. If that succeeds, run a single exact-head Windows artifact checkpoint with [artifact-checkpoint]. Keep the complete 1,595+ regression suite and every existing frozen-app, asset, M4B, Sound Design, installer, install/launch/upgrade/uninstall, user-data, transparency/hash, package-size, Defender and artifact-upload gate unchanged.
-3. Keep physical target-PC profile audition, restart and long-book production acceptance open until performed on the installed candidate. Keep Stage C3 NVIDIA CUDA / AMD ROCm / Intel XPU acceptance open until real self-hosted device evidence proves actual inference backend and timing.
+1. Run one exact-head Windows artifact checkpoint from candidate SHA `6348eb0bd9f915d76f432ce1d899f023552a5e89` using [artifact-checkpoint]. Require the complete focused and full regression suite before packaging. Preserve every existing frozen-app, bundled-assets, M4B, Sound Design, installer, install/launch/upgrade/uninstall, user-data, transparency/hash, package-size, Defender and artifact-upload gate unchanged.
+2. After the package succeeds, promote this accepted candidate to the long-lived PR #35 tracking branch by a verified fast-forward only. Keep PR #35 in draft until its accumulated review and applicable physical acceptance are addressed; do not force-push or rewrite the failed-run history.
+3. Keep installed target-PC profile audition, restart/repair and representative long-book production acceptance open. Keep C3 NVIDIA CUDA / AMD ROCm / Intel XPU acceptance open until real self-hosted inference proves actual backend and timing.
 
 ## Non-negotiable acceptance rules
 
@@ -77,8 +92,11 @@ Build Windows App #3405 / [run 43462518581](https://github.com/RyuBlanc/ryu-audi
 - Preserve failed runs, exact SHAs, and all focused/full/package gates; do not remove or weaken tests to obtain a green result.
 
 
-## Exact-head revalidation request — 14 November 2026
+## Exact-head validation result — 14 November 2026
 
-- The application source tree is unchanged from Build Windows App #3405 (45a0d5ee66363f3c258e1512e28347e457212027); commits after it update only this acceptance document, the bug register and the push ledger.
-- This tagged documentation-only push requests the real Provider Runtime Smoke chain and the full regression job on the current branch tip. It does not contain an artifact-checkpoint marker, so no Windows package is requested in this intermediate validation.
-- Result status at commit time: pending. Record actual run IDs, exact head SHA, completed jobs, audio evidence artifacts, per-language anchor hashes and elapsed/device telemetry after the workflows complete. Do not infer success from workflow dispatch or job startup.
+- Candidate branch HEAD: `6348eb0bd9f915d76f432ce1d899f023552a5e89`.
+- The application source tree is unchanged from Build Windows App #3405 (source baseline `45a0d5ee66363f3c258e1512e28347e457212027`). The five later commits contain C4 acceptance documentation, ledger updates and the provider-workflow path-filter correction; they do not change application source.
+- Build Windows App #3410 / [run 43499302199](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43499302199) passed on this exact head: Stage B 16/16, Stage 6 48/48, C1 10/10, C2 9/9, C3 8/8, C4 37/37 and full regression 1,595/1,595. The Windows build job was skipped because this was not yet an artifact-checkpoint push.
+- Provider Runtime Smoke #448 / [run 43499302368](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43499302368) completed successfully on the same exact SHA and uploaded the three real-audio evidence archives listed above.
+- Exact-head real CPU provider acceptance is passed. Windows artifact/package acceptance remains pending. CPU timing explicitly misses the under-60-second goal; no GPU result is implied.
+- The next commit carries [artifact-checkpoint] only. It requests the Windows package after the full regression suite; it does not repeat the expensive real-provider smoke chain. Do not infer package success from the test job alone.
