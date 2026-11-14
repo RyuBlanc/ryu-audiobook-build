@@ -134,7 +134,7 @@ Import must restore assets to application-managed, profile-owned storage and rem
 
 ## 9. Implementation sequence
 
-1. **D0 — Inventory and schema design:** inspect all current profile creation/save/load paths, asset ownership, path roots, model IDs, profile consumers and migrations. Publish field-by-field compatibility matrix and sample manifest. No runtime code changes until this design is internally consistent.
+1. **D0 — Inventory and schema design: COMPLETE.** See [STAGE-D0-CURRENT-PROFILE-INVENTORY.md](STAGE-D0-CURRENT-PROFILE-INVENTORY.md) and [STAGE-D0-BUNDLE-SCHEMA-DESIGN.md](STAGE-D0-BUNDLE-SCHEMA-DESIGN.md). The docs map current profile fields, model/runtime resolution, Clone source/normalized reference assets, derived VoiceDesign anchor storage, and a versioned bundle manifest proposal. No runtime code was changed.
 2. **D1 — Versioned profile domain model:** add explicit schema/revision/model-compatibility metadata with backwards-compatible readers and migration tests. Existing profile behaviour must remain unchanged.
 3. **D2 — Asset ownership and portable serialization:** implement deterministic export with relative paths, content hashes, validation and round-trip tests.
 4. **D3 — Transactional import and recovery:** implement preflight, compatibility report, additive import, collision choices, safe replacement/rollback and interrupted-operation recovery.
@@ -159,6 +159,6 @@ Stage D may proceed independently. A Stage D regression must not be used as a re
 
 ## 11. Current status
 
-**Planning charter committed; implementation not yet started.**
+**D0 inventory and schema proposal committed; application implementation has not started.**
 
-This branch is intentionally based on the accepted Stage C checkpoint SHA. The first implementation action is D0 inventory/schema design. No application source, model runtime, existing saved profile or user asset has been changed by creation of this plan.
+The next engineering gate is D1: add tests for canonical revision identity, legacy read compatibility, exact asset binding/round-trip and derived-anchor discovery before modifying VoiceProfile or catalogue persistence. Resolve any mismatch those tests expose before changing the runtime. The branch remains based on the accepted Stage C checkpoint lineage. No application source, model runtime, existing saved profile or user asset has been changed by the Stage D planning/inventory commits.
