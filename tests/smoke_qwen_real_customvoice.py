@@ -9,11 +9,13 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 import wave
 from unittest.mock import patch
 
 from huggingface_hub import snapshot_download
 
+from app.tts.preview import build_voice_preview
 from app.tts.profile_provider import provider_from_profile
 from app.tts.qwen_character_runtime import MODEL_IDS, model_installed
 from app.tts.voice_profile import VoiceProfile, load_saved_profile, save_profiles
@@ -29,6 +31,7 @@ KINDS = tuple(
     if item.strip()
 )
 EXPECTED_BACKEND = str(os.environ.get("RYU_QWEN_EXPECT_BACKEND") or "").strip().casefold()
+PREVIEW_SECONDS = max(0.0, float(os.environ.get("RYU_QWEN_CUSTOM_PREVIEW_SECONDS", "0") or 0.0))
 
 
 def _valid_wav(path: Path) -> float:
@@ -124,46 +127,111 @@ def main() -> None:
                     "the current global Automatic preference must control hardware."
                 )
             output = OUTPUT_ROOT / f"{kind}-customvoice.wav"
+            preview_metrics = None
+            expected, selection_reason = automatic_accelerator(kind)
             try:
+                warmup_started = time.perf_counter()
                 engine.synthesize(
                     "The road curved beyond the quiet village. Ryan spoke clearly and calmly.",
                     output,
                     voice,
                 )
+                warmup_elapsed = time.perf_counter() - warmup_started
+                duration = _valid_wav(output)
+                if output.stat().st_size < 1024:
+                    raise RuntimeError(f"Qwen CustomVoice produced an unexpectedly small WAV for {kind}.")
+                actual_backend = engine.execution_backend
+                actual_device = str(engine.last_execution_context.get("device") or "unverified")
+                if not engine.execution_backend_verified or actual_backend not in {"cpu", "cuda", "rocm", "xpu"}:
+                    raise RuntimeError(
+                        f"Qwen {kind} generated audio without verified execution-device telemetry: "
+                        f"{engine.last_execution_context!r}"
+                    )
+                if kind == "custom-0.6b" and actual_backend != expected.backend:
+                    raise RuntimeError(
+                        f"Qwen CustomVoice did not run on the backend selected by Automatic: "
+                        f"expected={expected.backend}/{expected.device}, "
+                        f"actual={actual_backend}/{actual_device}; reason={selection_reason}"
+                    )
+                if EXPECTED_BACKEND and kind == "custom-0.6b" and actual_backend != EXPECTED_BACKEND:
+                    raise RuntimeError(
+                        f"Qwen CustomVoice actual backend {actual_backend} did not match "
+                        f"required acceptance backend {EXPECTED_BACKEND}."
+                    )
+                if PREVIEW_SECONDS > 0:
+                    preview_source = " ".join([
+                        "The lantern glowed softly beside the quiet road.",
+                        "Mira listened carefully before she answered.",
+                        "Rain moved gently across the distant valley.",
+                        "The old wooden door opened into the hall.",
+                        "A calm narrator guided the story forward.",
+                        "The village lights shimmered beyond the river.",
+                    ] * 40)
+                    preview_path = OUTPUT_ROOT / f"{kind}-customvoice-{int(PREVIEW_SECONDS)}s-preview.wav"
+                    preview_started = time.perf_counter()
+                    preview_result = build_voice_preview(
+                        preview_source, engine, voice, preview_path,
+                        narration_speed=1.0, pacing_profile="off",
+                        max_chars=1400, target_seconds=PREVIEW_SECONDS,
+                    )
+                    preview_elapsed = time.perf_counter() - preview_started
+                    preview_duration = _valid_wav(preview_result.output_path)
+                    if abs(preview_duration - PREVIEW_SECONDS) > 3.0:
+                        raise RuntimeError(
+                            f"Qwen {kind} preview duration {preview_duration:.3f}s is outside "
+                            f"±3s of requested {PREVIEW_SECONDS:.1f}s."
+                        )
+                    if PREVIEW_SECONDS >= 30.0 and preview_elapsed >= 60.0:
+                        raise RuntimeError(
+                            f"Qwen {kind} {PREVIEW_SECONDS:.0f}s preview took {preview_elapsed:.3f}s; "
+                            "the accelerator acceptance limit is under 60 seconds."
+                        )
+                    if not engine.execution_backend_verified or engine.execution_backend != actual_backend:
+                        raise RuntimeError("CustomVoice preview lost verified execution-backend identity.")
+                    preview_metrics = {
+                        "requested_seconds": PREVIEW_SECONDS,
+                        "audio_seconds": round(preview_duration, 3),
+                        "elapsed_seconds": round(preview_elapsed, 3),
+                        "segments": preview_result.segments,
+                        "pass_under_60_seconds": preview_elapsed < 60.0,
+                        "cpu_fallback": actual_backend == "cpu" and EXPECTED_BACKEND not in {"", "cpu"},
+                    }
+                benchmark = {
+                    "model_kind": kind,
+                    "model_id": MODEL_IDS[kind],
+                    "backend": actual_backend,
+                    "device": actual_device,
+                    "backend_verified": engine.execution_backend_verified,
+                    "automatic_backend": expected.backend,
+                    "automatic_selection_reason": selection_reason,
+                    "saved_profile_reload": True,
+                    "warmup_seconds": round(warmup_elapsed, 3),
+                    "warmup_audio_seconds": round(duration, 3),
+                    "preview": preview_metrics,
+                }
+                (OUTPUT_ROOT / f"{kind}-performance.json").write_text(
+                    json.dumps(benchmark, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                print(
+                    f"REAL_QWEN_CUSTOMVOICE=PASS model={MODEL_IDS[kind]} kind={kind} "
+                    f"duration={duration:.3f}s bytes={output.stat().st_size} "
+                    f"saved_profile_reload=true decoded_audio=true "
+                    f"actual_backend={actual_backend} actual_device={actual_device}"
+                )
+                if preview_metrics is not None:
+                    print(
+                        f"REAL_QWEN_CUSTOMVOICE_PREVIEW=PASS kind={kind} "
+                        f"requested={PREVIEW_SECONDS:.1f}s actual={preview_metrics['audio_seconds']:.3f}s "
+                        f"elapsed={preview_metrics['elapsed_seconds']:.3f}s "
+                        f"backend={actual_backend} device={actual_device} cpu_fallback=false"
+                    )
             finally:
                 close = getattr(engine, "close", None)
                 if callable(close):
                     close()
-            duration = _valid_wav(output)
-            if output.stat().st_size < 1024:
-                raise RuntimeError(f"Qwen CustomVoice produced an unexpectedly small WAV for {kind}.")
-            actual_backend = engine.execution_backend
-            actual_device = str(engine.last_execution_context.get("device") or "unverified")
-            if not engine.execution_backend_verified or actual_backend not in {"cpu", "cuda", "rocm", "xpu"}:
-                raise RuntimeError(
-                    f"Qwen {kind} generated audio without verified execution-device telemetry: "
-                    f"{engine.last_execution_context!r}"
-                )
-            expected, selection_reason = automatic_accelerator(kind)
-            if kind == "custom-0.6b" and actual_backend != expected.backend:
-                raise RuntimeError(
-                    f"Qwen CustomVoice did not run on the backend selected by Automatic: "
-                    f"expected={expected.backend}/{expected.device}, "
-                    f"actual={actual_backend}/{actual_device}; reason={selection_reason}"
-                )
-            if EXPECTED_BACKEND and kind == "custom-0.6b" and actual_backend != EXPECTED_BACKEND:
-                raise RuntimeError(
-                    f"Qwen CustomVoice actual backend {actual_backend} did not match "
-                    f"required acceptance backend {EXPECTED_BACKEND}."
-                )
-            print(
-                f"REAL_QWEN_CUSTOMVOICE=PASS model={MODEL_IDS[kind]} kind={kind} "
-                f"duration={duration:.3f}s bytes={output.stat().st_size} "
-                f"saved_profile_reload=true decoded_audio=true "
-                f"actual_backend={actual_backend} actual_device={actual_device}"
-            )
 
-    print("REAL_QWEN_CUSTOMVOICE_BOTH_SIZES=PASS")
+    print("REAL_QWEN_CUSTOMVOICE_KINDS=PASS kinds=" + ",".join(KINDS))
 
 
 if __name__ == "__main__":

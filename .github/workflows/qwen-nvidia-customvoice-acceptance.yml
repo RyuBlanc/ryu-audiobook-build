@@ -1,0 +1,70 @@
+name: Qwen NVIDIA 0.6B CustomVoice 30-second Preview Acceptance
+
+on:
+  push:
+    branches:
+      - 'dragon-studio/**'
+      - 'stage-7/**'
+    paths:
+      - app/tts/preview.py
+      - app/tts/providers/qwen_character.py
+      - app/tts/qwen_character_worker.py
+      - app/tts/qwen_accelerator.py
+      - tests/smoke_qwen_real_customvoice.py
+      - .github/workflows/qwen-nvidia-customvoice-acceptance.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ryu-audiobook-qwen-nvidia-customvoice-acceptance
+  cancel-in-progress: false
+
+jobs:
+  qwen-nvidia-customvoice:
+    name: Real Qwen 0.6B CustomVoice under 60 seconds on NVIDIA
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[qwen-hardware-acceptance]')
+    runs-on: [self-hosted, Windows, X64, NVIDIA]
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install application and CUDA Qwen runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -r requirements.txt
+          python -m pip install --index-url https://download.pytorch.org/whl/cu128 torch==2.9.1 torchaudio==2.9.1
+          python -m pip install qwen-tts==0.1.1
+          python -c "import torch; print('torch=' + torch.__version__); print('cuda=' + str(torch.cuda.is_available())); assert torch.cuda.is_available(), 'This is a GPU-only acceptance job.'"
+          nvidia-smi
+
+      - name: Run real saved-profile 0.6B CustomVoice 30-second preview
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          HF_HOME: ${{ runner.temp }}\\ryu-qwen-hf
+          RYU_QWEN_MODEL_ROOT: ${{ runner.temp }}\\ryu-qwen-models
+          RYU_QWEN_CUSTOM_OUTPUT: ${{ github.workspace }}\\qwen-nvidia-customvoice
+          RYU_QWEN_CUSTOM_KINDS: custom-0.6b
+          RYU_QWEN_CUSTOM_PREVIEW_SECONDS: '30'
+          RYU_QWEN_EXPECT_BACKEND: cuda
+          PYTHONWARNINGS: ignore
+        run: python -B tests/smoke_qwen_real_customvoice.py
+
+      - name: Upload NVIDIA CustomVoice audio and benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ryu-Stage7-Qwen-NVIDIA-CustomVoice-Preview-${{ github.run_number }}
+          path: qwen-nvidia-customvoice/
+          if-no-files-found: warn
+          retention-days: 30

@@ -502,7 +502,8 @@ def automatic_accelerator(model_kind: str, history_path=None) -> tuple[Accelerat
         )
         rows = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else []
         current_processor = str(platform.processor() or "").strip().casefold()
-        latest: dict[str, tuple[str, float]] = {}
+        latest: dict[str, tuple[datetime, float]] = {}
+        benchmark_now = datetime.now(timezone.utc)
         for row in rows if isinstance(rows, list) else []:
             result = row.get("result") if isinstance(row, dict) else None
             if not isinstance(result, dict) or row.get("state") != "completed":
@@ -538,13 +539,15 @@ def automatic_accelerator(model_kind: str, history_path=None) -> tuple[Accelerat
                 measured_time = datetime.fromisoformat(measured_at.replace("Z", "+00:00"))
                 if measured_time.tzinfo is None:
                     measured_time = measured_time.replace(tzinfo=timezone.utc)
-                if datetime.now(timezone.utc) - measured_time > timedelta(days=30):
+                age = benchmark_now - measured_time
+                # Permit small clock skew, but never trust materially future-dated benchmark evidence.
+                if age < -timedelta(minutes=5) or age > timedelta(days=30):
                     continue
             except ValueError:
                 continue
             previous = latest.get(backend)
-            if previous is None or measured_at > previous[0]:
-                latest[backend] = (measured_at, rtf)
+            if previous is None or measured_time > previous[0]:
+                latest[backend] = (measured_time, rtf)
         cpu = latest.get("cpu")
         gpu = latest.get(selected.backend)
         if cpu and gpu and cpu[1] <= gpu[1] * 0.95:

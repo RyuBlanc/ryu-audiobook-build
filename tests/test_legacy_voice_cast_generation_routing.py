@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
+from app.core.character_identity import character_identity_key
+from app.tts.cast_provider import CastAwareProvider
 from app.ui.premium_v2_host import PremiumV2Bridge
 
 
@@ -78,6 +80,93 @@ class LegacyVoiceCastGenerationRoutingTests(unittest.TestCase):
             self.bridge._effective_generation_character_rows(
                 state, "Series One", available_profiles=self.profiles, strict=True
             )
+
+    def test_scoped_voice_cast_assignments_route_same_name_characters_to_their_own_profiles(self):
+        state = {
+            "characters": [
+                {"name": "Mira", "series": "Series One"},
+                {"name": "Mira", "series": "Series Two"},
+            ],
+            "voice_cast_character_roster": [
+                {"name": "Mira", "series": "Series One", "aliases": ["Mira One"]},
+                {"name": "Mira", "series": "Series Two", "aliases": ["Mira Two"]},
+            ],
+            "voice_cast": {},
+            "voice_cast_identity_assignments": {
+                character_identity_key("Mira", "Series One"): "Mira Character",
+                character_identity_key("Mira", "Series Two"): "Ren Character",
+            },
+        }
+        rows, issues = self.bridge._effective_generation_character_rows(state, "Series One", available_profiles=self.profiles)
+        self.assertEqual(issues, [])
+        self.assertEqual(len(rows), 2)
+        self.assertEqual({row["series"]: row["voice_profile"] for row in rows},
+                         {"Series One": "Mira Character", "Series Two": "Ren Character"})
+
+        assignments = {}
+        identity_assignments = {}
+        for row in rows:
+            profile_name = row["voice_profile"]
+            if not profile_name:
+                continue
+            assignments[row["name"]] = profile_name
+            identity_assignments[character_identity_key(row["name"], row["series"])] = profile_name
+        router = CastAwareProvider(
+            object(), "Narrator", {profile.name: profile for profile in self.profiles},
+            assignments, identity_assignments=identity_assignments,
+            unassigned_voice="Unassigned Character",
+        )
+        text = '“Hello.” “Goodbye.”'
+        first = text.index('“Hello.”')
+        second = text.index('“Goodbye.”')
+        routed = router.split_for_cast(text, "Narrator", dialogue_assignments=[
+            {"start": first, "end": first + len('“Hello.”'), "text": '“Hello.”', "speaker": "Mira", "series": "Series One"},
+            {"start": second, "end": second + len('“Goodbye.”'), "text": '“Goodbye.”', "speaker": "Mira", "series": "Series Two"},
+        ])
+        self.assertIn(("Hello.", "Mira Character"), routed)
+        self.assertIn(("Goodbye.", "Ren Character"), routed)
+
+    def test_explicit_empty_scoped_assignment_overrides_stale_legacy_name_mapping(self):
+        state = {
+            "characters": [
+                {"name": "Mira", "series": "Series One", "voice_profile": "Mira Character"},
+                {"name": "Mira", "series": "Series Two", "voice_profile": "Ren Character"},
+            ],
+            "voice_cast_character_roster": [
+                {"name": "Mira", "series": "Series One"},
+                {"name": "Mira", "series": "Series Two"},
+            ],
+            "voice_cast": {"Mira": "Mira Character"},
+            "voice_cast_identity_assignments": {
+                character_identity_key("Mira", "Series One"): "",
+                character_identity_key("Mira", "Series Two"): "Ren Character",
+            },
+        }
+        rows, issues = self.bridge._effective_generation_character_rows(state, "Series One", available_profiles=self.profiles)
+        self.assertEqual(issues, [])
+        self.assertEqual({row["series"]: row.get("voice_profile", "") for row in rows},
+                         {"Series One": "", "Series Two": "Ren Character"})
+
+    def test_scoped_voice_cast_assignment_matches_confirmed_character_alias(self):
+        state = {
+            "characters": [{
+                "name": "Mira", "series": "Series One",
+                "aliases": ["Captain Mira"], "voice_profile": "Mira Character",
+            }],
+            "voice_cast_character_roster": [{
+                "name": "Mira", "series": "Series One", "aliases": ["Captain Mira"],
+            }],
+            "voice_cast": {},
+            "voice_cast_identity_assignments": {
+                character_identity_key("Captain Mira", "Series One"): "Ren Character",
+            },
+        }
+        rows, issues = self.bridge._effective_generation_character_rows(
+            state, "Series One", available_profiles=self.profiles
+        )
+        self.assertEqual(issues, [])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["voice_profile"], "Ren Character")
 
     def test_explicit_series_on_legacy_cast_dict_resolves_same_name_safely(self):
         profiles = [SimpleNamespace(name="Mira One", voice_id="m1"), SimpleNamespace(name="Mira Two", voice_id="m2")]

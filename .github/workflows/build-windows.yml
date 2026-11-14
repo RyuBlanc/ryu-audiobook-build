@@ -1,5 +1,9 @@
 name: Build Windows App
-run-name: ${{ github.event.head_commit.message || github.event_name }}
+run-name: >-
+  ${{ github.event_name == 'pull_request'
+      && format('Build Windows App - PR #{0} - {1}', github.event.pull_request.number, github.event.pull_request.title)
+      || github.event.head_commit.message
+      || github.event_name }}
 
 on:
   push:
@@ -30,10 +34,16 @@ on:
       - stage-4/step-3-preview-assembly
       - stage-4/step-4-audio-assembly
       - stage-5/**
+      # Dragon Studio candidates may request an exact-head package on push with
+      # [artifact-checkpoint]; ordinary work continues through PR synchronize.
+      - 'dragon-studio/**'
       - stage-6/**
       - stage-7/**
       - fix/application-wide-closure-2026-11-08
       - fix/xapp-08-explicit-narrator-only-2026-11-08
+  pull_request:
+    branches:
+      - 'stage-5/**'
   workflow_dispatch:
 
 # Build artifacts are produced and verified on every main build.
@@ -56,10 +66,48 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Identify pull-request change topic
+        if: ${{ github.event_name == 'pull_request' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_REPOSITORY: ${{ github.repository }}
+          RUN_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $headers = @{
+            Accept = 'application/vnd.github+json'
+            Authorization = "Bearer $env:GH_TOKEN"
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          $uri = "https://api.github.com/repos/$env:RUN_REPOSITORY/commits/$env:RUN_SHA"
+          $commit = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers -TimeoutSec 20
+          $topic = ([string]$commit.commit.message).Trim()
+          if ([string]::IsNullOrWhiteSpace($topic)) {
+            throw "GitHub returned no commit subject for PR #$env:RUN_PR_NUMBER at $env:RUN_SHA."
+          }
+          Write-Host "PULL REQUEST CHANGE TOPIC: $topic"
+          $summary = @(
+            '## Pull-request change topic',
+            '',
+            "- **PR:** #$env:RUN_PR_NUMBER - $env:RUN_PR_TITLE",
+            "- **Exact commit:** $env:RUN_SHA",
+            "- **Change topic:** $topic",
+            '',
+            '### Files changed'
+          )
+          foreach ($file in @($commit.files)) {
+            $summary += "- $($file.filename) ($($file.status); +$($file.additions)/-$($file.deletions))"
+          }
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ($summary -join [Environment]::NewLine) -Encoding utf8
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
       - name: Install test dependencies
         shell: pwsh
         run: |
@@ -99,6 +147,17 @@ jobs:
           & $pythonExe -B -m unittest test_regressions.RegressionTests.test_voice_preview_invalidation_ignores_deleted_qt_status_widget -v
           if ($LASTEXITCODE -ne 0) { throw "Isolated Qt lifecycle regression failed with exit code $LASTEXITCODE." }
 
+      - name: Run focused Stage B measured generation progress and ETA regression
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          $repoRoot = (Get-Location).Path
+          $env:PYTHONPATH = "$repoRoot"
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -B -m unittest -v tests.test_stage5_generation_eta_stability
+          if ($LASTEXITCODE -ne 0) { throw "Focused Stage B generation progress/ETA regression failed with exit code $LASTEXITCODE." }
+
       - name: Run focused Stage 6 History and Task Manager preflight
         shell: pwsh
         run: |
@@ -109,6 +168,62 @@ jobs:
           $env:PYTHONDONTWRITEBYTECODE = '1'
           & $pythonExe -B -m unittest -v tests.test_p0_ui_refresh_stability tests.test_stage6_history_task_manager
           if ($LASTEXITCODE -ne 0) { throw "Focused Stage 6 History/Task Manager preflight failed with exit code $LASTEXITCODE." }
+
+      - name: Run focused Stage C1 Qwen Character Studio identity regression
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          if ($pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "setup-python did not provide a real Python interpreter: $pythonExe"
+          }
+          $repoRoot = $env:GITHUB_WORKSPACE
+          $env:PYTHONPATH = $repoRoot
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -B -m unittest discover -s tests -p test_native_character_studio_contract.py -v
+          if ($LASTEXITCODE -ne 0) { throw "Focused Stage C1 Qwen Character Studio identity regression failed with exit code $LASTEXITCODE." }
+
+
+      - name: Run focused Stage C2 Qwen profile restart and install-repair lifecycle regression
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          if ($pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "setup-python did not provide a real Python interpreter: $pythonExe"
+          }
+          $repoRoot = $env:GITHUB_WORKSPACE
+          $env:PYTHONPATH = $repoRoot
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -B -m unittest -v tests.test_qwen_profile_restart_acceptance tests.test_qwen_install_repair_lifecycle
+          if ($LASTEXITCODE -ne 0) { throw "Focused Stage C2 Qwen profile restart/install-repair lifecycle regression failed with exit code $LASTEXITCODE." }
+      - name: Run focused Stage C3 Qwen accelerator detection and benchmark policy regression
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          if ($pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "setup-python did not provide a real Python interpreter: $pythonExe"
+          }
+          $repoRoot = $env:GITHUB_WORKSPACE
+          $env:PYTHONPATH = $repoRoot
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -B -m unittest -v tests.test_qwen_accelerator_acceptance
+          if ($LASTEXITCODE -ne 0) { throw "Focused Stage C3 Qwen accelerator acceptance regression failed with exit code $LASTEXITCODE." }
+
+      - name: Run focused Stage C4 multilingual Qwen identity and expression regression
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          if ($pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "setup-python did not provide a real Python interpreter: $pythonExe"
+          }
+          $repoRoot = $env:GITHUB_WORKSPACE
+          $env:PYTHONPATH = $repoRoot
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -B -m unittest -v tests.test_stage_c4_voice_identity_continuity tests.test_stage3_emotion_story_pronunciation
+          if ($LASTEXITCODE -ne 0) { throw "Focused Stage C4 multilingual Qwen identity/expression regression failed with exit code $LASTEXITCODE." }
 
       - name: Run full regression suite (remaining tests)
         shell: pwsh
@@ -125,13 +240,71 @@ jobs:
   # storage cleanup. Only explicit artifact checkpoints (and main/manual runs)
   # may create release artifacts.
   build:
-    if: ${{ github.ref == 'refs/heads/main' || contains(github.event.head_commit.message || '', '[artifact-checkpoint]') || contains(github.event.head_commit.message || '', 'Dragon Studio Edition version') || github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.ref == 'refs/heads/main' || contains(github.event.head_commit.message || '', '[artifact-checkpoint]') || contains(github.event.head_commit.message || '', 'Dragon Studio Edition version') || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && startsWith(github.head_ref, 'dragon-studio/')) }}
     needs: tests
     runs-on: windows-latest
     timeout-minutes: 120
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Summarize run purpose and change set
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_REPOSITORY: ${{ github.repository }}
+          RUN_EVENT: ${{ github.event_name }}
+          RUN_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          RUN_PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          RUN_PR_TITLE: ${{ github.event.pull_request.title || '' }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $summaryLines = @(
+            '## Run purpose and changes',
+            '',
+            "- **Workflow event:** $env:RUN_EVENT",
+            "- **Commit:** $env:RUN_SHA"
+          )
+          if (-not [string]::IsNullOrWhiteSpace($env:RUN_PR_NUMBER)) {
+            $summaryLines += "- **Pull request:** #$env:RUN_PR_NUMBER — $env:RUN_PR_TITLE"
+          }
+          try {
+            $headers = @{
+              Accept = 'application/vnd.github+json'
+              Authorization = "Bearer $env:GH_TOKEN"
+              'X-GitHub-Api-Version' = '2022-11-28'
+            }
+            $uri = "https://api.github.com/repos/$env:RUN_REPOSITORY/commits/$env:RUN_SHA"
+            $commit = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers -TimeoutSec 20
+            $message = ([string]$commit.commit.message).Trim()
+            $summaryLines += ''
+            $summaryLines += '### Why this run was pushed'
+            if ([string]::IsNullOrWhiteSpace($message)) {
+              $summaryLines += '_No commit message was returned by GitHub._'
+            } else {
+              $summaryLines += $message
+            }
+            $changedFiles = @($commit.files)
+            $summaryLines += ''
+            $summaryLines += "### Files changed ($($changedFiles.Count))"
+            if ($changedFiles.Count -eq 0) {
+              $summaryLines += '_GitHub did not return a file list for this commit._'
+            } else {
+              $summaryLines += '| File | Change | Added | Deleted |'
+              $summaryLines += '|---|---:|---:|---:|'
+              foreach ($file in $changedFiles) {
+                $summaryLines += "| $($file.filename) | $($file.status) | $($file.additions) | $($file.deletions) |"
+              }
+            }
+          } catch {
+            Write-Warning "Commit detail lookup failed: $($_.Exception.Message)"
+            $summaryLines += ''
+            $summaryLines += '### Commit rationale'
+            $summaryLines += '_Commit details were not returned by the GitHub API. Open the commit above for its rationale and file list._'
+          }
+          $summaryLines += ''
+          $summaryLines += '_Validation results and runtime benchmark measurements appear below._'
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ($summaryLines -join [Environment]::NewLine) -Encoding utf8
 
       - name: Validate installer JavaScript syntax
         shell: pwsh
@@ -152,6 +325,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
 
       - name: Prepare, validate and build application
         timeout-minutes: 60
@@ -705,6 +880,56 @@ jobs:
           }
           Write-Host 'Critical application modules were already exercised by the frozen EXE self-test.'
 
+      - name: Run real bundled-Piper multi-chapter M4B acceptance
+        timeout-minutes: 20
+        shell: pwsh
+        env:
+          RYU_PIPER_MODEL_ROOT: ${{ runner.temp }}\ryu-stage3-test-models
+          RYU_STAGE3_ACCEPTANCE_OUTPUT: ${{ runner.temp }}\ryu-stage3-real-multichapter-acceptance
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $privatePython = Join-Path $env:RUNNER_TEMP 'ryu-qwen-python-bootstrap\python312\python.exe'
+          $pythonExe = $privatePython
+          if (-not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            $pythonExe = $env:RYU_CI_PYTHON_EXE
+          }
+          if ([string]::IsNullOrWhiteSpace($pythonExe) -or $pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "No verified Python interpreter is available for real multi-chapter M4B acceptance. Private=$privatePython; CI=$($env:RYU_CI_PYTHON_EXE)"
+          }
+          Write-Host "Using acceptance Python: $pythonExe"
+          & $pythonExe -m pip install --disable-pip-version-check --no-input -r requirements.txt
+          if ($LASTEXITCODE -ne 0) { throw "Installing declared application dependencies for real M4B acceptance failed with exit code $LASTEXITCODE." }
+          & $pythonExe -c "import piper, piper.download_voices, pyttsx3, imageio_ffmpeg, soundfile; print('Real M4B acceptance runtime imports verified: Piper, pyttsx3, FFmpeg, soundfile')"
+          if ($LASTEXITCODE -ne 0) { throw "Real M4B acceptance runtime import verification failed with exit code $LASTEXITCODE." }
+          $testPiperRoot = Join-Path $env:RYU_PIPER_MODEL_ROOT 'piper'
+          New-Item -ItemType Directory -Force -Path $testPiperRoot,$env:RYU_STAGE3_ACCEPTANCE_OUTPUT | Out-Null
+          $bundledPiperRoot = Join-Path (Get-Location) 'bundled_models\piper'
+          foreach ($voice in @('en_US-amy-medium','en_US-lessac-medium')) {
+            foreach ($suffix in @('.onnx','.onnx.json')) {
+              $source = Join-Path $bundledPiperRoot ($voice + $suffix)
+              if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+                throw "Required bundled Piper acceptance voice is missing: $source"
+              }
+              Copy-Item -LiteralPath $source -Destination (Join-Path $testPiperRoot ($voice + $suffix)) -Force
+            }
+          }
+          & $pythonExe -m piper.download_voices --data-dir $testPiperRoot en_US-ryan-high
+          if ($LASTEXITCODE -ne 0) { throw "Temporary Piper acceptance voice download failed with exit code $LASTEXITCODE." }
+          $env:PYTHONPATH = (Get-Location).Path
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -B 'tests\smoke_stage3_real_multichapter.py'
+          if ($LASTEXITCODE -ne 0) { throw "Real multi-chapter M4B acceptance failed with exit code $LASTEXITCODE." }
+
+      - name: Upload real multi-chapter M4B acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ryu-Stage3-Real-Multichapter-M4B-${{ github.run_number }}
+          path: ${{ runner.temp }}\ryu-stage3-real-multichapter-acceptance\
+          if-no-files-found: warn
+          retention-days: 30
+
+
       - name: Run packaged Sound Design Music Library acceptance (including Stage 5.3 generation UI)
         timeout-minutes: 20
         shell: pwsh
@@ -748,6 +973,10 @@ jobs:
           $coreInstaller = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Core Setup.exe"
           if (-not (Test-Path $coreInstaller)) { throw "Core installer was not produced: $coreInstaller" }
 
+      # This late restore only supplies the interpreter path to HTML installer packaging.
+      # Keep pip caching disabled here: setup-python's cache probe runs pip cache dir after
+      # the frozen/core installer steps have changed the runner's Python/PATH context.
+      # The earlier test and application-build setup-python steps retain pip caching.
       - name: Restore Python for HTML installer packaging
         id: html_python
         uses: actions/setup-python@v5
@@ -1046,6 +1275,7 @@ jobs:
           Write-Host 'Microsoft Defender completed all three release executable scans (application, HTML installer and core installer) without reporting a detection.'
 
       - name: Upload Windows installer artifact
+        if: ${{ github.event_name != 'pull_request' || startsWith(github.head_ref, 'dragon-studio/') }}
         id: upload_installer
         uses: actions/upload-artifact@v4
         with:
@@ -1056,6 +1286,7 @@ jobs:
           retention-days: 30
 
       - name: Upload release SHA-256 manifest
+        if: ${{ github.event_name != 'pull_request' || startsWith(github.head_ref, 'dragon-studio/') }}
         uses: actions/upload-artifact@v4
         with:
           name: Ryu-Audiobook-Release-SHA256-${{ github.run_number }}
@@ -1066,6 +1297,7 @@ jobs:
           retention-days: 30
 
       - name: Upload portable Windows application
+        if: ${{ github.event_name != 'pull_request' || startsWith(github.head_ref, 'dragon-studio/') }}
         uses: actions/upload-artifact@v4
         with:
           name: Ryu-Audiobook-Portable-${{ github.run_number }}
@@ -1075,6 +1307,7 @@ jobs:
           retention-days: 30
 
       - name: Upload Stage 7 real Piper benchmark evidence
+        if: ${{ github.event_name != 'pull_request' }}
         uses: actions/upload-artifact@v4
         with:
           name: Ryu-Audiobook-Stage7-Piper-Benchmark-${{ github.run_number }}

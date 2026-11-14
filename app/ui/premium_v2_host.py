@@ -37,7 +37,7 @@ from app.ui.frontend_assets import (
     prepare_native_host_html,
 )
 from app.core.project import Project, create_project, list_projects, resolve_library_project_folder
-from app.core.character_identity import character_identity_key
+from app.core.character_identity import character_identity_key, parse_character_identity_key
 from app.core.character_library import (
     character_library_path as reusable_character_library_path,
     list_characters as list_reusable_characters,
@@ -826,6 +826,18 @@ class PremiumV2Bridge(QObject):
             if not getattr(chapter, "skip_for_generation", False)
             and str(getattr(chapter, "text", "") or "").strip()
         )
+        eligible_narration_word_count = sum(
+            len(str(getattr(chapter, "text", "") or "").split())
+            for chapter in project.chapters
+            if not getattr(chapter, "skip_for_generation", False)
+            and str(getattr(chapter, "text", "") or "").strip()
+        )
+        # This is a clearly labelled text-only listening-time estimate, not a
+        # claim about model synthesis time or a substitute for measured M4B duration.
+        estimated_listening_duration_seconds = (
+            int(round(eligible_narration_word_count * 60 / 150))
+            if eligible_narration_word_count > 0 else None
+        )
         empty_chapters = sum(
             1 for chapter in project.chapters
             if not str(getattr(chapter, "text", "") or "").strip()
@@ -1072,6 +1084,9 @@ class PremiumV2Bridge(QObject):
             "folder": str(project.folder.resolve()),
             "source_path": str(project.source_path) if project.source_path else None,
             "chapter_count": chapter_count,
+            "eligible_narration_word_count": eligible_narration_word_count,
+            "estimated_listening_duration_seconds": estimated_listening_duration_seconds,
+            "estimated_listening_rate_words_per_minute": 150,
             "completed_chapter_count": completed_chapter_count,
             "empty_chapters_skipped": empty_chapters_skipped,
             "excluded_chapters_skipped": excluded_chapters_skipped,
@@ -1181,10 +1196,7 @@ class PremiumV2Bridge(QObject):
             target = Path(requested).expanduser().resolve()
         except (OSError, RuntimeError, ValueError) as exc:
             raise ValueError("The selected project path is invalid.") from exc
-        project = next(
-            (item for item in list_projects() if Path(item.folder).resolve() == target),
-            None,
-        )
+        project = self._load_library_project(target)
         if project is None:
             raise ValueError("That project is no longer present in the active Library.")
         active_folder_value = str(self.settings.value("project/active_folder") or "").strip()
@@ -1225,10 +1237,7 @@ class PremiumV2Bridge(QObject):
             target = Path(requested).expanduser().resolve()
         except (OSError, RuntimeError, ValueError) as exc:
             raise ValueError("The selected project path is invalid.") from exc
-        project = next(
-            (item for item in list_projects() if Path(item.folder).resolve() == target),
-            None,
-        )
+        project = self._load_library_project(target)
         if project is None:
             raise ValueError("That project is no longer present in the active Library.")
         active_folder_value = str(self.settings.value("project/active_folder") or "").strip()
@@ -2231,13 +2240,84 @@ class PremiumV2Bridge(QObject):
             row = self._jobs.get(str(job_id))
             if row is None:
                 raise ValueError("Background job no longer exists.")
+
+            previous_state = str(row.get("state") or "").casefold()
+            next_state = str(changes.get("state", previous_state) or "").casefold()
+            now_dt = datetime.now(timezone.utc)
+            now_iso = now_dt.isoformat()
+            paused_seconds = row.get("elapsed_paused_seconds", 0.0)
+            try:
+                paused_seconds = max(0.0, float(paused_seconds or 0.0))
+            except (TypeError, ValueError, OverflowError):
+                paused_seconds = 0.0
+
+            # Count only confirmed paused intervals. A pause request remains
+            # active until GenerationManager reports its saved checkpoint.
+            if previous_state == "paused" and next_state == "running":
+                paused_at = row.get("elapsed_paused_at")
+                if paused_at:
+                    try:
+                        paused_start = datetime.fromisoformat(str(paused_at))
+                        if paused_start.tzinfo is None:
+                            paused_start = paused_start.replace(tzinfo=timezone.utc)
+                        paused_seconds += max(
+                            0.0, (now_dt - paused_start.astimezone(timezone.utc)).total_seconds()
+                        )
+                    except (TypeError, ValueError, OverflowError):
+                        pass
+                row["elapsed_paused_seconds"] = paused_seconds
+                row["elapsed_paused_at"] = None
+                row["elapsed_frozen"] = False
+            elif next_state == "paused":
+                if previous_state != "paused":
+                    row["elapsed_paused_at"] = now_iso
+                row["elapsed_frozen"] = True
+            elif previous_state == "paused" and next_state != "running":
+                # Cancelling while paused must not count shutdown time as work.
+                row["elapsed_paused_at"] = None
+                row["elapsed_frozen"] = True
+            elif next_state in {"running", "pause_requested", "cancel_requested"}:
+                row["elapsed_frozen"] = False
+
             row.update(changes)
             row["updated_at"] = self._now()
-            if row.get("state") == "running" and row.get("started_at"):
+
+            active_states = {"running", "pause_requested", "cancel_requested"}
+            terminal_states = {"completed", "failed", "cancelled"}
+            should_measure_elapsed = (
+                next_state in active_states
+                or next_state == "paused"
+                or (next_state in terminal_states and previous_state in active_states)
+            )
+            if should_measure_elapsed and row.get("started_at") and row.get("elapsed_frozen") is not True:
                 try:
-                    row["elapsed_seconds"] = max(0, int((datetime.now(timezone.utc) - datetime.fromisoformat(row["started_at"])).total_seconds()))
-                except (TypeError, ValueError):
+                    started_at = datetime.fromisoformat(str(row["started_at"]))
+                    if started_at.tzinfo is None:
+                        started_at = started_at.replace(tzinfo=timezone.utc)
+                    active_elapsed = (
+                        now_dt - started_at.astimezone(timezone.utc)
+                    ).total_seconds() - paused_seconds
+                    row["elapsed_seconds"] = max(0, int(active_elapsed))
+                    row["elapsed_updated_at"] = now_iso
+                except (TypeError, ValueError, OverflowError):
                     pass
+            elif next_state == "paused" and previous_state != "paused" and row.get("started_at"):
+                # Freeze the elapsed display at the acknowledged pause boundary.
+                try:
+                    started_at = datetime.fromisoformat(str(row["started_at"]))
+                    if started_at.tzinfo is None:
+                        started_at = started_at.replace(tzinfo=timezone.utc)
+                    active_elapsed = (
+                        now_dt - started_at.astimezone(timezone.utc)
+                    ).total_seconds() - paused_seconds
+                    row["elapsed_seconds"] = max(0, int(active_elapsed))
+                    row["elapsed_updated_at"] = now_iso
+                except (TypeError, ValueError, OverflowError):
+                    pass
+            elif previous_state == "paused":
+                row["elapsed_updated_at"] = now_iso
+
+            if next_state in {"running", "pause_requested"} and row.get("elapsed_frozen") is not True:
                 job_type = str(row.get("type") or "").casefold()
                 if job_type in {
                     "audiobook-generation", "voice-preview",
@@ -2257,7 +2337,7 @@ class PremiumV2Bridge(QObject):
                         )
                     except (TypeError, ValueError, ZeroDivisionError):
                         row["eta_seconds"] = None
-            if row.get("state") in {"completed", "failed", "cancelled"}:
+            if row.get("state") in terminal_states:
                 row["completed_at"] = row.get("completed_at") or row["updated_at"]
                 row["eta_seconds"] = 0
                 self._record_history_job(row)
@@ -3518,6 +3598,8 @@ class PremiumV2Bridge(QObject):
             qwen_prompt=str(payload.get("qwen_prompt") or "")[:4000],
             qwen_seed=int(payload["qwen_seed"]) if payload.get("qwen_seed") not in (None, "") else None,
             reference_text=str(payload.get("reference_text") or "")[:10000],
+            qwen_anchor_path=str(payload.get("qwen_anchor_path") or "").strip() or None,
+            qwen_anchor_text=str(payload.get("qwen_anchor_text") or "")[:10000],
             qwen_profile_id=qwen_profile_id,
         )
 
@@ -4202,16 +4284,11 @@ class PremiumV2Bridge(QObject):
                 close_cache = getattr(self, "close_preview_provider_cache", None)
                 if callable(close_cache):
                     close_cache()
-                preview_profile = profile
-                if (str(getattr(profile, "provider", "") or "").casefold() == "qwen-character"
-                        and str(getattr(profile, "qwen_mode", "") or "").casefold() == "design"):
-                    # Keep the full-quality VoiceDesign profile/prompt/seed but use
-                    # the dedicated one-pass audition path for preview jobs. Production
-                    # narration continues to build/reuse the stable Base identity bank.
-                    import copy
-                    preview_profile = copy.copy(profile)
-                    preview_profile.qwen_mode = "design-preview"
-                provider, voice = provider_from_profile(preview_profile)
+                # VoiceDesign audition and full-book narration must use the same
+                # stable profile identity and content-addressed VoiceDesign/Base anchor
+                # bank. The one-pass design-preview engine can sound different from the
+                # saved production voice, so do not rewrite the selected profile mode.
+                provider, voice = provider_from_profile(profile)
                 if cast_assignments:
                     from app.tts.cast_provider import CastAwareProvider
                     provider = CastAwareProvider(
@@ -6309,11 +6386,7 @@ class PremiumV2Bridge(QObject):
             series = scope
         if not series or series.casefold() in {"global character library", "all series"}:
             active_folder = str(self.settings.value("project/active_folder") or "").strip()
-            active_project = next(
-                (project for project in list_projects()
-                 if active_folder and str(Path(project.folder).resolve()) == str(Path(active_folder).resolve())),
-                None,
-            )
+            active_project = self._load_library_project(active_folder) if active_folder else None
             if active_project:
                 series = self._project_series_name(active_project, load_state(active_project.folder))
             else:
@@ -6341,11 +6414,7 @@ class PremiumV2Bridge(QObject):
             record = update_reusable_character(existing["id"], changes)
         else:
             active_folder = str(self.settings.value("project/active_folder") or "").strip()
-            active_project = next(
-                (project for project in list_projects()
-                 if active_folder and str(Path(project.folder).resolve()) == str(Path(active_folder).resolve())),
-                None,
-            )
+            active_project = self._load_library_project(active_folder) if active_folder else None
             sync_reusable_characters(
                 series,
                 [{
@@ -6380,11 +6449,7 @@ class PremiumV2Bridge(QObject):
         project_updated = False
         if "voice_profile" in payload and voice_profile:
             active_folder = str(self.settings.value("project/active_folder") or "").strip()
-            active_project = next(
-                (project for project in list_projects()
-                 if active_folder and str(Path(project.folder).resolve()) == str(Path(active_folder).resolve())),
-                None,
-            )
+            active_project = self._load_library_project(active_folder) if active_folder else None
             if active_project is not None:
                 state = load_state(active_project.folder)
                 cast = state.get("characters") or []
@@ -7293,23 +7358,81 @@ class PremiumV2Bridge(QObject):
             if isinstance(row, dict)
         ]
 
-        # Normalize older alternate assignment fields on Character Studio rows.
+        # Merge the saved Voice Cast roster. Manually added characters may not
+        # exist in the older state["characters"] analysis snapshot.
+        roster = state.get("voice_cast_character_roster")
+        if isinstance(roster, list):
+            for saved_row in roster:
+                if not isinstance(saved_row, dict):
+                    continue
+                name = str(saved_row.get("name") or saved_row.get("primary_name") or "").strip()
+                series = str(saved_row.get("series") or default_series or "").strip()
+                if not name or name.casefold() == "narrator" or not series:
+                    continue
+                roster_names = {name.casefold()}
+                roster_names.update(str(alias or "").strip().casefold() for alias in (saved_row.get("aliases") or []))
+                matching_rows = [
+                    row for row in rows
+                    if self._character_series_for_voice_assignment(row, default_series).casefold() == series.casefold()
+                    and bool(roster_names.intersection(
+                        {str(row.get("name") or row.get("primary_name") or "").strip().casefold()}
+                        | {str(alias or "").strip().casefold() for alias in (row.get("aliases") or [])}
+                    ))
+                ]
+                if len(matching_rows) > 1:
+                    issues.append(f"Character roster identity '{name}' in series '{series}' matches multiple production rows.")
+                elif not matching_rows:
+                    rows.append({
+                        "name": name,
+                        "role": str(saved_row.get("role") or "Possible Character"),
+                        "series": series,
+                        "dialogue_count": saved_row.get("dialogue_count", 0),
+                        "examples": list(saved_row.get("examples") or []),
+                        "confidence": saved_row.get("confidence", 0.0),
+                        "aliases": list(saved_row.get("aliases") or []),
+                        "voice_profile": "",
+                    })
+
+        scoped_assignments: dict[str, dict[str, str]] = {}
+        raw_scoped_assignments = state.get("voice_cast_identity_assignments")
+        if isinstance(raw_scoped_assignments, dict):
+            for raw_identity, raw_profile in raw_scoped_assignments.items():
+                parsed = parse_character_identity_key(str(raw_identity or ""))
+                if parsed is None:
+                    issues.append("A saved series-scoped Voice Cast assignment has an invalid character identity key.")
+                    continue
+                series, name = parsed
+                identity = character_identity_key(name, series)
+                if identity in scoped_assignments:
+                    issues.append(f"Character '{name}' in series '{series}' has duplicate series-scoped voice assignments.")
+                    continue
+                scoped_assignments[identity] = {"name": name, "series": series, "profile_name": str(raw_profile or "").strip()}
+
+        def scoped_entries_for_row(row: dict[str, Any]) -> list[dict[str, str]]:
+            canonical = str(row.get("name") or row.get("primary_name") or "").strip().casefold()
+            aliases = row.get("aliases") or []
+            aliases = aliases if isinstance(aliases, (list, tuple)) else ([aliases] if aliases else [])
+            identity_names = {canonical}
+            identity_names.update(str(alias or "").strip().casefold() for alias in aliases)
+            series = self._character_series_for_voice_assignment(row, default_series).casefold()
+            return [
+                entry for entry in scoped_assignments.values()
+                if entry["series"].casefold() == series and entry["name"].casefold() in identity_names
+            ]
+
+        # A scoped empty value is an explicit Unassigned choice; do not resurrect
+        # an older profile from a name-only key or alternate legacy field.
         for row in rows:
+            if scoped_entries_for_row(row):
+                row["voice_profile"] = ""
+                row["_voice_cast_identity_explicit"] = True
+                continue
             existing = str(row.get("voice_profile") or "").strip()
             if not existing:
-                existing = next((
-                    str(row.get(key) or "").strip()
-                    for key in ("voice_profile_name", "assigned_voice_profile", "profile_name", "voice_name")
-                    if str(row.get(key) or "").strip()
-                ), "")
+                existing = next((str(row.get(key) or "").strip() for key in ("voice_profile_name", "assigned_voice_profile", "profile_name", "voice_name") if str(row.get(key) or "").strip()), "")
             profile = resolve_profile(existing) if existing else None
             if existing and profile is None:
-                issues.append(
-                    f"Character '{row.get('name') or 'Unknown'}' references unavailable saved voice profile '{existing}'."
-                )
-                # The stale reference is not a valid configured profile. Keep
-                # the returned generation snapshot empty so this character is
-                # safely routed through the explicit Unassigned Character voice.
+                issues.append(f"Character '{row.get('name') or 'Unknown'}' references unavailable saved voice profile '{existing}'.")
                 row["voice_profile"] = ""
             elif profile is not None:
                 row["voice_profile"] = str(profile.name)
@@ -7318,11 +7441,45 @@ class PremiumV2Bridge(QObject):
                 if legacy_voice_id:
                     profile = resolve_profile(legacy_voice_id, allow_voice_id=True)
                     if profile is None:
-                        issues.append(
-                            f"Character '{row.get('name') or 'Unknown'}' has an unresolvable legacy voice ID '{legacy_voice_id}'."
-                        )
+                        issues.append(f"Character '{row.get('name') or 'Unknown'}' has an unresolvable legacy voice ID '{legacy_voice_id}'.")
                     else:
                         row["voice_profile"] = str(profile.name)
+
+        # Apply exact (series, character) identities before legacy name mappings.
+        for identity, entry in scoped_assignments.items():
+            name, series = entry["name"], entry["series"]
+            matching_rows = []
+            for row in rows:
+                canonical = str(row.get("name") or row.get("primary_name") or "").strip()
+                aliases = row.get("aliases") or []
+                aliases = aliases if isinstance(aliases, (list, tuple)) else ([aliases] if aliases else [])
+                identity_names = {canonical.casefold()}
+                identity_names.update(str(alias or "").strip().casefold() for alias in aliases)
+                if name.casefold() not in identity_names:
+                    continue
+                if self._character_series_for_voice_assignment(row, default_series).casefold() != series.casefold():
+                    continue
+                matching_rows.append(row)
+            if len(matching_rows) > 1:
+                issues.append(f"Series-scoped Voice Cast identity '{name}' in series '{series}' matches multiple characters.")
+                continue
+            if not matching_rows:
+                row = {"name": name, "aliases": [], "series": series, "scope": "Series · " + series, "voice_profile": ""}
+                rows.append(row)
+                matching_rows = [row]
+            row = matching_rows[0]
+            row["_voice_cast_identity_explicit"] = True
+            if not entry["profile_name"]:
+                row["voice_profile"] = ""
+                continue
+            profile = resolve_profile(entry["profile_name"])
+            if profile is None:
+                issues.append(f"Character '{name}' in series '{series}' references unavailable saved voice profile '{entry['profile_name']}'." )
+                row["voice_profile"] = ""
+            else:
+                row["voice_profile"] = str(profile.name)
+                if not str(row.get("series") or row.get("series_name") or "").strip():
+                    row["series"] = series
 
         legacy_cast = state.get("voice_cast")
         legacy_cast = legacy_cast if isinstance(legacy_cast, dict) else {}
@@ -7371,6 +7528,9 @@ class PremiumV2Bridge(QObject):
                     continue
                 matching_rows.append(row)
 
+            if matching_rows and all(row.get("_voice_cast_identity_explicit") for row in matching_rows):
+                # Scoped records are newer and more precise than name-only values.
+                continue
             if len(matching_rows) > 1:
                 issues.append(
                     f"Legacy Voice Cast entry '{name}' matches multiple characters; specify its series in Character Studio."
@@ -7400,6 +7560,9 @@ class PremiumV2Bridge(QObject):
                 "voice_profile": str(profile.name),
                 "legacy_voice_cast": True,
             })
+
+        for row in rows:
+            row.pop("_voice_cast_identity_explicit", None)
 
         if strict and issues:
             raise ValueError(
@@ -7606,10 +7769,7 @@ class PremiumV2Bridge(QObject):
         requested_project_folder = str(payload.get("_project_folder") or "").strip()
         if requested_project_folder:
             requested_path = Path(requested_project_folder).expanduser().resolve()
-            project = next(
-                (item for item in list_projects() if str(item.folder.resolve()) == str(requested_path)),
-                None,
-            )
+            project = self._load_library_project(requested_path)
             if project is None:
                 raise ValueError("The project for this generation job is no longer available in the local library.")
         else:
@@ -7926,14 +8086,24 @@ class PremiumV2Bridge(QObject):
             timings = self._generation_progress_timing
         timing = timings.setdefault(
             str(job_id),
-            {"last_at": None, "last_work": 0, "samples": []},
+            {
+                "samples": [],
+                "seconds_per_unit_ema": None,
+                "warmup_chunk_skipped": False,
+                "smoothed_eta_seconds": None,
+                "eta_last_monotonic": None,
+                "eta_overrun_samples": 0,
+            },
         )
 
         if msg.startswith("paused:"):
             state = "paused"
             stage = "Paused at chapter checkpoint"
             changes["message"] = msg.split(":", 1)[1]
-            changes["eta_seconds"] = None
+            # Freeze the last estimate while paused; resume resets both clocks so
+            # the suspended interval is never mistaken for synthesis time.
+            timing["eta_last_monotonic"] = now
+            changes["eta_updated_at"] = None
         elif msg.startswith("plan:"):
             parts = msg.split(":")
             try:
@@ -7941,13 +8111,24 @@ class PremiumV2Bridge(QObject):
                 total_chunks = max(1, int(parts[3]))
             except (IndexError, TypeError, ValueError):
                 total_work, total_chunks = 1, 1
-            timing.update({"last_at": None, "last_work": 0, "samples": []})
+            timing.clear()
+            timing.update({
+                "samples": [],
+                "seconds_per_unit_ema": None,
+                "warmup_chunk_skipped": False,
+                "smoothed_eta_seconds": None,
+                "eta_last_monotonic": None,
+                "eta_overrun_samples": 0,
+            })
             stage = "Preparing generation plan"
             changes.update({
                 "progress": 0,
                 "eta_seconds": None,
+                "eta_updated_at": None,
+                "generation_eta_seconds_per_text_unit": None,
                 "generated_audio_duration_seconds": 0.0,
                 "generation_completed_work_units": 0,
+                "generation_completed_chapter_work_units": 0,
                 "generation_total_work_units": total_work,
                 "generation_completed_chunks": 0,
                 "generation_total_chunks": total_chunks,
@@ -7959,9 +8140,16 @@ class PremiumV2Bridge(QObject):
                 ),
             })
         elif msg.startswith("provider:"):
-            stage = "Loading voice provider"
-            changes["message"] = msg.partition(":")[2]
-            changes["eta_seconds"] = None
+            provider_message = msg.partition(":")[2].strip()
+            stage = (
+                "Loading voice model"
+                if "loading" in provider_message.casefold()
+                or "initializing" in provider_message.casefold()
+                else "Rendering narration"
+            )
+            changes["message"] = provider_message
+            # Keep the last measured ETA while provider diagnostics arrive.
+            # These messages are not completed work and must not erase a valid estimate.
         elif msg.startswith("pronunciation:"):
             parts = msg.split(":", 2)
             try:
@@ -7975,15 +8163,18 @@ class PremiumV2Bridge(QObject):
                 f"across {rules} enabled rule(s) for synthesis."
             )
         elif msg.startswith("chunk-start:"):
-            stage = "Loading voice model" if int(timing.get("last_work") or 0) == 0 else "Rendering chapter audio"
-            timing["last_at"] = now
-            changes["eta_seconds"] = None
-            changes["generation_eta_basis"] = None
+            stage = (
+                "Loading voice model"
+                if not timing.get("warmup_chunk_skipped")
+                else "Rendering chapter audio"
+            )
             changes["message"] = (
-                "Initializing the selected voice provider; no narration chunk has completed yet."
-                if int(timing.get("last_work") or 0) == 0
+                "Initializing the selected voice provider; measuring completed synthesis chunks."
+                if not timing.get("warmup_chunk_skipped")
                 else msg.partition(":")[2]
             )
+            # Chapter boundaries do not invalidate the measured book-wide rate.
+            # In particular, do not clear eta_seconds while Qwen moves to a new chapter.
         elif msg.startswith("chunk:"):
             stage = "Rendering narration chunks"
             match = re.search(r":(\d+)/(\d+):(\d+)/(\d+)", msg)
@@ -7992,23 +8183,9 @@ class PremiumV2Bridge(QObject):
                 total_chunks = max(1, int(match.group(2)))
                 completed_work = max(0, int(match.group(3)))
                 total_work = max(1, int(match.group(4)))
-                previous_work = max(0, int(timing.get("last_work") or 0))
-                previous_at = timing.get("last_at")
-                delta_work = max(0, completed_work - previous_work)
-                delta_seconds = (
-                    max(0.0, now - float(previous_at))
-                    if previous_at is not None else 0.0
-                )
-                samples = timing.setdefault("samples", [])
-                # Skip the first chunk: its duration can include lazy model load
-                # and accelerator warm-up, so it is not a valid throughput sample.
-                if previous_work > 0 and delta_work > 0 and delta_seconds >= 0.25:
-                    samples.append({"work": delta_work, "seconds": delta_seconds})
-                    del samples[:-5]
-                timing["last_work"] = completed_work
-                timing["last_at"] = now
                 # Main progress is the exact completed synthesis text-work
-                # ratio. M4B assembly has its own independent measured steps.
+                # ratio. Timing is received separately from the synthesis call,
+                # never inferred from UI callback spacing.
                 narration_percent = round(100.0 * min(total_work, completed_work) / total_work)
                 changes.update({
                     "progress": max(0, min(100, narration_percent)),
@@ -8016,35 +8193,143 @@ class PremiumV2Bridge(QObject):
                     "generation_total_work_units": total_work,
                     "generation_completed_chunks": completed_chunks,
                     "generation_total_chunks": total_chunks,
-                    "generation_eta_sample_count": len(samples),
                     "message": (
                         f"Completed synthesis workload {completed_work:,}/{total_work:,} "
                         f"text unit(s) · chunk {completed_chunks}/{total_chunks}."
                     ),
                 })
-                elapsed = 0
-                try:
-                    row = getattr(self, "_jobs", {}).get(str(job_id), {})
-                    started = datetime.fromisoformat(str(row.get("started_at") or ""))
-                    elapsed = max(0, int((datetime.now(timezone.utc) - started).total_seconds()))
-                except (TypeError, ValueError):
-                    pass
-                eta = None
-                if (
-                    len(samples) >= 3
-                    and elapsed >= 10
-                    and completed_work > 0
-                    and completed_work < total_work
-                ):
-                    measured_seconds = sum(float(sample["seconds"]) for sample in samples)
-                    measured_work = sum(int(sample["work"]) for sample in samples)
-                    throughput = measured_work / measured_seconds if measured_seconds > 0 else 0.0
-                    if throughput > 0:
-                        eta = max(0, int((total_work - completed_work) / throughput))
-                        changes["generation_eta_basis"] = (
-                            f"measured throughput from {len(samples)} completed chunks in this run"
+        elif msg.startswith("chunk-timing:"):
+            stage = "Rendering narration chunks"
+            match = re.match(
+                r"chunk-timing:(\d+):([0-9]+(?:\.[0-9]+)?):(\d+):(\d+):(\d+):(\d+)",
+                msg,
+            )
+            if match:
+                measured_work = max(1, int(match.group(1)))
+                measured_seconds = max(0.001, float(match.group(2)))
+                completed_work = max(0, int(match.group(3)))
+                total_work = max(1, int(match.group(4)))
+                completed_chunks = max(0, int(match.group(5)))
+                total_chunks = max(1, int(match.group(6)))
+                samples = timing.setdefault("samples", [])
+
+                # The first real synthesis call can include model loading and
+                # accelerator warm-up. Exclude it from the steady-state rate.
+                if not timing.get("warmup_chunk_skipped"):
+                    timing["warmup_chunk_skipped"] = True
+                else:
+                    samples.append({
+                        "work": measured_work,
+                        "seconds": measured_seconds,
+                    })
+                    del samples[:-9]
+
+                observed_rates = sorted(
+                    float(sample["seconds"]) / max(1, int(sample["work"]))
+                    for sample in samples
+                    if float(sample.get("seconds") or 0) > 0
+                    and int(sample.get("work") or 0) > 0
+                )
+                seconds_per_unit = None
+                if observed_rates:
+                    middle = len(observed_rates) // 2
+                    if len(observed_rates) % 2:
+                        observed_median = observed_rates[middle]
+                    else:
+                        observed_median = (
+                            observed_rates[middle - 1] + observed_rates[middle]
+                        ) / 2.0
+                    previous_rate = timing.get("seconds_per_unit_ema")
+                    if previous_rate is not None and float(previous_rate) > 0:
+                        # Damp changes from one unusually slow/fast chunk while
+                        # still adapting to sustained changes in Qwen throughput.
+                        seconds_per_unit = (
+                            0.20 * observed_median + 0.80 * float(previous_rate)
                         )
-                changes["eta_seconds"] = eta
+                    else:
+                        seconds_per_unit = observed_median
+                    timing["seconds_per_unit_ema"] = seconds_per_unit
+
+                changes.update({
+                    "generation_completed_work_units": completed_work,
+                    "generation_total_work_units": total_work,
+                    "generation_completed_chunks": completed_chunks,
+                    "generation_total_chunks": total_chunks,
+                    "generation_eta_sample_count": len(samples),
+                    "generation_eta_seconds_per_text_unit": seconds_per_unit,
+                    "message": (
+                        f"Measured synthesis chunk {completed_chunks}/{total_chunks} · "
+                        f"{measured_seconds:.1f}s for {measured_work:,} text unit(s)."
+                    ),
+                })
+                if completed_work >= total_work:
+                    changes["eta_seconds"] = 0
+                    changes["eta_updated_at"] = self._now()
+                elif len(samples) >= 3 and seconds_per_unit is not None:
+                    remaining_work = max(0, total_work - completed_work)
+                    measured_remaining = max(
+                        1.0, float(remaining_work) * float(seconds_per_unit)
+                    )
+                    previous_eta = timing.get("smoothed_eta_seconds")
+                    previous_at = timing.get("eta_last_monotonic")
+                    if previous_eta is None:
+                        displayed_eta = measured_remaining
+                        timing["eta_overrun_samples"] = 0
+                    else:
+                        try:
+                            previous_elapsed = max(
+                                0.0, now - float(previous_at)
+                            ) if previous_at is not None else 0.0
+                            previous_remaining_now = max(
+                                0.0, float(previous_eta) - previous_elapsed
+                            )
+                        except (TypeError, ValueError, OverflowError):
+                            previous_remaining_now = max(0.0, float(previous_eta))
+
+                        if measured_remaining <= previous_remaining_now:
+                            # Faster measured work may shorten the estimate,
+                            # but retain the established gradual downward smoothing
+                            # so one unusually fast chunk does not collapse ETA.
+                            discrepancy = measured_remaining - previous_remaining_now
+                            displayed_eta = max(
+                                0.0, previous_remaining_now + discrepancy * 0.25
+                            )
+                            timing["eta_overrun_samples"] = 0
+                        elif previous_remaining_now > 0:
+                            # Keep the displayed estimate monotonic while it is
+                            # still valid. Sustained overruns are handled only
+                            # after the last estimate has actually expired.
+                            displayed_eta = previous_remaining_now
+                            timing["eta_overrun_samples"] = 0
+                        else:
+                            # A single slow chunk must not make the ETA jump up.
+                            # Once the forecast expires, wait for three further
+                            # completed chunks before publishing a fresh estimate
+                            # from the rolling measured rate.
+                            overrun_samples = int(timing.get("eta_overrun_samples") or 0) + 1
+                            timing["eta_overrun_samples"] = overrun_samples
+                            if overrun_samples >= 3:
+                                displayed_eta = measured_remaining
+                                timing["eta_overrun_samples"] = 0
+                                changes["generation_eta_recalibrated"] = True
+                                changes["generation_eta_recalibration_reason"] = (
+                                    "Three completed chunks confirmed the previous estimate was exceeded."
+                                )
+                            else:
+                                displayed_eta = 0.0
+
+                    timing["smoothed_eta_seconds"] = displayed_eta
+                    timing["eta_last_monotonic"] = now
+                    changes["eta_seconds"] = max(0, int(round(displayed_eta)))
+                    changes["eta_updated_at"] = self._now()
+                    changes["generation_eta_basis"] = (
+                        "median measured synthesis-call duration per text unit; "
+                        "visible ETA counts down monotonically, smooths faster samples, "
+                        "and recalibrates only after three completed chunks exceed an expired estimate"
+                    )
+            # Before three post-warm-up samples, retain the last valid estimate
+            # (or leave it unavailable during initial calibration).
+
         elif msg.startswith("chapter-complete:"):
             stage = "Chapter audio saved"
             current_work = max(0, int(done or 0))
@@ -8065,6 +8350,7 @@ class PremiumV2Bridge(QObject):
             changes.update({
                 "progress": round(100.0 * min(total_work, current_work) / total_work),
                 "generation_completed_work_units": current_work,
+                "generation_completed_chapter_work_units": current_work,
                 "message": msg.partition(":")[2],
             })
             if measured_book_seconds is not None:
@@ -8074,12 +8360,15 @@ class PremiumV2Bridge(QObject):
                 )
         elif msg.startswith("m4b-packaging"):
             stage = "Assembling final M4B"
+            timing["smoothed_eta_seconds"] = None
+            timing["eta_last_monotonic"] = None
             changes.update({
                 "progress": 100,
                 "packaging_progress_percent": 0,
                 "packaging_completed_steps": 0,
                 "packaging_total_steps": None,
                 "eta_seconds": None,
+                "eta_updated_at": None,
                 "generation_eta_basis": None,
                 "message": "Narration workload is 100% complete. Measuring final M4B assembly and validation separately.",
             })
@@ -8102,21 +8391,31 @@ class PremiumV2Bridge(QObject):
                 detail = stage
             changes.update({
                 "eta_seconds": None,
+                "eta_updated_at": None,
                 "generation_eta_basis": None,
                 "message": detail,
             })
         elif msg.startswith("m4b-complete"):
-            stage = "Audiobook duration measured · M4B ready"
+            # The assembler has returned a complete file, but the bridge measures
+            # the final M4B duration in _generation_finished immediately after
+            # this progress event. Do not claim that duration has already been
+            # measured before that result is persisted.
+            stage = "Validating final M4B duration"
             changes.update({
                 "progress": 100,
                 "packaging_progress_percent": 100,
                 "eta_seconds": 0,
-                "message": "Final M4B assembly and validation completed.",
+                "eta_updated_at": self._now(),
+                "message": (
+                    "M4B assembly is complete; measuring the final audio duration "
+                    "before marking the audiobook ready."
+                ),
             })
         elif msg.startswith("m4b-failed"):
             stage = "Audiobook assembly failed"
             changes["message"] = msg.partition(":")[2]
             changes["eta_seconds"] = None
+            changes["eta_updated_at"] = None
         else:
             changes["message"] = msg
 
@@ -8499,8 +8798,20 @@ class PremiumV2Bridge(QObject):
                 or not _generation_worker_is_alive(manager)
             ):
                 return dict(current)
+            timing_rows = getattr(self, "_generation_progress_timing", {})
+            timing = timing_rows.get(job_id) if isinstance(timing_rows, dict) else None
+            if isinstance(timing, dict):
+                # Do not subtract time spent in the paused state from the next
+                # measured ETA revision.
+                timing["eta_last_monotonic"] = time.monotonic()
             return self._job_update(
-                job_id, state="running", stage="Resuming generation", message="Resume requested."
+                job_id,
+                state="running",
+                stage="Resuming generation",
+                message="Resume requested.",
+                eta_updated_at=(
+                    self._now() if current.get("eta_seconds") is not None else None
+                ),
             )
 
     def _job_cancel(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -8594,10 +8905,7 @@ class PremiumV2Bridge(QObject):
             raise ValueError("The original generation job does not contain a saved project reference.")
 
         requested_path = Path(project_folder_value).expanduser().resolve()
-        project = next(
-            (item for item in list_projects() if str(item.folder.resolve()) == str(requested_path)),
-            None,
-        )
+        project = self._load_library_project(requested_path)
         if project is None:
             raise ValueError("The original project is no longer available in the local library.")
 
@@ -8684,11 +8992,7 @@ class PremiumV2Bridge(QObject):
         requested_folder = str(payload.get("folder") or "").strip()
         if requested_folder:
             requested_path = Path(requested_folder).expanduser()
-            project = next(
-                (item for item in list_projects()
-                 if str(item.folder.resolve()) == str(requested_path.resolve())),
-                None,
-            )
+            project = self._load_library_project(requested_path)
             if project is None:
                 raise ValueError("The selected audiobook is no longer available in the local library.")
         else:
@@ -8785,11 +9089,7 @@ class PremiumV2Bridge(QObject):
         if not folder_value:
             raise ValueError("Select an audiobook before saving playback position.")
         requested_folder = Path(folder_value).expanduser().resolve()
-        project = next(
-            (item for item in list_projects()
-             if str(item.folder.resolve()) == str(requested_folder)),
-            None,
-        )
+        project = self._load_library_project(requested_folder)
         if project is None:
             raise ValueError("The selected audiobook is no longer available in the local library.")
         raw_position = payload.get("position_seconds", 0)
@@ -12333,17 +12633,18 @@ class PremiumV2Window(QMainWindow):
         self._frontend_generation += 1
         generation = self._frontend_generation
         self._update_startup_progress("Retrying the interface and reconnecting local services…", 5)
+        # Keep the native loading surface visible for both the packaged HTML
+        # path and the direct-file fallback. Showing Chromium before load/reload
+        # completes can expose a white frame while the renderer is still painting.
+        if hasattr(self, "_web_stack") and hasattr(self, "_loading_page"):
+            self._web_stack.setCurrentWidget(self._loading_page)
         if (
             self._uses_html_startup_loader
             and self._hosted_html_path is not None
             and self._hosted_html_path.is_file()
         ):
-            if hasattr(self, "_web_stack"):
-                self._web_stack.setCurrentWidget(self.web)
             self.web.load(QUrl.fromLocalFile(str(self._hosted_html_path.resolve())))
         else:
-            if hasattr(self, "_web_stack") and hasattr(self, "_loading_page"):
-                self._web_stack.setCurrentWidget(self._loading_page)
             self.web.reload()
         QTimer.singleShot(30000, lambda: self._show_web_failure(
             "The interface retry timed out. Your project data remains on disk. Check the local log and try again."

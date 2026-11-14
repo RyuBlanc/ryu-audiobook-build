@@ -72,6 +72,7 @@ class FunctionalCheckpoint20261111Tests(unittest.TestCase):
     def test_generation_progress_keeps_narration_and_package_percent_separate(self):
         started = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()
         bridge = SimpleNamespace(
+            _now=host.PremiumV2Bridge._now,
             _jobs_lock=threading.RLock(),
             _jobs={"generation-1": {"started_at": started}},
             _generation_progress_timing={},
@@ -84,7 +85,7 @@ class FunctionalCheckpoint20261111Tests(unittest.TestCase):
         bridge._job_update = Mock(side_effect=update)
         with patch(
             "app.ui.premium_v2_host.time.monotonic",
-            side_effect=[10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0],
+            side_effect=[float(value) for value in range(10, 40)],
         ):
             host.PremiumV2Bridge._generation_progress(
                 bridge, "generation-1", 0, 23, 0, "plan:2000:0:8"
@@ -97,14 +98,25 @@ class FunctionalCheckpoint20261111Tests(unittest.TestCase):
                     bridge, "generation-1", 1, 23, work,
                     f"chunk:{completed}/8:{work}/2000",
                 )
+                host.PremiumV2Bridge._generation_progress(
+                    bridge, "generation-1", 1, 23, work,
+                    f"chunk-timing:250:10.000:{work}:2000:{completed}:8",
+                )
             self.assertIsNone(bridge._jobs["generation-1"].get("eta_seconds"))
-            # Three usable samples are collected after the first completed
-            # chunk (which includes model warm-up) has been excluded.
+            # The first synthesis call is the warm-up sample. Three following
+            # measured provider calls establish the first steady-state ETA.
             host.PremiumV2Bridge._generation_progress(
                 bridge, "generation-1", 1, 23, 1000, "chunk:4/8:1000/2000"
             )
+            host.PremiumV2Bridge._generation_progress(
+                bridge, "generation-1", 1, 23, 1000,
+                "chunk-timing:250:10.000:1000:2000:4:8",
+            )
             self.assertIsNotNone(bridge._jobs["generation-1"].get("eta_seconds"))
-            self.assertIn("measured throughput", bridge._jobs["generation-1"].get("generation_eta_basis", ""))
+            self.assertIn(
+                "median measured synthesis-call duration",
+                bridge._jobs["generation-1"].get("generation_eta_basis", ""),
+            )
 
             host.PremiumV2Bridge._generation_progress(
                 bridge, "generation-1", 23, 23, 2000,
@@ -127,6 +139,103 @@ class FunctionalCheckpoint20261111Tests(unittest.TestCase):
             self.assertEqual(bridge._jobs["generation-1"]["packaging_completed_steps"], 1)
             self.assertEqual(bridge._jobs["generation-1"]["packaging_total_steps"], 4)
 
+    def test_measured_eta_does_not_increase_and_keeps_counting_down(self):
+        bridge = SimpleNamespace(
+            _now=host.PremiumV2Bridge._now,
+            _jobs_lock=threading.RLock(),
+            _jobs={"eta-job": {"started_at": (datetime.now(timezone.utc) - timedelta(minutes=4)).isoformat(),
+                              "state": "running", "eta_seconds": 300}},
+            _generation_progress_timing={
+                "eta-job": {
+                    "samples": [{"work": 1000, "seconds": 10.0}] * 3,
+                    "seconds_per_unit_ema": 0.01,
+                    "warmup_chunk_skipped": True,
+                    "smoothed_eta_seconds": 300.0,
+                    "eta_last_monotonic": 190.0,
+                }
+            },
+        )
+
+        def update(job_id, **changes):
+            bridge._jobs[job_id].update(changes)
+            return dict(bridge._jobs[job_id])
+
+        bridge._job_update = Mock(side_effect=update)
+        with patch("app.ui.premium_v2_host.time.monotonic", return_value=200.0):
+            host.PremiumV2Bridge._generation_progress(
+                bridge, "eta-job", 1, 20, 1000,
+                "chunk-timing:1000:1000.000:1000:100000:4:100",
+            )
+
+        # The slow chunk's raw remaining-work estimate exceeds the active
+        # forecast. The UI must keep the previous countdown (300 - 10 seconds),
+        # rather than revising remaining time upwards.
+        self.assertEqual(bridge._jobs["eta-job"]["eta_seconds"], 290)
+        self.assertIn("visible ETA counts down monotonically", bridge._jobs["eta-job"]["generation_eta_basis"])
+
+    def test_measured_eta_downward_revision_is_damped(self):
+        bridge = SimpleNamespace(
+            _now=host.PremiumV2Bridge._now,
+            _jobs_lock=threading.RLock(),
+            _jobs={"eta-job": {"started_at": (datetime.now(timezone.utc) - timedelta(minutes=4)).isoformat(),
+                              "state": "running", "eta_seconds": 300}},
+            _generation_progress_timing={
+                "eta-job": {
+                    "samples": [{"work": 1000, "seconds": 10.0}] * 3,
+                    "seconds_per_unit_ema": 0.01,
+                    "warmup_chunk_skipped": True,
+                    "smoothed_eta_seconds": 300.0,
+                    "eta_last_monotonic": 190.0,
+                }
+            },
+        )
+
+        def update(job_id, **changes):
+            bridge._jobs[job_id].update(changes)
+            return dict(bridge._jobs[job_id])
+
+        bridge._job_update = Mock(side_effect=update)
+        with patch("app.ui.premium_v2_host.time.monotonic", return_value=200.0):
+            host.PremiumV2Bridge._generation_progress(
+                bridge, "eta-job", 1, 20, 5000,
+                "chunk-timing:1000:10.000:5000:10000:4:20",
+            )
+
+        # The 240-second downward discrepancy is damped to a 60-second step.
+        self.assertEqual(bridge._jobs["eta-job"]["eta_seconds"], 230)
+
+    def test_eta_monotonic_anchor_resets_on_resume_without_counting_pause_time(self):
+        class LiveThread:
+            def is_alive(self):
+                return True
+
+        class LiveManager:
+            _thread = LiveThread()
+            def resume(self):
+                self.resumed = True
+
+        manager = LiveManager()
+        bridge = SimpleNamespace(
+            _now=host.PremiumV2Bridge._now,
+            _jobs_lock=threading.RLock(),
+            _jobs={"eta-job": {"job_id": "eta-job", "state": "paused", "eta_seconds": 240}},
+            _generators={"eta-job": manager},
+            _generation_progress_timing={
+                "eta-job": {"smoothed_eta_seconds": 240.0, "eta_last_monotonic": 100.0}
+            },
+        )
+
+        def update(job_id, **changes):
+            bridge._jobs[job_id].update(changes)
+            return dict(bridge._jobs[job_id])
+
+        bridge._job_update = Mock(side_effect=update)
+        with patch("app.ui.premium_v2_host.time.monotonic", return_value=987.6):
+            result = host.PremiumV2Bridge._job_resume(bridge, {"job_id": "eta-job"})
+
+        self.assertTrue(manager.resumed)
+        self.assertEqual(result["state"], "running")
+        self.assertEqual(bridge._generation_progress_timing["eta-job"]["eta_last_monotonic"], 987.6)
     def test_completed_chapter_audio_duration_is_measured_from_wav_frames(self):
         with TemporaryDirectory() as temporary:
             chapter_dir = Path(temporary) / "chapter"
@@ -183,18 +292,110 @@ class FunctionalCheckpoint20261111Tests(unittest.TestCase):
         self.assertIn("Press OK, then click Generate full audiobook again to continue.", adapter)
         self.assertIn("productionUnassignedAcknowledgementKey !== acknowledgementKey", adapter)
 
+    def test_production_reports_automatic_narrator_only_and_preserves_user_opt_out(self):
+        adapter = (
+            Path(__file__).resolve().parents[1]
+            / "assets"
+            / "frontend"
+            / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        self.assertGreaterEqual(
+            adapter.count("project?.narrator_only_generation_auto === true"),
+            2,
+        )
+        self.assertGreaterEqual(
+            adapter.count(
+                "Automatically enabled because this book has no configured character voice profiles."
+            ),
+            3,
+        )
+        self.assertIn(
+            "Off by your choice · assigned character profiles are used",
+            adapter,
+        )
+        self.assertIn(
+            "On · the saved narrator reads all passages, including dialogue.",
+            adapter,
+        )
+
+    def test_dragon_studio_pr_runs_packaged_acceptance_and_uploads_candidate_installer_and_manifest(self):
+        workflow = (
+            Path(__file__).resolve().parents[1]
+            / ".github"
+            / "workflows"
+            / "build-windows.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "github.event_name == 'pull_request' && startsWith(github.head_ref, 'dragon-studio/')",
+            workflow,
+        )
+        self.assertIn(
+            "Run packaged Sound Design Music Library acceptance (including Stage 5.3 generation UI)",
+            workflow,
+        )
+        upload_steps = (
+            "Upload Windows installer artifact",
+            "Upload release SHA-256 manifest",
+            "Upload portable Windows application",
+            "Upload Stage 7 real Piper benchmark evidence",
+        )
+        for step_name in upload_steps:
+            start = workflow.index("      - name: " + step_name)
+            next_step = workflow.find("\n      - name: ", start + 1)
+            block = workflow[start:next_step if next_step >= 0 else len(workflow)]
+            if step_name in {"Upload Windows installer artifact", "Upload release SHA-256 manifest"}:
+                self.assertIn("startsWith(github.head_ref, 'dragon-studio/')", block)
+            elif step_name == "Upload portable Windows application":
+                self.assertIn(
+                    "if: ${{ github.event_name != 'pull_request' || startsWith(github.head_ref, 'dragon-studio/') }}",
+                    block,
+                    msg="Portable application must upload for Dragon Studio PRs only.",
+                )
+                self.assertIn("path: dist/Ryu's Audiobook/", block)
+            else:
+                self.assertIn(
+                    "if: ${{ github.event_name != 'pull_request' }}",
+                    block,
+                    msg=step_name + " must remain disabled for pull-request validation.",
+                )
     def test_narrator_only_remains_available_with_character_profiles(self):
         adapter = (Path(__file__).resolve().parents[1] / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         backend = (Path(__file__).resolve().parents[1] / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         self.assertIn("narrator_only_eligible = narrator_ready", backend)
         self.assertNotIn("if (narratorOnly && configuredCharacterVoiceCount > 0)", adapter)
+        self.assertIn("0 configured character voice profiles · Narrator-only", adapter)
+        self.assertIn("configured character voice profile(s) · Narrator-only", adapter)
         self.assertIn("state[\"narrator_only_generation\"] = enabled", backend)
+
+    def test_preserved_help_guide_documents_current_gen07_eligibility(self):
+        adapter = (
+            Path(__file__).resolve().parents[1]
+            / "assets"
+            / "frontend"
+            / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        start = adapter.index("function renderHelpGuide()")
+        end = adapter.index("function wireStorageControls()", start)
+        guide_reconciliation = adapter[start:end]
+        self.assertIn(
+            "Narrator-only Generation (GEN-07) does not require that zero valid character voice profiles are configured.",
+            guide_reconciliation,
+        )
+        self.assertIn(
+            "saved narrator reads all narration and dialogue",
+            guide_reconciliation,
+        )
+        self.assertIn(
+            "A valid saved narrator profile is still required.",
+            guide_reconciliation,
+        )
 
     def test_qwen_preview_starts_at_zero_and_progress_is_completed_segment_based(self):
         adapter = (Path(__file__).resolve().parents[1] / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         backend = (Path(__file__).resolve().parents[1] / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
-        self.assertIn('stage = "Loading voice model" if int(timing.get("last_work") or 0) == 0', backend)
-        self.assertIn("changes[\"eta_seconds\"] = None", backend)
+        chunk_start = backend[backend.index('elif msg.startswith("chunk-start:"):'):backend.index('elif msg.startswith("chunk:")', backend.index('elif msg.startswith("chunk-start:"):'))]
+        self.assertIn('if not timing.get("warmup_chunk_skipped")', chunk_start)
+        self.assertNotIn('changes["eta_seconds"] = None', chunk_start)
         self.assertIn("actual_percent = min(95, max(0, round(95 * current / max(1, total))))", backend)
         self.assertIn("Loading voice model · 0%", adapter)
         self.assertIn("preview_completed_segments", backend)

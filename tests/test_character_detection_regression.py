@@ -25,6 +25,35 @@ class CharacterDetectionRegressionTests(unittest.TestCase):
             sum(character.dialogue_count for character in result.characters), 2
         )
 
+
+    def test_multilingual_and_canonically_equivalent_accented_speaker_labels_keep_identity(self):
+        chapter = Chapter(
+            number=1,
+            title="Unicode speaker identity",
+            text=(
+                '美咲: 「おはよう。」\n'
+                '美咲: 「ありがとう。」\n'
+                '林晓: “我们走吧。”\n'
+                '林晓: “谢谢你。”\n'
+                '민수: “안녕하세요.”\n'
+                '민수: “고마워.”\n'
+                'Élodie: “Bonjour.”\n'
+                'E\u0301lodie: “Merci.”'
+            ),
+        )
+        result = analyze_book([chapter])
+        import unicodedata
+        by_key = {
+            unicodedata.normalize("NFC", character.name).casefold(): character
+            for character in result.characters
+        }
+        for name in ("美咲", "林晓", "민수", "Élodie"):
+            with self.subTest(name=name):
+                self.assertIn(name.casefold(), by_key)
+                self.assertEqual(by_key[name.casefold()].dialogue_count, 2)
+        self.assertEqual(result.dialogue_total, 8)
+        self.assertEqual(result.unassigned_dialogue, 0)
+
     def test_dialogue_tags_produce_candidates_without_colon_labels(self):
         chapter = Chapter(
             number=1,

@@ -3,6 +3,7 @@ name: Stage 7 Qwen Real CPU Preview and Accelerator Contract Acceptance
 on:
   push:
     branches:
+      - 'dragon-studio/**'
       - 'stage-7/**'
     paths:
       - app/tts/preview.py
@@ -65,7 +66,7 @@ jobs:
           PYTHONDONTWRITEBYTECODE: '1'
         run: |
           $ErrorActionPreference = 'Stop'
-          python -B -m unittest -v tests.test_qwen_runtime_safety tests.test_qwen_preview_performance_policy tests.test_qwen_global_model_preference tests.test_p0_hardware_fallback
+          python -B -m unittest -v tests.test_qwen_accelerator_acceptance tests.test_qwen_runtime_safety tests.test_qwen_preview_performance_policy tests.test_qwen_global_model_preference tests.test_p0_hardware_fallback
           if ($LASTEXITCODE -ne 0) { throw "Qwen accelerator contract tests failed with exit code $LASTEXITCODE." }
 
       - name: Run Qwen expression protocol smoke
@@ -90,6 +91,22 @@ jobs:
           New-Item -ItemType Directory -Force -Path $env:RYU_QWEN_ACCEPTANCE_OUTPUT | Out-Null
           python -B tests/smoke_qwen_real_preview.py 2>&1 | Tee-Object -FilePath (Join-Path $env:RYU_QWEN_ACCEPTANCE_OUTPUT 'qwen-cpu-acceptance.log')
           if ($LASTEXITCODE -ne 0) { throw "Real Qwen CPU preview acceptance failed with exit code $LASTEXITCODE." }
+
+      - name: Collect Qwen worker stderr log
+        if: always()
+        shell: pwsh
+        env:
+          RYU_QWEN_ACCEPTANCE_OUTPUT: ${{ github.workspace }}\qwen-cpu-acceptance
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path $env:RYU_QWEN_ACCEPTANCE_OUTPUT | Out-Null
+          $source = Join-Path $HOME "Ryu's Audiobook\Settings\qwen_character_worker.log"
+          if (Test-Path -LiteralPath $source) {
+            Copy-Item -LiteralPath $source -Destination (Join-Path $env:RYU_QWEN_ACCEPTANCE_OUTPUT 'qwen_character_worker.log') -Force
+            Write-Host "Captured Qwen worker stderr from $source"
+          } else {
+            Write-Host "Qwen worker stderr log was not created at $source"
+          }
 
       - name: Upload real Qwen CPU preview audio and diagnostics
         if: always()

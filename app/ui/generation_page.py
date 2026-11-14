@@ -56,6 +56,62 @@ from app.audio.library import (
 log = logging.getLogger(__name__)
 
 
+def _revise_monotonic_eta(
+    previous_eta: float | None,
+    previous_at: float | None,
+    measured_remaining: float,
+    now: float,
+    overrun_samples: int,
+) -> tuple[float, int, bool]:
+    """Reconcile a new measured ETA without moving an active countdown backwards."""
+    measured = max(0.0, float(measured_remaining))
+    if previous_eta is None:
+        return measured, 0, False
+    try:
+        elapsed = max(0.0, float(now) - float(previous_at)) if previous_at is not None else 0.0
+        remaining_now = max(0.0, float(previous_eta) - elapsed)
+    except (TypeError, ValueError, OverflowError):
+        remaining_now = max(0.0, float(previous_eta))
+
+    if measured <= remaining_now:
+        # Faster measured chunks can shorten ETA, but a single fast chunk must
+        # not collapse the remaining-time display.
+        return max(0.0, remaining_now + (measured - remaining_now) * 0.25), 0, False
+    if remaining_now > 0.0:
+        # Keep counting down while the published forecast is still active.
+        return remaining_now, 0, False
+
+    # A slower run is only allowed to rebase after three new completed chunks
+    # confirm that the old estimate has genuinely expired.
+    next_overrun = max(0, int(overrun_samples)) + 1
+    if next_overrun >= 3:
+        return measured, 0, True
+    return 0.0, next_overrun, False
+
+
+def _generation_active_elapsed_seconds(
+    started_at: float | None,
+    now: float,
+    paused_seconds: float = 0.0,
+    paused_at: float | None = None,
+) -> float:
+    """Return processing time excluding completed and currently active pauses."""
+    try:
+        elapsed = max(0.0, float(now) - float(started_at)) if started_at is not None else 0.0
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+    try:
+        paused = max(0.0, float(paused_seconds))
+    except (TypeError, ValueError, OverflowError):
+        paused = 0.0
+    if paused_at is not None:
+        try:
+            paused += max(0.0, float(now) - float(paused_at))
+        except (TypeError, ValueError, OverflowError):
+            pass
+    return max(0.0, elapsed - paused)
+
+
 class VoicePreviewWorker(QThread):
     finished_ok = Signal(object)
     failed = Signal(str)
@@ -295,6 +351,8 @@ class GenerationPage(QWidget):
         self.signals = GenerationSignals()
         self.manager: GenerationManager | None = None
         self.started_at: float | None = None
+        self._generation_paused_at: float | None = None
+        self._generation_paused_seconds = 0.0
         self.last_progress_value = 0
         self.initial_progress_value = 0
         self.generation_phase = "idle"
@@ -304,6 +362,10 @@ class GenerationPage(QWidget):
         self._eta_last_time: float | None = None
         self._eta_warmup_samples = 0
         self._eta_rates: list[float] = []
+        self._eta_estimate_updated_at: float | None = None
+        self._eta_smoothed_remaining_seconds: float | None = None
+        self._eta_last_countdown_monotonic: float | None = None
+        self._eta_overrun_samples = 0
         self._estimated_listening_seconds = 0.0
         self._estimated_generation_seconds = 0.0
         self._active_calibration_key: str | None = None
@@ -2884,8 +2946,14 @@ class GenerationPage(QWidget):
         self._eta_rates = []
         self._eta_last_work = 0
         self._eta_last_time = time.monotonic()
+        self._eta_estimate_updated_at = None
+        self._eta_smoothed_remaining_seconds = None
+        self._eta_last_countdown_monotonic = None
+        self._eta_overrun_samples = 0
         self.generation_phase = "synthesis"
         self.started_at = time.monotonic()
+        self._generation_paused_at = None
+        self._generation_paused_seconds = 0.0
         self._active_calibration_key = self._generation_calibration_key()
         self._active_calibration_is_resume = bool(is_resume)
         self._update_overview()
@@ -2951,7 +3019,15 @@ class GenerationPage(QWidget):
         if not self.manager:
             return
         if self.manager.pause_event.is_set():
+            now = time.monotonic()
+            if self._generation_paused_at is not None:
+                self._generation_paused_seconds += max(0.0, now - self._generation_paused_at)
+                self._generation_paused_at = None
             self.manager.resume()
+            self.generation_phase = "synthesis"
+            # Restart the countdown from the frozen value; paused wall time is
+            # never deducted from the remaining synthesis estimate.
+            self._eta_last_countdown_monotonic = time.monotonic()
             self.pause_button.setText("Pause")
             self.status.setText("Resume requested. Generation will continue from the chapter checkpoint.")
             if self.project_folder:
@@ -2971,7 +3047,15 @@ class GenerationPage(QWidget):
 
     def update_progress(self, chapter: int, total: int, done: int, message: str) -> None:
         if message.startswith("paused:"):
+            # A queued worker signal can arrive after a fast Resume or Cancel.
+            # Ignore it once the manager has cleared the pause request.
+            if not self.manager or not self.manager.pause_event.is_set():
+                return
             note = message.split(":", 1)[1].strip()
+            self.generation_phase = "paused"
+            if self._generation_paused_at is None:
+                self._generation_paused_at = time.monotonic()
+            self._eta_last_countdown_monotonic = self._generation_paused_at
             self.status.setText(note)
             self.stage.setText("Generation paused at a chapter checkpoint")
             self.remaining.setText("Remaining: paused at checkpoint")
@@ -3001,26 +3085,17 @@ class GenerationPage(QWidget):
             self.progress.setValue(completed_work)
             self.last_progress_value = completed_work
             self.initial_progress_value = completed_work
-            baseline_rate = None
-            # Start with the persisted end-to-end estimate for this voice/settings
-            # signature. Live chunk measurements refine it as this book progresses.
-            try:
-                if self._estimated_generation_seconds > 0:
-                    self._eta_ema_sec_per_unit = (
-                        self._estimated_generation_seconds / max(1, work_total)
-                    )
-                else:
-                    provider = self.manager.provider if self.manager else None
-                    estimated_cpm = float(getattr(provider, "estimated_chars_per_minute", 0) or 0)
-                    if estimated_cpm > 0:
-                        baseline_rate = estimated_cpm / 60.0
-                    self._eta_ema_sec_per_unit = (1.0 / baseline_rate) if baseline_rate else None
-            except Exception:
-                self._eta_ema_sec_per_unit = None
+            # Do not seed a live ETA from a prior book or provider benchmark.
+            # The active device/model/settings must establish its own measured rate.
+            self._eta_ema_sec_per_unit = None
             self._eta_warmup_samples = 0
             self._eta_rates = []
             self._eta_last_work = completed_work
             self._eta_last_time = time.monotonic()
+            self._eta_estimate_updated_at = None
+            self._eta_smoothed_remaining_seconds = None
+            self._eta_last_countdown_monotonic = None
+            self._eta_overrun_samples = 0
             self.generation_phase = "synthesis"
             if completed_work:
                 self.stage.setText(
@@ -3030,7 +3105,7 @@ class GenerationPage(QWidget):
             else:
                 self.stage.setText(
                     f"Preparing {chunk_total:,} audio segments… "
-                    f"ETA is an initial estimate and will refine after the first segments"
+                    "ETA appears after model warm-up and three measured synthesis chunks"
                 )
             return
 
@@ -3049,8 +3124,14 @@ class GenerationPage(QWidget):
                     self.stage.setText("Packaging final M4B…")
             else:
                 self.stage.setText("Packaging final M4B…")
+            # Narration is complete. Keep its progress at 100% while packaging
+            # is reported as a separate phase; do not fall through to the
+            # generic chapter handler and overwrite this status.
+            self.progress.setValue(self.progress.maximum())
+            self.last_progress_value = self.progress.maximum()
             self.remaining.setText("Remaining: packaging…")
             self.speed.setText("Speed: —")
+            return
         if message.startswith("m4b-complete"):
             self.generation_phase = "complete"
             self.progress.setValue(self.progress.maximum())
@@ -3075,7 +3156,7 @@ class GenerationPage(QWidget):
             )
             self.status.setText(
                 "Voice engine is generating the current chunk. "
-                "ETA will appear after the first chunk completes."
+                "ETA will appear after three measured chunks following model warm-up."
             )
         elif message.startswith("chunk:"):
             try:
@@ -3093,32 +3174,60 @@ class GenerationPage(QWidget):
                     f"chapter {chapter}/{total}"
                 )
                 now = time.monotonic()
-                if self._eta_last_work is not None and self._eta_last_time is not None:
-                    delta_work = work_done_n - self._eta_last_work
-                    delta_time = now - self._eta_last_time
-                    if delta_work > 0 and delta_time >= 0.2:
-                        sample = delta_time / delta_work
-                        # The first completed segments include model startup and
-                        # cache warm-up. Do not let those samples dominate the
-                        # full-book ETA.
-                        if self._eta_warmup_samples < 2:
-                            self._eta_warmup_samples += 1
-                        else:
-                            previous = self._eta_ema_sec_per_unit
-                            # Ignore extreme one-sample stalls/spikes; they make
-                            # a multi-hour ETA jump from minutes to days.
-                            if previous is None or sample <= previous * 4.0:
-                                self._eta_rates.append(sample)
-                                self._eta_rates = self._eta_rates[-10:]
-                                ordered = sorted(self._eta_rates)
-                                median = ordered[len(ordered) // 2]
-                                self._eta_ema_sec_per_unit = (
-                                    median
-                                    if previous is None
-                                    else (0.18 * median + 0.82 * previous)
-                                )
                 self._eta_last_work = work_done_n
                 self._eta_last_time = now
+            except (ValueError, IndexError):
+                self.stage.setText(f"Chapter {chapter}/{total}")
+        elif message.startswith("chunk-timing:"):
+            try:
+                parts = message.split(":")
+                work_units = max(1, int(parts[1]))
+                synthesis_seconds = max(0.001, float(parts[2]))
+                if self._eta_warmup_samples < 1:
+                    # The first synthesis call may include cold Qwen model load.
+                    self._eta_warmup_samples += 1
+                else:
+                    self._eta_rates.append(synthesis_seconds / work_units)
+                    self._eta_rates = self._eta_rates[-9:]
+                    ordered = sorted(self._eta_rates)
+                    middle = len(ordered) // 2
+                    if len(ordered) >= 3:
+                        observed_median = (
+                            ordered[middle]
+                            if len(ordered) % 2
+                            else (ordered[middle - 1] + ordered[middle]) / 2.0
+                        )
+                        previous = self._eta_ema_sec_per_unit
+                        self._eta_ema_sec_per_unit = (
+                            observed_median
+                            if previous is None
+                            else (0.20 * observed_median + 0.80 * previous)
+                        )
+                if self._eta_ema_sec_per_unit is not None and self.progress.maximum() > 0:
+                    now = time.monotonic()
+                    work_remaining = max(0, self.progress.maximum() - self.progress.value())
+                    measured_remaining = max(1.0, work_remaining * self._eta_ema_sec_per_unit)
+                    (
+                        self._eta_smoothed_remaining_seconds,
+                        self._eta_overrun_samples,
+                        recalibrated,
+                    ) = _revise_monotonic_eta(
+                        self._eta_smoothed_remaining_seconds,
+                        self._eta_last_countdown_monotonic,
+                        measured_remaining,
+                        now,
+                        self._eta_overrun_samples,
+                    )
+                    self._eta_last_countdown_monotonic = now
+                    self._eta_estimate_updated_at = now
+                    if recalibrated:
+                        self.status.setText(
+                            "Generation is taking longer than the previous estimate; "
+                            "remaining time has been recalibrated from three new chunks."
+                        )
+                self.stage.setText(
+                    f"Measured synthesis time · {synthesis_seconds:.1f}s for {work_units:,} text units"
+                )
             except (ValueError, IndexError):
                 self.stage.setText(f"Chapter {chapter}/{total}")
         else:
@@ -3142,8 +3251,19 @@ class GenerationPage(QWidget):
     def _update_live_stats(self) -> None:
         if self.started_at is None:
             return
-        elapsed = int(time.monotonic() - self.started_at)
+        now = time.monotonic()
+        elapsed = int(_generation_active_elapsed_seconds(
+            self.started_at,
+            now,
+            self._generation_paused_seconds,
+            self._generation_paused_at,
+        ))
         self.elapsed.setText(f"Elapsed: {elapsed // 60}:{elapsed % 60:02d}")
+
+        if self.generation_phase == "paused":
+            self.remaining.setText("Remaining: paused at checkpoint")
+            self.speed.setText("Speed: paused")
+            return
 
         if self.generation_phase == "packaging":
             self.remaining.setText("Remaining: packaging…")
@@ -3160,20 +3280,22 @@ class GenerationPage(QWidget):
         work_done = max(0, current - self.initial_progress_value)
         work_remaining = max(0, total - current)
 
-        if self._eta_ema_sec_per_unit is not None and work_remaining > 0:
-            remaining = max(0, int(work_remaining * self._eta_ema_sec_per_unit))
-            self.remaining.setText(
-                f"Remaining: {remaining // 3600:02d}:{(remaining // 60) % 60:02d}:{remaining % 60:02d}"
+        if self._eta_ema_sec_per_unit is not None and self._eta_smoothed_remaining_seconds is not None and work_remaining > 0:
+            elapsed_since_sample = (
+                max(0.0, time.monotonic() - self._eta_last_countdown_monotonic)
+                if self._eta_last_countdown_monotonic is not None else 0.0
             )
+            remaining = max(0, int(self._eta_smoothed_remaining_seconds - elapsed_since_sample))
+            if remaining == 0:
+                self.remaining.setText(
+                    "Remaining: past the last measured estimate · waiting for the active chunk"
+                )
+            else:
+                self.remaining.setText(
+                    f"Remaining: {remaining // 3600:02d}:{(remaining // 60) % 60:02d}:{remaining % 60:02d}"
+                )
             units_per_min = 60.0 / max(self._eta_ema_sec_per_unit, 1e-9)
             self.speed.setText(f"Speed: {units_per_min:,.0f} chars/min")
-        elif work_done > 0 and elapsed > 8:
-            fallback_rate = work_done / elapsed
-            remaining = max(0, int(work_remaining / max(fallback_rate, 1e-9)))
-            self.remaining.setText(
-                f"Remaining: {remaining // 3600:02d}:{(remaining // 60) % 60:02d}:{remaining % 60:02d}"
-            )
-            self.speed.setText(f"Speed: {fallback_rate * 60:,.0f} chars/min")
         else:
             self.remaining.setText("Remaining: calibrating…")
             self.speed.setText("Speed: calibrating…")
@@ -3200,7 +3322,12 @@ class GenerationPage(QWidget):
                     and self.started_at is not None
                     and summary.output_path.is_file()
                 ):
-                    elapsed_seconds = max(1.0, time.monotonic() - self.started_at)
+                    elapsed_seconds = max(1.0, _generation_active_elapsed_seconds(
+                        self.started_at,
+                        time.monotonic(),
+                        self._generation_paused_seconds,
+                        self._generation_paused_at,
+                    ))
                     listening_seconds = max(1.0, _duration_ms(summary.output_path) / 1000.0)
                     words = max(1, sum(len(chapter.text.split()) for chapter in self.chapters))
                     actual_factor = max(0.4, min(20.0, elapsed_seconds / listening_seconds))
@@ -3249,7 +3376,12 @@ class GenerationPage(QWidget):
                 details.append(f"Chapter {number}: {reason}")
             elapsed = 0
             if self.started_at is not None:
-                elapsed = max(0, int(time.monotonic() - self.started_at))
+                elapsed = int(_generation_active_elapsed_seconds(
+                    self.started_at,
+                    time.monotonic(),
+                    self._generation_paused_seconds,
+                    self._generation_paused_at,
+                ))
             self.remaining.setText("Remaining: paused at checkpoint")
             self.speed.setText("Speed: checkpoint saved")
             self.elapsed.setText(f"Elapsed: {elapsed // 3600:02d}:{(elapsed // 60) % 60:02d}:{elapsed % 60:02d}")

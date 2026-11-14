@@ -2,7 +2,7 @@ name: Provider Runtime Smoke
 
 on:
   push:
-    branches: [main, stage-3/restart-from-stage2-closeout-1794]
+    branches: [main, stage-3/restart-from-stage2-closeout-1794, 'dragon-studio/**']
     # Avoid repeating multi-provider/model downloads for artifact-only or CI housekeeping commits.
     # App, assets, tests, build, or dependency changes still run these real-provider checks.
     paths:
@@ -11,6 +11,8 @@ on:
       - 'tests/**'
       - 'requirements*.txt'
       - 'build.py'
+      - '.github/workflows/provider-smoke-windows.yml'
+      - 'docs/dragon-studio/STAGE-C4-QWEN-VOICE-IDENTITY-CONTINUITY.md'
       - 'run_app.py'
   workflow_dispatch:
 
@@ -18,11 +20,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: ryu-audiobook-provider-smoke-stage5
-  cancel-in-progress: true
+  group: ryu-audiobook-provider-smoke-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   kokoro:
+    if: ${{ !startsWith(github.ref, 'refs/heads/dragon-studio/') }}
     name: Kokoro real synthesis
     runs-on: windows-latest
     steps:
@@ -60,6 +63,7 @@ jobs:
         run: python -B tests/smoke_kokoro_runtime.py
 
   chatterbox-api:
+    if: ${{ !startsWith(github.ref, 'refs/heads/dragon-studio/') }}
     name: Chatterbox pinned API
     runs-on: windows-latest
     steps:
@@ -115,7 +119,7 @@ jobs:
 
 
   qwen-real-voicedesign:
-    if: ${{ !contains(github.event.head_commit.message, '[skip-qwen-real]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[skip-qwen-real]') && (!startsWith(github.ref, 'refs/heads/dragon-studio/') || contains(github.event.head_commit.message, '[qwen-acceptance]')) }}
     name: Qwen 1.7B VoiceDesign real preview (CPU acceptance)
     runs-on: windows-latest
     timeout-minutes: 90
@@ -278,6 +282,7 @@ jobs:
 
 
   qwen-backend-discovery:
+    if: ${{ !startsWith(github.ref, 'refs/heads/dragon-studio/') || contains(github.event.head_commit.message, '[qwen-acceptance]') }}
     name: Qwen accelerator discovery and runtime installer unit tests
     runs-on: windows-latest
     steps:
@@ -308,6 +313,7 @@ jobs:
           python -B -c "from app.tts.qwen_accelerator import accelerator_report; print(accelerator_report())"
 
   qwen-protocol:
+    if: ${{ !startsWith(github.ref, 'refs/heads/dragon-studio/') || contains(github.event.head_commit.message, '[qwen-acceptance]') }}
     name: Qwen expression protocol smoke
     runs-on: windows-latest
     steps:

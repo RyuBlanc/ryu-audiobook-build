@@ -1038,7 +1038,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         first_handler = adapter.index("document.addEventListener('click', e => {", wire_start)
         settings_loaded = adapter.index("async function loadSettings()")
         optional_hydration = adapter.index("void (async () => {", core_hydration)
-        timer_start = adapter.index("if (!window.__ryuBackendJobTimer)", optional_hydration)
+        timer_start = adapter.index("window.__ryuBackendJobPollingStarted = true;", optional_hydration)
         self.assertLess(first_handler, core_hydration)
         self.assertLess(settings_loaded, core_hydration)
         self.assertLess(core_hydration, optional_hydration)
@@ -1263,6 +1263,44 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("if (!finished && monitorToken === monitorEpoch) poll = setInterval(tick, 1000);", monitor)
         self.assertIn("completion callback", monitor)
 
+    def test_global_background_job_heartbeat_is_adaptive_and_keeps_active_progress_fast(self):
+        """Idle polling backs off, active jobs stay near-real-time, and returning refreshes immediately."""
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
+            encoding="utf-8"
+        )
+        active_states_start = adapter.index("const PRODUCTION_ACTIVE_JOB_STATES = new Set(")
+        active_states_end = adapter.index(";", active_states_start)
+        active_states = adapter[active_states_start:active_states_end]
+        self.assertIn("'cancelling'", active_states)
+        poll_start = adapter.index("function backendJobPollDelay(")
+        poll_end = adapter.index("async function refreshJobs()", poll_start)
+        poll = adapter[poll_start:poll_end]
+        self.assertIn("PRODUCTION_ACTIVE_JOB_STATES.has", poll)
+        for timing_contract in (
+            "const BACKEND_JOB_POLL_ACTIVE_MS = 1500",
+            "const BACKEND_JOB_POLL_IDLE_MS = 10000",
+            "const BACKEND_JOB_POLL_HIDDEN_ACTIVE_MS = 5000",
+            "const BACKEND_JOB_POLL_HIDDEN_IDLE_MS = 30000",
+        ):
+            self.assertIn(timing_contract, adapter)
+        self.assertIn("return active ? BACKEND_JOB_POLL_HIDDEN_ACTIVE_MS : BACKEND_JOB_POLL_HIDDEN_IDLE_MS", poll)
+        self.assertIn("return active ? BACKEND_JOB_POLL_ACTIVE_MS : BACKEND_JOB_POLL_IDLE_MS", poll)
+        self.assertIn("document.visibilityState === 'hidden'", poll)
+        self.assertIn("clearTimeout(window.__ryuBackendJobTimer)", poll)
+        self.assertIn("refreshJobs().catch(error => console.warn", poll)
+        self.assertNotIn("setInterval", poll)
+
+        wire = adapter[adapter.index("async function wire()"):]
+        self.assertIn("window.__ryuBackendJobPollingStarted = true;", wire)
+        self.assertIn("document.addEventListener('visibilitychange'", wire)
+        self.assertIn("document.visibilityState === 'visible' ? 0 : undefined", wire)
+        self.assertIn("scheduleBackendJobRefresh(window.__ryuBackendLastJobs || []);", adapter)
+        self.assertNotIn(
+            "setInterval(()=>refreshJobs().catch(()=>{}),1500)",
+            adapter,
+            "The background job list must not poll at a fixed rate when idle.",
+        )
+
     def test_job_list_refresh_calls_share_one_in_flight_request(self):
         """Heartbeat, job monitor and manual refresh should not race to replace job DOM."""
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
@@ -1278,7 +1316,9 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("jobsRefreshRequested = false;", refresh)
         self.assertIn("latestJobs = await refreshJobsImpl();", refresh)
         self.assertIn("jobsRefreshPromise = refreshPromise;", refresh)
-        self.assertIn("finally { if (jobsRefreshPromise === refreshPromise) jobsRefreshPromise = null; }", refresh)
+        self.assertIn("if (jobsRefreshPromise === refreshPromise) {", refresh)
+        self.assertIn("jobsRefreshPromise = null;", refresh)
+        self.assertIn("scheduleBackendJobRefresh(window.__ryuBackendLastJobs || []);", refresh)
         self.assertIn("async function refreshJobsImpl()", refresh)
         self.assertIn("return allJobs;", refresh)
 

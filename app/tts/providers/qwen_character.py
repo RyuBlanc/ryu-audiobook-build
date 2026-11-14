@@ -28,9 +28,54 @@ from ..qwen_character_runtime import (
     register_qwen_worker,
     unregister_qwen_worker,
 )
-from ..expression import DEFAULT_VOICE_DESIGN_ANCHOR_TEXT, classify_expression
+from ..expression import (
+    EXPRESSION_PIPELINE_VERSION,
+    classify_expression,
+    default_voice_design_anchor_text,
+)
 from ..qwen_model_preference import normalize_qwen_backend_preference
 from app.core.paths import settings_root
+
+
+def _qwen_audio_file_signature(raw_path: Path | None) -> str:
+    """Fingerprint saved reference audio by content, not mutable file metadata."""
+    if not raw_path:
+        return ""
+    path = Path(raw_path).expanduser()
+    try:
+        resolved = path.resolve()
+    except (OSError, RuntimeError):
+        resolved = path.absolute()
+    if not path.is_file():
+        return f"{resolved}:missing"
+    hasher = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                hasher.update(block)
+    except OSError:
+        return f"{resolved}:unreadable"
+    return f"{resolved}:{hasher.hexdigest()}"
+
+
+def _request_language_for_text(language: str | None, text: str) -> str:
+    """Keep an explicitly selected Qwen language for native-script narration.
+
+    Auto-detection is a compatibility aid for English profiles that contain
+    occasional CJK names or phrases; it must not override a saved Japanese,
+    Korean, or Chinese language selection.
+    """
+    selected = str(language or "English").strip() or "English"
+    key = selected.casefold()
+    has_cjk = any(
+        "\u3040" <= char <= "\u30ff"
+        or "\u4e00" <= char <= "\u9fff"
+        or "\uac00" <= char <= "\ud7af"
+        for char in str(text or "")
+    )
+    is_english = key.startswith("english") or key in {"en", "eng"} or key.startswith(("en-", "en_"))
+    is_automatic = key in {"auto", "auto-detect", "autodetect"}
+    return "Auto" if has_cjk and (is_english or is_automatic) else selected
 
 
 class QwenCharacterProvider(TTSProvider):
@@ -89,10 +134,13 @@ class QwenCharacterProvider(TTSProvider):
         self.qwen_mode = (qwen_mode or "custom").casefold()
         self.qwen_seed = qwen_seed
         self.qwen_anchor_path = qwen_anchor_path
-        self.qwen_anchor_text = (
-            qwen_anchor_text
-            or (DEFAULT_VOICE_DESIGN_ANCHOR_TEXT if self.qwen_mode == "design" else "")
-        )
+        self.qwen_anchor_text = str(qwen_anchor_text or "").strip()
+        # New VoiceDesign profiles need a canonical reference in their selected
+        # language. When the user supplied an explicit anchor file without a
+        # transcript, keep the transcript empty so the worker uses x-vector-only
+        # conditioning instead of pairing that audio with a guessed sentence.
+        if self.qwen_mode == "design" and not self.qwen_anchor_text and not self.qwen_anchor_path:
+            self.qwen_anchor_text = default_voice_design_anchor_text(self.language)
         self.qwen_profile_id = qwen_profile_id or ""
         self.long_form_model_kind = (
             long_form_model_kind
@@ -156,14 +204,17 @@ class QwenCharacterProvider(TTSProvider):
 
     @property
     def recommended_preview_batch_size(self) -> int:
-        """Batch short VoiceDesign previews only on GPUs with comfortable VRAM."""
-        if self.qwen_mode != "design-preview":
+        """Batch short VoiceDesign previews when the selected identity path has headroom."""
+        if self.qwen_mode == "design":
+            threshold_gb = 12.0  # Match production batching for the Base identity-lock engine.
+        elif self.qwen_mode == "design-preview":
+            threshold_gb = 7.0   # Legacy one-pass VoiceDesign preview engine.
+        else:
             return 1
         try:
-            # VoiceDesign is a 1.7B model. Prefer serial inference on 4 GB
-            # GPUs / CPU; two sentences can share a call on 8 GB-class GPUs.
-            # The preview caller falls back if the device reports CUDA OOM.
-            return 2 if _detected_vram_gb() >= 7.0 else 1
+            # The identity-locked path loads the Base clone model. Keep its batch
+            # threshold aligned with production; batch OOM retries serially.
+            return 2 if _detected_vram_gb() >= threshold_gb else 1
         except Exception:
             return 1
 
@@ -178,19 +229,19 @@ class QwenCharacterProvider(TTSProvider):
 
     def generation_signature(self) -> str:
         self._ensure_model_kind()
-        reference = ""
-        if self.reference_audio and Path(self.reference_audio).exists():
-            try:
-                stat = Path(self.reference_audio).stat()
-                reference = f"{Path(self.reference_audio).resolve()}:{stat.st_size}:{stat.st_mtime_ns}"
-            except OSError:
-                reference = str(self.reference_audio)
+        reference = _qwen_audio_file_signature(self.reference_audio)
+        anchor_reference = _qwen_audio_file_signature(self.qwen_anchor_path)
         return "|".join(
             [
                 self.provider_id,
                 self.voice_id,
                 self.language,
                 self.qwen_mode,
+                (
+                    EXPRESSION_PIPELINE_VERSION
+                    if self.qwen_mode in {"design", "design-preview"}
+                    else ""
+                ),
                 self.model_kind,
                 str(self.backend or "automatic"),
                 str(self.low_memory),
@@ -200,14 +251,14 @@ class QwenCharacterProvider(TTSProvider):
                     else ""
                 ),
                 self.instruct,
+                self.reference_text,
                 str(self.qwen_seed),
-                str(self.qwen_anchor_path or ""),
+                anchor_reference,
                 self.qwen_anchor_text,
                 self.qwen_profile_id,
                 reference,
             ]
         )
-
 
     def set_status_callback(self, callback) -> None:
         self.status_callback = callback
@@ -321,7 +372,10 @@ class QwenCharacterProvider(TTSProvider):
             "--task", self.qwen_mode,
             "--backend", self.backend,
             "--models-root", str(RUNTIME_ROOT),
-            "--clone-kind", clone_kind or best_clone_kind(),
+            # Only production VoiceDesign needs the globally selected Base
+            # model. Preview/custom/clone workers use the CLI's safe default;
+            # do not run GPU discovery for a one-pass VoiceDesign audition.
+            "--clone-kind", clone_kind or "base-0.6b",
         ]
         if self.low_memory:
             command.append("--low-memory")
@@ -358,7 +412,17 @@ class QwenCharacterProvider(TTSProvider):
             + ("VoiceDesign preview" if self.qwen_mode == "design-preview" else "voice engine")
             + f" • {self.model_kind}"
         )
-        response = self._read_response(timeout=900.0, heartbeat="Loading Qwen model / character identity")
+        # VoiceDesign workers load lazily on the first synthesis request. Their
+        # startup acknowledgement confirms only that the protocol loop is ready;
+        # it must never be confused with a loaded model or verified device.
+        lazy_model_load = self.qwen_mode in {"design", "design-preview"}
+        response = self._read_response(
+            timeout=60.0 if lazy_model_load else 900.0,
+            heartbeat="Starting Qwen worker" if lazy_model_load else "Loading Qwen model / character identity",
+        )
+        if response.get("worker_ready") is True:
+            self._status("Qwen worker started • model will load for the first request")
+            return
         if response.get("ready"):
             # The worker's ready message now carries a real device only after
             # model initialization; reject legacy/pending responses rather than
@@ -394,6 +458,17 @@ class QwenCharacterProvider(TTSProvider):
         finally:
             output_queue.put(None)
 
+    def _close_worker_log(self) -> None:
+        """Close the stderr file after diagnostic details have been captured."""
+        handle = self._worker_log
+        self._worker_log = None
+        if handle is not None:
+            try:
+                handle.flush()
+                handle.close()
+            except (OSError, ValueError):
+                pass
+
     def _read_response(self, timeout: float, heartbeat: str = "") -> dict:
         q = self._stdout_queue
         if q is None:
@@ -406,6 +481,31 @@ class QwenCharacterProvider(TTSProvider):
                 line = q.get(timeout=min(1.0, max(0.01, deadline - time.monotonic())))
             except queue.Empty:
                 now = time.monotonic()
+                # Distinguish a live model load from an exited worker. Some
+                # Windows failures close stdout before the queue sentinel is
+                # consumed; poll the process on every heartbeat.
+                worker = self._worker
+                exit_code = worker.poll() if worker is not None else None
+                if exit_code is not None:
+                    detail = ""
+                    try:
+                        if self._worker_log is not None:
+                            self._worker_log.flush()
+                            log_path = Path(self._worker_log.name)
+                            if log_path.exists():
+                                detail = log_path.read_text(
+                                    encoding="utf-8", errors="replace"
+                                )[-4000:].strip()
+                    except (OSError, ValueError):
+                        pass
+                    suffix = f" Exit code: {exit_code}."
+                    if detail:
+                        suffix += f" Worker log: {detail}"
+                    self._close_worker_log()
+                    raise RuntimeError(
+                        "Offline character worker exited while waiting for a response."
+                        + suffix
+                    )
                 if heartbeat and now - last_heartbeat >= 2.0:
                     elapsed = int(now - started)
                     self._status(
@@ -423,12 +523,13 @@ class QwenCharacterProvider(TTSProvider):
                         if log_path.exists():
                             detail = log_path.read_text(
                                 encoding="utf-8", errors="replace"
-                            )[-2400:].strip()
-                except OSError:
+                            )[-4000:].strip()
+                except (OSError, ValueError):
                     pass
                 suffix = f" Exit code: {exit_code}."
                 if detail:
                     suffix += f" Worker log: {detail}"
+                self._close_worker_log()
                 raise RuntimeError(
                     "Offline character worker exited before returning a response."
                     + suffix
@@ -443,19 +544,48 @@ class QwenCharacterProvider(TTSProvider):
                     self._status(str(progress))
                     continue
                 return value
-        raise RuntimeError("Timed out waiting for the offline character worker.")
+        worker = self._worker
+        exit_code = worker.poll() if worker is not None else None
+        detail = ""
+        try:
+            if self._worker_log is not None:
+                self._worker_log.flush()
+                log_path = Path(self._worker_log.name)
+                if log_path.exists():
+                    detail = log_path.read_text(
+                        encoding="utf-8", errors="replace"
+                    )[-4000:].strip()
+        except (OSError, ValueError):
+            pass
+        suffix = f" Worker exit code: {exit_code}." if exit_code is not None else " Worker is still running."
+        if detail:
+            suffix += f" Worker log: {detail}"
+        self._close_worker_log()
+        raise RuntimeError(
+            f"Timed out waiting for the offline character worker after {timeout:.1f} seconds."
+            + suffix
+        )
 
     def synthesize(self, text: str, output_path: Path, voice: str | None = None) -> Path:
+        reference_path: Path | None = None
+        if self.qwen_mode == "clone":
+            if not self.reference_audio:
+                raise RuntimeError("Qwen Base voice cloning requires a reference audio recording.")
+            reference_path = Path(self.reference_audio).expanduser().resolve()
+            try:
+                reference_size = reference_path.stat().st_size if reference_path.is_file() else 0
+            except OSError:
+                reference_size = 0
+            if reference_size <= 0:
+                raise RuntimeError(
+                    "The saved Qwen Voice Clone reference recording is missing or empty. "
+                    "Re-import the audio in Voice Studio before preview or generation."
+                )
+        # Validate Clone references before starting/loading the heavyweight model.
         self._start_worker()
         if not self._worker or not self._worker.stdin:
             raise RuntimeError("Offline character worker is unavailable.")
-        request_language = self.language
-        # Qwen supports automatic language selection. Use it when an English
-        # narration chunk visibly contains Japanese/Chinese/Korean text so
-        # names and short foreign-language phrases are not forced through the
-        # English phoneme path.
-        if any("\u3040" <= ch <= "\u30ff" or "\u4e00" <= ch <= "\u9fff" or "\uac00" <= ch <= "\ud7af" for ch in text):
-            request_language = "Auto"
+        request_language = _request_language_for_text(self.language, text)
         request = {
             "text": text,
             "output": str(output_path.resolve()),
@@ -471,9 +601,8 @@ class QwenCharacterProvider(TTSProvider):
             "expression_style": classify_expression(text),
         }
         if self.qwen_mode == "clone":
-            if not self.reference_audio:
-                raise RuntimeError("Qwen Base voice cloning requires a reference audio recording.")
-            request["reference"] = str(self.reference_audio.resolve())
+            assert reference_path is not None
+            request["reference"] = str(reference_path)
             request["ref_text"] = self.reference_text
             request["x_vector_only_mode"] = not bool(self.reference_text.strip())
         self._status(
@@ -532,12 +661,7 @@ class QwenCharacterProvider(TTSProvider):
         if any(not text for text in texts):
             raise ValueError("Qwen batch contains empty narration text.")
 
-        batch_language = self.language
-        if any(
-            any("\u3040" <= ch <= "\u30ff" or "\u4e00" <= ch <= "\u9fff" or "\uac00" <= ch <= "\ud7af" for ch in text)
-            for text in texts
-        ):
-            batch_language = "Auto"
+        batch_language = _request_language_for_text(self.language, "\n".join(texts))
         request = {
             "texts": texts,
             "outputs": outputs,

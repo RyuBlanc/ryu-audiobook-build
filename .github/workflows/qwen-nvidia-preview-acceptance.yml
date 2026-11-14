@@ -3,6 +3,7 @@ name: Qwen NVIDIA 30-second Preview Acceptance
 on:
   push:
     branches:
+      - 'dragon-studio/**'
       - 'stage-7/**'
       - 'stage-5/**'
     paths:
@@ -24,6 +25,7 @@ concurrency:
 jobs:
   qwen-gpu-preview:
     name: Real Qwen 1.7B VoiceDesign under 60 seconds on NVIDIA
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[qwen-hardware-acceptance]')
     runs-on: [self-hosted, Windows, X64, NVIDIA]
     timeout-minutes: 90
     steps:
@@ -46,13 +48,13 @@ jobs:
           python -c "import torch; print('torch=' + torch.__version__); print('cuda=' + str(torch.cuda.is_available())); assert torch.cuda.is_available(), 'This is a GPU-only acceptance job.'"
           nvidia-smi
 
-      - name: Download the official Qwen 1.7B VoiceDesign model
+      - name: Download VoiceDesign and matching 1.7B Base identity model
         shell: pwsh
         env:
           HF_HOME: ${{ runner.temp }}\\ryu-qwen-hf
           RYU_QWEN_MODEL_ROOT: ${{ runner.temp }}\\ryu-qwen-models
         run: |
-          python -c "import os; from huggingface_hub import snapshot_download; snapshot_download(repo_id='Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign',local_dir=os.path.join(os.environ['RYU_QWEN_MODEL_ROOT'],'design-1.7b'),allow_patterns=['*.json','*.safetensors','*.txt','*.model','*.npz','*.bin','tokenizer*','vocab*'])"
+          python -c "import os; from huggingface_hub import snapshot_download; root=os.environ['RYU_QWEN_MODEL_ROOT']; models={'design-1.7b':'Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign','base-1.7b':'Qwen/Qwen3-TTS-12Hz-1.7B-Base'}; [snapshot_download(repo_id=repo,local_dir=os.path.join(root,kind),allow_patterns=['*.json','*.safetensors','*.txt','*.model','*.npz','*.bin','tokenizer*','vocab*']) for kind,repo in models.items()]"
 
       - name: Run the warmed 30-second Qwen preview GPU timing gate
         shell: pwsh

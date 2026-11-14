@@ -2,12 +2,127 @@ from __future__ import annotations
 
 import re
 
-EXPRESSION_PIPELINE_VERSION = "story-expression-v2"
+EXPRESSION_PIPELINE_VERSION = "story-expression-v3"
 DEFAULT_VOICE_DESIGN_ANCHOR_TEXT = (
     "Hello. I thought I understood what was happening. "
     "Oh, really? That's actually wonderful. "
     "Wait... something isn't right. Let's think for a moment."
 )
+
+def default_voice_design_anchor_text(language: str | None) -> str:
+    """Return one neutral identity reference in the selected Qwen language.
+
+    Qwen3-TTS officially supports Chinese, English, Japanese, Korean, German,
+    French, Russian, Portuguese, Spanish and Italian. Use native-language
+    reference text for every non-English supported language so the saved
+    acoustic identity is not initialized from an unrelated English sample.
+    """
+    raw_language = str(language or "English").strip().casefold()
+    locale_code = re.split(r"[-_]", raw_language, maxsplit=1)[0]
+    key = re.sub(r"[^a-z]", "", raw_language)
+    if key in {"japanese", "ja", "jajp", "jpn"} or key.startswith("japanese") or locale_code in {"ja", "jpn"}:
+        return "こんにちは。これは声のテストです。落ち着いて、自然に、はっきりと話します。"
+    if key in {"korean", "ko", "kokr", "kor"} or key.startswith("korean") or locale_code in {"ko", "kor"}:
+        return "안녕하세요. 이것은 자연스러운 목소리 테스트입니다. 차분하고 또렷하게 말합니다."
+    if key in {"chinese", "mandarin", "zh", "zhcn", "zhtw", "zhhans", "zhhant", "cmn", "simplifiedchinese", "traditionalchinese"} or key.startswith(("chinese", "mandarin")) or locale_code in {"zh", "cmn"}:
+        return "你好。这是一段自然的声音测试。我会用清晰、稳定、富有表现力的方式说话。"
+    if key in {"german", "de", "dede", "deu", "ger"} or key.startswith(("german", "deutsch")) or locale_code in {"de", "deu", "ger"}:
+        return "Hallo. Dies ist eine kurze Stimmprobe. Ich spreche ruhig, natürlich und deutlich."
+    if key in {"french", "fr", "frfr", "fra", "fre"} or key.startswith("french") or locale_code in {"fr", "fra", "fre"}:
+        return "Bonjour. Ceci est un court échantillon de voix. Je parle calmement, naturellement et clairement."
+    if key in {"russian", "ru", "ruru", "rus"} or key.startswith("russian") or locale_code in {"ru", "rus"}:
+        return "Здравствуйте. Это короткий образец голоса. Я говорю спокойно, естественно и чётко."
+    if key in {"portuguese", "pt", "ptpt", "ptbr", "por"} or key.startswith("portuguese") or locale_code in {"pt", "por"}:
+        return "Olá. Esta é uma breve amostra de voz. Falo com calma, naturalidade e clareza."
+    if key in {"spanish", "es", "eses", "esmx", "spa"} or key.startswith("spanish") or locale_code in {"es", "spa"}:
+        return "Hola. Esta es una breve muestra de voz. Hablo con calma, naturalidad y claridad."
+    if key in {"italian", "it", "itit", "ita"} or key.startswith("italian") or locale_code in {"it", "ita"}:
+        return "Ciao. Questo è un breve campione vocale. Parlo con calma, naturalezza e chiarezza."
+    return DEFAULT_VOICE_DESIGN_ANCHOR_TEXT
+
+
+_NON_ENGLISH_EXPRESSION_CUES = {
+    "sad": (
+        r"\b(?:traurig|traurigkeit|weinte|weinen|tränen|trauer|triste|tristesse|"
+        r"pleure|pleuré|pleurait|pleurer|pleurant|larmes|chagrin|desesperado|"
+        r"desesperada|tristeza|lloró|lloraba|llorar|llorando|lágrimas|pena|"
+        r"chorou|chorava|chorar|chorando|mágoa|pianse|piangeva|piangere|"
+        r"lacrime|dolore)\b|(?:грустн|печаль|плакал|плакать|слезы|слёзы|горе)"
+    ),
+    "anger": (
+        r"\b(?:wütend|zornig|wut|ärgerlich|fauchte|furieux|furieuse|fâché|fâchée|"
+        r"colère|en colère|s'énerva|furioso|furiosa|rabia|enfadado|enfadada|"
+        r"enojado|enojada|gritó|bravo|brava|raiva|irritado|irritada|gritou|"
+        r"arrabbiato|arrabbiata|rabbia|adirato|adirata|gridò)\b|"
+        r"(?:зл|зол|ярост|гнев|разозлил|рассердил|закричал|закричала)"
+    ),
+    "fear": (
+        r"\b(?:ängstlich|angst|fürcht\w*|erschrocken|zitter\w*|peur|effrayé|"
+        r"effrayée|terreur|trembl\w*|paniqu\w*|miedo|asustado|asustada|temor|"
+        r"tembl\w*|medo|assustado|assustada|trem(?:endo|eram|er|eu|ia|iam|em|es|e|o|am|emos|ido|or(?:es)?|edeira(?:s)?)|paura|spaventato|spaventata|"
+        r"timore|паник\w*|страш\w*|боялся|боялась|дрожал|дрожала)"
+    ),
+    "tense": (
+        r"\b(?:panik|paniqu|pánico|panico|pânico|gefährlich|danger|dangereux|dangereuse|peligro|perigo|"
+        r"pericolo|террор)\w*\b|(?:паник|опасн)|(?:パニック|危機)"
+    ),
+    "amused": (
+        r"\b(?:lachte|lachen|lächelt|lächelte|witzelte|scherzte|kicher\w*|"
+        r"rit|ria|sourit|souriait|plaisant\w*|amusé|amusée|éclata de rire|"
+        r"rió|rio|reía|sonrió|sonrisa|bromeó|bromeaba|riendo|riu|sorriu|"
+        r"sorriso|brincou|rindo|gargalhou|rise|rideva|sorrise|sorridendo|"
+        r"scherzò|scherzava)\b|(?:смеялся|смеялась|улыбнулся|улыбнулась|"
+        r"шутил|шутка|хихик)"
+    ),
+    "excited": (
+        r"\b(?:überrascht|erstaunt|verblüfft|fassungslos|surpris|surprise|"
+        r"étonné|étonnée|stupéfait|stupéfaite|sorprendido|sorprendida|"
+        r"sorpresa|asombrado|asombrada|surpreso|espantado|espantada|"
+        r"surpreendido|surpreendida|surpresa|stupito|stupita|sbalordito)\b|(?:удивл|изумл|поражен|поражён)"
+    ),
+    "warm": (
+        r"\b(?:glücklich|fröhlich|freudig|begeistert|zufrieden|heureux|heureuse|"
+        r"joyeux|joyeuse|ravi|ravie|content|contente|feliz|alegre|encantado|"
+        r"encantada|ilusionado|ilusionada|animado|animada|felice|contento|"
+        r"contenta|allegro|allegra|felicità|entusiasta)\b|"
+        r"(?:счастлив|радост|довольн|весел|восторг)"
+    ),
+    "bored": (
+        r"\b(?:gelangweilt|langweilig|lustlos|ennuy\w*|ennui|"
+        r"lassé|lassée|aburrido|aburrida|aburrimiento|desinteresado|"
+        r"desinteresada|entediado|entediada|tédio|annoiato|annoiata|noia|"
+        r"disinteressato|disinteressata)\b|(?:скучно|скучал|скучала|надоело)"
+    ),
+    "calm": (
+        r"\b(?:ruhig|gelassen|friedlich|calme|paisible|serein|sereine|tranquille|"
+        r"tranquilo|tranquila|calmado|calmada|sereno|serena|calmo|calma|"
+        r"tranquillo|tranquilla)\b|(?:спокойн|мирно|уравновешен|тихо)"
+    ),
+    "thoughtful": (
+        r"\b(?:vielleicht|möglicherweise|unsicher|zögerte|zögern|überlegte|"
+        r"peut-être|incertain|incertaine|hésita|hésiter|quizás|quizas|tal vez|"
+        r"dudó|dudar|talvez|hesitou|hesitar|forse|incerto|incerta|esitò|"
+        r"esitare)\b|(?:возможно|наверное|кажется|не уверен|не уверена|сомнева|колебал)|"
+        r"(?:迷っ|ためら|考え込|かもしれない)"
+    ),
+    "curious": (
+        r"\b(?:neugierig|wunderte sich|curieux|curieuse|se demanda|interessé|"
+        r"interessée|curioso|curiosa|se preguntó|interesado|interessada|"
+        r"perguntou-se|si chiese|interessato|curiosidad)\b|(?:любопыт|интересно|заинтересован)|"
+        r"(?:好奇|興味|気にな|知りた)"
+    ),
+    "serious": (
+        r"\b(?:ernst|ernsthaft|feierlich|sérieux|sérieuse|sérieusement|grave|"
+        r"solennel|serio|seria|seriamente|formal|solemne|sério|séria|solene)\b|"
+        r"(?:серьёз|серьез|всерьёз|строго)"
+    ),
+    "reflective": (
+        r"\b(?:erinnerte sich|rückblickend|nachdenklich|se souvint|en repensant|"
+        r"réfléchit|rappelait|recordó|recordaba|reflexionó|pensativo|pensativa|"
+        r"lembrou|refletiu|ricordò|ricordava|rifletté|pensieroso|pensierosa)\b|"
+        r"(?:вспомнил|вспомнила|вспоминал|размышлял|задумал)|(?:思い返|振り返|思い出し|回想)"
+    ),
+}
 
 # The four reference styles preserve one character identity while providing
 # audible differences in delivery. Other labels are mapped to these anchors.
@@ -135,69 +250,88 @@ def classify_expression(text: str) -> str:
     low = value.casefold()
 
     # Explicit delivery/action cues take priority over punctuation.
-    if re.search(r"\b(whisper(?:ed|ing)?|murmur(?:ed|ing)?|softly|quietly|under (?:her|his|their) breath|hushed)\b", low):
+    if re.search(r"\b(whisper(?:ed|ing)?|murmur(?:ed|ing)?|softly|quietly|under (?:her|his|their) breath|hushed)\b|(?:ささや|小声|ひそひそ)", low):
         return "soft"
     if re.search(
         r"\b(?:sob(?:bed|bing)?|cry|cries|cried|crying|wept|weep(?:ing)?|tears?|"
         r"heartbroken|grief-stricken|mournful|sad|sadly|sorrow|regret(?:ted|fully)?|"
-        r"lonely|miss(?:ed|ing) you|disappointed)\b|[泣涙悲愴寂]",
+        r"lonely|miss(?:ed|ing) you|disappointed)\b|[泣涙悲愴寂]|"
+        r"(?:伤心|傷心|难过|難過|悲伤|悲傷|悲哀|眼泪|眼淚|哭泣)|"
+        r"(?:슬프|눈물|울었|울고)",
         low,
-    ):
+    ) or re.search(_NON_ENGLISH_EXPRESSION_CUES["sad"], low):
         return "sad"
     if re.search(
         r"\b(?:angry|anger|furious|enraged|angrily|snapped|barked|how dare you|"
-        r"damn you|shut up)\b|(?:激怒|怒鳴|怒|腹を立)",
+        r"damn you|shut up)\b|(?:激怒|怒鳴|怒|腹を立|愤怒|憤怒|生气|生氣|发火)|"
+        r"(?:분노|화가\s*났|화냈|화났다)",
         low,
-    ):
+    ) or re.search(_NON_ENGLISH_EXPRESSION_CUES["anger"], low):
         return "angry"
+    # Panic and peril are urgent-delivery cues in their own right; they
+    # must not require an additional fear word in the same sentence.
+    if re.search(_NON_ENGLISH_EXPRESSION_CUES["tense"], low):
+        return "tense"
     if re.search(
         r"\b(?:terrified|panicked|desperate|urgent|in a panic|danger|dangerous|"
         r"run away|get back|help me|don't touch|do not touch|worried|afraid|"
-        r"fearful|anxious|trembl(?:ed|ing)|hurt|pain)\b|[怖恐怯震]|不安",
+        r"fearful|anxious|trembl(?:ed|ing)|hurt|pain)\b|[怖恐怯震]|不安|"
+        r"(?:害怕|恐惧|恐懼|惊慌|驚慌|颤抖|顫抖|危险|危險)|"
+        r"(?:무서|두렵|공포|떨|불안)",
         low,
-    ):
+    ) or re.search(_NON_ENGLISH_EXPRESSION_CUES["fear"], low):
         return "tense" if re.search(
             r"\b(?:terrified|panicked|desperate|urgent|run away|get back|help me|"
-            r"don't touch|do not touch)\b|[怖恐怯]",
+            r"don't touch|do not touch)\b|[怖恐怯]|"
+            r"(?:害怕|恐惧|恐懼|惊慌|驚慌|危险|危險)|(?:무서|두렵|공포)",
             low,
-        ) else "concerned"
+        ) or re.search(_NON_ENGLISH_EXPRESSION_CUES["tense"], low) else "concerned"
     if re.search(
         r"\b(?:laughed|laughing|chuckled|chuckling|smiled|smiling|grinned|amused|"
-        r"joked|teased|teasing|heh|haha)\b|[笑]|くすくす|爆笑",
+        r"joked|teased|teasing|heh|haha)\b|[笑]|くすくす|爆笑|"
+        r"(?:哈哈|开玩笑|逗笑)|(?:웃|킥킥|하하)",
         low,
-    ):
+    ) or re.search(_NON_ENGLISH_EXPRESSION_CUES["amused"], low):
         return "amused"
     if re.search(
         r"\b(?:surpris(?:ed|ing)?|astonish(?:ed|ing)?|startl(?:ed|ing)|stunned|"
-        r"taken aback)\b|驚|びっくり|仰天",
+        r"taken aback)\b|驚|びっくり|仰天|"
+        r"(?:惊讶|驚訝|震惊|震驚|吃惊|吃驚)|(?:놀랐|깜짝|놀라)",
         low,
-    ):
+    ) or re.search(_NON_ENGLISH_EXPRESSION_CUES["excited"], low):
         return "excited"
     if re.search(
         r"\b(?:happy|happily|joyful|joyfully|glad|pleased|delighted|thrilled|"
-        r"cheerful|beamed)\b|幸せ|嬉",
+        r"cheerful|beamed)\b|幸せ|嬉|"
+        r"(?:开心|開心|快乐|快樂|高兴|高興|幸福|喜悦)|"
+        r"(?:행복|기쁘|즐겁|신나)",
         low,
-    ):
+    ) or re.search(_NON_ENGLISH_EXPRESSION_CUES["warm"], low):
         return "warm"
     if re.search(
-        r"\b(?:bored|boredom|uninterested|listless|tedious)\b|退屈|つまらな|飽きた",
+        r"\b(?:bored|boredom|uninterested|listless|tedious)\b|退屈|つまらな|飽きた|"
+        r"(?:无聊|無聊|厌倦|厭倦)|(?:지루|따분|싫증)",
         low,
-    ):
+    ) or re.search(_NON_ENGLISH_EXPRESSION_CUES["bored"], low):
         return "bored"
     if re.search(
-        r"\b(?:calm|calmly|peaceful|serene|tranquil|composed|settled)\b|穏やか|落ち着|安心",
+        r"\b(?:calm|calmly|peaceful|serene|tranquil|composed|settled)\b|穏やか|落ち着|安心|"
+        r"(?:平静|平靜|冷静|冷靜|宁静|寧靜)|(?:차분|평온|침착|고요)",
         low,
-    ):
+    ) or re.search(_NON_ENGLISH_EXPRESSION_CUES["calm"], low):
         return "calm"
-    if re.search(r"\b(maybe|perhaps|i think|i wonder|not sure|could it be|i guess|hesitat(?:ed|ing)|uncertain|hesitant)\b", low) or "…" in value or "..." in value:
+    if re.search(r"\b(maybe|perhaps|i think|i wonder|not sure|could it be|i guess|hesitat(?:ed|ing)|uncertain|hesitant)\b|"
+                  r"(?:也许|也許|或许|或許|犹豫|猶豫|不知道)|(?:아마|어쩌면|글쎄|망설)", low) or re.search(_NON_ENGLISH_EXPRESSION_CUES["thoughtful"], low) or "…" in value or "..." in value:
         return "thoughtful"
-    if re.search(r"\b(curious|wondered|intrigued|eager to know)\b", low):
+    if re.search(r"\b(curious|wondered|intrigued|eager to know)\b|(?:好奇|想知道)|(?:궁금|호기심)", low) or re.search(_NON_ENGLISH_EXPRESSION_CUES["curious"], low):
         return "curious"
     if re.search(r"\b(sad|sadly|sorrow|regret(?:ted|fully)?|lonely|miss(?:ed|ing) you|disappointed)\b", low):
         return "sad"
-    if re.search(r"\b(serious|seriously|in a low voice|firmly|solemnly|gravely|matter-of-fact)\b|真剣|厳か|冷静", low):
+    if re.search(r"\b(serious|seriously|in a low voice|firmly|solemnly|gravely|matter-of-fact)\b|真剣|厳か|冷静|"
+                  r"(?:认真|認真|严肃|嚴肅|郑重|鄭重)|(?:진지|엄숙|심각)", low) or re.search(_NON_ENGLISH_EXPRESSION_CUES["serious"], low):
         return "serious"
-    if re.search(r"\b(reflected|thought to himself|thought to herself|remembered|in retrospect)\b", low):
+    if re.search(r"\b(reflected|thought to himself|thought to herself|remembered|in retrospect)\b|"
+                  r"(?:回想|回忆|回憶|沉思)|(?:회상|돌이켜|생각)", low) or re.search(_NON_ENGLISH_EXPRESSION_CUES["reflective"], low):
         return "reflective"
 
     # Punctuation helps only after semantic/action cues. A single exclamation
@@ -214,28 +348,59 @@ def classify_expression(text: str) -> str:
     return "neutral"
 
 
-def voice_design_anchor_instruction(base_voice_description: str) -> str:
-    """Describe one stable identity with a modest, audible range of story delivery.
+def voice_design_anchor_instruction(
+    base_voice_description: str,
+    *,
+    anchor_text: str | None = None,
+    language: str | None = None,
+) -> str:
+    """Describe one stable identity without imposing emotions absent from its reference.
 
-    VoiceDesign accepts natural-language instructions. We use that capability
-    once to create the shared reference, then reuse that single reference in
-    Base cloning so per-sentence emotion does not switch to a separately
-    generated voice or change the requested gender/pitch presentation.
+    The original English identity sample contains four sentences deliberately
+    written to demonstrate a modest range of delivery. Keep that instruction
+    only for that exact sample. Native-language and user-supplied references
+    can be a single sentence; they must be recorded as one calm identity sample
+    rather than being told to perform nonexistent "Wait..." or warm sentences.
     """
     base = str(base_voice_description or "").strip()
-    anchor_direction = (
+    supplied_anchor = str(anchor_text or "").strip()
+    language_key = str(language or "").strip().casefold()
+    use_english_mood_range = (
+        (not supplied_anchor or supplied_anchor == DEFAULT_VOICE_DESIGN_ANCHOR_TEXT)
+        and (
+            not language_key
+            or language_key in {"english", "en", "eng"}
+            or language_key.startswith(("english", "en-", "en_"))
+        )
+    )
+    identity_rules = (
         "Create one consistent audiobook character voice matching the description above. "
         "Preserve its specified gender presentation, perceived age, pitch range, timbre, "
-        "resonance, accent, and vocal placement in every sentence; do not raise the pitch "
-        "outside the described range or change into a different-sounding speaker. "
-        "Speak the supplied reference text as one continuous performance with subtle, "
-        "believable delivery changes: begin calm and conversational; let the next sentence "
-        "carry warm, pleasantly surprised energy; make the sentence beginning 'Wait...' "
-        "sound briefly concerned; finish reflective and settled. Keep these changes in "
-        "intonation, emphasis, rhythm, and energy rather than exaggerated acting. "
-        "Do not add words, stage directions, laughter, singing, or dramatic effects. "
-        "This should sound like one character reacting naturally, not four different voices."
+        "resonance, accent, and vocal placement; do not raise the pitch outside the "
+        "described range or change into a different-sounding speaker. "
     )
+    if use_english_mood_range:
+        anchor_direction = (
+            identity_rules
+            + "Speak the supplied reference text as one continuous performance with subtle, "
+            "believable delivery changes: begin calm and conversational; let the next sentence "
+            "carry warm, pleasantly surprised energy; make the sentence beginning 'Wait...' "
+            "sound briefly concerned; finish reflective and settled. Keep these changes in "
+            "intonation, emphasis, rhythm, and energy rather than exaggerated acting. "
+            "Do not add words, stage directions, laughter, singing, or dramatic effects. "
+            "This should sound like one character reacting naturally, not four different voices."
+        )
+    else:
+        selected_language = str(language or "selected").strip()
+        anchor_direction = (
+            identity_rules
+            + f"Speak the supplied {selected_language} reference text exactly as written, "
+            "as one calm, natural, neutral identity sample. Use clear articulation and a "
+            "steady, believable cadence appropriate to that language. Do not invent emotional "
+            "transitions, stage directions, extra words, laughter, singing, or dramatic effects. "
+            "This recording is the canonical acoustic identity anchor to be reused across "
+            "narration and character dialogue; emotional delivery must not change the speaker."
+        )
     return f"{base}\n{anchor_direction}".strip()
 
 

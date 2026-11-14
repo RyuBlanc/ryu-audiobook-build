@@ -85,6 +85,22 @@ class Stage54GenerationJobUiStateTests(unittest.TestCase):
         self.assertIn("delete control.dataset.dashboardGenerationAction", renderer)
         self.assertIn("button.dataset.dashboardGenerationControl === '1'", self.adapter)
 
+    def test_production_elapsed_display_uses_pause_adjusted_server_checkpoint(self):
+        start = self.adapter.index("function productionElapsedSeconds(job)")
+        end = self.adapter.index("function productionJobEtaSeconds(job)", start)
+        renderer = self.adapter[start:end]
+        self.assertIn("job.elapsed_updated_at", renderer)
+        self.assertIn("job.elapsed_paused_seconds", renderer)
+        self.assertIn("job.elapsed_frozen !== true", renderer)
+        self.assertIn("state === 'pause_requested'", renderer)
+        self.assertIn("Date.now() - checkpointAt", renderer)
+        self.assertIn("Date.now() - startedAt", renderer)  # legacy snapshot fallback
+        self.assertLess(renderer.index("checkpointAt"), renderer.index("startedAt"))
+        host_source = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn('row["elapsed_paused_seconds"] = paused_seconds', host_source)
+        self.assertIn('row["elapsed_updated_at"] = now_iso', host_source)
+        self.assertIn('row["elapsed_frozen"] = True', host_source)
+
     def test_frozen_app_acceptance_exercises_real_job_ui_and_bridge_dispatch(self):
         self.assertIn("runStage53JobUiAcceptance()", self.packaged)
         self.assertIn("stage53_background_job_state_controls", self.packaged)
@@ -106,6 +122,26 @@ class Stage54GenerationJobUiStateTests(unittest.TestCase):
         self.assertIn("stage54_library_open_fallback", self.packaged)
         self.assertIn("Library project card list", self.packaged)
         self.assertIn("data-job-action=\"recover\"", self.packaged)
+
+    def test_generate_navigation_refreshes_job_snapshots_for_the_new_active_project(self):
+        start = self.adapter.index("function bindMiniPlayerNavigation()")
+        end = self.adapter.index("function ", start + len("function bindMiniPlayerNavigation()"))
+        navigation = self.adapter[start:end]
+        wire = self.adapter[self.adapter.index("async function wire()"):]
+        jobs_refresh = self.adapter[self.adapter.index("async function refreshJobsImpl()"):]
+        self.assertIn("generate:'production'", navigation)
+        self.assertIn("['generate','production','generator','generation'].includes(page)", navigation)
+        self.assertIn("refreshJobs().catch(error => console.warn('[Ryu Production navigation job refresh]'", navigation)
+        self.assertIn("bindMiniPlayerNavigation();", wire)
+        self.assertIn("const projectRows = jobs.filter(row =>", self.adapter)
+        self.assertIn("renderProductionGeneration(allJobs)", jobs_refresh)
+
+    def test_packaged_production_gate_diagnostics_use_supported_project_readiness_fields(self):
+        self.assertNotIn('invoke("voice.select.get"', self.packaged)
+        self.assertNotIn('invoke("production.readiness"', self.packaged)
+        self.assertIn('invoke("project.get_active", {})', self.packaged)
+        self.assertIn("narrator_profile_available", self.packaged)
+        self.assertIn("dialogue_routing_ready", self.packaged)
 
     def test_production_preview_monitor_acceptance_reopens_page_before_render_assertion(self):
         preview_start = self.packaged.index("real Production Preview job start")

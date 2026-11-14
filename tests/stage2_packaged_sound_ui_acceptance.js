@@ -716,14 +716,16 @@
       must(stage6OriginalView && stage6OriginalView.dataset.jobView === stage6TaskRepairId,
         "Task Manager repair fixture did not start with an identity-matched View action.");
       stage6OriginalView.remove();
-      // Let the normal live 1.5-second backend poll repair the row. Clicking a
-      // filter is deliberately avoided because filter changes invalidate the
-      // row signature and request a full-list render.
+      // Request an immediate refresh through the existing Task Manager entry
+      // point. Idle polling intentionally backs off, so waiting exactly one
+      // idle interval here would race the scheduler. Do not click a filter:
+      // that changes the signature and could rebuild the original row.
+      stage6JobsButton.click();
       await waitFor("Task Manager repairs a missing View action in place", () => {
         const repaired = stage6TaskRepairRow.querySelector("[data-job-view]");
         return Boolean(stage6TaskRepairRow.isConnected && repaired &&
           repaired.dataset.jobView === stage6TaskRepairId);
-      }, 10000);
+      }, 5000);
       must(Array.from(document.querySelectorAll("#backgroundJobsList [data-backend-job]"))
         .find(row => String(row.dataset.backendJob || "") === stage6TaskRepairId) === stage6TaskRepairRow,
         "Task Manager replaced the native row instead of repairing its missing View action in place.");
@@ -732,12 +734,14 @@
 
       const stage6RepairedView = stage6TaskRepairRow.querySelector("[data-job-view]");
       stage6RepairedView.dataset.jobView = "stale-" + stage6TaskRepairId;
-      // Keep the same native filter and allow the next ordinary poll to repair.
+      // Reuse the same user-visible refresh path for the identity-mismatch
+      // case; only the action is repaired, not the row or the list signature.
+      stage6JobsButton.click();
       await waitFor("Task Manager repairs a mismatched View action in place", () => {
         const repaired = stage6TaskRepairRow.querySelector("[data-job-view]");
         return Boolean(stage6TaskRepairRow.isConnected && repaired &&
           repaired.dataset.jobView === stage6TaskRepairId);
-      }, 10000);
+      }, 5000);
       must(Array.from(document.querySelectorAll("#backgroundJobsList [data-backend-job]"))
         .find(row => String(row.dataset.backendJob || "") === stage6TaskRepairId) === stage6TaskRepairRow,
         "Task Manager replaced the native row instead of repairing its mismatched View action in place.");
@@ -3656,12 +3660,29 @@
         return Boolean(button && !button.disabled);
       }, 20000);
     } catch (gateError) {
-      const [activeGate, narratorGate, readinessGate, gateJobs] = await Promise.all([
+      const [activeGate, gateJobs] = await Promise.all([
         invoke("project.get_active", {}).catch(error => ({error:String(error)})),
-        invoke("voice.select.get", {}).catch(error => ({error:String(error)})),
-        invoke("production.readiness", {}).catch(error => ({error:String(error)})),
         invoke("job.list", {include_hidden:true}).catch(error => ({error:String(error)}))
       ]);
+      // project.get_active is the native, authoritative Production readiness
+      // snapshot. Do not call prototype-only voice.select.get / production.readiness
+      // commands that are not part of the desktop bridge.
+      const narratorGate = activeGate && {
+        profile_name:String(activeGate.voice_profile || activeGate.narrator || ""),
+        source:activeGate.narrator_profile_source || null,
+        configured:activeGate.narrator_voice_configured === true,
+        available:activeGate.narrator_profile_available === true
+      };
+      const readinessGate = activeGate && {
+        metadata_complete:activeGate.metadata_complete === true,
+        metadata_missing_fields:Array.isArray(activeGate.metadata_missing_fields) ? activeGate.metadata_missing_fields : [],
+        eligible_chapter_count:Number(activeGate.eligible_chapter_count || 0),
+        output_configured:activeGate.output_configured === true,
+        output_format_supported:activeGate.output_format_supported === true,
+        output_folder_ready:activeGate.output_folder_ready === true,
+        dialogue_routing_ready:activeGate.dialogue_routing_ready === true,
+        character_assignment_issue_count:Number(activeGate.character_assignment_issue_count || 0)
+      };
       const gateButton = document.querySelector("#startGenerate");
       const gateDiagnostic = {
         active:activeGate,
@@ -3693,10 +3714,25 @@
         String(job.project_folder || "") === String(config.control_project_folder || ""))
       .map(job => String(job.job_id || "")));
     const controlGenerateButton = document.querySelector("#startGenerate");
+    const controlProject = await invoke("project.get_active", {});
     const controlPreflight = {
-      project: await invoke("project.get_active", {}),
-      narrator: await invoke("voice.select.get", {}).catch(error => ({error:String(error)})),
-      readiness: await invoke("production.readiness", {}).catch(error => ({error:String(error)})),
+      project:controlProject,
+      narrator:{
+        profile_name:String(controlProject?.voice_profile || controlProject?.narrator || ""),
+        source:controlProject?.narrator_profile_source || null,
+        configured:controlProject?.narrator_voice_configured === true,
+        available:controlProject?.narrator_profile_available === true
+      },
+      readiness:{
+        metadata_complete:controlProject?.metadata_complete === true,
+        metadata_missing_fields:Array.isArray(controlProject?.metadata_missing_fields) ? controlProject.metadata_missing_fields : [],
+        eligible_chapter_count:Number(controlProject?.eligible_chapter_count || 0),
+        output_configured:controlProject?.output_configured === true,
+        output_format_supported:controlProject?.output_format_supported === true,
+        output_folder_ready:controlProject?.output_folder_ready === true,
+        dialogue_routing_ready:controlProject?.dialogue_routing_ready === true,
+        character_assignment_issue_count:Number(controlProject?.character_assignment_issue_count || 0)
+      },
       button: controlGenerateButton ? {
         disabled: controlGenerateButton.disabled,
         title: controlGenerateButton.title,

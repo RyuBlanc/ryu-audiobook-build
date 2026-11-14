@@ -29,9 +29,12 @@
 - Library folder resolution rejects paths outside direct Library children.
 - Non-migrating reload does not enumerate narration folders or rewrite legacy BGM state.
 
-## Verification status
+## Verification status — Dragon Studio extension
 
-- **CODE CHANGED — NOT VERIFIED** until this artifact-checkpoint commit completes its matching-head Windows regression and package workflow.
-- The pre-fix Build #2819 run passed 1,325 automated tests and packaged the installer/portable artifacts, but it did not measure or accept routine interactive responsiveness.
-- No manual claim is made for zero UI stalls, zero flicker, or the user's installed-PC behaviour.
-- This repair preserves the existing migration code and performs it on the first authoritative project load; it does not delete or rewrite project/audio content as an optimization.
+- The original active-project cache/resolver and this branch's direct-known-folder extension passed the matching-head regression suite and complete Windows package at Build #3363 (1,541 tests, package success). The AST contract verifies the seven known-folder actions do not enumerate the entire Library, and the filesystem contract verifies the resolver accepts a direct Library child and rejects a path outside it.
+- The #3358–#3362 failures were diagnosed as incomplete test doubles/path normalization and a separate missing stopwatch import; they are preserved as failed records in `docs/dragon-studio/PUSH-LEDGER.md`. The corrected exact head #3363 passed.
+- The source audit found seven remaining `list_projects()` operations in the bridge; each is a true library-wide task (list/duplicate-source/series update/profile dependency/first-time character hydration/diagnostics). The Library list path caches parsed Project objects using `project.json` and `chapters.json` fingerprints.
+- The frontend `window.go` wrapper refreshes project collection only for Dashboard and Library; it does not trigger `project.list` while navigating Voice, Chapters, Production, Models or History. Secondary hydration remains deferred until after the essential workspace is interactive.
+- **Latest additional fix:** commit `98f604fb1fa414fb01d50d8f4a6d7186e107f1b3` moves both renderer-retry branches back to the native loading splash before starting HTML load or direct WebEngine reload. Its focused regression and packaged checkpoint are pending Build #3365.
+- **Still not manually accepted:** physical target-PC responsiveness/no-flicker/no-freeze, real mixed-DPI/multi-monitor behaviour, actual shell icon and installer visuals at the user's scaling. Automated tests/package do not replace those checks.
+- This repair preserves all screens, features, project/audio data and the one-time legacy migration. It does not delete or rewrite project/audio content as an optimization.

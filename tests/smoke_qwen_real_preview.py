@@ -231,6 +231,33 @@ def main() -> None:
                 "QWEN_VS01_CPU_60S_TARGET="
                 + ("MET" if elapsed < 60.0 else "NOT_MET_ON_HOSTED_CPU")
             )
+    except Exception as exc:
+        worker = getattr(provider, "_worker", None)
+        diagnostics = {
+            "error": repr(exc),
+            "worker_pid": getattr(worker, "pid", None),
+            "worker_exit_code": worker.poll() if worker is not None else None,
+            "model_kind": provider.model_kind,
+            "backend": provider.backend,
+        }
+        try:
+            log_handle = getattr(provider, "_worker_log", None)
+            if log_handle is not None:
+                log_handle.flush()
+                log_path = Path(log_handle.name)
+                if log_path.is_file():
+                    diagnostics["worker_stderr_tail"] = log_path.read_text(
+                        encoding="utf-8", errors="replace"
+                    )[-12000:]
+                    diagnostics["worker_log_path"] = str(log_path)
+        except (OSError, ValueError) as log_error:
+            diagnostics["log_read_error"] = repr(log_error)
+        (OUTPUT_ROOT / "qwen-worker-startup-diagnostics.json").write_text(
+            json.dumps(diagnostics, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        print("QWEN_WORKER_STARTUP_DIAGNOSTICS=" + json.dumps(diagnostics, ensure_ascii=True))
+        raise
     finally:
         try:
             provider.close()

@@ -346,6 +346,10 @@ class VoicePreviewContractTests(unittest.TestCase):
 
             bridge = SimpleNamespace(
                 _character_library_bootstrap=lambda: None,
+                _load_library_project=lambda requested_folder: (
+                    project if Path(requested_folder).expanduser().resolve() == Path(project.folder).expanduser().resolve()
+                    else None
+                ),
                 settings=SimpleNamespace(value=lambda key: str(project.folder) if key == "project/active_folder" else ""),
                 _find_profile=lambda name: SimpleNamespace(name=name),
                 _project_series_name=lambda active_project, active_state: "Series A",
@@ -355,7 +359,9 @@ class VoicePreviewContractTests(unittest.TestCase):
             )
             with patch.object(premium_v2_host, "list_reusable_characters", side_effect=lambda: records), \
                  patch.object(premium_v2_host, "sync_reusable_characters", side_effect=sync_characters), \
-                 patch.object(premium_v2_host, "list_projects", return_value=[project]), \
+                 patch.object(premium_v2_host, "list_projects", side_effect=AssertionError(
+                    "Character Library save must resolve the active project folder directly"
+                )), \
                  patch.object(premium_v2_host, "load_state", return_value=state), \
                  patch.object(premium_v2_host, "save_state") as save_state:
                 result = premium_v2_host.PremiumV2Bridge._character_library_save(
@@ -600,10 +606,12 @@ class VoicePreviewContractTests(unittest.TestCase):
         source = voice_page.read_text(encoding="utf-8")
         method = source[source.index("    def assign_to_character("):source.index("    def _set_voice_step(")]
         self.assertIn("from app.core.character_library import sync_characters", source)
-        self.assertIn("sync_characters(\n                    series,\n                    [source_row]", method)
+        self.assertIn('cast_page._save_cast(update_voice=False)', method)
         self.assertIn('source_row = {"name": character, "voice": saved_profile.name}', method)
-        self.assertIn('source_row["aliases"] = list(roster_row["aliases"])', method)
+        self.assertIn("sync_characters(\n                selected_series,\n                [source_row]", method)
+        self.assertIn('source_row["aliases"] = assignment_aliases', method)
         self.assertIn("update_voice=True", method)
+        self.assertIn('state["voice_cast_identity_assignments"] = identity_assignments', method)
         self.assertIn('state["voice_cast"] = assignments', method)
         self.assertIn("but Character Library sync failed", method)
     def test_missing_saved_native_voice_stays_visible_without_substitution(self):

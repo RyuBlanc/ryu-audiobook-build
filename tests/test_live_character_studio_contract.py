@@ -212,18 +212,35 @@ class LiveCharacterStudioContracts(unittest.TestCase):
         self.assertIn("path=registry_path", sync_method)
         self.assertNotIn("registry_path=registry_path", sync_method)
 
-    def test_qwen_design_preview_uses_design_model_without_production_anchor_setup(self):
+    def test_qwen_design_preview_uses_production_identity_locked_voice_path(self):
         provider = (ROOT / "app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
         worker = (ROOT / "app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
+        preview = (ROOT / "app/tts/preview.py").read_text(encoding="utf-8")
         host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        voice_page = (ROOT / "app/ui/voice_page.py").read_text(encoding="utf-8")
+        voice_preview_start = voice_page.index("    def preview(self) -> None:")
+        voice_preview_end = voice_page.index("\n    def ", voice_preview_start + 10)
+        voice_preview = voice_page[voice_preview_start:voice_preview_end]
 
         self.assertIn('if self.qwen_mode in {"design", "design-preview"}:', provider)
         self.assertIn("self.model_kind = best_voice_design_kind()", provider)
+        # Keep the legacy one-pass worker task, but the saved Voice Studio
+        # audition must use the same profile and anchor lock as production.
         self.assertIn('elif active_task == "design-preview" and model is None:', worker)
         self.assertIn('elif active_task == "design-preview":', worker)
         self.assertIn("_generate_design_preview(model, request, output)", worker)
+        self.assertIn('if active_task == "design":', worker)
+        self.assertIn("lock_design_identity(request)", worker)
         self.assertIn('_generate_design_locked(model, locked_clone_prompts, request, output)', worker)
-        self.assertIn('preview_profile.qwen_mode = "design-preview"', host)
+        self.assertNotIn('preview_profile.qwen_mode = "design-preview"', host)
+        self.assertIn("qwen_model_kinds_for_preference(", voice_preview)
+        self.assertIn("model_installed(clone_kind)", voice_preview)
+        self.assertIn("best_long_form_clone_kind()", voice_preview)
+        self.assertIn("preview_profile = profile", voice_preview)
+        self.assertNotIn("preview_profile = replace(", voice_preview)
+        self.assertNotIn('qwen_mode="design-preview"', voice_preview)
+        self.assertIn("provider, voice = provider_from_profile(profile)", host)
+        self.assertIn('qwen_mode in {"design", "design-preview"}', preview)
         self.assertIn('"provider_setup_seconds": provider_setup_seconds', host)
         self.assertIn('"synthesis_seconds": synthesis_seconds', host)
         self.assertIn('"total_seconds": total_seconds', host)

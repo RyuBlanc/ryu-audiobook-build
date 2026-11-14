@@ -266,10 +266,14 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn("qwen_design_preview_duration", source)
         self.assertNotIn("test_profile_button", source)
 
-    def test_qwen_design_preview_uses_one_pass_voice_design_model(self):
+    def test_qwen_design_preview_keeps_legacy_worker_but_auditions_with_saved_identity(self):
         provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
         host = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        voice_page = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
+        voice_preview_start = voice_page.index("    def preview(self) -> None:")
+        voice_preview_end = voice_page.index("\n    def ", voice_preview_start + 10)
+        voice_preview = voice_page[voice_preview_start:voice_preview_end]
         self.assertIn('"design-preview"', provider)
         self.assertIn('if self.qwen_mode in {"design", "design-preview"}:', provider)
         self.assertIn("self.model_kind = best_voice_design_kind()", provider)
@@ -277,22 +281,215 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("_generate_design_preview(model, request, output)", worker)
         self.assertIn('elif active_task == "design":', worker)
         self.assertIn("_generate_design_locked(model, locked_clone_prompts, request, output)", worker)
-        self.assertIn('preview_profile.qwen_mode = "design-preview"', host)
+        self.assertNotIn('preview_profile.qwen_mode = "design-preview"', host)
+        self.assertIn("qwen_model_kinds_for_preference(", voice_preview)
+        self.assertIn("model_installed(clone_kind)", voice_preview)
+        self.assertIn("best_long_form_clone_kind()", voice_preview)
+        self.assertIn("preview_profile = profile", voice_preview)
+        self.assertNotIn("preview_profile = replace(", voice_preview)
+        self.assertNotIn('qwen_mode="design-preview"', voice_preview)
+        self.assertIn("provider, voice = provider_from_profile(profile)", host)
+        self.assertIn("lock_design_identity(request)", worker)
+        self.assertIn('qwen_mode in {"design", "design-preview"}',
+                      Path("app/tts/preview.py").read_text(encoding="utf-8"))
+        self.assertIn("recommended_preview_batch_size", provider)
         self.assertIn("performance_target_met", host)
 
+
     def test_qwen_voice_consistency_uses_design_anchor_and_base_prompt(self):
+        import ast
+
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
         provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
-        self.assertIn("create_voice_clone_prompt", worker)
         self.assertIn("generate_voice_design", worker)
         self.assertIn("voice_anchors", worker)
-        self.assertIn("locked_clone_prompts[style] = model.create_voice_clone_prompt", worker)
+
+        # Prompt construction is intentionally isolated so a GPU->CPU retry can
+        # rebuild device-bound prompt tensors without changing the saved anchor.
+        worker_ast = ast.parse(worker)
+        prompt_builder = next(
+            (
+                node
+                for node in ast.walk(worker_ast)
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == "create_locked_clone_prompts"
+            ),
+            None,
+        )
+        self.assertIsNotNone(prompt_builder, "VoiceDesign must keep a dedicated identity-prompt builder.")
+        prompt_factory_calls = (
+            [
+                node
+                for node in ast.walk(prompt_builder)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "create_voice_clone_prompt"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "target_model"
+            ]
+            if prompt_builder is not None
+            else []
+        )
+        self.assertTrue(
+            prompt_factory_calls,
+            "Identity prompts must be constructed by the model that owns their target device.",
+        )
+        prompt_builder_calls = [
+            node
+            for node in ast.walk(worker_ast)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "create_locked_clone_prompts"
+        ]
+        self.assertTrue(
+            any(
+                len(node.args) >= 3
+                and isinstance(node.args[2], ast.Name)
+                and node.args[2].id == "locked_anchors"
+                for node in prompt_builder_calls
+            ),
+            "Automatic OOM recovery must rebuild prompts from the exact saved anchor paths.",
+        )
         self.assertIn("reference_style(style)", worker)
-        self.assertIn("ANCHOR_TEXTS", worker)
+        self.assertIn("default_voice_design_anchor_text", worker)
+        self.assertIn("return default_voice_design_anchor_text(request.get(\"language\"))", worker)
+        self.assertNotIn("ANCHOR_TEXTS", worker)
         self.assertIn("recommended_chunk_chars = 2400", provider)
         self.assertIn("recommended_chunk_sentences = 10", provider)
         self.assertIn("recommended_preview_chunk_chars = 2400", provider)
         self.assertIn("recommended_preview_chunk_sentences = 10", provider)
+
+    def test_design_automatic_oom_fallback_preserves_selected_17b_base_model(self):
+        import io
+        import json
+        from contextlib import redirect_stdout
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.tts import qwen_character_worker as worker
+
+        class FakePrompt:
+            def __init__(self, device, model_kind, arguments):
+                self.device = device
+                self.model_kind = model_kind
+                self.arguments = dict(arguments)
+
+        class FakeModel:
+            def __init__(self, device, model_kind):
+                self.device = device
+                self.model_kind = model_kind
+                self.prompts = []
+
+            def create_voice_clone_prompt(self, **arguments):
+                prompt = FakePrompt(self.device, self.model_kind, arguments)
+                self.prompts.append(prompt)
+                return prompt
+
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            anchor = root / "saved-17b-identity.wav"
+            anchor.write_bytes(b"stable-saved-identity-anchor" * 256)
+            output_path = root / "chapter.wav"
+            request = {
+                "text": "The saved character speaks.",
+                "output": str(output_path),
+                "speaker": "Saved character",
+                "language": "English",
+                "instruct": "Preserve the saved character identity.",
+                "seed": 20261112,
+                "anchor_text": "Stable saved anchor transcript.",
+                "profile_id": "saved-17b-profile",
+            }
+            args = SimpleNamespace(
+                models_root=temporary,
+                task="design",
+                kind="design-1.7b",
+                backend="automatic",
+                low_memory=False,
+                clone_kind="base-1.7b",
+            )
+            accelerator_model = FakeModel("cuda:0", "base-1.7b")
+            cpu_model = FakeModel("cpu", "base-1.7b")
+            accelerator_loads = []
+            cpu_loads = []
+
+            def load_accelerator(
+                kind, backend, _root, low_memory=False, progress=None,
+                allow_cpu_fallback=True,
+            ):
+                accelerator_loads.append((kind, backend))
+                return accelerator_model, "cuda:0"
+
+            def load_cpu(kind, backend, _root, low_memory=False):
+                cpu_loads.append((kind, backend))
+                return cpu_model, "cpu"
+
+            def synthesize_with_locked_identity(model, prompts, current_request, destination):
+                prompt = prompts.get("neutral")
+                self.assertEqual(current_request.get("profile_id"), "saved-17b-profile")
+                self.assertEqual(current_request.get("seed"), 20261112)
+                if model.device == "cuda:0":
+                    raise RuntimeError("CUDA out of memory during synthetic inference")
+                self.assertEqual(model.device, "cpu")
+                self.assertEqual(model.model_kind, "base-1.7b")
+                self.assertIsNotNone(prompt)
+                self.assertEqual(prompt.device, "cpu")
+                self.assertEqual(prompt.model_kind, "base-1.7b")
+                self.assertEqual(
+                    prompt.arguments.get("ref_audio"),
+                    str(anchor),
+                    "CPU recovery must keep the exact saved VoiceDesign anchor.",
+                )
+                self.assertEqual(
+                    prompt.arguments.get("ref_text"),
+                    "Stable saved anchor transcript.",
+                )
+                Path(destination).write_bytes(b"valid-synthetic-audio" * 128)
+
+            output = io.StringIO()
+            with (
+                patch.object(worker, "_anchor_path", return_value=anchor),
+                patch.object(
+                    worker,
+                    "_expression_anchor_text",
+                    return_value="Stable saved anchor transcript.",
+                ),
+                patch.object(
+                    worker,
+                    "_load_model_with_fallback",
+                    side_effect=load_accelerator,
+                ),
+                patch.object(worker, "_load_model", side_effect=load_cpu),
+                patch.object(
+                    worker,
+                    "_generate_design_locked",
+                    side_effect=synthesize_with_locked_identity,
+                ),
+                patch("sys.stdin", io.StringIO(json.dumps(request) + "\n")),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(worker.server(args), 0)
+
+            messages = [
+                json.loads(line)
+                for line in output.getvalue().splitlines()
+                if line.strip().startswith("{")
+            ]
+            self.assertIs(messages[0].get("worker_ready"), True)
+            successes = [message for message in messages if message.get("ok") is True]
+            self.assertEqual(len(successes), 1)
+            self.assertEqual(successes[0].get("device"), "cpu")
+            self.assertEqual(successes[0].get("kind"), "base-1.7b")
+            self.assertEqual(accelerator_loads, [("base-1.7b", "automatic")])
+            self.assertEqual(cpu_loads, [("base-1.7b", "cpu")])
+            self.assertEqual(len(accelerator_model.prompts), 1)
+            self.assertEqual(len(cpu_model.prompts), 1)
+            self.assertEqual(cpu_model.prompts[0].device, "cpu")
+            self.assertEqual(
+                cpu_model.prompts[0].arguments.get("ref_audio"),
+                str(anchor),
+            )
+            self.assertGreater(output_path.stat().st_size, 1024)
 
     def test_voice_profile_save_and_qwen_preview_controls_are_exposed(self):
         source = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
@@ -456,9 +653,15 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("_create_expression_anchors", worker)
         self.assertIn('"outputs": [str(Path(str(path)).resolve()) for path in batch_outputs]', worker)
         self.assertIn('qwen_mode="design"', voice_page)
-        self.assertIn('preview_profile.qwen_mode = "design-preview"', host)
+        self.assertNotIn('preview_profile.qwen_mode = "design-preview"', host)
+        self.assertIn("provider, voice = provider_from_profile(profile)", host)
+        self.assertIn("lock_design_identity(request)", worker)
+        self.assertIn('qwen_mode in {"design", "design-preview"}',
+                      Path("app/tts/preview.py").read_text(encoding="utf-8"))
+        self.assertIn("recommended_preview_batch_size", provider)
         self.assertIn('best_long_form_clone_kind()', provider)
-        self.assertIn('"--clone-kind", clone_kind or best_clone_kind()', provider)
+        self.assertIn('"--clone-kind", clone_kind or "base-0.6b"', provider)
+        self.assertNotIn('clone_kind or best_clone_kind()', provider)
 
     def test_voicedesign_requires_stable_base_model(self):
         provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
@@ -625,7 +828,10 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("briefly concerned", instruction)
         self.assertIn("not four different voices", instruction)
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
-        self.assertIn("voice_design_anchor_instruction(base_description)", worker)
+        self.assertIn("voice_design_anchor_instruction(", worker)
+        self.assertIn("anchor_text=anchor_text", worker)
+        self.assertIn("language=language", worker)
+        self.assertIn('EXPRESSION_BANK_VERSION = "v9-language-matched-anchor-direction"', worker)
         self.assertIn('"temperature": temperature', worker)
 
     def test_changing_qwen_preset_clears_old_saved_voice_selection(self):
@@ -1419,8 +1625,9 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("saved canonical character identity", worker)
         self.assertIn("ready = all(", worker)
         self.assertIn('ANCHOR_STYLES = ("neutral",)', worker)
-        self.assertIn("v8-emotion-range-anchor", worker)
-        self.assertIn('if active_task not in {"design", "design-preview"}:', worker)
+        self.assertIn('EXPRESSION_BANK_VERSION = "v9-language-matched-anchor-direction"', worker)
+        self.assertIn('if active_task in {"design", "design-preview"}:', worker)
+        self.assertIn('"worker_ready": True', worker)
         self.assertIn('if vram_gb >= 10.0 and model_installed("base-1.7b")', runtime)
 
     def test_qwen_batch_generation_path_exists(self):
@@ -1429,7 +1636,9 @@ class RegressionTests(unittest.TestCase):
         generator = Path("app/tts/generator.py").read_text(encoding="utf-8")
         self.assertIn("def synthesize_batch", provider)
         self.assertIn("def recommended_preview_batch_size", provider)
-        self.assertIn("_detected_vram_gb() >= 7.0", provider)
+        self.assertIn("threshold_gb = 12.0", provider)
+        self.assertIn("threshold_gb = 7.0", provider)
+        self.assertIn("_detected_vram_gb() >= threshold_gb", provider)
         self.assertIn('batch_texts = request.get("texts")', worker)
         self.assertIn('if active_task == "design-preview":', worker)
         self.assertIn("model.generate_voice_design(", worker)
@@ -4101,4 +4310,3 @@ Rias Gremory
                 '{"chunks_total": 2, "completed": [0, 1], "generation_signature": "resume-inspector-fixture-v1"}',
                 encoding="utf-8",
             )
-

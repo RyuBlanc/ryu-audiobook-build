@@ -351,6 +351,7 @@ if __name__ == "__main__":
 
 class GenerationProgressDispatchHarness:
     _generation_progress = host.PremiumV2Bridge._generation_progress
+    _now = staticmethod(host.PremiumV2Bridge._now)
 
     def __init__(self):
         self._job_update = Mock()
@@ -365,7 +366,7 @@ class Stage53GenerationProgressDispatchTests(unittest.TestCase):
             ((1, 2, 1, "chunk:1/2:1/4"), "Rendering narration chunks", 25),
             ((2, 2, 4, "m4b-packaging"), "Assembling final M4B", 100),
             ((2, 2, 4, "m4b-package:2/4:Encoding final chapters"), "Encoding and validating final M4B", 100),
-            ((2, 2, 4, "m4b-complete"), "Audiobook duration measured · M4B ready", 100),
+            ((2, 2, 4, "m4b-complete"), "Validating final M4B duration", 100),
         )
         observed = []
         for args, expected_stage, expected_progress in events:
@@ -382,6 +383,10 @@ class Stage53GenerationProgressDispatchTests(unittest.TestCase):
                 self.assertEqual(changes["packaging_progress_percent"], 50)
                 self.assertEqual(changes["packaging_completed_steps"], 2)
                 self.assertEqual(changes["packaging_total_steps"], 4)
+            elif args[3] == "m4b-complete":
+                self.assertIn("measuring the final audio duration", changes["message"].casefold())
+                self.assertNotIn("duration measured", changes["stage"].casefold())
+                self.assertEqual(changes["packaging_progress_percent"], 100)
             observed.append(changes["progress"])
 
         self.assertEqual(observed, sorted(observed))

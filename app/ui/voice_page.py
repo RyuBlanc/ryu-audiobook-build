@@ -5,7 +5,7 @@ import tempfile
 import hashlib
 import json
 import threading
-from dataclasses import asdict, replace
+from dataclasses import asdict
 import re
 from pathlib import Path
 import webbrowser
@@ -23,6 +23,41 @@ from PySide6.QtWidgets import (
 )
 
 
+def _voice_assignment_targets(rows, default_series: str) -> list[dict[str, object]]:
+    """Build stable Voice Studio choices without collapsing series identities."""
+    targets: dict[str, dict[str, object]] = {}
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("name") or row.get("primary_name") or "").strip()
+        series = str(row.get("series") or row.get("series_name") or default_series or "").strip()
+        if not name or name.casefold() == "narrator" or not series:
+            continue
+        identity = character_identity_key(name, series)
+        target = targets.setdefault(identity, {
+            "name": name, "series": series, "aliases": [],
+            "role": row.get("role") or "Possible Character",
+            "dialogue_count": row.get("dialogue_count", 0),
+            "examples": list(row.get("examples") or []),
+            "confidence": row.get("confidence", 0.0),
+        })
+        aliases = row.get("aliases") or []
+        if isinstance(aliases, (list, tuple)):
+            target["aliases"] = list(dict.fromkeys([
+                *target.get("aliases", []),
+                *[str(alias).strip() for alias in aliases if str(alias).strip()],
+            ]))
+    name_series: dict[str, set[str]] = {}
+    for target in targets.values():
+        name_series.setdefault(str(target["name"]).casefold(), set()).add(str(target["series"]).casefold())
+    result = []
+    for target in targets.values():
+        duplicated = len(name_series.get(str(target["name"]).casefold(), set())) > 1
+        label = f"{target['name']} — {target['series']}" if duplicated else str(target["name"])
+        result.append({**target, "label": label})
+    return sorted(result, key=lambda item: (str(item["name"]).casefold(), str(item["series"]).casefold()))
+
+
 class PassiveScrollComboBox(QComboBox):
     """Prevent mouse-wheel changes until the user explicitly opens the combo."""
     
@@ -35,6 +70,7 @@ class PassiveScrollComboBox(QComboBox):
 from app.ui.motion import SmoothProgressBar
 from app.ui.stable_refresh import sync_combo_items_in_place
 from app.core.state import load_state, save_state
+from app.core.character_identity import character_identity_key
 from app.core.character_library import sync_characters
 from app.tts.profile_provider import provider_from_profile
 from app.tts.preview import build_voice_preview
@@ -53,7 +89,10 @@ from app.tts.voice_profile import (
     VoiceProfile, builtin_voice_profiles, import_reference_audio,
     load_profiles, load_saved_profiles, save_profiles,
 )
-from app.tts.qwen_model_preference import get_qwen_model_preference
+from app.tts.qwen_model_preference import (
+    get_qwen_model_preference,
+    qwen_model_kinds_for_preference,
+)
 from app.tts.providers.edge_tts import EdgeTTSProvider
 from app.tts.providers.elevenlabs import ElevenLabsProvider
 
@@ -1310,97 +1349,163 @@ class VoicePage(QWidget):
         if saved_profile is None:
             self.status.setText("Save this voice profile first, then generate its preview and assign it.")
             return
+
         window = self.window()
         cast_page = getattr(window, "voice_cast", None)
-        names = []
-        if cast_page is not None:
-            names.extend(
-                str(row.get("name") or "").strip()
-                for row in getattr(cast_page, "rows", [])
-                if str(row.get("name") or "").strip()
-            )
-        state = load_state(folder)
-        assignments = state.get("voice_cast", {})
-        if isinstance(assignments, dict):
-            names.extend(str(name).strip() for name in assignments if str(name).strip())
-        names = sorted({name for name in names if name.casefold() != "narrator"}, key=str.casefold)
-        if not names:
-            self.status.setText(
-                "No characters are available yet. Open Voice Cast, analyze the book, then assign this voice."
-            )
-            if hasattr(window, "select_section"):
-                window.select_section("Voice Cast")
-            return
-        character, ok = QInputDialog.getItem(
-            self, "Assign Voice to Character", "Character:", names, 0, False
-        )
-        if not ok or not character:
-            return
-        assignments = dict(assignments) if isinstance(assignments, dict) else {}
-        assignments[character] = saved_profile.name
-        state["voice_cast"] = assignments
-        save_state(folder, state)
-
-        # Native Voice Studio must update the shared series-level registry too,
-        # not only this book's voice_cast mapping. Sync only this character so
-        # unrelated/unassigned character voices are never cleared by the update.
-        library_sync_error = None
         project = getattr(window, "project", None)
+        state = load_state(folder)
         metadata = state.get("metadata") if isinstance(state.get("metadata"), dict) else {}
-        series = str(
+        default_series = str(
             state.get("series_name")
             or state.get("series")
             or metadata.get("series")
             or getattr(project, "title", "")
             or ""
         ).strip()
-        if series:
+        if not default_series and cast_page is not None:
+            default_series = str(cast_page._series_name() or "").strip()
+
+        candidate_rows = []
+        if cast_page is not None:
+            candidate_rows.extend(getattr(cast_page, "rows", []) or [])
+        candidate_rows.extend(row for row in (state.get("characters") or []) if isinstance(row, dict))
+        candidate_rows.extend(row for row in (state.get("voice_cast_character_roster") or []) if isinstance(row, dict))
+        legacy_assignments = state.get("voice_cast", {})
+        if isinstance(legacy_assignments, dict):
+            candidate_rows.extend(
+                {"name": str(name).strip(), "series": default_series}
+                for name in legacy_assignments
+                if str(name or "").strip() and str(name).strip().casefold() != "narrator"
+            )
+        targets = _voice_assignment_targets(candidate_rows, default_series)
+        if not targets:
+            self.status.setText(
+                "No characters are available yet. Open Voice Cast, analyze the book, then assign this voice."
+            )
+            if hasattr(window, "select_section"):
+                window.select_section("Voice Cast")
+            return
+
+        target_by_label = {str(item["label"]): item for item in targets}
+        selected_label, ok = QInputDialog.getItem(
+            self, "Assign Voice to Character", "Character and series:",
+            list(target_by_label), 0, False,
+        )
+        if not ok or not selected_label:
+            return
+        target = target_by_label.get(selected_label)
+        if target is None:
+            self.status.setText("The selected character identity is no longer available. Refresh Voice Cast and retry.")
+            return
+        character = str(target["name"])
+        selected_series = str(target["series"])
+        identity = character_identity_key(character, selected_series)
+
+        # Persist the full canonical Voice Cast state and scoped assignment map,
+        # but synchronize only this selected voice to the series library. A bulk
+        # update_voice=True here could overwrite unrelated library voice records
+        # with stale values from other project rows.
+        assignment_aliases: list[str] = []
+        if cast_page is not None:
+            matching_rows = [
+                row for row in getattr(cast_page, "rows", [])
+                if str(row.get("name") or row.get("primary_name") or "").strip().casefold() == character.casefold()
+                and str(row.get("series") or cast_page._series_name() or "").strip().casefold() == selected_series.casefold()
+            ]
+            if len(matching_rows) > 1:
+                self.status.setText(
+                    f"More than one '{character}' identity exists in series '{selected_series}'. "
+                    "Resolve the duplicate Character Library entry before assigning a voice."
+                )
+                return
+            if not matching_rows:
+                selected_row = {
+                    "name": character, "role": target.get("role") or "Manually Added Character",
+                    "series": selected_series, "dialogue_count": int(target.get("dialogue_count") or 0),
+                    "examples": list(target.get("examples") or []), "voice": saved_profile.name,
+                    "confidence": float(target.get("confidence", 1.0)),
+                    "aliases": list(target.get("aliases") or []),
+                }
+                cast_page.rows.append(selected_row)
+            else:
+                selected_row = matching_rows[0]
+                selected_row["series"] = selected_series
+                selected_row["voice"] = saved_profile.name
+            assignment_aliases = list(selected_row.get("aliases") or [])
+            # Persist roster + scoped identity assignments without overwriting
+            # other Character Library voice records as part of this one edit.
+            cast_page._save_cast(update_voice=False)
+            cast_page._refresh_labels()
+        else:
+            identity_assignments = state.get("voice_cast_identity_assignments", {})
+            identity_assignments = dict(identity_assignments) if isinstance(identity_assignments, dict) else {}
+            identity_assignments[identity] = saved_profile.name
+            state["voice_cast_identity_assignments"] = identity_assignments
             roster = state.get("voice_cast_character_roster", [])
+            roster = [dict(row) for row in roster if isinstance(row, dict)]
             roster_row = next(
                 (
                     row for row in roster
-                    if isinstance(row, dict)
-                    and str(row.get("name") or "").strip().casefold() == character.casefold()
+                    if str(row.get("name") or row.get("primary_name") or "").strip().casefold() == character.casefold()
+                    and str(row.get("series") or default_series).strip().casefold() == selected_series.casefold()
                 ),
                 None,
-            ) if isinstance(roster, list) else None
-            # Only update the selected identity and voice. Sending analysis
-            # confidence/line counts here could overwrite richer library metadata.
-            source_row = {"name": character, "voice": saved_profile.name}
-            if isinstance(roster_row, dict) and isinstance(roster_row.get("aliases"), list):
-                source_row["aliases"] = list(roster_row["aliases"])
-            try:
-                sync_characters(
-                    series,
-                    [source_row],
-                    source_project_folder=str(folder),
-                    source_project_title=str(getattr(project, "title", "") or ""),
-                    update_voice=True,
-                )
-            except Exception as exc:
-                library_sync_error = str(exc)
-        else:
-            library_sync_error = "Set a shared series name in Voice Cast to enable cross-volume reuse."
+            )
+            if roster_row is None:
+                roster_row = {
+                    "name": character, "role": target.get("role") or "Manually Added Character",
+                    "series": selected_series, "dialogue_count": int(target.get("dialogue_count") or 0),
+                    "examples": list(target.get("examples") or []),
+                    "confidence": float(target.get("confidence", 1.0)),
+                    "aliases": list(target.get("aliases") or []),
+                }
+                roster.append(roster_row)
+            assignment_aliases = list(roster_row.get("aliases") or [])
+            state["voice_cast_character_roster"] = roster
+            known_series = {
+                str(row.get("series") or default_series).strip().casefold()
+                for row in [*roster, *(state.get("characters") or [])]
+                if isinstance(row, dict)
+                and str(row.get("name") or row.get("primary_name") or "").strip().casefold() == character.casefold()
+            }
+            assignments = state.get("voice_cast", {})
+            assignments = dict(assignments) if isinstance(assignments, dict) else {}
+            if len(known_series) <= 1:
+                assignments[character] = saved_profile.name
+            else:
+                assignments.pop(character, None)
+            state["voice_cast"] = assignments
+            save_state(folder, state)
 
-        if cast_page is not None:
-            for row in getattr(cast_page, "rows", []):
-                if str(row.get("name", "")).casefold() == character.casefold():
-                    row["voice"] = saved_profile.name
-            cast_page._refresh_labels()
+        source_row = {"name": character, "voice": saved_profile.name}
+        if assignment_aliases:
+            source_row["aliases"] = assignment_aliases
+        try:
+            sync_characters(
+                selected_series,
+                [source_row],
+                source_project_folder=str(folder),
+                source_project_title=str(getattr(project, "title", "") or ""),
+                update_voice=True,
+            )
+        except Exception as exc:
+            self.status.setText(
+                f"Assigned '{saved_profile.name}' to {character} [{selected_series}], "
+                f"but Character Library sync failed: {exc}"
+            )
+            self._refresh_assignment_actions()
+            return
+
         generation = getattr(window, "generation", None)
         if generation is not None:
             generation._load_voice_cast_summary()
             generation._refresh_readiness()
-        if library_sync_error:
-            self.status.setText(
-                f"Assigned '{saved_profile.name}' to {character} for this book, "
-                f"but Character Library sync failed: {library_sync_error}"
-            )
-        else:
-            self.status.setText(
-                f"Assigned '{saved_profile.name}' to {character} for this book and series Character Library."
-            )
+        self.status.setText(
+            f"Assigned '{saved_profile.name}' to {character} [{selected_series}] "
+            "for this book and series Character Library."
+        )
         self._refresh_assignment_actions()
+
     def _set_voice_step(self, index: int) -> None:
         """Select a Voice Studio step without rebuilding or losing its controls."""
         self.voice_step_index = max(0, min(3, int(index)))
@@ -2943,24 +3048,41 @@ class VoicePage(QWidget):
                 return
 
             if profile.qwen_mode == "design":
-                # Audition the selected VoiceDesign prompt in a one-pass preview.
-                # Building the long-form Design→Base anchor bank belongs to
-                # production narration, not every short audition. Keep the same
-                # VoiceDesign model/prompt/seed and all quality settings.
-                kind = best_voice_design_kind()
+                # Voice Studio audition must follow the same VoiceDesign→Base
+                # identity-lock path as audiobook production. A one-pass
+                # VoiceDesign sample can sound different from the saved voice.
+                # Resolve the Base model with the same global preference helper
+                # used by provider_from_profile(); Auto uses the same hardware-
+                # aware installed-model selection as the production provider.
+                preferred_design_kind, preferred_base_kind = qwen_model_kinds_for_preference(
+                    "design", get_qwen_model_preference()
+                )
+                kind = preferred_design_kind or best_voice_design_kind()
+                clone_kind = preferred_base_kind or best_long_form_clone_kind()
                 if not model_installed(kind):
                     QMessageBox.warning(
                         self,
                         "Qwen VoiceDesign Not Ready",
-                        "Install the Qwen VoiceDesign model from Models first.",
+                        f"Install the Qwen VoiceDesign model ({kind}) from Models first.",
                     )
                     return
-                preview_profile = replace(
-                    profile,
-                    qwen_mode="design-preview",
-                    model_id=kind,
+                if not model_installed(clone_kind):
+                    QMessageBox.warning(
+                        self,
+                        "Qwen Base Model Required",
+                        (
+                            "VoiceDesign audition uses the same stable identity-locked "
+                            f"Base model as production. Install the selected Qwen Base "
+                            f"model ({clone_kind}) in Models, or change the global "
+                            "model-size preference in Models & Voice Engines."
+                        ),
+                    )
+                    return
+                # Keep the original saved/draft profile intact. This retains its
+                # qwen_mode, qwen_profile_id, prompt, seed and anchor references.
+                preview_model = (
+                    f"{kind} VoiceDesign + {clone_kind} Base • identity-locked audition"
                 )
-                preview_model = f"{kind} • VoiceDesign • one-pass preview"
             elif profile.qwen_mode == "clone":
                 kind = best_clone_kind(vram_gb=0.0)
                 if not model_installed(kind):

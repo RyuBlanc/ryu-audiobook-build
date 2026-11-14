@@ -384,6 +384,9 @@ class GenerationManager:
                     checkpoint_callback=lambda _done, _total, chapter_index=index: self._wait_if_paused(
                         chapter_index + 1, len(self.chapters)
                     ),
+                    on_chunk_timing=lambda completed_chunks, work_units, elapsed_seconds, chapter_index=index: self._chunk_timing(
+                        chapter_index, completed_chunks, work_units, elapsed_seconds
+                    ),
                 )
                 if self.cancel_event.is_set():
                     cancelled = True
@@ -548,6 +551,31 @@ class GenerationManager:
                         child.unlink()
                     except OSError:
                         pass
+
+    def _chunk_timing(
+        self,
+        chapter_index: int,
+        completed_chunks: int,
+        work_units: int,
+        elapsed_seconds: float,
+    ) -> None:
+        """Publish the measured wall time of an actual TTS synthesis call."""
+        chunk_offset = self._chunk_offsets[chapter_index] if chapter_index < len(self._chunk_offsets) else 0
+        work_offset = self._chunk_work_offsets[chapter_index] if chapter_index < len(self._chunk_work_offsets) else 0
+        units = self._chapter_work_units[chapter_index] if chapter_index < len(self._chapter_work_units) else []
+        completed_work = sum(units[: max(0, min(completed_chunks, len(units)))])
+        overall_work = work_offset + completed_work
+        overall_chunk = chunk_offset + max(0, completed_chunks)
+        self._emit(
+            chapter_index + 1,
+            len(self.chapters),
+            overall_work,
+            (
+                f"chunk-timing:{max(1, int(work_units))}:{max(0.001, float(elapsed_seconds)):.6f}:"
+                f"{overall_work}:{max(1, self._total_work_units)}:"
+                f"{overall_chunk}:{max(1, self._total_chunks)}"
+            ),
+        )
 
     def _progress(self, chapter_index: int, chapter_total: int, done: int, total: int) -> None:
         chunk_offset = self._chunk_offsets[chapter_index] if chapter_index < len(self._chunk_offsets) else 0

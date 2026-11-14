@@ -74,6 +74,195 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
                 selected, _reason = accelerator.automatic_accelerator("custom-0.6b", path)
         self.assertEqual(selected.backend, "cuda")
 
+    def test_qwen_custom_design_and_clone_profiles_round_trip_to_runtime_providers(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from app.tts import voice_profile
+        from app.tts.profile_provider import provider_from_profile
+
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary) / "Voices"
+            anchor = root / "VoiceDesign" / "identity.wav"
+            reference = root / "VoiceClone" / "reference.wav"
+            profiles = [
+                voice_profile.VoiceProfile(
+                    name="Round-trip CustomVoice",
+                    provider="qwen-character",
+                    voice_id="Ryan",
+                    model_id="custom-1.7b",
+                    backend="automatic",
+                    language="English",
+                    qwen_mode="custom",
+                    qwen_prompt="Warm, clear CustomVoice narrator.",
+                    qwen_seed=111,
+                    qwen_profile_id="roundtrip-custom-profile",
+                ),
+                voice_profile.VoiceProfile(
+                    name="Round-trip VoiceDesign",
+                    provider="qwen-character",
+                    voice_id="Designed narrator",
+                    model_id="design-1.7b",
+                    backend="automatic",
+                    language="Japanese",
+                    qwen_mode="design",
+                    qwen_prompt="A calm Japanese audiobook narrator.",
+                    qwen_seed=222,
+                    qwen_anchor_path=str(anchor),
+                    qwen_anchor_text="こんにちは。これは保存された声の確認です。",
+                    qwen_profile_id="roundtrip-design-profile",
+                ),
+                voice_profile.VoiceProfile(
+                    name="Round-trip VoiceClone",
+                    provider="qwen-character",
+                    voice_id="Cloned narrator",
+                    model_id="base-1.7b",
+                    backend="automatic",
+                    language="English",
+                    qwen_mode="clone",
+                    qwen_prompt="",
+                    qwen_seed=333,
+                    sample_path=str(reference),
+                    reference_text="This is the saved reference transcript.",
+                    qwen_profile_id="roundtrip-clone-profile",
+                ),
+            ]
+
+            with (
+                patch.object(voice_profile, "voices_root", return_value=root),
+                patch.object(voice_profile, "builtin_voice_profiles", return_value=[]),
+            ):
+                voice_profile.save_profiles(profiles)
+                reloaded = voice_profile.load_saved_profiles()
+
+            self.assertEqual(
+                {profile.name for profile in reloaded},
+                {profile.name for profile in profiles},
+            )
+            by_name = {profile.name: profile for profile in reloaded}
+            with (
+                patch("app.tts.profile_provider.get_qwen_model_preference", return_value="1.7b"),
+                patch("app.tts.profile_provider.get_qwen_backend_preference", return_value="automatic"),
+                patch("app.tts.profile_provider.get_qwen_low_memory_mode", return_value=False),
+            ):
+                for expected in profiles:
+                    with self.subTest(mode=expected.qwen_mode):
+                        saved = by_name[expected.name]
+                        provider, voice_id = provider_from_profile(saved)
+                        self.assertEqual(voice_id, expected.voice_id)
+                        self.assertEqual(provider.qwen_mode, expected.qwen_mode)
+                        self.assertEqual(provider.voice_id, expected.voice_id)
+                        self.assertEqual(provider.language, expected.language)
+                        self.assertEqual(provider.instruct, expected.qwen_prompt)
+                        self.assertEqual(provider.qwen_seed, expected.qwen_seed)
+                        self.assertEqual(provider.qwen_profile_id, expected.qwen_profile_id)
+                        self.assertEqual(provider.model_kind, expected.model_id)
+                        if expected.qwen_mode == "design":
+                            self.assertEqual(provider.qwen_anchor_path, Path(expected.qwen_anchor_path))
+                            self.assertEqual(provider.qwen_anchor_text, expected.qwen_anchor_text)
+                            self.assertEqual(provider.long_form_model_kind, "base-1.7b")
+                        if expected.qwen_mode == "clone":
+                            self.assertEqual(provider.reference_audio, Path(expected.sample_path))
+                            self.assertEqual(provider.reference_text, expected.reference_text)
+
+    def test_qwen_clone_reference_transcript_changes_generation_signature(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from app.tts.providers.qwen_character import QwenCharacterProvider
+
+        with TemporaryDirectory() as temporary:
+            reference = Path(temporary) / "clone-reference.wav"
+            reference.write_bytes(b"same-reference-audio")
+            provider = QwenCharacterProvider(
+                voice_id="saved-clone-profile",
+                model_kind="base-1.7b",
+                qwen_mode="clone",
+                reference_audio=reference,
+                reference_text="The original reference transcript.",
+                qwen_profile_id="stable-clone-profile-id",
+            )
+            before = provider.generation_signature()
+            provider.reference_text = "The corrected reference transcript."
+            after = provider.generation_signature()
+
+            self.assertNotEqual(
+                before,
+                after,
+                "Changing the Qwen Clone reference transcript must invalidate cached chapter audio.",
+            )
+
+    def test_saved_qwen_clone_reference_replacement_changes_generation_signature(self):
+        import os
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from app.tts.providers.qwen_character import QwenCharacterProvider
+
+        with TemporaryDirectory() as temporary:
+            reference = Path(temporary) / "saved-clone-reference.wav"
+            reference.write_bytes(b"old-clone-reference")
+            provider = QwenCharacterProvider(
+                voice_id="saved-clone-profile",
+                model_kind="base-1.7b",
+                qwen_mode="clone",
+                reference_audio=reference,
+                reference_text="The saved reference transcript.",
+                qwen_profile_id="stable-clone-profile-id",
+            )
+            before = provider.generation_signature()
+            original = reference.stat()
+            reference.write_bytes(b"new-clone-reference")
+            os.utime(
+                reference,
+                ns=(original.st_atime_ns, original.st_mtime_ns),
+            )
+            replaced = reference.stat()
+            self.assertEqual(replaced.st_size, original.st_size)
+            self.assertEqual(replaced.st_mtime_ns, original.st_mtime_ns)
+            after = provider.generation_signature()
+
+            self.assertNotEqual(
+                before,
+                after,
+                "Replacing a saved Qwen Clone reference with the same path, size and timestamp must invalidate cached chapter audio.",
+            )
+
+    def test_saved_qwen_anchor_replacement_changes_generation_signature(self):
+        import os
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from app.tts.providers.qwen_character import QwenCharacterProvider
+
+        with TemporaryDirectory() as temporary:
+            anchor = Path(temporary) / "saved-voice-anchor.wav"
+            anchor.write_bytes(b"old-anchor-bytes")
+            provider = QwenCharacterProvider(
+                voice_id="saved-design-profile",
+                model_kind="design-1.7b",
+                qwen_mode="design",
+                qwen_anchor_path=anchor,
+                qwen_profile_id="stable-profile-id",
+                instruct="Warm, clear narrator with a steady identity.",
+            )
+            with patch(
+                "app.tts.providers.qwen_character.best_long_form_clone_kind",
+                return_value="base-0.6b",
+            ):
+                before = provider.generation_signature()
+                original = anchor.stat()
+                anchor.write_bytes(b"new-anchor-bytes")
+                os.utime(
+                    anchor,
+                    ns=(original.st_atime_ns, original.st_mtime_ns),
+                )
+                after = provider.generation_signature()
+
+            self.assertNotEqual(
+                before,
+                after,
+                "Replacing a saved Qwen identity anchor at the same path must invalidate cached chapter audio.",
+            )
+
     def test_qwen_huggingface_cache_uses_configured_model_cache_root(self):
         from pathlib import Path
         from tempfile import TemporaryDirectory
@@ -86,6 +275,97 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
                 environment = runtime.runtime_environment()
             self.assertEqual(Path(environment["HF_HOME"]), selected_cache)
             self.assertTrue(selected_cache.is_dir())
+
+    def test_worker_timeout_reports_live_state_and_captured_stderr_log(self):
+        import queue
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.tts.providers.qwen_character import QwenCharacterProvider
+
+        provider = QwenCharacterProvider(
+            voice_id="timeout-diagnostic-test",
+            backend="cpu",
+            model_kind="design-1.7b",
+            qwen_mode="design-preview",
+        )
+        output_queue = queue.Queue()
+        with TemporaryDirectory() as temporary:
+            log_path = Path(temporary) / "worker.log"
+            log_path.write_text("model load failed: diagnostic sentinel", encoding="utf-8")
+            provider._worker_log = log_path.open("a", encoding="utf-8")
+            provider._worker = SimpleNamespace(poll=lambda: None)
+            provider._stdout_queue = output_queue
+            class FakeClock:
+                def __init__(self):
+                    self.value = 0.0
+
+                def monotonic(self):
+                    self.value += 0.75
+                    return self.value
+
+            try:
+                with patch(
+                    "app.tts.providers.qwen_character.time.monotonic",
+                    side_effect=FakeClock().monotonic,
+                ), patch(
+                    "app.tts.providers.qwen_character.queue.Queue.get",
+                    side_effect=queue.Empty,
+                ), patch.object(provider, "_status") as status:
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "(?i)timed out.*Worker is still running.*diagnostic sentinel",
+                    ):
+                        provider._read_response(timeout=4.0, heartbeat="Loading model")
+                self.assertTrue(status.called)
+            finally:
+                provider._close_worker_log()
+
+    def test_worker_exit_while_waiting_includes_exit_code_and_stderr(self):
+        import queue
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.tts.providers.qwen_character import QwenCharacterProvider
+
+        provider = QwenCharacterProvider(
+            voice_id="early-exit-diagnostic-test",
+            backend="cpu",
+            model_kind="design-1.7b",
+            qwen_mode="design-preview",
+        )
+        provider._stdout_queue = queue.Queue()
+        class ExitedWorker:
+            pid = None
+            stdin = None
+            stdout = None
+
+            def poll(self):
+                return 37
+
+        provider._worker = ExitedWorker()
+        with TemporaryDirectory() as temporary:
+            log_path = Path(temporary) / "worker.log"
+            log_path.write_text("worker crashed: diagnostic sentinel", encoding="utf-8")
+            provider._worker_log = log_path.open("a", encoding="utf-8")
+            try:
+                with patch(
+                    "app.tts.providers.qwen_character.time.monotonic",
+                    side_effect=(0.0, 0.0, 2.0, 2.0, 3.0),
+                ), patch(
+                    "app.tts.providers.qwen_character.queue.Queue.get",
+                    side_effect=queue.Empty,
+                ):
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "exited while waiting.*Exit code: 37.*diagnostic sentinel",
+                    ):
+                        provider._read_response(timeout=3.0, heartbeat="Loading model")
+            finally:
+                provider._close_worker_log()
+                provider._worker = None
 
     def test_command_runner_enforces_timeout_when_child_stalls_without_stdout(self):
         started = time.monotonic()
@@ -236,6 +516,111 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
         self.assertEqual(calls[0][0], str(model_root / "custom-1.7b"))
         self.assertTrue(calls[0][1].get("low_cpu_mem_usage"))
 
+    def test_automatic_worker_retries_same_model_on_cpu_after_hip_runtime_failure(self):
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from contextlib import redirect_stdout
+        import io
+        import json
+        from app.tts import qwen_character_worker as worker
+
+        calls = []
+        model = object()
+
+        def load(kind, backend, root, low_memory=False):
+            calls.append((kind, backend, low_memory))
+            if backend == "automatic":
+                raise RuntimeError("HIP error: invalid device function during model initialization")
+            return model, "cpu"
+
+        with TemporaryDirectory() as temporary:
+            args = type("Args", (), {
+                "models_root": temporary,
+                "task": "custom",
+                "kind": "custom-1.7b",
+                "backend": "automatic",
+                "low_memory": True,
+                "clone_kind": "base-1.7b",
+            })()
+            output = io.StringIO()
+            with (
+                patch.object(worker, "_load_model", side_effect=load),
+                patch("sys.stdin", io.StringIO("")),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(worker.server(args), 0)
+
+        messages = [json.loads(line) for line in output.getvalue().splitlines() if line.strip()]
+        self.assertEqual(calls, [
+            ("custom-1.7b", "automatic", True),
+            ("custom-1.7b", "cpu", True),
+        ])
+        self.assertTrue(any("retrying the same selected model on CPU without changing voice identity" in m.get("progress", "") for m in messages))
+        self.assertEqual(messages[-1]["model"], worker.MODEL_IDS["custom-1.7b"])
+        self.assertEqual(messages[-1]["backend"], "cpu")
+
+    def test_explicit_gpu_backend_does_not_silently_fall_back_after_runtime_failure(self):
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from contextlib import redirect_stdout
+        import io
+        from app.tts import qwen_character_worker as worker
+
+        calls = []
+        def load(kind, backend, root, low_memory=False):
+            calls.append(backend)
+            raise RuntimeError("CUDA error: initialization error")
+
+        with TemporaryDirectory() as temporary:
+            args = type("Args", (), {
+                "models_root": temporary,
+                "task": "custom",
+                "kind": "custom-1.7b",
+                "backend": "cuda",
+                "low_memory": False,
+                "clone_kind": "base-0.6b",
+            })()
+            with (
+                patch.object(worker, "_load_model", side_effect=load),
+                patch("sys.stdin", io.StringIO("")),
+                redirect_stdout(io.StringIO()),
+                self.assertRaisesRegex(RuntimeError, "CUDA error"),
+            ):
+                worker.server(args)
+
+        self.assertEqual(calls, ["cuda"])
+
+    def test_non_accelerator_model_error_does_not_trigger_automatic_cpu_retry(self):
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from contextlib import redirect_stdout
+        import io
+        from app.tts import qwen_character_worker as worker
+
+        calls = []
+        def load(kind, backend, root, low_memory=False):
+            calls.append(backend)
+            raise RuntimeError("safetensors checkpoint is corrupted")
+
+        with TemporaryDirectory() as temporary:
+            args = type("Args", (), {
+                "models_root": temporary,
+                "task": "custom",
+                "kind": "custom-1.7b",
+                "backend": "automatic",
+                "low_memory": False,
+                "clone_kind": "base-0.6b",
+            })()
+            with (
+                patch.object(worker, "_load_model", side_effect=load),
+                patch("sys.stdin", io.StringIO("")),
+                redirect_stdout(io.StringIO()),
+                self.assertRaisesRegex(RuntimeError, "safetensors checkpoint is corrupted"),
+            ):
+                worker.server(args)
+
+        self.assertEqual(calls, ["automatic"])
+
     def test_stdout_drain_uses_captured_queue_after_close_clears_provider_state(self):
         import queue
         import threading
@@ -324,6 +709,529 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
                     "kind": "custom-0.6b", "task": "custom",
                 })
             self.assertFalse((Path(temporary) / "qwen_last_inference.json").exists())
+
+    def test_design_automatic_cuda_and_xpu_oom_rebuilds_identity_prompts_on_cpu(self):
+        import io
+        import json
+        from contextlib import redirect_stdout
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.tts import qwen_character_worker as worker
+
+        class FakePrompt:
+            def __init__(self, device):
+                self.device = device
+
+        class FakeModel:
+            def __init__(self, device):
+                self.device = device
+                self.prompt_devices = []
+
+            def create_voice_clone_prompt(self, **_kwargs):
+                self.prompt_devices.append(self.device)
+                return FakePrompt(self.device)
+
+        for accelerator_device, oom_message in (
+            ("cuda:0", "CUDA out of memory during synthetic inference"),
+            ("xpu:0", "XPU out of memory during synthetic inference"),
+        ):
+            with self.subTest(device=accelerator_device), TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                anchor = root / "saved-identity.wav"
+                anchor.write_bytes(b"identity-anchor" * 256)
+                output_path = root / "chapter.wav"
+                request = {
+                    "text": "The saved character speaks.",
+                    "output": str(output_path),
+                    "speaker": "Saved character",
+                    "language": "English",
+                    "instruct": "Preserve the saved character identity.",
+                    "seed": 20261112,
+                    "anchor_text": "A stable identity reference.",
+                    "profile_id": "oom-profile",
+                }
+                args = SimpleNamespace(
+                    models_root=temporary,
+                    task="design",
+                    kind="design-1.7b",
+                    backend="automatic",
+                    low_memory=False,
+                    clone_kind="base-0.6b",
+                )
+                accelerator_model = FakeModel(accelerator_device)
+                cpu_model = FakeModel("cpu")
+                loaded_on_cpu = []
+
+                def load_accelerator(_kind, _backend, _root, low_memory=False, progress=None, allow_cpu_fallback=True):
+                    return accelerator_model, accelerator_device
+
+                def load_cpu(_kind, backend, _root, low_memory=False):
+                    loaded_on_cpu.append(backend)
+                    return cpu_model, "cpu"
+
+                def synthesize_with_locked_identity(model, prompts, _request, destination):
+                    prompt = prompts.get("neutral")
+                    if model.device == accelerator_device:
+                        raise RuntimeError(oom_message)
+                    if prompt is None or prompt.device != model.device:
+                        raise RuntimeError(
+                            f"voice prompt device mismatch: prompt={getattr(prompt, 'device', None)} model={model.device}"
+                        )
+                    Path(destination).write_bytes(b"valid-synthetic-audio" * 128)
+
+                output = io.StringIO()
+                with (
+                    patch.object(worker, "_anchor_path", return_value=anchor),
+                    patch.object(worker, "_expression_anchor_text", return_value="A stable identity reference."),
+                    patch.object(worker, "_load_model_with_fallback", side_effect=load_accelerator),
+                    patch.object(worker, "_load_model", side_effect=load_cpu),
+                    patch.object(worker, "_generate_design_locked", side_effect=synthesize_with_locked_identity),
+                    patch("sys.stdin", io.StringIO(json.dumps(request) + "\n")),
+                    redirect_stdout(output),
+                ):
+                    self.assertEqual(worker.server(args), 0)
+
+                messages = [
+                    json.loads(line)
+                    for line in output.getvalue().splitlines()
+                    if line.strip().startswith("{")
+                ]
+                self.assertIs(messages[0].get("worker_ready"), True)
+                self.assertIs(messages[-1].get("ok"), True)
+                self.assertEqual(messages[-1].get("device"), "cpu")
+                self.assertEqual(loaded_on_cpu, ["cpu"])
+                self.assertEqual(accelerator_model.prompt_devices, [accelerator_device])
+                self.assertEqual(
+                    cpu_model.prompt_devices,
+                    ["cpu"],
+                    "Automatic OOM fallback must rebuild the saved identity prompt on CPU.",
+                )
+                self.assertGreater(output_path.stat().st_size, 1024)
+
+
+    def test_design_preview_automatic_oom_retries_same_voicedesign_model_on_cpu(self):
+        import io
+        import json
+        from contextlib import redirect_stdout
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.tts import qwen_character_worker as worker
+
+        for device, message in (
+            ("cuda:0", "CUDA out of memory during VoiceDesign preview"),
+            ("xpu:0", "XPU out of memory during VoiceDesign preview"),
+            ("cuda:0", "ROCm out of memory during VoiceDesign preview"),
+        ):
+            with self.subTest(device=device, message=message), TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                output_path = root / "preview.wav"
+                request = {
+                    "text": "A stable preview sentence.",
+                    "output": str(output_path),
+                    "speaker": "Saved narrator",
+                    "language": "Japanese",
+                    "instruct": "Warm, steady, natural narration.",
+                    "seed": 20261112,
+                    "profile_id": "preview-oom-profile",
+                }
+                args = SimpleNamespace(
+                    models_root=temporary,
+                    task="design-preview",
+                    kind="design-1.7b",
+                    backend="automatic",
+                    low_memory=False,
+                    clone_kind="base-1.7b",
+                )
+                accelerator_model = SimpleNamespace(device=device)
+                cpu_model = SimpleNamespace(device="cpu")
+                loads = []
+                syntheses = []
+
+                def initial_load(kind, backend, _root, low_memory=False, progress=None, allow_cpu_fallback=True):
+                    loads.append((kind, backend, low_memory))
+                    return accelerator_model, device
+
+                def retry_load(kind, backend, _root, low_memory=False):
+                    loads.append((kind, backend, low_memory))
+                    return cpu_model, "cpu"
+
+                def synthesize(model, received_request, destination):
+                    syntheses.append((model.device, dict(received_request)))
+                    if model.device != "cpu":
+                        raise RuntimeError(message)
+                    Path(destination).write_bytes(b"valid-preview-audio" * 128)
+
+                output = io.StringIO()
+                with (
+                    patch.object(worker, "_load_model_with_fallback", side_effect=initial_load),
+                    patch.object(worker, "_load_model", side_effect=retry_load),
+                    patch.object(worker, "_generate_design_preview", side_effect=synthesize),
+                    patch("sys.stdin", io.StringIO(json.dumps(request) + "\n")),
+                    redirect_stdout(output),
+                ):
+                    self.assertEqual(worker.server(args), 0)
+
+                messages = [json.loads(line) for line in output.getvalue().splitlines() if line.strip()]
+                self.assertTrue(messages[0].get("worker_ready"))
+                self.assertTrue(messages[-1].get("ok"))
+                self.assertEqual(loads, [
+                    ("design-1.7b", "automatic", False),
+                    ("design-1.7b", "cpu", False),
+                ])
+                self.assertEqual([entry[0] for entry in syntheses], [device, "cpu"])
+                self.assertEqual(syntheses[-1][1], request)
+                self.assertEqual(messages[-1].get("kind"), "design-1.7b")
+                self.assertEqual(messages[-1].get("device"), "cpu")
+                self.assertGreater(output_path.stat().st_size, 1024)
+
+    def test_design_explicit_cuda_rocm_and_xpu_oom_never_retry_on_cpu(self):
+        import io
+        import json
+        from contextlib import redirect_stdout
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.tts import qwen_character_worker as worker
+
+        cases = (
+            ("cuda", "cuda:0", "CUDA out of memory during VoiceDesign synthesis"),
+            ("rocm", "cuda:0", "HIP out of memory during VoiceDesign synthesis"),
+            ("xpu", "xpu:0", "XPU out of memory during VoiceDesign synthesis"),
+        )
+        for backend, device, message in cases:
+            with self.subTest(backend=backend), TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                anchor = root / "saved-identity.wav"
+                anchor.write_bytes(b"identity-anchor" * 256)
+                request = {
+                    "text": "The saved character speaks.",
+                    "output": str(root / "chapter.wav"),
+                    "speaker": "Saved character",
+                    "language": "English",
+                    "instruct": "Preserve the saved character identity.",
+                    "profile_id": "explicit-" + backend + "-profile",
+                }
+                args = SimpleNamespace(
+                    models_root=temporary,
+                    task="design",
+                    kind="design-1.7b",
+                    backend=backend,
+                    low_memory=False,
+                    clone_kind="base-1.7b",
+                )
+                cpu_loads = []
+
+                class FakePromptModel:
+                    def create_voice_clone_prompt(self, **_kwargs):
+                        return SimpleNamespace(device=device)
+
+                def accelerator_load(_kind, _backend, _root, low_memory=False, progress=None, allow_cpu_fallback=True):
+                    return FakePromptModel(), device
+
+                def unexpected_cpu_load(_kind, requested, _root, low_memory=False):
+                    cpu_loads.append(requested)
+                    return SimpleNamespace(), "cpu"
+
+                def fail_with_oom(*_args, **_kwargs):
+                    raise RuntimeError(message)
+
+                output = io.StringIO()
+                with (
+                    patch.object(worker, "_anchor_path", return_value=anchor),
+                    patch.object(worker, "_expression_anchor_text", return_value="A stable identity reference."),
+                    patch.object(worker, "_load_model_with_fallback", side_effect=accelerator_load),
+                    patch.object(worker, "_load_model", side_effect=unexpected_cpu_load),
+                    patch.object(worker, "_generate_design_locked", side_effect=fail_with_oom),
+                    patch("sys.stdin", io.StringIO(json.dumps(request) + "\n")),
+                    redirect_stdout(output),
+                ):
+                    self.assertEqual(worker.server(args), 0)
+
+                messages = [json.loads(line) for line in output.getvalue().splitlines() if line.strip()]
+                self.assertFalse(messages[-1].get("ok"))
+                self.assertIn("out of memory", messages[-1].get("error", "").casefold())
+                self.assertEqual(messages[-1].get("device"), device)
+                self.assertEqual(cpu_loads, [], f"Explicit {backend} must fail closed, never switch to CPU.")
+
+    def test_design_preview_explicit_cuda_rocm_and_xpu_oom_never_retry_on_cpu(self):
+        import io
+        import json
+        from contextlib import redirect_stdout
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.tts import qwen_character_worker as worker
+
+        cases = (
+            ("cuda", "cuda:0", "CUDA out of memory during explicit VoiceDesign preview"),
+            ("rocm", "cuda:0", "HIP out of memory during explicit VoiceDesign preview"),
+            ("xpu", "xpu:0", "XPU out of memory during explicit VoiceDesign preview"),
+        )
+        for backend, device, message in cases:
+            with self.subTest(backend=backend), TemporaryDirectory() as temporary:
+                output_path = Path(temporary) / "explicit-preview.wav"
+                request = {
+                    "text": "The saved character speaks with a steady voice.",
+                    "output": str(output_path),
+                    "speaker": "Saved character",
+                    "language": "English",
+                    "instruct": "Preserve the requested voice design.",
+                    "seed": 20261112,
+                }
+                args = SimpleNamespace(
+                    models_root=temporary,
+                    task="design-preview",
+                    kind="design-1.7b",
+                    backend=backend,
+                    low_memory=False,
+                    clone_kind="base-1.7b",
+                )
+                model = SimpleNamespace(device=device)
+                loaded = []
+                preview_calls = []
+                cpu_loads = []
+
+                def load_accelerator(kind, requested, _root, low_memory=False, progress=None, allow_cpu_fallback=True):
+                    loaded.append((kind, requested, low_memory))
+                    return model, device
+
+                def unexpected_cpu_load(kind, requested, _root, low_memory=False):
+                    cpu_loads.append((kind, requested))
+                    return SimpleNamespace(device="cpu"), "cpu"
+
+                def fail_preview(received_model, received_request, destination):
+                    preview_calls.append((received_model.device, dict(received_request), str(destination)))
+                    raise RuntimeError(message)
+
+                output = io.StringIO()
+                with (
+                    patch.object(worker, "_load_model_with_fallback", side_effect=load_accelerator),
+                    patch.object(worker, "_load_model", side_effect=unexpected_cpu_load),
+                    patch.object(worker, "_generate_design_preview", side_effect=fail_preview),
+                    patch("sys.stdin", io.StringIO(json.dumps(request) + "\n")),
+                    redirect_stdout(output),
+                ):
+                    self.assertEqual(worker.server(args), 0)
+
+                messages = [json.loads(line) for line in output.getvalue().splitlines() if line.strip()]
+                self.assertIs(messages[0].get("worker_ready"), True)
+                self.assertFalse(messages[-1].get("ok"))
+                self.assertIn("out of memory", messages[-1].get("error", "").casefold())
+                self.assertEqual(messages[-1].get("device"), device)
+                self.assertEqual(loaded, [("design-1.7b", backend, False)])
+                self.assertEqual(preview_calls, [(device, request, str(output_path))])
+                self.assertEqual(cpu_loads, [], f"Explicit {backend} preview must fail closed, never switch to CPU.")
+
+    def test_design_explicit_gpu_oom_does_not_silently_fallback_to_cpu(self):
+        import io
+        import json
+        from contextlib import redirect_stdout
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.tts import qwen_character_worker as worker
+
+        class FakeModel:
+            def create_voice_clone_prompt(self, **_kwargs):
+                return object()
+
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            anchor = root / "saved-identity.wav"
+            anchor.write_bytes(b"identity-anchor" * 256)
+            request = {
+                "text": "The saved character speaks.",
+                "output": str(root / "chapter.wav"),
+                "speaker": "Saved character",
+                "language": "English",
+                "instruct": "Preserve the saved character identity.",
+                "profile_id": "explicit-gpu-profile",
+            }
+            args = SimpleNamespace(
+                models_root=temporary,
+                task="design",
+                kind="design-1.7b",
+                backend="cuda",
+                low_memory=False,
+                clone_kind="base-0.6b",
+            )
+            load_cpu = []
+
+            def load_accelerator(_kind, _backend, _root, low_memory=False, progress=None, allow_cpu_fallback=True):
+                return FakeModel(), "cuda:0"
+
+            def unexpected_cpu_load(_kind, backend, _root, low_memory=False):
+                load_cpu.append(backend)
+                return FakeModel(), "cpu"
+
+            def fail_with_oom(_model, _prompts, _request, _destination):
+                raise RuntimeError("CUDA out of memory during synthetic inference")
+
+            output = io.StringIO()
+            with (
+                patch.object(worker, "_anchor_path", return_value=anchor),
+                patch.object(worker, "_expression_anchor_text", return_value="A stable identity reference."),
+                patch.object(worker, "_load_model_with_fallback", side_effect=load_accelerator),
+                patch.object(worker, "_load_model", side_effect=unexpected_cpu_load),
+                patch.object(worker, "_generate_design_locked", side_effect=fail_with_oom),
+                patch("sys.stdin", io.StringIO(json.dumps(request) + "\n")),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(worker.server(args), 0)
+
+            messages = [
+                json.loads(line)
+                for line in output.getvalue().splitlines()
+                if line.strip().startswith("{")
+            ]
+            self.assertIs(messages[-1].get("ok"), False)
+            self.assertIn("out of memory", messages[-1].get("error", "").casefold())
+            self.assertEqual(messages[-1].get("device"), "cuda:0")
+            self.assertEqual(load_cpu, [], "Explicit CUDA must not silently switch to CPU after OOM.")
+
+    def test_lazy_voicedesign_worker_acknowledges_protocol_readiness_without_device_claim(self):
+        import io
+        import json
+        from contextlib import redirect_stdout
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.tts import qwen_character_worker as worker
+
+        for task in ("design", "design-preview"):
+            output = io.StringIO()
+            args = SimpleNamespace(
+                models_root=".",
+                task=task,
+                kind="design-1.7b",
+                backend="cpu",
+                low_memory=False,
+                clone_kind="base-0.6b",
+            )
+            with self.subTest(task=task), patch("sys.stdin", io.StringIO("")), redirect_stdout(output):
+                worker.server(args)
+
+            messages = [json.loads(line) for line in output.getvalue().splitlines() if line.strip()]
+            self.assertEqual(len(messages), 1)
+            self.assertIs(messages[0].get("worker_ready"), True)
+            self.assertEqual(messages[0].get("task"), task)
+            self.assertNotIn("ready", messages[0])
+            self.assertNotIn("device", messages[0])
+            self.assertNotIn("backend", messages[0])
+
+    def test_voicedesign_preview_first_request_returns_synthesis_result_not_second_ready_message(self):
+        import io
+        import json
+        from contextlib import redirect_stdout
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.tts import qwen_character_worker as worker
+
+        with TemporaryDirectory() as temporary:
+            output_path = Path(temporary) / "preview.wav"
+            request = {
+                "text": "A short preview sentence.",
+                "output": str(output_path),
+                "speaker": "Test narrator",
+                "language": "English",
+                "instruct": "A clear narrator.",
+                "profile_id": "lazy-preview-protocol-test",
+            }
+            args = SimpleNamespace(
+                models_root=temporary,
+                task="design-preview",
+                kind="design-1.7b",
+                backend="cpu",
+                low_memory=False,
+                clone_kind="base-0.6b",
+            )
+            output = io.StringIO()
+
+            def write_preview(_model, _request, path):
+                Path(path).write_bytes(b"\0" * 2048)
+
+            with (
+                patch("sys.stdin", io.StringIO(json.dumps(request) + "\n")),
+                redirect_stdout(output),
+                patch.object(worker, "_load_model", return_value=(object(), "cpu")) as load_model,
+                patch.object(worker, "_generate_design_preview", side_effect=write_preview),
+            ):
+                worker.server(args)
+
+            messages = [json.loads(line) for line in output.getvalue().splitlines() if line.strip()]
+            self.assertIs(messages[0].get("worker_ready"), True)
+            self.assertFalse(any(message.get("ready") is True for message in messages))
+            self.assertIs(messages[-1].get("ok"), True)
+            self.assertEqual(messages[-1].get("device"), "cpu")
+            load_model.assert_called_once()
+
+    def test_provider_accepts_lazy_worker_protocol_handshake_without_device(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+        from app.tts.providers import qwen_character
+
+        class FakeStream:
+            def close(self):
+                return None
+
+        class FakeWorker:
+            pid = 31415
+
+            def __init__(self):
+                self.stdin = FakeStream()
+                self.stdout = FakeStream()
+                self.running = True
+
+            def poll(self):
+                return None if self.running else 0
+
+            def terminate(self):
+                self.running = False
+
+            def wait(self, timeout=None):
+                self.running = False
+                return 0
+
+        provider = qwen_character.QwenCharacterProvider(
+            voice_id="lazy-preview-handshake-test",
+            backend="cpu",
+            model_kind="design-1.7b",
+            qwen_mode="design-preview",
+        )
+        fake_worker = FakeWorker()
+        with TemporaryDirectory() as temporary:
+            with (
+                patch.object(qwen_character.Path, "home", return_value=Path(temporary)),
+                patch.object(qwen_character, "runtime_ready", return_value=True),
+                patch.object(qwen_character, "model_installed", return_value=True),
+                patch.object(qwen_character, "runtime_environment", return_value={}),
+                patch.object(qwen_character, "best_clone_kind", side_effect=AssertionError(
+                    "VoiceDesign preview must not probe/select a Base clone model"
+                )),
+                patch.object(qwen_character.subprocess, "Popen", return_value=fake_worker),
+                patch.object(qwen_character.threading, "Thread", return_value=SimpleNamespace(start=Mock())),
+                patch.object(qwen_character, "register_qwen_worker"),
+                patch.object(qwen_character, "unregister_qwen_worker"),
+                patch.object(provider, "_read_response", return_value={
+                    "worker_ready": True,
+                    "kind": "design-1.7b",
+                    "task": "design-preview",
+                }) as read_response,
+            ):
+                provider._start_worker()
+                self.assertIs(provider._worker, fake_worker)
+                self.assertEqual(read_response.call_args.kwargs["timeout"], 60.0)
+                provider.close()
 
     def test_close_tolerates_already_closed_qwen_streams(self):
         from types import SimpleNamespace

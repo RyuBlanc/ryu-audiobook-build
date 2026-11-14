@@ -1230,7 +1230,9 @@
     setDashboardRow(card, 'processing stage', job.stage || job.message || 'Working');
     const percent = Math.max(0, Math.min(100, Math.round(Number(job.progress || 0))));
     writeTextIfChanged(percentLabel, percent + '% complete');
-    const eta = Number(job.eta_seconds);
+    // Use the same timestamped measured countdown as Production Studio so the
+    // Dashboard never displays a frozen ETA between backend job refreshes.
+    const eta = productionJobEtaSeconds(job);
     writeTextIfChanged(etaLabel, Number.isFinite(eta) && eta > 0 ? Math.floor(eta/60) + 'm ' + String(Math.floor(eta%60)).padStart(2,'0') + 's remaining' : '');
     writeStyleIfChanged(track, 'visibility', '');
     writeStyleIfChanged(fill, 'width', percent + '%');
@@ -1290,7 +1292,7 @@
         const aliases = {
           import:'import', chapters:'chapters', voice:'narrator', narrator:'narrator',
           characters:'characters', character:'characters', sound:'sound', sounds:'sound',
-          production:'production', generator:'production', generation:'production', player:'player'
+          generate:'production', production:'production', generator:'production', generation:'production', player:'player'
         };
         const stage = aliases[page];
         if (stage && dashboardProject?.folder) writeResumeCheckpoint(dashboardProject.folder, stage);
@@ -1303,6 +1305,12 @@
             refreshProjects().catch(() => {});
           }
           if (page === 'history') refreshHistory().catch(() => {});
+          // Production controls are scoped to the newly active project. Re-read
+          // the real job list after navigation so a preview/job snapshot from the
+          // previous project can never keep Generate disabled.
+          if (['generate','production','generator','generation'].includes(page)) {
+            refreshJobs().catch(error => console.warn('[Ryu Production navigation job refresh]', error));
+          }
         },0);
         return result;
       };
@@ -6084,7 +6092,9 @@ function renderProductionMetadataGate(active) {
     const conflictingDialogue = Math.max(0, Number(active.conflicting_dialogue_count || 0));
     const dialogueIndexIssues = Math.max(0, Number(active.dialogue_index_issue_count || 0));
     let characterStatus = narratorOnly
-      ? 'Narrator-only · saved narrator reads every passage; configured character profiles are ignored for this book'
+      ? (configuredCharacterVoiceCount === 0
+        ? '0 configured character voice profiles · Narrator-only; the saved narrator reads every passage.'
+        : configuredCharacterVoiceCount + ' configured character voice profile(s) · Narrator-only; character voices are ignored for this book and the saved narrator reads every passage.')
       : 'Character analysis not run';
     let characterKind = narratorOnly ? 'ready' : 'warn';
     if (!narratorOnly && active.dialogue_index_ready !== true) {
@@ -6150,7 +6160,7 @@ function renderProductionMetadataGate(active) {
       : minutes + ':' + String(remainder).padStart(2, '0');
   }
 
-  const PRODUCTION_ACTIVE_JOB_STATES = new Set(['queued','running','pause_requested','paused','cancel_requested','retrying']);
+  const PRODUCTION_ACTIVE_JOB_STATES = new Set(['queued','running','pause_requested','paused','cancel_requested','cancelling','retrying']);
   const PRODUCTION_TERMINAL_JOB_STATES = new Set(['completed','failed','cancelled']);
   function productionJobIsActive(job) {
     return Boolean(job && PRODUCTION_ACTIVE_JOB_STATES.has(String(job.state || '').toLowerCase()));
@@ -6165,10 +6175,23 @@ function renderProductionMetadataGate(active) {
     if (!job) return NaN;
     const raw = job.elapsed_seconds;
     const stored = raw !== null && raw !== undefined && raw !== '' ? Number(raw) : NaN;
-    if (String(job.state || '').toLowerCase() === 'running') {
+    const state = String(job.state || '').toLowerCase();
+    const live = state === 'running' || state === 'pause_requested' ||
+      (state === 'cancel_requested' && job.elapsed_frozen !== true);
+    if (live) {
+      // New snapshots provide a checkpoint that already excludes completed
+      // pauses. Continue from it instead of counting from started_at.
+      const checkpointAt = Date.parse(job.elapsed_updated_at || '');
+      if (Number.isFinite(checkpointAt)) {
+        const base = Number.isFinite(stored) ? stored : 0;
+        const liveSinceCheckpoint = Math.max(0, Math.floor((Date.now() - checkpointAt) / 1000));
+        return base + liveSinceCheckpoint;
+      }
+      // Compatibility for job records saved before pause-aware checkpoints.
       const startedAt = Date.parse(job.started_at || '');
       if (Number.isFinite(startedAt)) {
-        const liveElapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+        const pausedTotal = Math.max(0, Number(job.elapsed_paused_seconds) || 0);
+        const liveElapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000 - pausedTotal));
         return Number.isFinite(stored) ? Math.max(stored, liveElapsed) : liveElapsed;
       }
     }
@@ -6179,7 +6202,14 @@ function renderProductionMetadataGate(active) {
     const raw = job.eta_seconds;
     if (raw === null || raw === undefined || raw === '') return NaN;
     const value = Number(raw);
-    return Number.isFinite(value) && value >= 0 ? value : NaN;
+    if (!Number.isFinite(value) || value < 0) return NaN;
+    // eta_seconds is the measured remainder at eta_updated_at. Count it down
+    // locally between chunk completions instead of showing a frozen estimate.
+    const measuredAt = Date.parse(job.eta_updated_at || '');
+    const liveSeconds = Number.isFinite(measuredAt)
+      ? Math.max(0, Math.floor((Date.now() - measuredAt) / 1000))
+      : 0;
+    return Math.max(0, value - liveSeconds);
   }
   function syncProductionPreviewChapterSelector() {
     const select = $('productionPreviewChapterSelect');
@@ -6531,13 +6561,20 @@ function renderProductionMetadataGate(active) {
     const eta = productionJobEtaSeconds(fullJob);
     setProductionStatus('elapsed', Number.isFinite(elapsed) && elapsed >= 0 ? formatProductionDuration(elapsed) : '—');
     const packagingStage = /assembling|encoding|validating final m4b/i.test(String(fullJob?.stage || ''));
-    const etaLabel = Number.isFinite(eta)
-      ? 'Measured ETA · ' + formatProductionDuration(eta)
-      : packagingStage
-        ? 'Narration complete · final M4B assembly in progress; ETA not estimated'
-        : fullActive
-          ? 'Available after 4 completed synthesis chunks'
-          : (fullState === 'completed' ? 'Complete' : '—');
+    const etaExpired = Number.isFinite(eta) && eta <= 0 && fullActive;
+    const etaLabel = etaExpired
+      ? 'Past the last measured estimate · the active synthesis chunk is still rendering; it will refresh when the chunk completes'
+      : Number.isFinite(eta)
+        ? 'Measured ETA · ' + formatProductionDuration(eta)
+        : packagingStage
+          ? 'Narration complete · final M4B assembly in progress; ETA not estimated'
+          : fullState === 'paused'
+            ? 'Paused · the measured remaining time will resume with generation'
+            : fullState === 'pause_requested'
+              ? 'Pause requested · waiting for the current chunk checkpoint'
+              : fullActive
+                ? 'Calibrating after Qwen model warm-up · ETA appears after 4 completed synthesis chunks'
+                : (fullState === 'completed' ? 'Complete' : '—');
     setProductionStatus('remaining', etaLabel);
     const measuredDuration = Number(
       fullJob?.result?.output_duration_seconds ?? project?.output_duration_seconds ?? NaN
@@ -6547,14 +6584,39 @@ function renderProductionMetadataGate(active) {
     const workloadLabel = workloadTotal > 0
       ? 'Narration workload completed · ' + workloadCompleted.toLocaleString() + ' / ' + workloadTotal.toLocaleString() + ' text units'
       : (fullActive ? 'Narration workload · preparing the measured generation plan' : '');
+    const completedChunks = Math.max(0, Number(fullJob?.generation_completed_chunks || 0));
+    const totalChunks = Math.max(0, Number(fullJob?.generation_total_chunks || 0));
+    const chunkProgressLabel = totalChunks > 0
+      ? 'Valid synthesis chunks saved · ' + completedChunks.toLocaleString() + ' / ' +
+        totalChunks.toLocaleString() + ' · percentage advances when a chunk is validated'
+      : (fullActive ? 'Synthesis chunk progress · preparing the measured generation plan' : '');
+    const generatedAudioSeconds = Number(fullJob?.generated_audio_duration_seconds || 0);
+    const completedChapterWork = Math.max(
+      0, Number(fullJob?.generation_completed_chapter_work_units || 0)
+    );
+    const projectedRuntimeSeconds = (
+      generatedAudioSeconds > 0 && completedChapterWork > 0 && workloadTotal > 0
+        ? Math.max(60, Math.round(
+            (generatedAudioSeconds * workloadTotal / completedChapterWork) / 60
+          ) * 60)
+        : NaN
+    );
+    const textEstimateSeconds = Number(
+      project?.estimated_listening_duration_seconds || NaN
+    );
     const durationLabel = Number.isFinite(measuredDuration) && measuredDuration > 0
       ? 'Measured full audiobook duration · ' + formatProductionDuration(measuredDuration)
-      : (fullActive || fullState === 'completed'
-        ? 'Full audiobook duration · shown only after the final M4B is measured'
-        : (completedOutput
-          ? 'Audiobook duration · not available in this saved project record'
-          : 'Full audiobook duration · shown after M4B validation'));
-    const generatedAudioSeconds = Number(fullJob?.generated_audio_duration_seconds || 0);
+      : Number.isFinite(projectedRuntimeSeconds) && projectedRuntimeSeconds > 0
+        ? 'Projected full audiobook runtime · about ' + formatProductionDuration(projectedRuntimeSeconds) +
+          ' (based on measured completed chapters)'
+        : Number.isFinite(textEstimateSeconds) && textEstimateSeconds > 0
+          ? 'Estimated audiobook listening length · about ' + formatProductionDuration(textEstimateSeconds) +
+            ' (text estimate at ' + Number(project?.estimated_listening_rate_words_per_minute || 150) + ' words/min)'
+          : (fullActive || fullState === 'completed'
+            ? 'Full audiobook duration · will appear when enough source/audio measurements are available'
+            : (completedOutput
+              ? 'Audiobook duration · not available in this saved project record'
+              : 'Full audiobook duration · shown after source text is analysed'));
     const generatedAudioLabel = Number.isFinite(measuredDuration) && measuredDuration > 0
       ? 'Validated audiobook runtime · ' + formatProductionDuration(measuredDuration)
       : (generatedAudioSeconds > 0
@@ -6594,10 +6656,13 @@ function renderProductionMetadataGate(active) {
     if (details) {
       const workload = document.createElement('div');
       workload.textContent = workloadLabel;
+      const chunks = document.createElement('div');
+      chunks.id = 'genChunkProgress';
+      chunks.textContent = chunkProgressLabel;
       const generated = document.createElement('div');
       generated.id = 'genGeneratedDuration';
       generated.textContent = generatedAudioLabel;
-      const metrics = [workload, generated];
+      const metrics = [workload, chunks, generated];
       if (packagingLabel) {
         const packaging = document.createElement('div');
         packaging.id = 'genPackagingProgress';
@@ -6796,7 +6861,9 @@ function renderProductionMetadataGate(active) {
         const voiceCount = Math.max(0,Number(project?.configured_character_voice_profile_count ?? project?.character_voice_count ?? 0));
         const narratorReadyForOnly = project?.narrator_voice_configured === true && project?.narrator_profile_available === true;
         status.textContent = input.checked
-          ? 'On · the saved narrator reads all passages, including dialogue. Character assignments are ignored for this book.'
+          ? (project?.narrator_only_generation_auto === true
+            ? 'Automatically enabled because this book has no configured character voice profiles. The saved narrator reads all narration and dialogue.'
+            : 'On · the saved narrator reads all passages, including dialogue. Character assignments are ignored for this book.')
           : (project?.narrator_only_generation_user_opt_out === true
             ? 'Off by your choice · assigned character profiles are used; other speakers use the global Unassigned Character profile.'
             : (!narratorReadyForOnly ? 'Unavailable · save an available narrator profile first.' : 'Off · available. You can enable it even when character profiles are assigned.'));
@@ -6816,7 +6883,9 @@ function renderProductionMetadataGate(active) {
         const voiceCount = Math.max(0,Number(project?.configured_character_voice_profile_count ?? project?.character_voice_count ?? 0));
         const narratorReadyForOnly = project?.narrator_voice_configured === true && project?.narrator_profile_available === true;
         status.textContent = savedValue
-          ? 'On · the saved narrator reads all passages, including dialogue. Character assignments are ignored for this book.'
+          ? (project?.narrator_only_generation_auto === true
+            ? 'Automatically enabled because this book has no configured character voice profiles. The saved narrator reads all narration and dialogue.'
+            : 'On · the saved narrator reads all passages, including dialogue. Character assignments are ignored for this book.')
           : (project?.narrator_only_generation_user_opt_out === true
             ? 'Off by your choice · assigned character profiles are used; other speakers use the global Unassigned Character profile.'
             : (!narratorReadyForOnly ? 'Unavailable · save an available narrator profile first.' : 'Off · available. You can enable it even when character profiles are assigned.'));
@@ -7225,6 +7294,35 @@ function renderProductionMetadataGate(active) {
     }, true);
   }
 
+  const BACKEND_JOB_POLL_ACTIVE_MS = 1500;
+  const BACKEND_JOB_POLL_IDLE_MS = 10000;
+  const BACKEND_JOB_POLL_HIDDEN_ACTIVE_MS = 5000;
+  const BACKEND_JOB_POLL_HIDDEN_IDLE_MS = 30000;
+
+  function backendJobPollDelay(jobs) {
+    const active = Array.isArray(jobs) && jobs.some(job =>
+      PRODUCTION_ACTIVE_JOB_STATES.has(String(job?.state || '').toLowerCase())
+    );
+    if (document.visibilityState === 'hidden') {
+      return active ? BACKEND_JOB_POLL_HIDDEN_ACTIVE_MS : BACKEND_JOB_POLL_HIDDEN_IDLE_MS;
+    }
+    return active ? BACKEND_JOB_POLL_ACTIVE_MS : BACKEND_JOB_POLL_IDLE_MS;
+  }
+
+  function scheduleBackendJobRefresh(jobs, delayOverride) {
+    if (window.__ryuBackendJobPollingStarted !== true) return;
+    if (window.__ryuBackendJobTimer !== null && window.__ryuBackendJobTimer !== undefined) {
+      clearTimeout(window.__ryuBackendJobTimer);
+    }
+    const requestedDelay = delayOverride === null || delayOverride === undefined
+      ? backendJobPollDelay(jobs)
+      : Math.max(0, Number(delayOverride) || 0);
+    window.__ryuBackendJobTimer = setTimeout(() => {
+      window.__ryuBackendJobTimer = null;
+      refreshJobs().catch(error => console.warn('[Ryu background job polling]', error));
+    }, requestedDelay);
+  }
+
   async function refreshJobs() {
     // Coalesce overlapping calls without dropping state changes. A Task Manager
     // filter can change while job.list is in flight; that request must receive
@@ -7241,11 +7339,17 @@ function renderProductionMetadataGate(active) {
     })();
     jobsRefreshPromise = refreshPromise;
     try { return await refreshPromise; }
-    finally { if (jobsRefreshPromise === refreshPromise) jobsRefreshPromise = null; }
+    finally {
+      if (jobsRefreshPromise === refreshPromise) {
+        jobsRefreshPromise = null;
+        scheduleBackendJobRefresh(window.__ryuBackendLastJobs || []);
+      }
+    }
   }
   async function refreshJobsImpl() {
     ensureFailedJobsFilter();
     const allJobs = await call('job.list', {include_hidden:false});
+    window.__ryuBackendLastJobs = allJobs;
     if (allJobs.some(job => String(job.type || '').toLowerCase() === 'import' && job.state === 'completed')) {
       await refreshLatestImport();
     }
@@ -10001,7 +10105,7 @@ function renderProductionMetadataGate(active) {
         .includes('zero valid character voice profiles are configured'));
       if (narratorOnlyItem) {
         narratorOnlyItem.textContent =
-          'Narrator-Only Generation is an explicit per-book choice and remains available even when character voice profiles are configured. When enabled, the saved narrator reads all narration and dialogue; character assignments are ignored for that book. A valid saved narrator profile is still required.';
+          'Narrator-only Generation (GEN-07) does not require that zero valid character voice profiles are configured. It is an explicit per-book choice and remains available even when character voice profiles are configured. When enabled, the saved narrator reads all narration and dialogue; character assignments are ignored for that book. A valid saved narrator profile is still required.';
       }
       const unassignedItem = [
         ...root.querySelectorAll('li, p')
@@ -10565,6 +10669,7 @@ function renderProductionMetadataGate(active) {
     // any asynchronous backend initialization or real handler registration.
     suppressLegacyVoicePreviewHandlers();
     await call('app.get_info');
+    bindMiniPlayerNavigation();
     await refreshCurrentProjectCard();
     installProjectCardStatusObserver();
 
@@ -13058,7 +13163,22 @@ function renderProductionMetadataGate(active) {
         attributes:true, attributeFilter:['class']
       });
     }
-    if (!window.__ryuBackendJobTimer) window.__ryuBackendJobTimer=setInterval(()=>refreshJobs().catch(()=>{}),1500);
+    if (window.__ryuBackendJobPollingStarted !== true) {
+      window.__ryuBackendJobPollingStarted = true;
+      if (window.__ryuBackendJobVisibilityBound !== true) {
+        window.__ryuBackendJobVisibilityBound = true;
+        document.addEventListener('visibilitychange', () => {
+          const rows = window.__ryuBackendLastJobs || [];
+          scheduleBackendJobRefresh(
+            rows,
+            document.visibilityState === 'visible' ? 0 : undefined
+          );
+        });
+      }
+      // The first snapshot is immediate; subsequent delays follow active/idle
+      // job state and page visibility. Explicit action refreshes reschedule too.
+      scheduleBackendJobRefresh([], 0);
+    }
     const jobsBox = $('backgroundJobsList');
     if (jobsBox && !window.__ryuBackendJobsObserver) {
       window.__ryuBackendJobsObserver = new MutationObserver(() => {
