@@ -128,6 +128,24 @@ class Stage8PackagedAcceptanceContractTests(unittest.TestCase):
         release_step = workflow[release_start:release_end if release_end >= 0 else len(workflow)]
         self.assertIn("github.event_name == 'push' && github.ref == 'refs/heads/main'", release_step)
 
+    def test_html_installer_python_restore_does_not_enable_pip_cache(self):
+        workflow = (ROOT / ".github" / "workflows" / "build-windows.yml").read_text(encoding="utf-8")
+
+        restore_start = workflow.index("      - name: Restore Python for HTML installer packaging")
+        build_start = workflow.index("      - name: Build functional HTML installer", restore_start)
+        restore_step = workflow[restore_start:build_start]
+        self.assertIn("uses: actions/setup-python@v5", restore_step)
+        self.assertIn("python-version: '3.12'", restore_step)
+        self.assertNotIn("cache: pip", restore_step)
+        self.assertNotIn("cache-dependency-path:", restore_step)
+
+        html_build_end = workflow.index("      - name: Verify functional HTML installer UI startup", build_start)
+        html_build_step = workflow[build_start:html_build_end]
+        self.assertIn("HTML_PYTHON: ${{ steps.html_python.outputs.python-path }}", html_build_step)
+        self.assertIn("$pythonExe = $env:HTML_PYTHON", html_build_step)
+        self.assertIn("ryu-qwen-python-bootstrap", html_build_step)
+
+
     def test_live_qwen_smoke_download_has_official_fallback_and_pinned_digest(self):
         workflow = (ROOT / ".github" / "workflows" / "build-windows.yml").read_text(encoding="utf-8")
         self.assertIn("$llamaZipExpectedSha256 = '1110e183589e0e2ac5b365fb5c3c4a7e149e0760c1989cac18ee426b08e5813a'", workflow)

@@ -973,13 +973,15 @@ jobs:
           $coreInstaller = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Core Setup.exe"
           if (-not (Test-Path $coreInstaller)) { throw "Core installer was not produced: $coreInstaller" }
 
+      # This late restore only supplies the interpreter path to HTML installer packaging.
+      # Keep pip caching disabled here: setup-python's cache probe runs pip cache dir after
+      # the frozen/core installer steps have changed the runner's Python/PATH context.
+      # The earlier test and application-build setup-python steps retain pip caching.
       - name: Restore Python for HTML installer packaging
         id: html_python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: pip
-          cache-dependency-path: requirements.txt
 
       - name: Build functional HTML installer
         shell: pwsh
