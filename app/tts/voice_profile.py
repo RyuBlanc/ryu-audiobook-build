@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass, field, fields
 import hashlib
 from pathlib import Path
 import json
@@ -12,6 +12,7 @@ import uuid
 import imageio_ffmpeg
 
 from app.core.paths import voices_root
+from app.tts.qwen_profile_schema import CURRENT_QWEN_PROFILE_SCHEMA_VERSION
 
 
 @dataclass
@@ -40,6 +41,23 @@ class VoiceProfile:
     # profiles migrate automatically on load; this prevents stale generated
     # reference audio from being reused by a newly saved voice.
     qwen_profile_id: str = ""
+    qwen_profile_schema_version: int = CURRENT_QWEN_PROFILE_SCHEMA_VERSION
+    # Unknown fields are retained across read/write cycles so a profile
+    # exported by a newer build is not silently stripped by an older one.
+    extra_fields: dict[str, object] = field(default_factory=dict, repr=False, compare=False)
+
+
+def profile_record(profile: VoiceProfile) -> dict[str, object]:
+    """Serialize known fields and flatten preserved extension fields."""
+    record = {
+        item.name: getattr(profile, item.name)
+        for item in fields(VoiceProfile)
+        if item.name != "extra_fields"
+    }
+    for key, value in (profile.extra_fields or {}).items():
+        if key not in record and key != "extra_fields":
+            record[key] = value
+    return record
 
 
 def stable_qwen_profile_id(
@@ -252,6 +270,9 @@ def load_saved_profiles() -> list[VoiceProfile]:
         if not record.get("qwen_profile_id"):
             record["qwen_profile_id"] = uuid.uuid4().hex
             migrated = True
+        if "qwen_profile_schema_version" not in record:
+            record["qwen_profile_schema_version"] = CURRENT_QWEN_PROFILE_SCHEMA_VERSION
+            migrated = True
 
     if migrated:
         # This read path must not call save_profiles(), which scans installed
@@ -275,11 +296,23 @@ def load_saved_profiles() -> list[VoiceProfile]:
             except OSError:
                 pass
     saved: list[VoiceProfile] = []
+    known_fields = {item.name for item in fields(VoiceProfile) if item.name != "extra_fields"}
     for record in records:
         if not isinstance(record, dict):
             continue
+        extra_fields: dict[str, object] = {}
+        raw_extra = record.get("extra_fields")
+        if isinstance(raw_extra, dict):
+            extra_fields.update(raw_extra)
+        elif raw_extra is not None:
+            extra_fields["extra_fields"] = raw_extra
+        for key, value in record.items():
+            if key not in known_fields and key != "extra_fields":
+                extra_fields[key] = value
+        values = {key: value for key, value in record.items() if key in known_fields}
+        values["extra_fields"] = extra_fields
         try:
-            saved.append(VoiceProfile(**record))
+            saved.append(VoiceProfile(**values))
         except (TypeError, ValueError):
             continue
     return saved
@@ -386,7 +419,7 @@ def save_profiles(profiles: list[VoiceProfile]) -> None:
     destination = profiles_file()
     destination.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(
-        [asdict(profile) for profile in persistent],
+        [profile_record(profile) for profile in persistent],
         ensure_ascii=False,
         indent=2,
     )

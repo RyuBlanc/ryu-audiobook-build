@@ -2,7 +2,7 @@ from pathlib import Path
 import hashlib
 import json
 
-from app.tts.voice_profile import VoiceProfile
+from app.tts.voice_profile import VoiceProfile, profile_record
 from app.tts.system_sapi import SystemSAPIProvider
 from app.tts.providers.piper import PiperProvider
 from app.tts.providers.kokoro import KokoroProvider
@@ -121,9 +121,10 @@ class ProfileBoundProvider:
         return self._provider.synthesize(text, output_path, voice=voice)
 
     def generation_signature(self) -> str:
-        from dataclasses import asdict
-
-        profile_data = asdict(self.profile)
+        profile_data = profile_record(self.profile)
+        # Schema migrations must not invalidate already-generated audio. Unknown
+        # extension fields remain in the signature until their semantics are known.
+        profile_data.pop("qwen_profile_schema_version", None)
         for key, raw_path in (("sample_audio_sha256", self.profile.sample_path),
                               ("anchor_audio_sha256", self.profile.qwen_anchor_path)):
             digest = None
