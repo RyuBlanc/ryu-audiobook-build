@@ -5,8 +5,8 @@
 **Implementation branch:** `dragon-studio/stage-e-character-intelligence-cast-production-ux-2026-11-15`  
 **Base source head:** `6d970bf70911848c90bcb178b1a166a10bf8305d`  
 **Previous stage:** Stage D engineering closeout — D0–D5 accepted; D6 deferred to Stage F  
-**Baseline regression:** Build #3460 / [run 43700894123](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43700894123), **1,681/1,681** tests passed. The documentation-only build job was skipped as expected.  
-**Status:** ACTIVE — source audit and test-first work begin from the preserved Stage D head.
+**Latest Stage E source/test regression:** Build #3469 / [run 43710739978](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43710739978), exact tested head a99786938d98004ceb1df91d603d31d05babd858, passed focused E1 40/40, E2 181/181, E3 41/41, E4 8/8 and full regression 1,692/1,692. The Windows build job was skipped because this was not yet an explicit artifact-checkpoint commit.
+**Status:** E1–E4 SOURCE/TEST GATES PASSED; E5 EXACT-HEAD WINDOWS PACKAGE PENDING.
 
 ## 1. Purpose
 
@@ -27,7 +27,7 @@ Do not reopen accepted D1–D5 behavior without a demonstrated regression. Prese
 
 ## 3. Included requirements
 
-### E1 — Multilingual, source-grounded Character Studio analysis (DS-AI-012)
+### E1 — Multilingual, source-grounded Character Studio analysis (DS-AI-012) — SOURCE/TEST GATE PASSED
 
 - Support Japanese, Chinese, Korean, accented Latin names and Indian-language scripts, including Unicode combining marks in Devanagari, Tamil, Telugu, Bengali and other scripts present in real source text.
 - Detect explicit speaker labels, dialogue tags, aliases and quote forms without truncating or corrupting source spelling.
@@ -36,9 +36,9 @@ Do not reopen accepted D1–D5 behavior without a demonstrated regression. Prese
 - AI output must be grounded in the exact chapter and quote. If local AI returns no usable characters, retain deterministic/source-grounded fallback rather than reporting a false empty success.
 - Coverage must span all chapters and the complete candidate/passage set. No hidden 120-passage or similar cap may make later text disappear; processed/total chapters and incomplete coverage must be explicit.
 
-**Initial source finding:** `app/chapters/characters.py` builds `SPEAKER_NAME_TOKEN` using Python `re`'s `\w`. Python `\w` excludes Unicode combining marks (Mn/Mc/Me). Existing multilingual fixtures cover Japanese, Chinese, Korean and accented Latin, but not Indian-script labels with vowel marks. A direct reproduction of the current token pattern failed on common Hindi/Tamil/Telugu/Bengali names such as `मीरा`, `கவிதா`, `లక్ష్మి` and `রিয়া`. E1 must add an end-to-end failing test first, then apply the narrowest robust correction without broad false-positive capture.
+**Original E1 finding and correction:** At the Stage D base, SPEAKER_NAME_TOKEN relied on Python re's word class, which excludes Unicode combining-mark categories Mn/Mc/Me and missed real Indian-script speaker labels. Commit c105a6bf1998f824dfad9424b904e30c882dfa96 replaced the explicit speaker token/consumers with Unicode letter+mark property matching, added input-name validation, and added end-to-end Hindi, Tamil, Telugu, Bengali, Gujarati and Punjabi fixtures. E1 focused and full regression gates now pass; existing CJK, accented-Latin, false-positive and confirmed-alias protections remain in the passing suite.
 
-### E2 — Narrator and series-scoped cast consistency (DS-CAST-008)
+### E2 — Narrator and series-scoped cast consistency (DS-CAST-008) — SOURCE/TEST GATE PASSED
 
 - Preserve explicit per-book Narrator-only choice and its default-off behavior when normal cast selection is available.
 - Preserve accepted zero-valid-character-profile behavior: automatically use the saved narrator when no valid character voice profiles exist and a valid narrator is saved; respect an explicit saved user opt-out.
@@ -47,7 +47,7 @@ Do not reopen accepted D1–D5 behavior without a demonstrated regression. Prese
 - Readiness, Voice Studio preview/assignment, Production preview and final generation must agree on narrator/cast identity and generation signature.
 - Preserve saved dialogue assignments and confirmed aliases during re-analysis, chapter split/merge, save/reload and retry.
 
-### E3 — Production presentation and cover-art separation (DS-UI-009)
+### E3 — Production presentation and cover-art separation (DS-UI-009) — SOURCE/TEST GATE PASSED
 
 - Keep Production cards, configuration, progress and primary actions readable and consistently grouped without removing working controls.
 - Selected/project cover artwork remains the artwork itself. The Ryu watermark is permitted only on an empty-cover placeholder, never over a real selected cover.
@@ -56,7 +56,7 @@ Do not reopen accepted D1–D5 behavior without a demonstrated regression. Prese
 
 **Existing guard:** `tests/test_cover_art_presentation.py` asserts placeholder-only watermark CSS and frontend project-cover state toggling. Do not duplicate or weaken it.
 
-### E4 — Help & Guide accuracy (DS-HELP-014)
+### E4 — Help & Guide accuracy (DS-HELP-014) — SOURCE/TEST GATE PASSED
 
 - Update task-based instructions after E1–E3 behavior is accepted.
 - Preserve the detailed seven-stage guide and existing help topics; reconcile narrator-only, character review, cancellation/recovery, profile/model compatibility and Production behavior with the actual accepted application.
@@ -90,13 +90,13 @@ This inventory is not an assertion that every requirement is complete. Add targe
 
 ## 6. Implementation sequence
 
-1. **E0 — Baseline/source audit:** preserve exact base SHA and map each requirement to implementation/test files.
-2. **E1 — Unicode regression first:** add Indian-script speaker-label/dialogue-tag tests including combining marks; run a focused check, then correct parsing while retaining Japanese/CJK/accented Latin coverage.
-3. **E1 follow-up — Full-book analysis:** verify no passage/chapter truncation, deterministic fallback on empty AI results, exact chapter/quote grounding and cancellation that never commits partial cast state.
-4. **E2 — Cast/narrator integration:** add only missing parity tests for series-scoped identities, per-book narrator-only choice, saved narrator identity, Unassigned fallback and preview/final routing.
-5. **E3 — Production presentation:** inspect CSS/adapter state and packaged geometry contracts; fix only reproducible gaps and preserve all visible controls.
-6. **E4 — Help & Guide:** reconcile and test user instructions after E1–E3 behavior is stable.
-7. **E5 — Exact-head package:** focused E tests, full regression, frozen Windows app, integrated packaged UI/Production acceptance, installer, portable, install/launch/upgrade/uninstall, Defender and artifact hashes on one exact commit.
+1. **E0 — Baseline/source audit: COMPLETE.** Preserved Stage D base SHA and mapped E1–E4 requirements to source and tests.
+2. **E1 — Unicode and multilingual source labels: SOURCE/TEST GATE PASSED.** Indian-script speaker-label and after-quote tests pass with existing CJK/accented-Latin and false-positive safeguards.
+3. **E1 follow-up — Full-book analysis: SOURCE/TEST GATE PASSED.** 150 dialogue passages across three chapters, source-grounded fallback, full segment traversal and cancellation-before-commit contracts pass.
+4. **E2 — Cast/narrator integration: SOURCE/TEST GATE PASSED.** Preview now uses the same strict series-scoped cast resolution, exact chapter assignments, narrator identity and global Unassigned Character fallback as production generation.
+5. **E3 — Production presentation: SOURCE/TEST GATE PASSED.** 41 focused layout/progress/cover-art tests pass; real-cover/placeholder watermark separation remains covered. No additional source defect was accepted without a reproducible regression.
+6. **E4 — Help & Guide: SOURCE/TEST GATE PASSED.** Eight focused help tests pass, preserving the detailed seven-stage guide and documenting current limitations.
+7. **E5 — Exact-head package: IN PROGRESS.** The next artifact-checkpoint commit will run the full test job and, only after it succeeds, the frozen Windows application, integrated packaged UI/Production acceptance, installer, portable, install/launch/upgrade/uninstall, Defender and artifact/hash gates.
 
 Every source change requires a focused regression and full-suite result. Test-only/documentation-only runs with a skipped build job are useful checks but are not artifact acceptance.
 
@@ -113,3 +113,29 @@ Every source change requires a focused regression and full-suite result. Test-on
 ## 8. Stage F handoff
 
 Stage F is consolidated physical/manual acceptance and final release-readiness. It will execute D6 and every Stage C/Stage E physical carry-forward item on the user's real target systems after engineering stages A–E are complete. Stage F closes only with device/build/backend-specific evidence, real audio/listening results, UI/installer observations and exact-head artifact hashes. Version 1.2.0 publication/final sign-off remains separate and requires explicit owner approval after the acceptance ledger is complete.
+
+
+## 9. E1–E4 source/test verification ledger — 15 November 2026
+
+**Accepted source/test head:** a99786938d98004ceb1df91d603d31d05babd858 on the active Stage E branch.
+
+### Latest successful gates
+
+- **Build #3463** / [run 43706538292](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43706538292), source SHA c105a6bf1998f824dfad9424b904e30c882dfa96: E1 Unicode implementation and focused character regressions passed; full regression 1,684/1,684.
+- **Build #3464** / [run 43707567532](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43707567532), test SHA 67eb042f0456b9eba2ce10006907ee684723ad89: E1 focused 40/40, full-book 150-passage/fallback/cancel contracts and full regression 1,688/1,688 passed.
+- **Build #3468** / [run 43710004680](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43710004680), test SHA 8509bca54a041b81dfd19d7c99f51d8312f70208: E2 preview/cast focused suite 181/181 and full regression 1,692/1,692 passed after correcting the source-contract test literals.
+- **Build #3469** / [run 43710739978](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43710739978), exact tested head a99786938d98004ceb1df91d603d31d05babd858: E1 40/40, E2 181/181, E3 41/41, E4 8/8, full regression 1,692/1,692. The tests job passed; the build job was skipped because the head was not an explicit artifact checkpoint.
+
+### Failed attempts preserved
+
+- **Build #3465** / [run 43709432289](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43709432289), commit 3f8523fc2fffe79ac13ff62e0de4ce9bfbf36133: the E2 preview-routing source change exposed stale lightweight test fixtures without the new routing snapshot method and an integration contract that still expected the removed inline name-only map. The full regression failed; it remains a failure.
+- **Build #3466** / [run 43709542835](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43709542835), commit f3b1035f9e94808afa61324fc0f86f9790624b29: the Unassigned-only preview-router correction was added, but the same legacy fixture/contract failures remained in the full regression. It remains a failure.
+- **Build #3467** / [run 43709935729](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43709935729), commit be4cc2f65326ed4f67974e71f167cf2be29ed497: the new E2 focused gate could not import the integration-contract test because escaped quotes produced a Python SyntaxError at line 316. It remains a failure.
+- **Build #3468** corrected those contract-test string literals; #3469 then independently passed E1–E4 and the full regression. The failed attempts above are not relabelled or removed.
+
+### E5 package gate — PENDING
+
+The next commit is explicitly marked with the artifact-checkpoint token so the workflow's Windows build job runs after the test job passes. Stage E is not package-accepted or closed until the same exact commit passes the frozen-app/package acceptance, integrated Production/Sound Design UI, installer and portable creation, install/launch/upgrade/uninstall, Defender scan, SHA-256 manifest and required artifact uploads. A passed test-only run with a skipped build job is not E5 acceptance.
+
+Stage F physical checks remain separate and open, including D6 two-PC profile transfer/audition, real target-device Qwen/GPU measurements, full-book listening/recovery and physical UI/installer inspection.
+

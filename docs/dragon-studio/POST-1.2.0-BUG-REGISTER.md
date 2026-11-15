@@ -492,3 +492,16 @@ These code and regression results demonstrate that repeated unrelated-project lo
 ### Stage F disposition
 
 Stage F will consolidate D6 two-PC transfer/audition, saved Qwen profile/device acceptance, real long-book generation/playback/recovery, physical display/DPI/flicker, shell icon and installer visual checks, and final Help & Guide user review. These checks must run after engineering stages are complete and cannot be replaced by CI simulation.
+ 
+## Stage E1–E4 source/test gates and E5 package handoff — 15 November 2026
+
+- Active branch: dragon-studio/stage-e-character-intelligence-cast-production-ux-2026-11-15.
+- Exact tested head before the package checkpoint: a99786938d98004ceb1df91d603d31d05babd858.
+- **E1 — 40/40** focused character analysis; multilingual Indian-script names with combining marks, source-grounded fallback, full-book coverage (150 passages / three chapters) and cancellation-before-commit contracts passed.
+- **E2 — 181/181** focused Production-preview/cast-routing tests; same-name characters remain series-scoped, exact saved chapter dialogue assignments are forwarded, and unresolved dialogue uses the global Unassigned Character profile.
+- **E3 — 41/41** focused Production layout/progress/cover-art tests passed; real selected cover and empty placeholder branding remain separate.
+- **E4 — 8/8** Help & Guide accuracy tests passed; the original detailed seven-stage guide remains preserved.
+- **Build #3469** / [run 43710739978](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43710739978), head a99786938d98004ceb1df91d603d31d05babd858: full regression 1,692/1,692 and all E1–E4 focused gates passed. Build job was skipped because it was not an explicit artifact checkpoint.
+- **Historical failures preserved:** #3465 / run 43709432289 and #3466 / run 43709542835 failed full regression while preview-routing test fixtures/contracts were stale after the shared-router change. #3467 / run 43709935729 failed the E2 focused step due a Python syntax error in an escaped test literal. #3468 / run 43710004680 corrected those literals; #3469 passed the complete E1–E4 test gate. The failures remain failures in Actions history.
+- **E5 is now the active gate:** a commit carrying the artifact-checkpoint token will run the Windows package job on the tested E1–E4 source tree. Do not close Stage E until that exact-head run passes the frozen-app, packaged UI/Production acceptance, installer/portable, install/launch/upgrade/uninstall, Defender, SHA-256 manifest and artifact-upload steps.
+- **Stage F remains separate:** D6 two-PC profile transfer/audition and all physical hardware, real audio/listening, GPU timing, full-book generation/recovery, display/DPI/flicker, shell icon and installer-visual checks remain deferred, not passed.
