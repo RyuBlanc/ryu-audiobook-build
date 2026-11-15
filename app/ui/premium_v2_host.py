@@ -3495,6 +3495,42 @@ class PremiumV2Bridge(QObject):
             raise ValueError("The selected saved voice profile no longer exists. Refresh the Voice Library.")
         return profile_library_record(profile, inspect_assets=True)
 
+    def _voice_library_acceptance_path(
+        self,
+        payload: dict[str, Any],
+        key: str,
+        *,
+        must_exist: bool = False,
+    ) -> Path | None:
+        """Resolve a packaged-acceptance file only inside its opt-in temporary root.
+
+        Normal application sessions do not set RYU_VOICE_LIBRARY_ACCEPTANCE_ROOT,
+        so the Voice Library continues to use native file dialogs. The frozen
+        Windows acceptance runner sets this variable to a unique temporary
+        directory, allowing it to exercise the same bridge methods without
+        automating an OS file-picker window.
+        """
+        acceptance_root_raw = str(os.environ.get("RYU_VOICE_LIBRARY_ACCEPTANCE_ROOT") or "").strip()
+        raw_path = str(payload.get(key) or "").strip()
+        if not acceptance_root_raw or not raw_path:
+            return None
+        root = Path(acceptance_root_raw).expanduser().resolve(strict=True)
+        candidate = Path(raw_path).expanduser()
+        if not candidate.is_absolute():
+            candidate = root / candidate
+        if candidate.is_symlink():
+            raise ValueError("Voice Library acceptance paths cannot be symbolic links.")
+        resolved = candidate.resolve(strict=must_exist)
+        try:
+            resolved.relative_to(root)
+        except ValueError as exc:
+            raise ValueError("Voice Library acceptance paths must stay inside the isolated acceptance directory.") from exc
+        if not resolved.parent.is_dir():
+            raise ValueError("The Voice Library acceptance destination directory is unavailable.")
+        if must_exist and not resolved.is_file():
+            raise ValueError("The Voice Library acceptance bundle must be a regular file.")
+        return resolved
+
     def _voice_bundle_export(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Export selected saved Qwen profiles after the native Save dialog confirms a destination."""
         from app.tts.qwen_model_preference import get_qwen_model_preference
@@ -3527,24 +3563,34 @@ class PremiumV2Bridge(QObject):
         suggested = profiles[0].name.strip()
         safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", suggested).strip("._") or "qwen-voice-profiles"
         default_path = str(Path.home() / f"{safe_name}.ryuvoice")
-        selected_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Export Qwen Voice Profile Package",
-            default_path,
-            "Ryu Qwen Voice Profiles (*.ryuvoice)",
+        acceptance_destination = self._voice_library_acceptance_path(
+            payload, "acceptance_output_path"
         )
-        if not selected_path:
-            return {"cancelled": True}
-        destination = Path(selected_path).expanduser()
-        if destination.suffix.casefold() != ".ryuvoice":
-            destination = destination.with_suffix(".ryuvoice")
+        if acceptance_destination is not None:
+            if acceptance_destination.exists():
+                raise FileExistsError("The isolated Voice Library acceptance export already exists.")
+            destination = acceptance_destination
+            overwrite = False
+        else:
+            selected_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Export Qwen Voice Profile Package",
+                default_path,
+                "Ryu Qwen Voice Profiles (*.ryuvoice)",
+            )
+            if not selected_path:
+                return {"cancelled": True}
+            destination = Path(selected_path).expanduser()
+            if destination.suffix.casefold() != ".ryuvoice":
+                destination = destination.with_suffix(".ryuvoice")
+            # QFileDialog is the native explicit Save action; it owns the
+            # overwrite confirmation before the atomic exporter is called.
+            overwrite = True
         result = export_qwen_profiles_bundle(
             profiles,
             destination,
             source_model_preference=get_qwen_model_preference(),
-            # QFileDialog is the native explicit Save action; it owns the
-            # overwrite confirmation before the atomic exporter is called.
-            overwrite=True,
+            overwrite=overwrite,
         )
         return {
             "cancelled": False,
@@ -3558,22 +3604,29 @@ class PremiumV2Bridge(QObject):
             "runtime_included": False,
         }
 
-    def _voice_bundle_choose_import(self, _payload: dict[str, Any]) -> dict[str, Any]:
-        """Let the user choose a .ryuvoice file and preflight it without importing."""
+    def _voice_bundle_choose_import(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Choose a .ryuvoice file and run compatibility/collision preflight only."""
         from app.tts.qwen_profile_import import plan_qwen_profiles_import
 
-        selected_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Import Qwen Voice Profile Package",
-            str(Path.home()),
-            "Ryu Qwen Voice Profiles (*.ryuvoice)",
+        acceptance_source = self._voice_library_acceptance_path(
+            payload, "acceptance_bundle_path", must_exist=True
         )
-        if not selected_path:
-            return {"cancelled": True}
-        plan = plan_qwen_profiles_import(Path(selected_path).expanduser())
+        if acceptance_source is None:
+            selected_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Import Qwen Voice Profile Package",
+                str(Path.home()),
+                "Ryu Qwen Voice Profiles (*.ryuvoice)",
+            )
+            if not selected_path:
+                return {"cancelled": True}
+            source = Path(selected_path).expanduser().resolve()
+        else:
+            source = acceptance_source
+        plan = plan_qwen_profiles_import(source)
         return {
             "cancelled": False,
-            "path": str(Path(selected_path).expanduser().resolve()),
+            "path": str(source),
             "plan": plan,
         }
 

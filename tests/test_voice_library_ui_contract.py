@@ -124,6 +124,21 @@ class VoiceLibraryUiContractTests(unittest.TestCase):
         self.assertIn("export_qwen_profiles_bundle(", exporter)
         self.assertIn("QFileDialog.getSaveFileName(", exporter)
 
+    def test_packaged_acceptance_file_paths_are_opt_in_and_confined_to_temporary_root(self):
+        self.assertIn("def _voice_library_acceptance_path(", self.host)
+        self.assertIn("RYU_VOICE_LIBRARY_ACCEPTANCE_ROOT", self.host)
+        helper = self.host[
+            self.host.index("def _voice_library_acceptance_path"):
+            self.host.index("def _voice_bundle_export")
+        ]
+        self.assertIn("resolved.relative_to(root)", helper)
+        self.assertIn("candidate.is_symlink()", helper)
+        self.assertIn('payload, "acceptance_output_path"', self.host)
+        self.assertIn('payload, "acceptance_bundle_path", must_exist=True', self.host)
+        self.assertIn("QFileDialog.getSaveFileName(", self.host)
+        self.assertIn("QFileDialog.getOpenFileName(", self.host)
+
+
     def test_import_preflight_is_separate_from_transactional_commit(self):
         chooser = self.host[self.host.index("def _voice_bundle_choose_import"):self.host.index("def _voice_bundle_import")]
         commit = self.host[self.host.index("def _voice_bundle_import"):self.host.index("def _find_profile")]
