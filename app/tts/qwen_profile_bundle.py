@@ -353,6 +353,7 @@ def inspect_qwen_profile_bundle(bundle_path: str | Path) -> dict[str, object]:
             raise ValueError("Bundle contains unlisted or missing payload files.")
 
         seen_ids: set[str] = set()
+        referenced_payload_paths: set[str] = set()
         validated_profiles = []
         for entry in profiles:
             if not isinstance(entry, dict):
@@ -366,6 +367,9 @@ def inspect_qwen_profile_bundle(bundle_path: str | Path) -> dict[str, object]:
                 raise ValueError("Bundle profile record path does not match its stable profile ID.")
             if profile_path not in expected_files or archive.getinfo(profile_path).file_size > MAX_PROFILE_BYTES:
                 raise ValueError("Bundle profile record is missing or too large.")
+            if profile_path in referenced_payload_paths:
+                raise ValueError("Bundle contains a duplicate profile record reference.")
+            referenced_payload_paths.add(profile_path)
             try:
                 profile_doc = json.loads(archive.read(profile_path).decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -386,16 +390,26 @@ def inspect_qwen_profile_bundle(bundle_path: str | Path) -> dict[str, object]:
             requirements = profile_doc.get("model_requirements")
             if not isinstance(requirements, dict) or requirements.get("provider") != "qwen-character":
                 raise ValueError("Profile model-compatibility metadata is missing.")
+            source_preference = requirements.get("source_machine_preference")
+            expected_requirements = qwen_model_compatibility(profile, source_preference)
+            if requirements != expected_requirements:
+                raise ValueError("Profile model-compatibility metadata does not match its saved mode/model roles.")
             assets = entry.get("assets")
             if not isinstance(assets, list):
                 raise ValueError("Profile asset list is malformed.")
             revision_assets: dict[str, str] = {}
+            asset_paths: set[str] = set()
+            binding_counts: dict[str, int] = {}
             for asset in assets:
                 if not isinstance(asset, dict):
                     raise ValueError("Profile contains an invalid asset descriptor.")
                 asset_path = asset.get("archive_path")
                 if not _is_safe_archive_path(asset_path) or not asset_path.startswith(f"profiles/{profile_id}/assets/"):
                     raise ValueError("Profile asset path is unsafe or outside its profile directory.")
+                if asset_path in asset_paths:
+                    raise ValueError("Profile contains a duplicate asset archive path.")
+                asset_paths.add(asset_path)
+                referenced_payload_paths.add(asset_path)
                 if asset_path not in expected_files or asset.get("size_bytes") != archive.getinfo(asset_path).file_size:
                     raise ValueError("Profile asset is missing or has an incorrect size.")
                 digest = str(asset.get("sha256") or "")
@@ -404,15 +418,41 @@ def inspect_qwen_profile_bundle(bundle_path: str | Path) -> dict[str, object]:
                 revision_key = str(asset.get("revision_key") or "")
                 if not revision_key or revision_key in revision_assets:
                     raise ValueError("Profile asset revision keys must be unique and non-empty.")
+                if not isinstance(asset.get("required"), bool):
+                    raise ValueError("Profile asset required flag must be boolean.")
+                media_type = str(asset.get("media_type") or "")
+                if not media_type.startswith("audio/"):
+                    raise ValueError("Profile asset must declare an audio media type.")
                 revision_assets[revision_key] = digest
-                if asset.get("binding") in {"sample_path", "qwen_anchor_path"}:
-                    if asset.get("media_type") != "audio/wav":
+                binding = str(asset.get("binding") or "")
+                binding_counts[binding] = binding_counts.get(binding, 0) + 1
+                if binding in {"sample_path", "qwen_anchor_path"}:
+                    if media_type != "audio/wav":
                         raise ValueError("Qwen conditioning and anchor bindings must be WAV audio.")
                     _validate_wav_member(archive, asset_path)
-            if profile.qwen_mode == "clone" and not any(
-                asset.get("binding") == "sample_path" and asset.get("required") is True for asset in assets
-            ):
-                raise ValueError("Qwen Clone bundle is missing its required conditioning reference.")
+                if binding == "sample_path" and revision_key != "sample_path":
+                    raise ValueError("Sample-audio binding has an inconsistent revision key.")
+                if binding == "qwen_anchor_path" and revision_key != "qwen_anchor_path":
+                    raise ValueError("Explicit anchor binding has an inconsistent revision key.")
+                if binding == "worker-derived-neutral-anchor" and revision_key != "derived_voice_identity_anchor":
+                    raise ValueError("Derived VoiceDesign anchor has an inconsistent revision key.")
+            if binding_counts.get("sample_path", 0) > 1 or binding_counts.get("qwen_anchor_path", 0) > 1:
+                raise ValueError("Profile has more than one active conditioning or explicit anchor asset.")
+            if profile.qwen_mode == "clone":
+                sample_assets = [
+                    asset for asset in assets
+                    if asset.get("binding") == "sample_path"
+                    and asset.get("role") == "clone_reference_conditioning"
+                    and asset.get("required") is True
+                    and asset.get("revision_key") == "sample_path"
+                ]
+                if len(sample_assets) != 1:
+                    raise ValueError("Qwen Clone bundle must contain exactly one required conditioning reference.")
+            if profile.qwen_mode == "design":
+                explicit_count = binding_counts.get("qwen_anchor_path", 0)
+                derived_count = binding_counts.get("worker-derived-neutral-anchor", 0)
+                if explicit_count + derived_count > 1:
+                    raise ValueError("VoiceDesign bundle must contain at most one canonical neutral identity anchor.")
             calculated = qwen_profile_revision_id(profile, revision_assets)
             if calculated != entry.get("revision_id") or calculated != profile_doc.get("revision_id"):
                 raise ValueError("Profile revision fingerprint does not match its record/assets.")
@@ -423,6 +463,8 @@ def inspect_qwen_profile_bundle(bundle_path: str | Path) -> dict[str, object]:
                 "asset_count": len(assets),
             })
 
+        if referenced_payload_paths != set(expected_files):
+            raise ValueError("Bundle contains orphaned or unreferenced payload files.")
         for name, expected_digest in expected_files.items():
             if not _is_safe_archive_path(name) or not _SHA256_RE.fullmatch(str(expected_digest or "")):
                 raise ValueError("Bundle integrity map contains an invalid path or SHA-256.")

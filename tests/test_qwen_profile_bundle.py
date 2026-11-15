@@ -259,6 +259,72 @@ class QwenProfileBundleExportTests(unittest.TestCase):
             self.assertEqual(asset["revision_key"], "sample_path")
             self.assertEqual(result.revision_ids[0], manifest["profiles"][0]["revision_id"])
 
+    def _rewrite_bundle(self, source_path, destination_path, mutate_manifest=None, mutate_members=None):
+        with zipfile.ZipFile(source_path) as source:
+            members = {item.filename: source.read(item.filename) for item in source.infolist()}
+        manifest = json.loads(members["manifest.json"])
+        if mutate_members:
+            mutate_members(members, manifest)
+        if mutate_manifest:
+            mutate_manifest(manifest, members)
+        members["manifest.json"] = (
+            json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
+        ).encode("utf-8")
+        with zipfile.ZipFile(destination_path, "w", compression=zipfile.ZIP_DEFLATED) as target:
+            for name, data in members.items():
+                target.writestr(name, data)
+        return destination_path
+
+    def test_duplicate_asset_archive_reference_is_rejected(self):
+        reference = self.root / "duplicate-reference.wav"
+        write_wav(reference)
+        profile = VoiceProfile(
+            name="Duplicate asset", provider="qwen-character", voice_id="Clone",
+            qwen_mode="clone", sample_path=str(reference), qwen_profile_id="duplicate-asset",
+        )
+        self.export_with_runtime([profile])
+        modified = self.root / "duplicate-asset.ryuvoice"
+        def mutate_manifest(manifest, members):
+            assets = manifest["profiles"][0]["assets"]
+            assets.append(dict(assets[0]))
+        self._rewrite_bundle(self.bundle_path, modified, mutate_manifest=mutate_manifest)
+        with self.assertRaisesRegex(ValueError, "duplicate asset archive path"):
+            inspect_qwen_profile_bundle(modified)
+
+    def test_orphaned_integrity_payload_is_rejected(self):
+        profile = VoiceProfile(
+            name="Orphan payload", provider="qwen-character", voice_id="Ryan",
+            qwen_mode="custom", qwen_profile_id="orphan-payload",
+        )
+        self.export_with_runtime([profile])
+        modified = self.root / "orphan-payload.ryuvoice"
+        def mutate_members(members, manifest):
+            members["profiles/orphan-payload/assets/unbound.wav"] = b"unreferenced"
+            manifest["integrity"]["files"]["profiles/orphan-payload/assets/unbound.wav"] = (
+                hashlib.sha256(b"unreferenced").hexdigest()
+            )
+        self._rewrite_bundle(self.bundle_path, modified, mutate_members=mutate_members)
+        with self.assertRaisesRegex(ValueError, "orphaned or unreferenced"):
+            inspect_qwen_profile_bundle(modified)
+
+    def test_model_compatibility_metadata_must_match_profile_mode(self):
+        profile = VoiceProfile(
+            name="Compatibility mismatch", provider="qwen-character", voice_id="Ryan",
+            qwen_mode="custom", qwen_profile_id="compatibility-mismatch",
+        )
+        self.export_with_runtime([profile])
+        modified = self.root / "compatibility-mismatch.ryuvoice"
+        def mutate_members(members, manifest):
+            profile_path = manifest["profiles"][0]["profile_path"]
+            doc = json.loads(members[profile_path])
+            doc["model_requirements"]["mode"] = "clone"
+            updated = json.dumps(doc, ensure_ascii=False, sort_keys=True, indent=2).encode("utf-8") + b"\n"
+            members[profile_path] = updated
+            manifest["integrity"]["files"][profile_path] = hashlib.sha256(updated).hexdigest()
+        self._rewrite_bundle(self.bundle_path, modified, mutate_members=mutate_members)
+        with self.assertRaisesRegex(ValueError, "model-compatibility metadata does not match"):
+            inspect_qwen_profile_bundle(modified)
+
     def test_corrupt_payload_fails_integrity_validation(self):
         profile = VoiceProfile(name="Corrupt", provider="qwen-character", voice_id="Ryan",
                                qwen_mode="custom", qwen_profile_id="corrupt-test")
