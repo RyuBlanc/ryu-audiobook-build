@@ -54,6 +54,77 @@ class CharacterDetectionRegressionTests(unittest.TestCase):
         self.assertEqual(result.dialogue_total, 8)
         self.assertEqual(result.unassigned_dialogue, 0)
 
+
+    def test_indian_script_speaker_labels_with_combining_marks_keep_full_identity(self):
+        import unicodedata
+
+        chapter = Chapter(
+            number=1,
+            title="Indian script speaker identities",
+            text=(
+                'मीरा: “नमस्ते।”\n'
+                'मीरा: “धन्यवाद।”\n'
+                'महेंद्र सिंह: “आप कैसे हैं?”\n'
+                'महेंद्र सिंह: “मैं ठीक हूँ।”\n'
+                'கவிதா: “வணக்கம்।”\n'
+                'கவிதா: “நன்றி।”\n'
+                'లక్ష్మి: “నమస్కారం।”\n'
+                'లక్ష్మి: “ధన్యవాదాలు।”\n'
+                'রিয়া: “হ্যালো।”\n'
+                'রিয়া: “ধন্যবাদ।”\n'
+                'ગૌરી: “કેમ છો?”\n'
+                'ગૌરી: “આભાર।”\n'
+                'ਗੁਰਮੀਤ: “ਸਤ ਸ੍ਰੀ ਅਕਾਲ।”\n'
+                'ਗੁਰਮੀਤ: “ਧੰਨਵਾਦ।”'
+            ),
+        )
+        result = analyze_book([chapter])
+        by_key = {
+            unicodedata.normalize("NFC", character.name).casefold(): character
+            for character in result.characters
+        }
+        expected = ("मीरा", "महेंद्र सिंह", "கவிதா", "లక్ష్మి", "রিয়া", "ગૌરી", "ਗੁਰਮੀਤ")
+        for name in expected:
+            with self.subTest(name=name):
+                key = unicodedata.normalize("NFC", name).casefold()
+                self.assertIn(key, by_key)
+                self.assertEqual(by_key[key].dialogue_count, 2)
+        self.assertEqual(result.dialogue_total, 14)
+        self.assertEqual(result.unassigned_dialogue, 0)
+
+    def test_indian_script_speech_tags_after_quotes_keep_combining_marks(self):
+        chapter = Chapter(
+            number=1,
+            title="Indian script speech tags",
+            text=(
+                '“नमस्ते,” said मीरा.\n'
+                '“வணக்கம்,” said கவிதா.\n'
+                '“నమస్కారం,” said లక్ష్మి.\n'
+                '“হ্যালো,” said রিয়া.\n'
+                '“કેમ છો?” said ગૌરી.\n'
+                '“ਸਤ ਸ੍ਰੀ ਅਕਾਲ,” said ਗੁਰਮੀਤ.'
+            ),
+        )
+        result = analyze_book([chapter])
+        names = {character.name for character in result.characters}
+        self.assertEqual(
+            names,
+            {"मीरा", "கவிதா", "లక్ష్మి", "রিয়া", "ગૌરી", "ਗੁਰਮੀਤ"},
+        )
+        self.assertEqual(result.dialogue_total, 6)
+        self.assertEqual(result.unassigned_dialogue, 0)
+
+    def test_non_letter_symbols_are_not_absorbed_into_speaker_names(self):
+        chapter = Chapter(
+            number=1,
+            title="Invalid decorated speaker label",
+            text='मीरा😊: “नमस्ते।”',
+        )
+        result = analyze_book([chapter])
+        self.assertEqual(result.characters, [])
+        self.assertEqual(result.dialogue_total, 1)
+        self.assertEqual(result.unassigned_dialogue, 1)
+
     def test_dialogue_tags_produce_candidates_without_colon_labels(self):
         chapter = Chapter(
             number=1,

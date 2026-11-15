@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import re
+import regex as unicode_regex
 from collections import Counter
 import unicodedata
 
@@ -52,7 +53,8 @@ SPEAKER_VERBS = (
 
 NAME_TOKEN = r"[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'’-]{2,30}\b"
 # Unicode-aware token for explicit speaker labels, including Japanese/Korean scripts.
-SPEAKER_NAME_TOKEN = r"([^\W\d_][\w'’.-]*(?:\s+[^\W\d_][\w'’.-]*){0,2})"
+SPEAKER_NAME_TOKEN = r"([\p{L}][\p{L}\p{M}\p{N}'’.\u200c\u200d-]*(?:\s+[\p{L}][\p{L}\p{M}\p{N}'’.\u200c\u200d-]*){0,2})"
+UNICODE_NAME_WORD_RE = unicode_regex.compile(r"[\p{L}][\p{L}\p{M}\p{N}'’.\u200c\u200d-]*")
 
 NAME_STOPWORDS = {
     "The","A","An","I","Im","I'm","I’m","Ive","I've","I’ve","Id","I'd","I’d","Ill","I'll","I’ll",
@@ -317,10 +319,10 @@ def _discover_explicit_speakers(text: str) -> set[str]:
         # Name said, "dialogue" (including a comma after the speech verb)
         rf"(?:^|[\n\r.!?。！？]\s*|[,;:]\s*){SPEAKER_NAME_TOKEN}\s+(?:{SPEAKER_VERBS})\b\s*[,;:]?",
         # "dialogue," said Name
-        rf"[”\"」』]\s*,?\s*(?:{SPEAKER_VERBS})\s+{SPEAKER_NAME_TOKEN}\b",
+        rf"[”\"」』]\s*,?\s*(?:{SPEAKER_VERBS})\s+{SPEAKER_NAME_TOKEN}",
     )
     for pattern in patterns:
-        for match in re.finditer(pattern, text, re.I):
+        for match in unicode_regex.finditer(pattern, text, unicode_regex.I):
             name = _clean_name(match.group(1))
             if _is_plausible_name(name):
                 candidates.add(name)
@@ -371,7 +373,7 @@ def _speaker_near_quote(
         rf"(?:{SPEAKER_VERBS})\s+{name_phrase}\s*$",
         rf"{name_phrase}\s*[:：—–-]\s*$",
     ):
-        matches = list(re.finditer(pattern, before, re.I | re.S))
+        matches = list(unicode_regex.finditer(pattern, before, unicode_regex.I | unicode_regex.S))
         if matches:
             name = _clean_name(matches[-1].group(1))
             resolved = _resolve_candidate(name, candidates)
@@ -396,11 +398,11 @@ def _speaker_near_quote(
     for pattern in (
         rf"^\s*[,;:—–-]?\s*I\s+(?:{SPEAKER_VERBS})\b",
         rf"^\s*[,;:—–-]?\s*(?:he|she|they)\s+(?:{SPEAKER_VERBS})\b",
-        rf"^\s*[,;:—–-]?\s*(?:{SPEAKER_VERBS})\s+{name_phrase}\b",
+        rf"^\s*[,;:—–-]?\s*(?:{SPEAKER_VERBS})\s+{name_phrase}",
         rf"^\s*[,;:—–-]?\s*{name_phrase}\s*(?:{SPEAKER_VERBS})\b",
         rf"^\s*[,;:—–-]?\s*{name_phrase}\s*[:—–-]",
     ):
-        match = re.search(pattern, after, re.I | re.S)
+        match = unicode_regex.search(pattern, after, unicode_regex.I | unicode_regex.S)
         if match:
             tagged = match.group(0)
             if re.search(rf"\bI\s+(?:{SPEAKER_VERBS})\b", tagged, re.I):
@@ -553,6 +555,8 @@ def _is_plausible_name(value: str) -> bool:
         return False
     words = value.split()
     if not 1 <= len(words) <= 3:
+        return False
+    if not all(UNICODE_NAME_WORD_RE.fullmatch(word) for word in words):
         return False
     if any(word.strip(".,!?;:") in NAME_STOPWORDS for word in words):
         return False
