@@ -243,7 +243,21 @@ def builtin_voice_profiles() -> list[VoiceProfile]:
 
 
 def load_saved_profiles() -> list[VoiceProfile]:
-    """Read the persisted profile records only; do not scan installed voice engines."""
+    """Read saved profiles only after recovering any interrupted Qwen import."""
+    # Import lazily to avoid a module cycle: the importer uses VoiceProfile and
+    # profile_record, but recovery is only needed when the catalogue is read.
+    from app.tts.qwen_profile_import import (
+        recover_interrupted_qwen_profile_imports,
+        voice_profile_catalogue_lock,
+    )
+
+    recover_interrupted_qwen_profile_imports()
+    with voice_profile_catalogue_lock():
+        return _load_saved_profiles_locked()
+
+
+def _load_saved_profiles_locked() -> list[VoiceProfile]:
+    """Read and migrate the catalogue while holding its cross-process lock."""
     path = profiles_file()
     if not path.is_file():
         return []
@@ -424,16 +438,21 @@ def save_profiles(profiles: list[VoiceProfile]) -> None:
         indent=2,
     )
     temporary = destination.with_suffix(destination.suffix + ".tmp")
-    try:
-        temporary.write_text(payload, encoding="utf-8")
-        # Verify the temporary file before it can replace the last good copy.
-        written = json.loads(temporary.read_text(encoding="utf-8"))
-        expected = json.loads(payload)
-        if written != expected:
-            raise IOError("Voice profile catalogue verification failed.")
-        temporary.replace(destination)
-    finally:
-        temporary.unlink(missing_ok=True)
+    # Serialize full-catalogue writes with imports and legacy migrations. The
+    # lock never changes the existing save semantics; it only prevents concurrent
+    # atomic replacements from racing one another.
+    from app.tts.qwen_profile_import import voice_profile_catalogue_lock
+    with voice_profile_catalogue_lock():
+        try:
+            temporary.write_text(payload, encoding="utf-8")
+            # Verify the temporary file before it can replace the last good copy.
+            written = json.loads(temporary.read_text(encoding="utf-8"))
+            expected = json.loads(payload)
+            if written != expected:
+                raise IOError("Voice profile catalogue verification failed.")
+            temporary.replace(destination)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def import_reference_audio(source: Path, profile_name: str, minimum_seconds: float = 6.0) -> Path:
