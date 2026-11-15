@@ -54,15 +54,18 @@ Current defensive limits: 100 profiles per bundle, 2 MiB manifest, 2 MiB profile
 
 ## 4. D1/D2 test gates and workflow history
 
-The first D2 candidate exposed three existing source-contract tests that expected the expression-bank constant and voice_anchors path literal to remain physically in qwen_character_worker.py. D2 intentionally centralized that identity calculation in the shared helper. The implementation retained the existing source-contract markers as comments without duplicating the live value or resolver. The failed attempt remains visible and was not relabeled green.
+The first D2 candidate exposed three existing source-contract tests that expected the expression-bank constant and `voice_anchors` path literal to remain physically in `qwen_character_worker.py`. D2 intentionally centralized that identity calculation in the shared helper. The implementation retained the existing source-contract markers as comments without duplicating the live value or resolver.
 
 | Build | Commit | Result | Notes |
 |---|---|---|---|
-| #3430 | 22966e1 | Failed | 16/16 new D2 exporter tests passed; cumulative suite ran 1,621 tests and had three legacy source-text contract failures. |
-| #3432 | 7af561a | Passed | Restored source-contract markers; full regression 1,621/1,621. |
-| #3433 | 16e5fdb | Passed | Explicit D1/D2 CI step added; 29/29 focused schema/bundle tests; full regression 1,624/1,624. |
-| #3434 | 40d60ec | Passed | 29/29 focused tests; full regression 1,625/1,625; no artifact build was requested on this ordinary commit. |
-| #3435 | 18e5391 | Passed | 29/29 focused tests; full regression 1,625/1,625. Added physical bundling of both shared Qwen helper modules and package-time hash checks in the subsequent source head. |
+| #3430 | `22966e1` | Failed | 16/16 new D2 exporter tests passed; cumulative suite ran 1,621 tests and had three legacy source-text contract failures. |
+| #3431 | `a60dc9d` | Failed | The full suite again failed on the same three legacy worker source-contract assertions. The WAV media-type change in the commit title was not the cause shown by the test log. |
+| #3432 | `7af561a` | Passed | Restored source-contract markers; full regression 1,621/1,621. |
+| #3433 | `16e5fdb` | Passed | Explicit D1/D2 CI gate added; 29/29 focused schema/bundle tests; full regression 1,624/1,624. |
+| #3434 | `40d60ec` | Passed | 29/29 focused tests; full regression 1,625/1,625; no artifact build was requested on this ordinary commit. |
+| #3435 | `18e5391` | Passed | 29/29 focused tests; full regression 1,625/1,625. Added physical bundling of both shared Qwen helper modules and package-time hash checks in the subsequent source head. |
+| #3436 | `0689580` | **Passed — final D2 artifact checkpoint** | 29/29 focused tests; 1,625/1,625 full regression; Windows package, standalone worker, installer, install/launch/upgrade/uninstall, Defender and all expected artifacts passed. |
+| #3437 | `0689580` | **Passed — repeat artifact checkpoint** | Same exact D2 source SHA; 29/29 focused tests; 1,625/1,625 full regression; Windows installer/portable/manifest/M4B/benchmark artifacts uploaded. This is a second run on the accepted D2 source, not a new code head. |
 
 The 29 focused tests comprise nine D1 schema tests and 20 D2 bundle/export tests. The D2 cases cover CustomVoice, Clone, Clone sidecar byte fidelity, explicit/derived VoiceDesign anchors, multilingual/Unicode metadata, multiple profiles, stable revision hashes, invalid/future schemas, missing/invalid references, overwrite safety, duplicate IDs/assets, archive traversal, corrupt payloads, orphan files, model-compatibility mismatch and standalone-worker helper packaging.
 
@@ -72,17 +75,43 @@ The Qwen worker runs in an external Python process. It imports app.tts.qwen_prof
 
 The Windows build now physically copies both files beside qwen_character_worker.py under app/tts, and package acceptance compares their SHA-256 values with repository source. The existing standalone-worker smoke removes PYTHONPATH before launching the packaged worker with --help; it must pass to clear the package gate.
 
-## 6. Final D2 acceptance still pending
+## 6. Final D2 hosted artifact acceptance — COMPLETE
 
-The current source/test head is 18e5391c2d42d18afb8d830ffee114746febdc38. The final artifact-checkpoint Build Windows App run must pass:
-- explicit focused Stage D schema and bundle tests;
-- full regression;
-- frozen application build;
-- physical Qwen helper source/hash checks;
-- standalone packaged worker launch without PYTHONPATH;
-- installer, HTML installer, install/launch/upgrade/uninstall, Defender and artifact/hash checks.
+Accepted D2 source SHA: `06895803d859e748dc8c7292c6a3bfd895af9304`.
 
-D2 is not declared complete until that exact-head Windows package run passes. Even after it passes, D2 acceptance does not claim that import, UI or two-PC transfer is complete.
+Build Windows App **#3436** / [run 43671334770](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43671334770) passed both jobs on the exact accepted D2 head:
+- Focused D1/D2 schema and bundle tests: **29/29**.
+- Full regression: **1,625/1,625**.
+- Frozen application, voice assets, Qwen standalone-worker helper source/hash checks, and standalone `qwen_character_worker.py --help` launch with `PYTHONPATH` removed.
+- Real bundled-Piper multi-chapter M4B and packaged Sound Design/Music Library acceptance.
+- Core and HTML installer, HTML installer startup, install/launch/upgrade/uninstall, branding transparency/hash checks, package-size report and Microsoft Defender scans.
+- Installer, portable, release SHA manifest, M4B and Stage 7 benchmark artifacts uploaded.
+
+Build Windows App **#3437** / [run 43676558316](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43676558316) repeated the same exact SHA `0689580` checkpoint and completed successfully. It provides a second artifact set; it does not change the accepted D2 code head.
+
+### Build #3436 artifacts
+
+| Artifact | ID | Size (bytes) | GitHub artifact ZIP digest |
+|---|---:|---:|---|
+| Installer | `14145491117` | 847,191,828 | `sha256:b756853364102119a92a3fa1163605be810b5da520ece51914f0c7d687bcd46a` |
+| Portable | `14145530088` | 1,190,907,115 | `sha256:e7a98198b097bcc14be2f6761ebddaa81dabf366c58c6f123a6e02d29df8159f` |
+| Release SHA-256 manifest | `14145202810` | 3,050 | `sha256:c4064b6bbf3817f576985ccbfce40322644077b5428cfbecc2c09f9944228af0` |
+| Real multi-chapter M4B | `14145285194` | 8,988,945 | `sha256:f267a06223e86f2f2857bb075912150d247bf62672ee38517fd782305a8a1a5f` |
+| Stage 7 Piper benchmark | `14144822662` | 804 | `sha256:36e1e49128da636b863c2dacc6f157702900ffd309ed15fdb6cfaf05de678c68` |
+
+### Build #3437 artifacts
+
+| Artifact | ID | Size (bytes) | GitHub artifact ZIP digest |
+|---|---:|---:|---|
+| Installer | `14147582177` | 847,239,315 | `sha256:68f2c2508e037b532dbb999c3e24fb3b57fefc5d6f1b9ccb41ddb049217eb6a1` |
+| Portable | `14147452566` | 1,190,907,115 | `sha256:91fa9a26e813c3e4e9638b8172add27e633cb53a57269f4c575ef94427839310` |
+| Release SHA-256 manifest | `14146799665` | 3,053 | `sha256:81adbf92d9bce913bf881a73d2e1e81417aaaa51c2b239e8a5c5772985295bd4` |
+| Real multi-chapter M4B | `14146609762` | 8,977,778 | `sha256:442a918ee7ea9b6f616e3fad4937d4b19d438a7262f3911a70a34019ab6c9a18` |
+| Stage 7 Piper benchmark | `14147532383` | 800 | `sha256:46aa907223d3dc356c09d2e5b8a1c6dba0c92191e0e522e0edc053f17bdd32d7` |
+
+The digests above identify the uploaded GitHub artifact ZIPs. The application/installer file hashes are recorded inside each run's release SHA-256 manifest. Artifacts are retained by GitHub Actions until their configured expiry; these runs reported an expiry of 15 December 2026.
+
+D2 acceptance does **not** claim that import, the Voice Library UI, packaged import/export round-trip, or two-PC transfer is complete. Those remain D3, D4, D5 and D6 respectively.
 
 ## 7. Out of scope / next stages
 
