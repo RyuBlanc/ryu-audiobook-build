@@ -505,3 +505,36 @@ Stage F will consolidate D6 two-PC transfer/audition, saved Qwen profile/device 
 - **Historical failures preserved:** #3465 / run 43709432289 and #3466 / run 43709542835 failed full regression while preview-routing test fixtures/contracts were stale after the shared-router change. #3467 / run 43709935729 failed the E2 focused step due a Python syntax error in an escaped test literal. #3468 / run 43710004680 corrected those literals; #3469 passed the complete E1–E4 test gate. The failures remain failures in Actions history.
 - **E5 is now the active gate:** a commit carrying the artifact-checkpoint token will run the Windows package job on the tested E1–E4 source tree. Do not close Stage E until that exact-head run passes the frozen-app, packaged UI/Production acceptance, installer/portable, install/launch/upgrade/uninstall, Defender, SHA-256 manifest and artifact-upload steps.
 - **Stage F remains separate:** D6 two-PC profile transfer/audition and all physical hardware, real audio/listening, GPU timing, full-book generation/recovery, display/DPI/flicker, shell icon and installer-visual checks remain deferred, not passed.
+
+
+## Stage A–E engineering closeout and Stage F handoff — 15 November 2026
+
+This section is the current A–F status overlay. It does not erase or rewrite the historical Build/PR failures recorded above, and it does not restart the earlier Stage 1–8 implementation history.
+
+| Stage | Hosted/source engineering status | Physical acceptance disposition |
+|---|---|---|
+| A — baseline and scope reconciliation | COMPLETE. The A/B continuation preserved the accepted Stage 1–8 history and established one A→F bug-fix sequence. | No separate A-only physical gate; related real-device checks are consolidated into F. |
+| B — measured generation progress, ETA and duration | COMPLETE as hosted/source/package engineering. Build #3369 passed 1,543 tests and the Windows package; later exact-head pipelines continue to exercise its regression gates. | Long real multi-chapter Qwen/Piper timing, progress movement, ETA countdown and final duration comparison remain Stage F. |
+| C — Qwen identity, lifecycle, accelerator policy and multilingual continuity | COMPLETE as hosted/source/provider/package engineering. Stage C main accepted the integrated hosted baseline at Build #3420; C1–C4 gates and the #3414 exact-head package are recorded in the C ledgers. Provider Runtime Smoke #448 proves CPU functional identity paths only. | Real NVIDIA CUDA, AMD ROCm, Intel XPU and target-PC save/reload/audition/performance remain Stage F. The CPU 30-second VoiceDesign runs (187.318s and 336.607s) did not meet the under-60s target and are not GPU evidence. |
+| D — portable Qwen Voice Library | D0–D5 COMPLETE as hosted engineering/package work. D5 exact-head package #3457 on fbed26a passed, and #3458 repeated the package checkpoint. #3459/#3460 documentation validations passed. | D6 two-physical-PC transfer, compatibility, fresh restart and CustomVoice/VoiceDesign/Clone auditions remain deferred to F and NOT PASSED. |
+| E — multilingual Character Studio, cast parity, Production UX, Help & Guide | E0–E5 COMPLETE. Build #3469 passed E1 40/40, E2 181/181, E3 41/41, E4 8/8 and 1,692/1,692; exact-head Build #3470 on fc3a0f8 passed 1,692/1,692 and both Windows package jobs. | Physical UI smoothness, representative real-book quality, target-device voice continuity and Help & Guide walkthrough are Stage F. |
+| F — final physical/manual acceptance | ACTIVE — plan and evidence baseline established on dragon-studio/stage-f-physical-final-acceptance-2026-11-15. | All physical checklist rows begin as NOT RUN. Close only with evidence from the actual target devices. |
+
+### Build #3470 exact-head evidence
+
+- Run: [Build Windows App #3470](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43714021829); run ID 43714021829; exact head fc3a0f8e1d64790b1a61024f8d883653b2dad51c.
+- Both workflow jobs passed. The full regression reported **1,692 tests, OK**. The Stage B, Stage 6, C1–C4, D3/D4/D5 and E1/E2/E3/E4 focused workflow steps all completed successfully.
+- Packaged evidence included the real two-chapter Piper M4B/FFmpeg decode, Stage 5.4 generation/retry/restart recovery, Stage D5 CustomVoice/VoiceDesign/Clone bundle round-trip with fresh-process reload, narrator-only full-book generation, embedded M4B chapters and player seek/restart.
+- Windows installer and portable package creation, install/launch/upgrade/uninstall, shell/logo/hash checks, package-size report and three Microsoft Defender scans passed. Defender reported no threats for the application, HTML installer and core installer. Candidate release publication was intentionally skipped.
+- Artifacts: installer 14162537175; portable 14163025967; SHA-256 manifest 14162528273; real multi-chapter M4B 14162070795; Piper benchmark 14162867421. GitHub retention expiry is 15 December 2026. Candidate release publication was intentionally skipped.
+
+### Stage F guardrails
+
+1. Do not rerun or reopen completed Stage A–E implementation without a reproducible regression. A physical check that fails creates a targeted follow-up defect; it does not invalidate unrelated accepted stages.
+2. Never represent hosted CPU, mocked hardware, viewport emulation or a second process on one PC as physical GPU, multi-monitor or two-PC acceptance.
+3. Record exact app build/SHA, machine label, OS, CPU/GPU/RAM/VRAM, model/runtime versions, resolved inference backend, input/output duration, timings and hashes as applicable. Do not include personal account names, serial numbers or private voice recordings in public evidence.
+4. A requested GPU result passes only when synthesis telemetry proves the actual backend; silent CPU fallback is a failure of that backend-specific test.
+5. Preserve every failed attempt and root cause. After a code correction, run focused tests, full regression and an exact-head Windows package before repeating the affected physical gate.
+6. Stage F completion and Version 1.2.0 publication are separate decisions. Do not publish or claim final release acceptance without explicit owner approval.
+
+The detailed physical sequence is in [STAGE-F-PHYSICAL-FINAL-ACCEPTANCE-PLAN.md](STAGE-F-PHYSICAL-FINAL-ACCEPTANCE-PLAN.md). D6 remains its own NOT RUN worksheet and must be completed only on two separate physical PCs.
