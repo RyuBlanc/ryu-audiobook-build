@@ -28,8 +28,10 @@ from app.tts.expression import (
     voice_design_anchor_instruction,
 )
 from app.tts.qwen_accelerator import automatic_accelerator, best_accelerator
-
-EXPRESSION_BANK_VERSION = "v9-language-matched-anchor-direction"
+from app.tts.qwen_profile_schema import (
+    QWEN_EXPRESSION_BANK_VERSION as EXPRESSION_BANK_VERSION,
+    qwen_design_anchor_cache_path,
+)
 
 # The Base model locks speaker identity from one acoustic reference, but does
 # not expose VoiceDesign's per-line natural-language instruction channel.
@@ -431,20 +433,16 @@ def _anchor_path(root: Path, request: dict, style: str = "neutral") -> Path:
     explicit = str(request.get("anchor_path") or "").strip()
     if explicit and style == "neutral":
         return Path(explicit)
-    identity = "|".join(
-        [
-            EXPRESSION_BANK_VERSION,
-            str(request.get("speaker") or request.get("voice_id") or "voice"),
-            str(request.get("language") or "English"),
-            str(request.get("instruct") or ""),
-            str(request.get("seed") or ""),
-            str(request.get("anchor_text") or ""),
-            str(request.get("profile_id") or ""),
-            style,
-        ]
+    return qwen_design_anchor_cache_path(
+        root,
+        speaker=request.get("speaker") or request.get("voice_id") or "voice",
+        language=request.get("language") or "English",
+        instruct=request.get("instruct") or "",
+        seed=request.get("seed"),
+        anchor_text=request.get("anchor_text") or "",
+        profile_id=request.get("profile_id") or "",
+        style=style,
     )
-    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20]
-    return root / "voice_anchors" / f"qwen-design-{style}-{digest}.wav"
 def _generate_custom(model, request: dict, output: Path) -> None:
     import soundfile as sf
 

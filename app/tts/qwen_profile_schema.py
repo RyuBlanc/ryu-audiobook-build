@@ -10,6 +10,7 @@ from app.tts.qwen_model_preference import normalize_qwen_model_preference
 CURRENT_QWEN_PROFILE_SCHEMA_VERSION = 1
 QWEN_MODEL_COMPATIBILITY_SCHEMA_VERSION = 1
 QWEN_TOKENIZER_MODEL_ID = "Qwen/Qwen3-TTS-Tokenizer-12Hz"
+QWEN_EXPRESSION_BANK_VERSION = "v9-language-matched-anchor-direction"
 QWEN_MODEL_IDS = {
     "custom-0.6b": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
     "custom-1.7b": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
@@ -17,6 +18,50 @@ QWEN_MODEL_IDS = {
     "base-0.6b": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
     "base-1.7b": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
 }
+
+
+
+def require_supported_qwen_profile_schema(profile) -> int:
+    """Fail closed for malformed or newer Qwen profile schemas."""
+    raw_version = getattr(profile, "qwen_profile_schema_version", 1)
+    if type(raw_version) is not int or raw_version < 1 or raw_version > CURRENT_QWEN_PROFILE_SCHEMA_VERSION:
+        raise RuntimeError(
+            f"Qwen profile '{getattr(profile, 'name', 'unnamed')}' uses profile schema version "
+            f"{raw_version!r}, which this app cannot safely execute "
+            f"(supported: 1–{CURRENT_QWEN_PROFILE_SCHEMA_VERSION}). "
+            "Update Ryu's Audiobook before preview or generation. The saved profile was not modified."
+        )
+    return raw_version
+
+
+def qwen_design_anchor_cache_path(
+    root,
+    *,
+    speaker: str,
+    language: str,
+    instruct: str,
+    seed: object,
+    anchor_text: str,
+    profile_id: str,
+    style: str = "neutral",
+):
+    """Resolve the exact content-addressed neutral VoiceDesign anchor path."""
+    from pathlib import Path
+
+    identity = "|".join(
+        [
+            QWEN_EXPRESSION_BANK_VERSION,
+            str(speaker or "voice"),
+            str(language or "English"),
+            str(instruct or ""),
+            str(seed or ""),
+            str(anchor_text or ""),
+            str(profile_id or ""),
+            str(style or "neutral"),
+        ]
+    )
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20]
+    return Path(root) / "voice_anchors" / f"qwen-design-{style or 'neutral'}-{digest}.wav"
 
 
 def qwen_model_compatibility(profile, model_preference: object = "auto") -> dict[str, object]:
