@@ -1,6 +1,6 @@
 # Stage C4 — Qwen multilingual voice identity and expressive continuity
 
-**Status:** Exact-head hosted regression and real CPU Qwen provider acceptance passed at candidate HEAD `6348eb0bd9f915d76f432ce1d899f023552a5e89`. The Windows artifact checkpoint is the remaining hosted C4 gate. Physical target-PC and accelerator acceptance remain open.
+**Status:** HOSTED REGRESSION, REAL CPU QWEN PROVIDER IDENTITY AND EXACT-HEAD WINDOWS PACKAGE ACCEPTANCE COMPLETE. Build #3414 passed the C1–C4 package gates; Build #3420 is the integrated Stage C artifact baseline. Physical target-PC, GPU accelerator/performance and representative full-novel sign-off are deferred to Stage F.
 
 **Candidate branch:** dragon-studio/candidate-c4-voice-identity-continuity-2026-11-13  
 **Source/test baseline:** Build Windows App #3405, SHA 45a0d5ee66363f3c258e1512e28347e457212027.  
