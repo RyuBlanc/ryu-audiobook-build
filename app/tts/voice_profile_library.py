@@ -7,7 +7,8 @@ compatibility and asset integrity without changing profile settings.
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
+import json
+from pathlib import Path, PurePosixPath
 import re
 from typing import Any
 
@@ -214,6 +215,137 @@ def profile_asset_integrity(profile: VoiceProfile) -> dict[str, Any]:
     }
 
 
+def profile_revision_history(profile: VoiceProfile) -> dict[str, Any]:
+    """Return verified, read-only stored revisions for a Qwen profile."""
+    if str(profile.provider or "").casefold() != "qwen-character" or not profile.qwen_profile_id:
+        return {"current_revision_id": None, "history": [], "history_count": 0}
+
+    from app.core.paths import voices_root
+    from app.tts.qwen_profile_import import _existing_revision_id
+    from app.tts.voice_profile import profile_record
+
+    profile_id = str(profile.qwen_profile_id)
+    current_revision = _existing_revision_id(profile_record(profile))
+    revision_root = voices_root() / "Qwen Profile Revisions" / profile_id
+    if not revision_root.is_dir() or revision_root.is_symlink():
+        return {"current_revision_id": current_revision, "history": [], "history_count": 0}
+
+    rows: list[dict[str, Any]] = []
+    for path in sorted(revision_root.iterdir(), key=lambda item: item.name.casefold()):
+        if path.is_symlink() or not path.is_file():
+            continue
+        if path.suffix.casefold() == ".json":
+            row: dict[str, Any] = {
+                "kind": "Revision snapshot",
+                "file_name": path.name,
+                "revision_id": None,
+                "saved_at": None,
+                "asset_count": 0,
+                "integrity_valid": False,
+                "status": "Unreadable revision snapshot",
+                "source_bundle_sha256": None,
+            }
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                if not isinstance(payload, dict) or str(payload.get("profile_id") or "") != profile_id:
+                    row["status"] = "Profile ID does not match this library entry"
+                else:
+                    revision_id = str(payload.get("revision_id") or "")
+                    row["revision_id"] = revision_id
+                    row["saved_at"] = payload.get("saved_at")
+                    row["source_bundle_sha256"] = payload.get("source_bundle_sha256")
+                    raw_assets = payload.get("assets", [])
+                    valid = bool(re.fullmatch(r"[0-9a-f]{64}", revision_id))
+                    if not isinstance(raw_assets, list):
+                        valid = False
+                        raw_assets = []
+                    checked = 0
+                    root_resolved = revision_root.resolve()
+                    for asset in raw_assets:
+                        if not isinstance(asset, dict):
+                            valid = False
+                            continue
+                        relative = str(asset.get("snapshot_path") or "")
+                        if (
+                            not relative
+                            or "\\" in relative
+                            or relative.startswith("/")
+                            or re.match(r"^[A-Za-z]:", relative)
+                        ):
+                            valid = False
+                            continue
+                        parts = PurePosixPath(relative).parts
+                        if not parts or any(part in {"", ".", ".."} for part in parts):
+                            valid = False
+                            continue
+                        target = revision_root.joinpath(*parts)
+                        try:
+                            if target.is_symlink() or not target.is_file():
+                                valid = False
+                                continue
+                            resolved = target.resolve(strict=True)
+                            resolved.relative_to(root_resolved)
+                            digest = _sha256_file(resolved)
+                            if digest != str(asset.get("sha256") or ""):
+                                valid = False
+                                continue
+                            expected_size = asset.get("size_bytes")
+                            if expected_size is not None and int(expected_size) != resolved.stat().st_size:
+                                valid = False
+                                continue
+                            checked += 1
+                        except (OSError, RuntimeError, ValueError, TypeError):
+                            valid = False
+                    row["asset_count"] = len(raw_assets)
+                    row["verified_asset_count"] = checked
+                    row["integrity_valid"] = valid
+                    row["status"] = "Verified snapshot" if valid else "Missing or corrupt snapshot asset"
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+                pass
+            rows.append(row)
+        elif path.suffix.casefold() == ".ryuvoice":
+            row = {
+                "kind": "Portable backup bundle",
+                "file_name": path.name,
+                "revision_id": None,
+                "saved_at": None,
+                "asset_count": 0,
+                "integrity_valid": False,
+                "status": "Unreadable backup bundle",
+                "source_bundle_sha256": None,
+            }
+            try:
+                from app.tts.qwen_profile_bundle import inspect_qwen_profile_bundle
+                inspection = inspect_qwen_profile_bundle(path)
+                bundle_profiles = inspection.get("profiles", [])
+                if (
+                    inspection.get("integrity_verified") is True
+                    and len(bundle_profiles) == 1
+                    and str(bundle_profiles[0].get("profile_id") or "") == profile_id
+                ):
+                    row["revision_id"] = bundle_profiles[0].get("revision_id")
+                    row["asset_count"] = int(bundle_profiles[0].get("asset_count") or 0)
+                    row["integrity_valid"] = True
+                    row["status"] = "Verified backup bundle"
+                    row["source_bundle_sha256"] = _sha256_file(path)
+                else:
+                    row["status"] = "Backup bundle does not match this profile or failed integrity checks"
+            except (OSError, ValueError, TypeError, RuntimeError):
+                pass
+            rows.append(row)
+
+    rows.sort(key=lambda item: (
+        str(item.get("saved_at") or ""),
+        str(item.get("file_name") or ""),
+    ), reverse=True)
+    return {
+        "current_revision_id": current_revision,
+        "history": rows,
+        "history_count": len(rows),
+        "verified_history_count": sum(1 for item in rows if item.get("integrity_valid") is True),
+    }
+
+
 def qwen_profile_compatibility(profile: VoiceProfile) -> dict[str, Any]:
     """Check the current PC's Qwen model/runtime availability, without changing settings."""
     if str(profile.provider or "").casefold() != "qwen-character":
@@ -310,4 +442,6 @@ def profile_library_record(profile: VoiceProfile, *, inspect_assets: bool = Fals
         row["compatibility"] = qwen_profile_compatibility(profile)
     if inspect_assets:
         row["asset_integrity"] = profile_asset_integrity(profile)
+        if profile.provider == "qwen-character":
+            row["revision_history"] = profile_revision_history(profile)
     return row

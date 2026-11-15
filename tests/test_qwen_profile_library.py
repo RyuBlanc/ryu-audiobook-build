@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -14,6 +15,7 @@ from app.tts.voice_profile_library import (
     profile_library_category,
     profile_library_model_group,
     profile_library_record,
+    profile_revision_history,
     qwen_profile_compatibility,
 )
 
@@ -140,6 +142,82 @@ class VoiceProfileLibraryTaxonomyTests(unittest.TestCase):
         )
         self.assertEqual(result["models"][0]["selected_model_kind"], "design-1.7b")
         self.assertEqual(result["models"][1]["selected_model_kind"], "base-0.6b")
+
+    def test_revision_history_reports_verified_snapshot_and_current_revision(self):
+        with tempfile.TemporaryDirectory() as directory:
+            voices = Path(directory) / "Voices"
+            profile = VoiceProfile(
+                name="Revision history voice",
+                provider="qwen-character",
+                voice_id="Ryan",
+                qwen_mode="custom",
+                model_id="custom-0.6b",
+                qwen_profile_id="d4-revision-history",
+            )
+            revision_dir = voices / "Qwen Profile Revisions" / profile.qwen_profile_id
+            asset_path = revision_dir / "assets" / "previous-reference.wav"
+            asset_bytes = write_wav(asset_path)
+            old_revision = "a" * 64
+            snapshot = {
+                "profile_id": profile.qwen_profile_id,
+                "revision_id": old_revision,
+                "saved_at": "2026-11-14T10:00:00Z",
+                "source_bundle_sha256": "b" * 64,
+                "assets": [{
+                    "snapshot_path": "assets/previous-reference.wav",
+                    "sha256": hashlib.sha256(asset_bytes).hexdigest(),
+                    "size_bytes": len(asset_bytes),
+                    "role": "clone_reference_conditioning",
+                }],
+            }
+            revision_dir.mkdir(parents=True, exist_ok=True)
+            (revision_dir / (old_revision + ".json")).write_text(
+                json.dumps(snapshot, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            with patch("app.core.paths.voices_root", return_value=voices):
+                result = profile_revision_history(profile)
+        self.assertRegex(result["current_revision_id"], r"^[0-9a-f]{64}$")
+        self.assertEqual(result["history_count"], 1)
+        self.assertEqual(result["verified_history_count"], 1)
+        self.assertEqual(result["history"][0]["revision_id"], old_revision)
+        self.assertTrue(result["history"][0]["integrity_valid"])
+        self.assertEqual(result["history"][0]["status"], "Verified snapshot")
+        self.assertNotIn(str(voices), str(result))
+
+    def test_revision_history_marks_missing_or_modified_snapshot_assets_invalid(self):
+        with tempfile.TemporaryDirectory() as directory:
+            voices = Path(directory) / "Voices"
+            profile = VoiceProfile(
+                name="Damaged revision history",
+                provider="qwen-character",
+                voice_id="Ryan",
+                qwen_mode="custom",
+                qwen_profile_id="d4-damaged-revision",
+            )
+            revision_id = "c" * 64
+            revision_dir = voices / "Qwen Profile Revisions" / profile.qwen_profile_id
+            revision_dir.mkdir(parents=True, exist_ok=True)
+            (revision_dir / (revision_id + ".json")).write_text(
+                json.dumps({
+                    "profile_id": profile.qwen_profile_id,
+                    "revision_id": revision_id,
+                    "saved_at": "2026-11-14T11:00:00Z",
+                    "assets": [{
+                        "snapshot_path": "assets/missing.wav",
+                        "sha256": "d" * 64,
+                        "size_bytes": 100,
+                    }],
+                }),
+                encoding="utf-8",
+            )
+            with patch("app.core.paths.voices_root", return_value=voices):
+                result = profile_revision_history(profile)
+        self.assertEqual(result["history_count"], 1)
+        self.assertEqual(result["verified_history_count"], 0)
+        self.assertFalse(result["history"][0]["integrity_valid"])
+        self.assertEqual(result["history"][0]["status"], "Missing or corrupt snapshot asset")
+
 
     def test_non_qwen_provider_does_not_receive_qwen_readiness_claim(self):
         profile = VoiceProfile(name="Edge", provider="edge-tts", voice_id="en-US-AvaNeural")

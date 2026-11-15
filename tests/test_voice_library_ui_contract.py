@@ -64,6 +64,10 @@ class VoiceLibraryUiContractTests(unittest.TestCase):
         self.assertIn("call('voice.bundle.import'", self.adapter)
         self.assertIn("call('voice.bundle.export'", self.adapter)
         self.assertIn("call('voice.delete'", self.adapter)
+        self.assertIn("Revision history", self.adapter)
+        self.assertIn("profile.revision_history", self.adapter)
+        self.assertIn("wasOpenInEditor", self.adapter)
+        self.assertIn("voiceLibraryRefresh", self.adapter)
 
     def test_native_bridge_advertises_every_new_library_command(self):
         commands = (

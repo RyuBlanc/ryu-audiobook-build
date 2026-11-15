@@ -2614,6 +2614,7 @@
       var compatibility = profile.compatibility || {};
       var models = Array.isArray(compatibility.models) ? compatibility.models : [];
       var assets = profile.asset_integrity || {};
+      var history = profile.revision_history || {};
       var modelRows = models.map(function(item) {
         var variants = Object.entries(item.installed || {}).map(function(entry) {
           return '<div class="saved-library-meta-row"><span>' + esc(entry[0]) + '</span><b>' + (entry[1] ? 'Installed' : 'Missing') + '</b></div>';
@@ -2621,6 +2622,21 @@
         return '<article class="saved-library-import-row"><b>' + esc(item.role || 'Model role') + '</b><p>' +
           esc(item.required_model_kind || item.selected_model_kind || 'Compatible variant required') + '</p>' + variants + '</article>';
       }).join('');
+      var revisionRows = Array.isArray(history.history) ? history.history : [];
+      var revisionContent = '<h3 style="font-size:13px;margin:16px 0 7px">Revision history</h3>' +
+        '<div class="saved-library-import-row"><p><b>Current revision</b></p><div class="saved-library-hash">' +
+        esc(history.current_revision_id || 'Current revision could not be fingerprinted because required assets are missing or unreadable.') +
+        '</div><p>' + Number(history.history_count || 0) + ' retained historical revision(s) · ' +
+        Number(history.verified_history_count || 0) + ' verified</p>' +
+        (revisionRows.length ? revisionRows.map(function(item) {
+          return '<article class="saved-library-import-row"><div class="saved-library-meta-row"><b>' +
+            esc(item.kind || 'Stored revision') + '</b><span>' + esc(item.status || 'Not verified') + '</span></div>' +
+            '<p>' + esc(item.saved_at || item.file_name || 'Stored historical revision') + '</p>' +
+            '<div class="saved-library-hash">' + esc(item.revision_id || 'Revision ID not recorded') + '</div>' +
+            '<p>' + Number(item.asset_count || 0) + ' asset(s)' +
+            (item.source_bundle_sha256 ? ' · source bundle SHA-256 ' + esc(item.source_bundle_sha256) : '') + '</p></article>';
+        }).join('') : '<p>No replaced/imported revisions are currently retained for this profile.</p>') +
+        '</div>';
       var body = '<p class="saved-library-modal-copy">This is the saved record read from the existing profile catalogue. Inspection is read-only; the destination model preference and active narrator are not changed.</p>' +
         '<div class="saved-library-detail-grid"><div><small>Profile</small><b>' + esc(profile.name) + '</b></div>' +
         '<div><small>Category</small><b>' + esc(profile.profile_kind || 'Saved profile') + '</b></div>' +
@@ -2642,7 +2658,8 @@
         '</p><p>Destination model preference: ' + esc(compatibility.model_preference || 'Not applicable') +
         ' · Backend: ' + esc(compatibility.backend_preference || 'Provider-specific') + '</p>' +
         (modelRows || '<p>Provider-specific readiness is shown in the provider settings.</p>') + '</div>' +
-        '<h3 style="font-size:13px;margin:16px 0 7px">Audio asset integrity</h3>' + renderVoiceLibraryAssetDetails(assets);
+        '<h3 style="font-size:13px;margin:16px 0 7px">Audio asset integrity</h3>' + renderVoiceLibraryAssetDetails(assets) +
+        revisionContent;
       var actions = '<button type="button" class="btn secondary" data-library-dialog-close>Close</button>' +
         '<button type="button" class="btn" data-library-detail-load="' + esc(name) + '">Load into Voice Profile</button>';
       var overlay = showVoiceLibraryDialog('Profile details',body,actions);
@@ -2781,6 +2798,17 @@
     try {
       await call('voice.delete',{profile_name:name});
       voiceLibrarySelectedProfiles.delete(name);
+      var wasOpenInEditor = String(profileEditOriginalName || '').toLowerCase() === name.toLowerCase()
+        || String(selectedVoice || '').toLowerCase() === name.toLowerCase();
+      if (wasOpenInEditor) {
+        invalidateVoicePreview();
+        if ($('profileName')) $('profileName').value = '';
+        selectedVoice = null;
+        selectedVoiceId = null;
+        selectedVoiceProvider = null;
+        profileEditOriginalName = '';
+        updateVoiceSummary(null,{saved:false,previewReady:false,assignment:''});
+      }
       await refreshVoices();
       message('Deleted saved voice profile: ' + name);
     } catch (error) { message(error && error.message || String(error),true); }

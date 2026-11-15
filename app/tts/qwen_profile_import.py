@@ -1192,6 +1192,17 @@ def import_qwen_profiles_bundle(
             profile_plan = plan_by_id[profile_id]
             resolution = _resolution_for(profile_id, resolutions)
             action, new_name = _decide(profile_plan, resolution)
+            if action == "skip":
+                # A profile the user explicitly skips must not require an
+                # acknowledgement for missing assets it will never install.
+                skipped_ids.append(profile_id)
+                compatibility_results.append({
+                    "profile_id": profile_id,
+                    **profile_plan["compatibility"],
+                    "warnings": [],
+                    "skipped": True,
+                })
+                continue
             profile_warnings = _single_profile_warnings(
                 profile_plan, allow_missing_voicedesign_anchor
             )
@@ -1200,10 +1211,8 @@ def import_qwen_profiles_bundle(
                 "profile_id": profile_id,
                 **profile_plan["compatibility"],
                 "warnings": profile_warnings,
+                "skipped": False,
             })
-            if action == "skip":
-                skipped_ids.append(profile_id)
-                continue
             if action == "rename":
                 if not new_name or len(new_name) > 160:
                     raise QwenProfileImportConflict(

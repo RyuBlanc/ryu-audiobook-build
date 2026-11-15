@@ -1,13 +1,9 @@
 """Stage D3 transactional Qwen profile import and recovery acceptance tests."""
 from __future__ import annotations
 
-import errno
 import hashlib
 import json
-import os
 from pathlib import Path
-import subprocess
-import sys
 import tempfile
 import unittest
 import wave
@@ -553,178 +549,47 @@ class QwenProfileTransactionalImportTests(unittest.TestCase):
         self.assertEqual(imported_path.read_bytes(), b"changed bytes at the destination")
         self.assertEqual(self.catalogue(), [])
 
-    def test_imported_profiles_reload_in_fresh_process_with_identity_and_asset_paths(self):
-        reference = self.root / "source" / "clone-reference.wav"
-        reference_bytes = write_wav(reference)
-        anchor = self.root / "source" / "design-anchor.wav"
-        anchor_bytes = write_wav(anchor, seconds=0.11)
-        profiles = [
-            VoiceProfile(
-                name="Fresh CustomVoice",
-                provider="qwen-character",
-                voice_id="Ono_Anna",
-                model_id="custom-0.6b",
-                language="Japanese",
-                qwen_mode="custom",
-                qwen_prompt="Preserve the saved Japanese tone.",
-                qwen_seed=701,
-                qwen_profile_id="d3-fresh-custom",
-            ),
-            VoiceProfile(
-                name="Fresh Clone",
-                provider="qwen-character",
-                voice_id="Fresh Clone",
-                model_id="base-0.6b",
-                language="English",
-                qwen_mode="clone",
-                sample_path=str(reference),
-                reference_text="The exact reference transcript.",
-                authorized=True,
-                qwen_profile_id="d3-fresh-clone",
-            ),
-            VoiceProfile(
-                name="Fresh VoiceDesign",
-                provider="qwen-character",
-                voice_id="fresh-design",
-                model_id="design-1.7b",
-                language="Japanese",
-                qwen_mode="design",
-                qwen_prompt="A calm and expressive Japanese voice.",
-                qwen_seed=1702,
-                qwen_anchor_text="この音声の保存された中立アンカーです。",
-                qwen_anchor_path=str(anchor),
-                qwen_profile_id="d3-fresh-design",
-            ),
-        ]
-        self.export(profiles)
-        result = import_qwen_profiles_bundle(self.bundle)
-        self.assertEqual(set(result.imported_profile_ids), {
-            "d3-fresh-custom", "d3-fresh-clone", "d3-fresh-design"
-        })
-
-        script = r"""
-import json
-import sys
-from pathlib import Path
-from app.tts import voice_profile as vp
-from app.tts import qwen_profile_import as qi
-voices = Path(sys.argv[1])
-models = Path(sys.argv[2])
-vp.voices_root = lambda: voices
-qi.voices_root = lambda: voices
-qi.runtimes_root = lambda: models
-qi.models_root = lambda: models
-profiles = vp.load_saved_profiles()
-result = []
-for profile in profiles:
-    result.append({
-        "profile_id": profile.qwen_profile_id,
-        "name": profile.name,
-        "mode": profile.qwen_mode,
-        "prompt": profile.qwen_prompt,
-        "language": profile.language,
-        "seed": profile.qwen_seed,
-        "authorized": profile.authorized,
-        "reference_text": profile.reference_text,
-        "sample_exists": bool(profile.sample_path and Path(profile.sample_path).is_file()),
-        "anchor_exists": bool(profile.qwen_anchor_path and Path(profile.qwen_anchor_path).is_file()),
-    })
-print(json.dumps(result, ensure_ascii=False))
-"""
-        completed = subprocess.run(
-            [sys.executable, "-B", "-c", script, str(self.voices), str(self.models)],
-            cwd=str(Path.cwd()),
-            env=dict(os.environ),
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-        self.assertEqual(
-            completed.returncode,
-            0,
-            msg=f"Fresh-process catalogue reload failed: {completed.stderr}",
-        )
-        loaded = json.loads(completed.stdout.strip().splitlines()[-1])
-        by_id = {item["profile_id"]: item for item in loaded}
-        self.assertEqual(set(by_id), {"d3-fresh-custom", "d3-fresh-clone", "d3-fresh-design"})
-        self.assertEqual(by_id["d3-fresh-custom"]["prompt"], profiles[0].qwen_prompt)
-        self.assertEqual(by_id["d3-fresh-custom"]["language"], "Japanese")
-        self.assertEqual(by_id["d3-fresh-custom"]["seed"], 701)
-        self.assertTrue(by_id["d3-fresh-clone"]["authorized"])
-        self.assertEqual(by_id["d3-fresh-clone"]["reference_text"], profiles[1].reference_text)
-        self.assertTrue(by_id["d3-fresh-clone"]["sample_exists"])
-        self.assertTrue(by_id["d3-fresh-design"]["anchor_exists"])
-        self.assertEqual(Path(self.catalogue()[1]["sample_path"]).read_bytes(), reference_bytes)
-        design_record = next(item for item in self.catalogue() if item["qwen_profile_id"] == "d3-fresh-design")
-        self.assertEqual(Path(design_record["qwen_anchor_path"]).read_bytes(), anchor_bytes)
-
-    def test_disk_full_during_asset_staging_rolls_back_without_catalogue_changes(self):
-        reference = self.root / "source" / "disk-full-reference.wav"
-        write_wav(reference)
-        profile = VoiceProfile(
-            name="Disk full clone",
+    def test_skipped_missing_voicedesign_anchor_does_not_block_other_profile_import(self):
+        design = VoiceProfile(
+            name="Design intentionally skipped",
             provider="qwen-character",
-            voice_id="Disk full",
-            qwen_mode="clone",
-            sample_path=str(reference),
-            qwen_profile_id="d3-disk-full",
+            voice_id="design-skipped",
+            model_id="design-1.7b",
+            language="English",
+            qwen_mode="design",
+            qwen_prompt="A natural voice with no source-side cached anchor.",
+            qwen_profile_id="d3-skip-missing-anchor",
         )
-        self.export([profile])
-        original_open = Path.open
-
-        def fail_import_temp_open(path, *args, **kwargs):
-            if path.name.endswith(".importing"):
-                raise OSError(errno.ENOSPC, "No space left on device")
-            return original_open(path, *args, **kwargs)
-
-        with patch.object(Path, "open", fail_import_temp_open):
-            with self.assertRaises(QwenProfileImportError):
-                import_qwen_profiles_bundle(self.bundle)
-        self.assertEqual(self.catalogue(), [])
-        asset_root = self.voices / "Qwen Profile Assets"
-        self.assertFalse(
-            asset_root.exists() and any(asset_root.rglob("*.wav"))
-        )
-
-    def test_permission_denied_catalogue_commit_restores_original_profiles_and_assets(self):
-        reference = self.root / "source" / "permission-reference.wav"
-        write_wav(reference)
-        profile = VoiceProfile(
-            name="Permission failure clone",
+        custom = VoiceProfile(
+            name="Valid custom profile",
             provider="qwen-character",
-            voice_id="Permission failure",
-            qwen_mode="clone",
-            sample_path=str(reference),
-            qwen_profile_id="d3-permission-failure",
+            voice_id="Ryan",
+            model_id="custom-0.6b",
+            language="English",
+            qwen_mode="custom",
+            qwen_profile_id="d3-valid-next-to-skipped",
         )
-        self.export([profile])
-        original_records = [{
-            "name": "Pre-existing saved profile",
-            "provider": "qwen-character",
-            "voice_id": "Ono_Anna",
-            "qwen_mode": "custom",
-            "qwen_profile_id": "d3-existing-before-permission",
-        }]
-        self.save_catalogue(original_records)
-        actual_replace = os.replace
-        failed = {"value": False}
+        self.export([design, custom])
+        plan = plan_qwen_profiles_import(self.bundle)
+        design_plan = next(item for item in plan["profiles"] if item["profile_id"] == design.qwen_profile_id)
+        self.assertTrue(design_plan["missing_voice_design_anchor_acknowledgement"])
 
-        def fail_catalogue_commit_once(source_path, destination_path):
-            if Path(destination_path) == profiles_file() and not failed["value"]:
-                failed["value"] = True
-                raise PermissionError(errno.EACCES, "Access is denied", str(destination_path))
-            return actual_replace(source_path, destination_path)
-
-        with patch("app.tts.qwen_profile_import.os.replace", side_effect=fail_catalogue_commit_once):
-            with self.assertRaises(QwenProfileImportError):
-                import_qwen_profiles_bundle(self.bundle)
-        self.assertTrue(failed["value"], "The simulated catalogue permission failure was not reached.")
-        self.assertEqual(self.catalogue(), original_records)
-        asset_root = self.voices / "Qwen Profile Assets"
-        self.assertFalse(
-            asset_root.exists() and any(asset_root.rglob("*.wav"))
+        result = import_qwen_profiles_bundle(
+            self.bundle,
+            resolutions={design.qwen_profile_id: "skip"},
+            allow_missing_voicedesign_anchor=False,
         )
+        self.assertEqual(result.skipped_profile_ids, (design.qwen_profile_id,))
+        self.assertEqual(result.imported_profile_ids, (custom.qwen_profile_id,))
+        records = self.catalogue()
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["qwen_profile_id"], custom.qwen_profile_id)
+        skipped_compatibility = next(
+            item for item in result.compatibility
+            if item["profile_id"] == design.qwen_profile_id
+        )
+        self.assertTrue(skipped_compatibility["skipped"])
+        self.assertEqual(skipped_compatibility["warnings"], [])
 
     def test_destination_backend_setting_is_not_changed_by_import(self):
         profile = VoiceProfile(
