@@ -4024,6 +4024,17 @@ class PremiumV2Bridge(QObject):
         if include_sound_design:
             state["_include_sound_design_preview"] = True
         production_preview = bool(payload.get("_production_preview"))
+        if route_character_cast and project is not None:
+            # Resolve all saved assignments against the same strict, series-aware
+            # production cast before the worker starts. This fails closed on stale
+            # profile references and preserves the Unassigned Character fallback.
+            state["_preview_cast_routing"] = self._preview_cast_routing_snapshot(
+                project, state, require_unassigned=production_preview
+            )
+            state["_preview_dialogue_assignments"] = (
+                [dict(row) for row in (getattr(selected_chapter, "dialogue_assignments", []) or []) if isinstance(row, dict)]
+                if selected_chapter is not None else []
+            )
         job_type = "production-preview" if production_preview else ("sound-design-preview" if include_sound_design else "voice-preview")
         job_title = ("Production preview · " if production_preview else "Sound Design mix preview · " if include_sound_design else "Preview · ") + profile.name
         job_id = self._new_job(job_type, job_title,
@@ -4380,6 +4391,90 @@ class PremiumV2Bridge(QObject):
                     pass
 
 
+    def _preview_cast_routing_snapshot(
+        self,
+        project,
+        state: dict[str, Any],
+        *,
+        require_unassigned: bool = False,
+    ) -> dict[str, Any]:
+        """Snapshot the saved, series-scoped cast routing used by preview workers.
+
+        This is intentionally resolved before starting the worker thread. The
+        preview must not re-read whichever project happens to become active
+        after the user switches projects, and it must not rebuild a weaker
+        name-only map than full audiobook generation.
+        """
+        saved_profiles = list(load_profiles() or [])
+        available_profiles = {
+            str(getattr(item, "name", "") or "").strip().casefold(): item
+            for item in saved_profiles
+            if str(getattr(item, "name", "") or "").strip()
+        }
+        series = self._project_series_name(project, state)
+        character_rows, _issues = self._effective_generation_character_rows(
+            state if isinstance(state, dict) else {},
+            series,
+            available_profiles=saved_profiles,
+            strict=True,
+        )
+
+        cast_profiles: dict[str, Any] = {}
+        cast_assignments: dict[str, str] = {}
+        identity_assignments: dict[str, str] = {}
+        for character in character_rows:
+            if not isinstance(character, dict):
+                continue
+            assigned_name = str(character.get("voice_profile") or "").strip()
+            if not assigned_name:
+                continue
+            assigned_profile = available_profiles.get(assigned_name.casefold())
+            if assigned_profile is None:
+                raise ValueError(
+                    f"Character '{character.get('name', 'Unknown')}' uses voice profile "
+                    f"'{assigned_name}', which is no longer available. Reassign its voice in Character Studio."
+                )
+            cast_profiles[assigned_profile.name] = assigned_profile
+            character_series = self._character_series_for_voice_assignment(
+                character, series
+            )
+            character_names = [str(character.get("name") or character.get("primary_name") or "").strip()]
+            aliases = character.get("aliases") or []
+            if isinstance(aliases, (list, tuple)):
+                character_names.extend(str(alias).strip() for alias in aliases)
+            for character_name in character_names:
+                if not character_name:
+                    continue
+                cast_assignments[character_name] = assigned_profile.name
+                if character_series:
+                    identity_assignments[
+                        character_identity_key(character_name, character_series)
+                    ] = assigned_profile.name
+
+        unassigned_default = self._unassigned_character_default_read()
+        unassigned_name = str(unassigned_default.get("profile_name") or "").strip()
+        unassigned_profile = available_profiles.get(unassigned_name.casefold()) if unassigned_name else None
+        unassigned_available = bool(
+            unassigned_name
+            and unassigned_default.get("profile_available")
+            and unassigned_profile is not None
+        )
+        if require_unassigned and not unassigned_available:
+            raise ValueError(
+                "The app-wide 'Unassigned Character' voice profile is required for character-based preview. "
+                "Choose and save it in Voice Studio, then retry the preview."
+            )
+        if unassigned_available and unassigned_profile is not None:
+            cast_profiles[unassigned_profile.name] = unassigned_profile
+
+        return {
+            "cast_profiles": cast_profiles,
+            "cast_assignments": cast_assignments,
+            "identity_assignments": identity_assignments,
+            "unassigned_voice": unassigned_profile.name if unassigned_available and unassigned_profile else "",
+            "series": series,
+        }
+
     def _preview_worker(
         self, job_id: str, profile, text_value: str, seconds: int,
         state: dict[str, Any], cancel_event=None, route_character_cast: bool = True,
@@ -4402,34 +4497,14 @@ class PremiumV2Bridge(QObject):
             if cancel_event is not None and cancel_event.is_set():
                 raise PreviewCancelledError("Preview cancelled by user.")
             # Cast routing is explicitly disabled for narrator-only Production
-            # previews; persisted assignments must not leak into that mode.
-            cast_assignments: dict[str, str] = {}
-            cast_profiles: dict[str, Any] = {}
-            # Character Studio's selected-line audition must use the draft-selected
-            # profile directly. Production and ordinary Voice Studio previews keep
-            # the saved cast router unless this explicit option is false.
-            if route_character_cast:
-                available_profiles = {p.name.casefold(): p for p in load_profiles()}
-                for character in state.get("characters") or []:
-                    if not isinstance(character, dict):
-                        continue
-                    assigned_name = str(character.get("voice_profile") or "").strip()
-                    if not assigned_name:
-                        continue
-                    assigned_profile = available_profiles.get(assigned_name.casefold())
-                    if assigned_profile is None:
-                        raise ValueError(
-                            f"Character '{character.get('name', 'Unknown')}' uses voice profile "
-                            f"'{assigned_name}', which is no longer available. Reassign its voice in Character Studio."
-                        )
-                    cast_profiles[assigned_profile.name] = assigned_profile
-                    character_names = [str(character.get("name") or "").strip()]
-                    aliases = character.get("aliases") or []
-                    if isinstance(aliases, list):
-                        character_names.extend(str(alias).strip() for alias in aliases)
-                    for character_name in character_names:
-                        if character_name:
-                            cast_assignments[character_name] = assigned_profile.name
+            # previews and Character Studio's selected-line audition. Otherwise
+            # use the pre-resolved, series-aware snapshot shared with production.
+            routing = state.get("_preview_cast_routing") if route_character_cast else {}
+            routing = routing if isinstance(routing, dict) else {}
+            cast_assignments = dict(routing.get("cast_assignments") or {})
+            cast_profiles = dict(routing.get("cast_profiles") or {})
+            identity_assignments = dict(routing.get("identity_assignments") or {})
+            unassigned_voice = str(routing.get("unassigned_voice") or "")
 
             cache_signature = json.dumps({
                 "profile": getattr(profile, "__dict__", str(profile)),
@@ -4439,6 +4514,8 @@ class PremiumV2Bridge(QObject):
                     for name, item in sorted(cast_profiles.items(), key=lambda pair: pair[0].casefold())
                 },
                 "cast_assignments": dict(sorted(cast_assignments.items(), key=lambda pair: pair[0].casefold())),
+                "identity_assignments": dict(sorted(identity_assignments.items(), key=lambda pair: pair[0].casefold())),
+                "unassigned_voice": unassigned_voice,
                 "narrating_character": str(state.get("narrating_character") or ""),
                 "backend": str(state.get("backend") or "automatic"),
             }, sort_keys=True, default=str, ensure_ascii=False)
@@ -4464,6 +4541,9 @@ class PremiumV2Bridge(QObject):
                         provider, voice, cast_profiles, cast_assignments,
                         narrating_character=str(state.get("narrating_character") or ""),
                         backend_override=str(state.get("backend") or "automatic"),
+                        narrator_profile=profile,
+                        identity_assignments=identity_assignments,
+                        unassigned_voice=unassigned_voice or None,
                     )
             preview_status_lock = threading.Lock()
             preview_status = {
@@ -4602,6 +4682,7 @@ class PremiumV2Bridge(QObject):
             heartbeat_thread.start()
             result = build_voice_preview(
                 text_value, provider, voice, output,
+                dialogue_assignments=state.get("_preview_dialogue_assignments") or [],
                 pronunciation_dictionary=(
                     [] if state.get("_bypass_pronunciation_dictionary")
                     else _effective_pronunciation_dictionary(state)

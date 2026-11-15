@@ -70,6 +70,61 @@ class ProductionPreviewSavedNarratorTests(unittest.TestCase):
         self.assertNotIn("voice_id", captured)
 
 
+    def test_preview_cast_snapshot_keeps_same_name_series_profiles_and_unassigned_fallback(self):
+        from app.core.character_identity import character_identity_key
+
+        bridge = premium_v2_host.PremiumV2Bridge.__new__(premium_v2_host.PremiumV2Bridge)
+        bridge._project_series_name = lambda _project, _state: "Series One"
+        bridge._unassigned_character_default_read = lambda: {
+            "profile_name": "Unassigned Character",
+            "profile_available": True,
+        }
+        profiles = [
+            SimpleNamespace(name="Mira One", voice_id="mira-one", provider="piper"),
+            SimpleNamespace(name="Mira Two", voice_id="mira-two", provider="qwen-character"),
+            SimpleNamespace(name="Unassigned Character", voice_id="unassigned", provider="piper"),
+        ]
+        state = {
+            "characters": [
+                {"name": "Mira", "series": "Series One"},
+                {"name": "Mira", "series": "Series Two"},
+            ],
+            "voice_cast_identity_assignments": {
+                character_identity_key("Mira", "Series One"): "Mira One",
+                character_identity_key("Mira", "Series Two"): "Mira Two",
+            },
+        }
+        project = SimpleNamespace(folder=Path("project-preview"))
+        with patch.object(premium_v2_host, "load_profiles", return_value=profiles):
+            routing = premium_v2_host.PremiumV2Bridge._preview_cast_routing_snapshot(
+                bridge, project, state, require_unassigned=True
+            )
+
+        self.assertEqual(
+            routing["identity_assignments"],
+            {
+                character_identity_key("Mira", "Series One"): "Mira One",
+                character_identity_key("Mira", "Series Two"): "Mira Two",
+            },
+        )
+        self.assertIn("Mira One", routing["cast_profiles"])
+        self.assertIn("Mira Two", routing["cast_profiles"])
+        self.assertIn("Unassigned Character", routing["cast_profiles"])
+        self.assertEqual(routing["unassigned_voice"], "Unassigned Character")
+
+    def test_preview_cast_snapshot_fails_closed_when_required_unassigned_profile_is_missing(self):
+        bridge = premium_v2_host.PremiumV2Bridge.__new__(premium_v2_host.PremiumV2Bridge)
+        bridge._project_series_name = lambda _project, _state: "Series One"
+        bridge._unassigned_character_default_read = lambda: {
+            "profile_name": "Unassigned Character",
+            "profile_available": False,
+        }
+        with patch.object(premium_v2_host, "load_profiles", return_value=[]):
+            with self.assertRaisesRegex(ValueError, "Unassigned Character.*required"):
+                premium_v2_host.PremiumV2Bridge._preview_cast_routing_snapshot(
+                    bridge, SimpleNamespace(folder=Path("project-preview")), {}, require_unassigned=True
+                )
+
     def test_production_preview_rejects_stale_chapter_id_before_synthesis(self):
         chapter = SimpleNamespace(
             number=2, title="Replacement Chapter", text="Replacement text.",
@@ -348,6 +403,16 @@ class ProductionPreviewParitySourceContracts(unittest.TestCase):
         self.assertIn("_run([", worker)
         self.assertIn('"-c:a", "pcm_s16le"', worker)
         self.assertIn("abs(float(playback_duration) - float(duration)) > 1.5", worker)
+
+    def test_preview_worker_uses_same_series_scoped_cast_and_exact_saved_chapter_assignments(self):
+        worker_start = self.host_source.index("def _preview_worker(")
+        worker_end = self.host_source.index("def _character_list(", worker_start)
+        worker = self.host_source[worker_start:worker_end]
+        self.assertIn('routing = state.get("_preview_cast_routing") if route_character_cast else {}', worker)
+        self.assertIn("identity_assignments=identity_assignments", worker)
+        self.assertIn("unassigned_voice=unassigned_voice or None", worker)
+        self.assertIn('dialogue_assignments=state.get("_preview_dialogue_assignments") or []', worker)
+        self.assertIn("self._preview_cast_routing_snapshot(", self.host_source)
 
     def test_production_preview_download_filename_uses_project_and_chapter_identity(self):
         start = self.adapter_source.index("const downloadProductionPreview=async()=>{")
