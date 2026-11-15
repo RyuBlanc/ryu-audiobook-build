@@ -2,10 +2,10 @@
 
 **Stage:** D5 — exact-head frozen-app integration and artifact acceptance  
 **Repository:** `RyuBlanc/ryu-audiobook-build`  
-**Implementation branch:** `dragon-studio/stage-d4-voice-library-interface-2026-11-15` for the accepted packaged round-trip; follow-on hardening is tracked on `dragon-studio/stage-d5-voice-library-packaged-acceptance-2026-11-15`  
-**Accepted packaged SHA:** `a2f7efb2f4bc4a58cc6a2fe56215e45e4d9c1c3e`  
-**Accepted package:** Build Windows App #3452 / [run 43691113837](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43691113837)  
-**Status:** Packaged D5 export/preflight/import/asset-hash/fresh-process round-trip PASSED on #3452. Final import-path confinement is a follow-on hardening change and awaits its own exact-head package regression.
+**Implementation history:** the first shared-harness round-trip was accepted on the D4 branch; final import-path hardening and exact-head package acceptance were completed on `dragon-studio/stage-d5-voice-library-packaged-acceptance-2026-11-15`, then carried forward to the D6 branch.
+**Final D5 exact-head SHA:** `fbed26a0beadd5ebe845173f8e2e059668248d8c`
+**Final D5 package:** Build Windows App #3457 / [run 43696836352](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43696836352)
+**Status:** COMPLETE — packaged D5 three-profile round-trip, fresh-process reload and final import-path confinement passed on the exact-head #3457 Windows package.
 
 ## 1. What the packaged acceptance exercises
 
@@ -41,7 +41,7 @@ Build Windows App #3450 / [run 43690410288](https://github.com/RyuBlanc/ryu-audi
 
 The 3/3 D5 tests verify that the frozen-app fixture is isolated/restored, the browser acceptance invokes the real export/preflight/import/fresh-process commands, and the native path override is confined to the opt-in temporary root while production file dialogs remain intact.
 
-## 4. Exact-head Windows package gate — ACCEPTED
+## 4. First packaged round-trip checkpoint — ACCEPTED ON #3452
 
 Build Windows App **#3452** / [run 43691113837](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43691113837), exact SHA **a2f7efb2f4bc4a58cc6a2fe56215e45e4d9c1c3e**:
 
@@ -55,12 +55,52 @@ Build Windows App **#3452** / [run 43691113837](https://github.com/RyuBlanc/ryu-
 
 This accepts the hosted D5 data round-trip. It does not replace D6 physical two-PC transfer/audition acceptance.
 
-## 5. Follow-on import-path hardening — IN PROGRESS
+## 5. Follow-on import-path hardening — ACCEPTED ON #3457
 
 Source review found that export and import preflight used the opt-in confined acceptance-path resolver, but the final voice.bundle.import commit handler passed bundle_path directly to the transactional importer. The D5 continuation centralizes path resolution in app/ui/voice_library_acceptance.py, applies it to the final commit operation as well, and adds 10 functional traversal/symlink/junction/path-type tests. The accepted D4 packaged acceptance files remain the base; no duplicate packaged runner is introduced.
 
-The hardening checkpoint must pass the focused D3/D4/D5 contracts, the 10 path-security tests, the full regression suite, and the exact-head frozen Windows package before this follow-on item is closed.
+The final hardening checkpoint passed the focused D3/D4/D5 contracts, all 10 path-security tests, the full regression suite, and the exact-head frozen Windows package on #3457.
 
 ## 5. D6 is separate
 
 D5 verifies the application-managed data path and restart behaviour on one hosted Windows package. It does not prove two physical PCs have completed a real transfer or that an actual compatible Qwen model reproduces the voice acoustically. D6 remains a real user-device transfer/audition acceptance item and is deferred until the engineering stages are complete.
+
+
+## 6. Final D5 exact-head Windows artifact acceptance — COMPLETE
+
+Build Windows App **#3457** / [run 43696836352](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43696836352), exact SHA **`fbed26a0beadd5ebe845173f8e2e059668248d8c`**:
+
+| Gate | Result |
+|---|---:|
+| D3 transactional import/recovery | 21/21 |
+| D4 Voice Library UI/library | 22/22 |
+| D5 packaged acceptance contract | 3/3 |
+| D5 path-security regression | 10/10 |
+| Full regression | **1,681/1,681** |
+| `tests` workflow job | Passed |
+| `build` workflow job | Passed |
+
+The frozen-app log recorded:
+
+- Three stable profile IDs: `stage-d5-custom-084469617e00`, `stage-d5-design-084469617e00` and `stage-d5-clone-084469617e00`.
+- Profile types Preset/CustomVoice, Designed/VoiceDesign and Cloned/Clone.
+- Successful export, preflight and transactional import with the same three IDs.
+- Bundle SHA-256: `9d69880a612182b2d0975c89832932097bdc97248d67b4aa9f5b5de3340a5c2e`.
+- Two byte-verified audio assets: `3def3ca0f1b5c8848457c6aac08486c5e143c0f8f9f90773e840f7d267b5d478` and `3c645d884345694df222d7ef7b0144b71e7ba05d306b8bd2eba343f1a5a6a6d2`.
+- Fresh frozen-app process reload of all three profiles and both verified assets.
+
+The 10 path-security tests cover disabled acceptance mode, missing path rejection, relative and absolute in-root destinations, relative traversal, absolute out-of-root paths, import file existence/type, direct symlink, symlinked parent and invalid acceptance root. The final import-commit handler applies the same confined path resolution as export and preflight; outside the opt-in test environment the normal native file dialogs remain unchanged.
+
+### Build #3457 artifacts
+
+| Artifact | ID | Size (bytes) | GitHub artifact ZIP digest |
+|---|---:|---:|---|
+| Installer | `14155946288` | 847,513,902 | `sha256:3d3b9eb55fbfcbb92971b15f5674c8c9081c25c6e08373c810b09aed95378b83` |
+| Portable | `14155203714` | 1,191,009,995 | `sha256:7a31d8d10bed4c4fb2b297777399e467d1acdeb6417fc29c4b85ba2cb9facc6e` |
+| Release SHA-256 manifest | `14156115594` | 3,049 | `sha256:5723db8431ec0ee6c8345310f51432519450fd8b1e54c6e6da95d372f2475233` |
+| Real multi-chapter M4B | `14155232491` | 9,049,610 | `sha256:38fa2ee2d98886bc75a21638372e30573117fdc0be54b2747608f4d07461ac12` |
+| Stage 7 Piper benchmark | `14154984256` | 801 | `sha256:0e280b8f523672deac9506a9631624b7b71688f306e6c3e678ea933811cd8199` |
+
+The values above are GitHub Actions artifact ZIP digests and sizes, not the hashes of the installer/portable files inside those archives. The application/installer file hashes are in the release SHA-256 manifest. GitHub reported expiry on **15 December 2026**.
+
+D5 closes hosted one-machine packaged import/export and import-path security acceptance. It does **not** replace D6 physical two-PC transfer/audition acceptance.

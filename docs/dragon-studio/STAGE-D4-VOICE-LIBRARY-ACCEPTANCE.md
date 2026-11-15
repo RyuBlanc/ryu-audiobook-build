@@ -4,9 +4,9 @@
 **Repository:** `RyuBlanc/ryu-audiobook-build`  
 **Implementation branch:** `dragon-studio/stage-d4-voice-library-interface-2026-11-15`  
 **Accepted D3 baseline:** `946049393836d9f2628f1e1c6bd26312b0111197`  
-**Latest D4/D5 source-test head:** `bf9a91bbba15533b52d2a01313b68d9135f4a921`  
-**Latest hosted test:** Build Windows App #3450 / [run 43690410288](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43690410288)  
-**Status:** D4 implementation and hosted tests passed; exact-head Windows artifact checkpoint pending.
+**Latest exact-head D4 package evidence:** `fbed26a0beadd5ebe845173f8e2e059668248d8c`
+**Latest hosted package:** Build Windows App #3457 / [run 43696836352](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43696836352)
+**Status:** COMPLETE — D4 UI and native actions passed the exact-head Build #3457 Windows package on `fbed26a0beadd5ebe845173f8e2e059668248d8c`.
 
 ## 1. Delivered interface and integration
 
@@ -45,14 +45,10 @@ The Windows package test needs to call the same native export and import-preflig
 
 The #3448–#3450 commits were source/test checkpoints. Their Windows build jobs were skipped because the commits did not request an artifact checkpoint. No D4 installer/portable artifact is claimed from those runs.
 
-## 4. Remaining D4 acceptance
+## 4. Final D4 hosted package acceptance — COMPLETE
 
-The next `[artifact-checkpoint]` commit must run the exact-head Windows package against the current Voice Library source and must pass:
+Build Windows App **#3457** / [run 43696836352](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43696836352), exact head `fbed26a0beadd5ebe845173f8e2e059668248d8c`, included the D4 production UI and native actions in the exact-head frozen Windows package. The D4 focused suite passed **22/22** and the integrated packaged Sound Design/Voice Library acceptance passed. The full regression was **1,681/1,681**; both workflow jobs passed.
 
-- Focused D1/D2, D3, D4 and D5 tests plus cumulative regression.
-- Frozen app build and bundled Qwen worker/hash/launch checks.
-- Existing packaged app Sound Design, library, M4B, installer, HTML installer, install/launch/upgrade/uninstall and Defender gates.
-- D5 frozen-app export/preflight/import round-trip with all three Qwen profile types and fresh-process reload.
-- Installer/portable artifacts, release SHA manifest and artifact hashes on that exact source head.
+This closes D4 hosted acceptance. Actual target-PC visual inspection, responsiveness/DPI/mixed-monitor checks and physical interaction checks remain part of the wider final hardware acceptance register; this hosted result does not claim those device-specific checks.
 
-Physical target-PC checks, including actual UI inspection, are retained for final user acceptance and are not replaced by this hosted package gate.
+The D5 follow-on import-path confinement is tracked and accepted separately in [STAGE-D5-PACKAGED-VOICE-LIBRARY-ACCEPTANCE.md](STAGE-D5-PACKAGED-VOICE-LIBRARY-ACCEPTANCE.md).
