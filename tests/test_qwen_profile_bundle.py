@@ -339,6 +339,16 @@ class QwenProfileBundleExportTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
             inspect_qwen_profile_bundle(corrupted)
 
+    def test_standalone_qwen_worker_schema_helper_is_physically_bundled(self):
+        build_script = (Path(__file__).resolve().parents[1] / "build.py").read_text(encoding="utf-8")
+        self.assertIn("qwen_profile_schema.py", build_script)
+        self.assertIn("--add-data", build_script)
+        self.assertIn("app/tts", build_script)
+        worker_source = (
+            Path(__file__).resolve().parents[1] / "app" / "tts" / "qwen_character_worker.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("from app.tts.qwen_profile_schema import", worker_source)
+
     def test_archive_path_traversal_is_rejected(self):
         malicious = self.root / "malicious.ryuvoice"
         with zipfile.ZipFile(malicious, "w") as archive:
