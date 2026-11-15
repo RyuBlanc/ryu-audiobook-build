@@ -1,6 +1,6 @@
 # Stage C3 — Qwen accelerator and performance acceptance
 
-**Status:** Candidate implementation and hosted policy regressions in progress. Physical accelerator closeout has not been claimed.
+**Status:** SOFTWARE/HOSTED IMPLEMENTATION AND POLICY ACCEPTANCE COMPLETE; PHYSICAL DEVICE SIGN-OFF DEFERRED TO STAGE F. C3 focused 8/8 and the exact-head C1–C4 Windows package passed at Build #3414; the integrated Stage C artifact baseline is Build #3420. Real NVIDIA/AMD/Intel inference telemetry and target-device preview timing are not accepted by hosted CI.
 
 **Baseline:** Stage C2 exact-head Build Windows App #3382, commit `05a15fac65305e428752f194b8852884c40c7c5d`, branch `dragon-studio/candidate-c2-profile-lifecycle-2026-11-13`.
 
@@ -65,4 +65,4 @@ C1/C2 installed-PC checks, representative full-novel Qwen acceptance and Stage C
 - Build Windows App **#3414** / run [43567794677](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43567794677), exact commit 1ab7c27ead88e55df644f703c339bc608bfef897, completed successfully. Hosted test results: Stage B 16/16, Stage 6 48/48, C1 10/10, C2 9/9, C3 8/8, C4 37/37, full regression 1,596/1,596. The pip-cache regression contract also passed.
 - The #3414 Windows build passed frozen application and bundled assets verification, real bundled-Piper M4B/FFmpeg acceptance, packaged Sound Design/Music Library acceptance, Inno Setup/core installer, the formerly failing late Python restore, functional HTML installer build/startup, install/launch/upgrade/uninstall, logo transparency/hash, package-size report, Microsoft Defender and all expected artifact uploads.
 - #3414 artifacts: installer 14103528384 (847,025,536 bytes; digest sha256:bba96e421929586e95058c4e6f05500adc3fac046a0595b4309e52b991fb8677); portable 14103967421 (1,190,866,285 bytes; digest sha256:4108c66874c4bc28845072259a3a3d069cb076b1ce224f7f24e2c86ecfaab5f2); SHA/package manifest 14103383915; M4B 14102583924 (8,989,270 bytes).
-- **C3 closure remains blocked on physical devices.** These package/test runs are hosted Windows acceptance, not CUDA, ROCm or XPU inference. The manual self-hosted matrix and the under-60-second 30-second preview threshold remain required for each supported backend claimed.
+- **C3 hosted/software closure is complete; physical device sign-off remains open in Stage F.** These package/test runs are hosted Windows acceptance, not CUDA, ROCm or XPU inference. The manual self-hosted matrix and the under-60-second 30-second preview threshold remain required for each supported backend claimed.
