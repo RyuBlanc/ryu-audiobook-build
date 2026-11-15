@@ -2455,6 +2455,387 @@
     return true;
   }
 
+  // Stage D4 Voice Library state is separate from provider selection and narrator assignment.
+  let voiceLibraryKindFilter = 'All';
+  let voiceLibraryModelFilterValue = 'All models';
+  const voiceLibrarySelectedProfiles = new Set();
+  let voiceLibraryPendingImport = null;
+
+  function voiceLibrarySavedProfiles() {
+    return voices.filter(profile => profile && profile.saved === true && String(profile.name || '').trim());
+  }
+  function voiceLibraryCategory(profile) {
+    if (['Designed','Cloned','Preset','Cloud'].includes(profile.profile_kind)) return profile.profile_kind;
+    var provider = String(profile.provider || '').toLowerCase();
+    var mode = String(profile.qwen_mode || 'custom').toLowerCase();
+    if (provider === 'qwen-character') {
+      if (mode === 'design') return 'Designed';
+      if (['clone','voiceclone','voice-clone'].includes(mode)) return 'Cloned';
+      return 'Preset';
+    }
+    if (provider === 'chatterbox' && profile.sample_path) return 'Cloned';
+    if (['edge-tts','elevenlabs'].includes(provider)) return 'Cloud';
+    return 'Preset';
+  }
+  function voiceLibraryModelGroup(profile) {
+    var value = String(profile.model_group || '').trim();
+    if (value) return value;
+    var provider = String(profile.provider || '').trim();
+    var model = String(profile.model_id || '').trim();
+    return [provider, model && !['auto','automatic'].includes(model.toLowerCase()) ? model : ''].filter(Boolean).join(' · ') || 'Model not recorded';
+  }
+  function voiceLibraryCompatibility(profile) {
+    var value = profile.compatibility;
+    if (!value || value.applicable !== true) return 'Provider-specific';
+    return String(value.status || 'Not assessed');
+  }
+  function renderSavedVoiceLibrary() {
+    var host = $('voiceLibraryRows');
+    if (!host) return;
+    var saved = voiceLibrarySavedProfiles();
+    var modelSelect = $('voiceLibraryModelFilter');
+    var modelOptions = Array.from(new Set(saved.map(voiceLibraryModelGroup))).sort(function(a,b){return a.localeCompare(b);});
+    if (modelSelect) {
+      var allowed = new Set(['All models'].concat(modelOptions));
+      if (!allowed.has(voiceLibraryModelFilterValue)) voiceLibraryModelFilterValue = 'All models';
+      var signature = JSON.stringify(['All models'].concat(modelOptions));
+      if (modelSelect.dataset.libraryOptionsSignature !== signature) {
+        modelSelect.replaceChildren();
+        ['All models'].concat(modelOptions).forEach(function(item) {
+          var option = document.createElement('option');
+          option.value = item; option.textContent = item; modelSelect.appendChild(option);
+        });
+        modelSelect.dataset.libraryOptionsSignature = signature;
+      }
+      modelSelect.value = voiceLibraryModelFilterValue;
+    }
+    var query = String($('voiceLibrarySearch') && $('voiceLibrarySearch').value || '').trim().toLowerCase();
+    var filtered = saved.filter(function(profile) {
+      var categoryOk = voiceLibraryKindFilter === 'All' || voiceLibraryCategory(profile) === voiceLibraryKindFilter;
+      var modelOk = voiceLibraryModelFilterValue === 'All models' || voiceLibraryModelGroup(profile) === voiceLibraryModelFilterValue;
+      var haystack = [profile.name,profile.provider,profile.voice_id,profile.language,profile.model_id,profile.model_group,
+        profile.qwen_mode,profile.qwen_prompt,profile.notes,profile.reference_text].map(function(value){return String(value || '');}).join(' ').toLowerCase();
+      return categoryOk && modelOk && (!query || haystack.indexOf(query) >= 0);
+    }).sort(function(a,b) {
+      return voiceLibraryModelGroup(a).localeCompare(voiceLibraryModelGroup(b)) || String(a.name).localeCompare(String(b.name));
+    });
+    document.querySelectorAll('[data-library-kind]').forEach(function(button) {
+      var active = button.dataset.libraryKind === voiceLibraryKindFilter;
+      button.classList.toggle('active',active);
+      button.setAttribute('aria-pressed',active ? 'true' : 'false');
+    });
+    var summary = $('voiceLibrarySummary');
+    if (summary) summary.textContent = filtered.length + ' of ' + saved.length + ' saved profile(s) · ' +
+      new Set(filtered.map(voiceLibraryModelGroup)).size + ' model/engine group(s) · built-in catalogue voices are not shown here.';
+    var empty = $('voiceLibraryEmpty');
+    if (empty) empty.hidden = filtered.length > 0;
+    if (!filtered.length) {
+      host.innerHTML = '';
+      var emptyExport = $('voiceLibraryExportSelected');
+      if (emptyExport) emptyExport.disabled = true;
+      return;
+    }
+    var groups = Array.from(new Set(filtered.map(voiceLibraryModelGroup)));
+    host.innerHTML = groups.map(function(group) {
+      var members = filtered.filter(function(profile){return voiceLibraryModelGroup(profile) === group;});
+      var cards = members.map(function(profile) {
+        var name = String(profile.name || '');
+        var qwen = String(profile.provider || '').toLowerCase() === 'qwen-character';
+        var category = voiceLibraryCategory(profile);
+        var selected = voiceLibrarySelectedProfiles.has(name);
+        var compatibility = voiceLibraryCompatibility(profile);
+        var identity = profile.provider === 'qwen-character'
+          ? (profile.voice_id || 'Voice ID not recorded') + ' · ' + (profile.qwen_mode || 'custom')
+          : String(profile.voice_id || 'Voice ID not recorded');
+        var audioConfigured = Boolean(profile.sample_path || profile.qwen_anchor_path);
+        var model = String(profile.model_id || 'Provider default');
+        return '<article class="saved-library-profile" data-library-profile="' + esc(name) + '">' +
+          '<div class="saved-library-profile-head"><div class="saved-library-profile-title">' +
+          (qwen ? '<input type="checkbox" data-library-select="' + esc(name) + '" aria-label="Select ' + esc(name) + ' for export" ' + (selected ? 'checked' : '') + '/>' : '<span aria-hidden="true" style="width:13px;flex:none"></span>') +
+          '<div><h4>' + esc(name) + '</h4><small>' + esc(profile.provider || 'Provider not recorded') + ' · ' + esc(profile.language || 'Language not recorded') + '</small></div></div>' +
+          '<span class="saved-library-kind">' + esc(category) + '</span></div>' +
+          '<div class="saved-library-profile-meta">' +
+          '<div class="saved-library-meta-row"><span>Voice identity</span><b>' + esc(identity) + '</b></div>' +
+          '<div class="saved-library-meta-row"><span>Model / engine</span><b>' + esc(model) + '</b></div>' +
+          '<div class="saved-library-meta-row"><span>Audio assets</span><b>' + (audioConfigured ? 'Reference / anchor saved' : 'No profile-owned reference') + '</b></div></div>' +
+          '<div class="saved-library-compat"><span>Destination compatibility</span><b>' + esc(compatibility) + '</b></div>' +
+          '<div class="saved-library-card-actions">' +
+          '<button type="button" class="btn small secondary" data-library-inspect="' + esc(name) + '">Inspect</button>' +
+          '<button type="button" class="btn small" data-library-load="' + esc(name) + '">Load profile</button>' +
+          (qwen ? '<button type="button" class="btn small secondary" data-library-export="' + esc(name) + '">Export</button>' : '') +
+          '<button type="button" class="btn small danger" data-library-delete="' + esc(name) + '">Delete</button></div></article>';
+      }).join('');
+      return '<section class="saved-library-model-group"><h4 class="saved-library-group-title">' + esc(group) +
+        ' <small>' + members.length + ' profile(s)</small></h4><div class="saved-library-profile-grid">' + cards + '</div></section>';
+    }).join('');
+    var selectedCount = Array.from(voiceLibrarySelectedProfiles).filter(function(name) {
+      return saved.some(function(profile){return profile.name === name && profile.provider === 'qwen-character';});
+    }).length;
+    var exportButton = $('voiceLibraryExportSelected');
+    if (exportButton) {
+      exportButton.disabled = selectedCount === 0;
+      exportButton.textContent = selectedCount ? 'Export selected (' + selectedCount + ')' : 'Export selected';
+    }
+  }
+  function closeVoiceLibraryDialog() {
+    var dialog = $('ryuVoiceLibraryDialog');
+    if (dialog) dialog.remove();
+  }
+  function showVoiceLibraryDialog(title, body, actions) {
+    closeVoiceLibraryDialog();
+    var overlay = document.createElement('div');
+    overlay.id = 'ryuVoiceLibraryDialog';
+    overlay.className = 'modal-back show';
+    overlay.innerHTML = '<section class="modal" role="dialog" aria-modal="true" aria-label="' + esc(title) + '" style="width:min(820px,100%);max-height:calc(100vh - 40px);overflow:auto">' +
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px"><div><span class="eyebrow">VOICE LIBRARY</span><h2 style="margin:3px 0 0;font-size:19px">' + esc(title) + '</h2></div>' +
+      '<button type="button" class="icon-btn" data-library-dialog-close aria-label="Close">×</button></div>' +
+      '<div class="saved-library-modal-body">' + body + '</div>' +
+      (actions ? '<div class="controls" style="justify-content:flex-end;margin-top:14px">' + actions + '</div>' : '') + '</section>';
+    overlay.addEventListener('click', function(event) {
+      if (event.target === overlay || event.target.closest('[data-library-dialog-close]')) closeVoiceLibraryDialog();
+    });
+    document.body.appendChild(overlay);
+    return overlay;
+  }
+  function renderVoiceLibraryAssetDetails(integrity) {
+    var rows = Array.isArray(integrity && integrity.assets) ? integrity.assets : [];
+    if (!rows.length) return '<p class="muted">No profile-owned audio assets are recorded for this profile.</p>';
+    return '<div class="saved-library-import-rows">' + rows.map(function(asset) {
+      return '<article class="saved-library-import-row"><div class="saved-library-meta-row"><b>' + esc(asset.role || 'Audio asset') +
+        '</b><span>' + esc(asset.status || 'Not checked') + '</span></div><p>' + esc(asset.name || 'No local file') +
+        (asset.required ? ' · Required for this profile mode' : '') + '</p>' +
+        (asset.sha256 ? '<div class="saved-library-hash">' + esc(asset.sha256) + '</div>' : '') +
+        (asset.error ? '<p>' + esc(asset.error) + '</p>' : '') + '</article>';
+    }).join('') + '</div>';
+  }
+  async function inspectSavedVoiceProfile(name) {
+    try {
+      var profile = await call('voice.library.inspect',{profile_name:name});
+      var compatibility = profile.compatibility || {};
+      var models = Array.isArray(compatibility.models) ? compatibility.models : [];
+      var assets = profile.asset_integrity || {};
+      var modelRows = models.map(function(item) {
+        var variants = Object.entries(item.installed || {}).map(function(entry) {
+          return '<div class="saved-library-meta-row"><span>' + esc(entry[0]) + '</span><b>' + (entry[1] ? 'Installed' : 'Missing') + '</b></div>';
+        }).join('');
+        return '<article class="saved-library-import-row"><b>' + esc(item.role || 'Model role') + '</b><p>' +
+          esc(item.required_model_kind || item.selected_model_kind || 'Compatible variant required') + '</p>' + variants + '</article>';
+      }).join('');
+      var body = '<p class="saved-library-modal-copy">This is the saved record read from the existing profile catalogue. Inspection is read-only; the destination model preference and active narrator are not changed.</p>' +
+        '<div class="saved-library-detail-grid"><div><small>Profile</small><b>' + esc(profile.name) + '</b></div>' +
+        '<div><small>Category</small><b>' + esc(profile.profile_kind || 'Saved profile') + '</b></div>' +
+        '<div><small>Provider / mode</small><b>' + esc(profile.provider) + ' · ' + esc(profile.qwen_mode || 'standard') + '</b></div>' +
+        '<div><small>Voice identity</small><b>' + esc(profile.voice_id || 'Not recorded') + '</b></div>' +
+        '<div><small>Language</small><b>' + esc(profile.language || 'Not recorded') + '</b></div>' +
+        '<div><small>Saved model</small><b>' + esc(profile.model_id || 'Provider default') + '</b></div>' +
+        '<div><small>Profile ID</small><b class="saved-library-hash">' + esc(profile.qwen_profile_id || 'Not applicable') + '</b></div>' +
+        '<div><small>Asset integrity</small><b>' + esc(assets.status || 'Not inspected') + '</b></div></div>' +
+        '<h3 style="font-size:13px;margin:16px 0 7px">Saved configuration</h3>' +
+        '<div class="saved-library-import-row"><p><b>Prompt / notes</b></p><p>' + esc(profile.qwen_prompt || profile.notes || 'No prompt or notes saved.') + '</p>' +
+        '<p><b>Seed</b> · ' + esc(profile.qwen_seed == null ? 'Not set' : profile.qwen_seed) + ' · <b>Authorization</b> · ' +
+        (profile.authorized ? 'Confirmed in saved record' : 'Not confirmed') + '</p><p><b>Reference text</b></p><p>' +
+        esc(profile.reference_text || 'No reference transcript saved.') + '</p></div>' +
+        '<h3 style="font-size:13px;margin:16px 0 7px">Destination compatibility</h3>' +
+        '<div class="saved-library-import-row"><b>' + esc(compatibility.status || 'Provider-specific') + '</b><p>Runtime: ' +
+        (compatibility.runtime_ready === true ? 'Ready' : compatibility.runtime_ready === false ? 'Not ready' : 'Not applicable') +
+        ' · Model roles: ' + (compatibility.model_roles_ready === true ? 'Ready' : compatibility.model_roles_ready === false ? 'Not all installed' : 'Not applicable') +
+        '</p><p>Destination model preference: ' + esc(compatibility.model_preference || 'Not applicable') +
+        ' · Backend: ' + esc(compatibility.backend_preference || 'Provider-specific') + '</p>' +
+        (modelRows || '<p>Provider-specific readiness is shown in the provider settings.</p>') + '</div>' +
+        '<h3 style="font-size:13px;margin:16px 0 7px">Audio asset integrity</h3>' + renderVoiceLibraryAssetDetails(assets);
+      var actions = '<button type="button" class="btn secondary" data-library-dialog-close>Close</button>' +
+        '<button type="button" class="btn" data-library-detail-load="' + esc(name) + '">Load into Voice Profile</button>';
+      var overlay = showVoiceLibraryDialog('Profile details',body,actions);
+      overlay.querySelector('[data-library-detail-load]')?.addEventListener('click',function() {
+        var selected = voices.find(function(item){return item.saved === true && item.name === name;});
+        if (!selected) { message('The selected saved profile is no longer in the catalogue. Refresh the Voice Library.',true); return; }
+        closeVoiceLibraryDialog();
+        applySavedVoiceProfile(selected);
+        document.querySelector('#voices .step[data-step="3"]')?.click();
+      });
+    } catch (error) { message(error && error.message || String(error),true); }
+  }
+  function importCompatibilityText(compatibility) {
+    if (!compatibility) return 'Compatibility was not reported.';
+    var roles = Array.isArray(compatibility.models) ? compatibility.models : [];
+    var modelText = roles.map(function(role) {
+      var variants = Array.isArray(role.available_variants) ? role.available_variants : [];
+      return (role.role || 'Model') + ': ' + (role.ready ? 'Ready' : 'Not fully installed') +
+        (variants.length ? ' · available: ' + variants.join(', ') : '');
+    }).join(' · ');
+    return 'Runtime: ' + (compatibility.runtime_ready ? 'Ready' : 'Not ready') +
+      ' · Model roles: ' + (compatibility.model_roles_ready ? 'Ready' : 'Not all installed') +
+      (modelText ? ' · ' + modelText : '');
+  }
+  async function chooseVoiceLibraryImport() {
+    try {
+      var selected = await call('voice.bundle.choose_import',{});
+      if (selected && selected.cancelled) return;
+      if (!selected || !selected.plan || !selected.plan.integrity_verified) throw new Error('The selected package did not pass integrity validation.');
+      voiceLibraryPendingImport = selected;
+      var profiles = Array.isArray(selected.plan.profiles) ? selected.plan.profiles : [];
+      var rows = profiles.map(function(profile) {
+        var classification = String(profile.classification || 'unknown');
+        var options = [];
+        if (classification === 'new_profile') options = [['import','Import'],['skip','Skip']];
+        else if (classification === 'already_present') options = [['skip','Already present · Skip']];
+        else if (classification === 'revision_conflict') options = [['keep_both','Keep incoming revision in history'],['replace','Replace current after verified backup'],['skip','Skip']];
+        else if (classification === 'semantic_duplicate') options = [['skip','Skip duplicate'],['keep_both','Keep as a separate profile']];
+        else if (classification === 'name_collision') options = [['rename','Import under a new name'],['skip','Skip']];
+        var collision = classification === 'name_collision' ||
+          (classification === 'semantic_duplicate' && ((profile.name_collision_profile_ids || []).length || (profile.incoming_name_collision_profile_ids || []).length));
+        var warnings = Array.isArray(profile.warnings) ? profile.warnings : [];
+        var choice = options.map(function(item) {
+          var chosen = item[0] === profile.default_action || (classification === 'already_present' && item[0] === 'skip');
+          return '<option value="' + esc(item[0]) + '" ' + (chosen ? 'selected' : '') + '>' + esc(item[1]) + '</option>';
+        }).join('');
+        return '<article class="saved-library-import-row" data-library-import-row="' + esc(profile.profile_id) + '">' +
+          '<div class="saved-library-profile-head"><h4>' + esc(profile.name) + '</h4><span class="saved-library-kind">' + esc(classification.replace(/_/g,' ')) + '</span></div>' +
+          '<p>' + esc(profile.mode || 'Qwen profile') + ' · ' + Number(profile.asset_count || 0) + ' audio asset(s) · revision ' + esc(String(profile.revision_id || '').slice(0,16)) + '…</p>' +
+          '<p>' + esc(importCompatibilityText(profile.compatibility)) + '</p>' +
+          warnings.map(function(warning){return '<div class="saved-library-import-warning">' + esc(warning) + '</div>';}).join('') +
+          '<div class="saved-library-import-choice"><label><span>Import decision</span><select data-library-import-action ' + (classification === 'already_present' ? 'disabled' : '') + '>' + choice + '</select></label>' +
+          (collision ? '<label><span>New display name</span><input class="input" data-library-import-name placeholder="Enter a distinct profile name" maxlength="160"/></label>' : '') +
+          '</div>' +
+          (profile.missing_voice_design_anchor_acknowledgement ? '<div class="saved-library-import-warning">The package does not contain the cached neutral VoiceDesign identity anchor. No replacement will be generated during import.</div>' : '') +
+          '</article>';
+      }).join('');
+      var body = '<p class="saved-library-modal-copy">Package integrity verified. Review every profile, model requirement and collision before committing. Import does not download models or change the destination PC model/backend preferences.</p>' +
+        '<div class="saved-library-meta-row"><span>Selected package</span><b>' + esc(selected.path) + '</b></div>' +
+        '<div class="saved-library-meta-row"><span>Profiles</span><b>' + profiles.length + '</b></div>' +
+        '<div class="saved-library-import-rows">' + rows + '</div>' +
+        '<label class="saved-library-ack"><input type="checkbox" id="voiceLibraryMissingAnchorAck"/><span>Acknowledge import of a VoiceDesign profile whose cached neutral anchor is missing. I understand that later preview/generation may need to prepare the anchor on this PC.</span></label>';
+      var actions = '<button type="button" class="btn secondary" data-library-dialog-close>Cancel</button>' +
+        '<button type="button" class="btn" id="voiceLibraryCommitImport">Import selected profiles</button>';
+      var overlay = showVoiceLibraryDialog('Review import package',body,actions);
+      overlay.querySelector('#voiceLibraryCommitImport')?.addEventListener('click',function(){void commitVoiceLibraryImport(overlay);});
+    } catch (error) { message(error && error.message || String(error),true); }
+  }
+  async function commitVoiceLibraryImport(overlay) {
+    var plan = voiceLibraryPendingImport && voiceLibraryPendingImport.plan;
+    var path = voiceLibraryPendingImport && voiceLibraryPendingImport.path;
+    if (!plan || !path) { message('The import review is no longer available. Choose the package again.',true); return; }
+    var resolutions = {};
+    for (var row of overlay.querySelectorAll('[data-library-import-row]')) {
+      var profileId = row.dataset.libraryImportRow;
+      var action = String(row.querySelector('[data-library-import-action]')?.value || 'skip');
+      var newName = String(row.querySelector('[data-library-import-name]')?.value || '').trim();
+      if (action === 'rename' && !newName) {
+        message('Enter a new display name for every profile with a name collision.',true);
+        row.querySelector('[data-library-import-name]')?.focus();
+        return;
+      }
+      resolutions[profileId] = newName ? {action:action,new_name:newName} : action;
+    }
+    var requiresAnchorAck = (plan.profiles || []).some(function(profile) {
+      var resolution = resolutions[profile.profile_id];
+      var action = typeof resolution === 'string' ? resolution : resolution && resolution.action;
+      return profile.missing_voice_design_anchor_acknowledgement && action !== 'skip';
+    });
+    var anchorAcknowledged = Boolean(overlay.querySelector('#voiceLibraryMissingAnchorAck')?.checked);
+    if (requiresAnchorAck && !anchorAcknowledged) {
+      message('Acknowledge the missing VoiceDesign anchor warning before importing that profile.',true);
+      return;
+    }
+    var button = overlay.querySelector('#voiceLibraryCommitImport');
+    if (button) { button.disabled = true; button.textContent = 'Importing…'; }
+    try {
+      var result = await call('voice.bundle.import',{
+        bundle_path:path,resolutions:resolutions,allow_missing_voicedesign_anchor:anchorAcknowledged,
+      });
+      await refreshVoices();
+      voiceLibrarySelectedProfiles.clear();
+      voiceLibraryPendingImport = null;
+      var imported = result.imported_profile_ids || [];
+      var revisions = result.stored_revision_ids || [];
+      var skipped = result.skipped_profile_ids || [];
+      var warnings = result.warnings || [];
+      var summary = '<p class="saved-library-modal-copy">The D3 importer completed its transaction. The existing catalogue was updated only after every selected asset/revision passed validation.</p>' +
+        '<div class="saved-library-detail-grid"><div><small>New active profiles</small><b>' + imported.length + '</b></div>' +
+        '<div><small>Historical revisions stored</small><b>' + revisions.length + '</b></div>' +
+        '<div><small>Skipped profiles</small><b>' + skipped.length + '</b></div>' +
+        '<div><small>Renamed profiles</small><b>' + Object.keys(result.renamed_profiles || {}).length + '</b></div></div>' +
+        warnings.map(function(warning){return '<div class="saved-library-import-warning">' + esc(warning) + '</div>';}).join('') +
+        (imported.length ? '<p><b>Imported:</b> ' + imported.map(esc).join(', ') + '</p>' : '') +
+        (skipped.length ? '<p><b>Skipped:</b> ' + skipped.map(esc).join(', ') + '</p>' : '');
+      showVoiceLibraryDialog('Import result',summary,'<button type="button" class="btn" data-library-dialog-close>Done</button>');
+      renderSavedVoiceLibrary();
+    } catch (error) {
+      if (button) { button.disabled = false; button.textContent = 'Retry import'; }
+      message(error && error.message || String(error),true);
+    }
+  }
+  async function exportVoiceLibraryProfiles(names) {
+    var selected = Array.from(new Set((names || []).map(function(value){return String(value || '').trim();}).filter(Boolean)));
+    if (!selected.length) { message('Select at least one saved Qwen profile to export.',true); return; }
+    try {
+      var result = await call('voice.bundle.export',{profile_names:selected});
+      if (result && result.cancelled) return;
+      message('Exported ' + result.profile_count + ' Qwen profile(s) with ' + result.asset_count +
+        ' audio asset(s). SHA-256 ' + result.sha256 + '. Saved to ' + result.path);
+      renderSavedVoiceLibrary();
+    } catch (error) { message(error && error.message || String(error),true); }
+  }
+  async function deleteVoiceLibraryProfile(name) {
+    if (!window.confirm('Delete saved voice profile "' + name + '"? The app will refuse deletion while it is used by a narrator, series default or character assignment.')) return;
+    try {
+      await call('voice.delete',{profile_name:name});
+      voiceLibrarySelectedProfiles.delete(name);
+      await refreshVoices();
+      message('Deleted saved voice profile: ' + name);
+    } catch (error) { message(error && error.message || String(error),true); }
+  }
+  function bindSavedVoiceLibrary() {
+    var root = $('savedVoiceLibrary');
+    if (!root || root.dataset.libraryBound === 'true') return;
+    root.dataset.libraryBound = 'true';
+    root.addEventListener('input',function(event) {
+      if (event.target && event.target.id === 'voiceLibrarySearch') renderSavedVoiceLibrary();
+    });
+    root.addEventListener('change',function(event) {
+      var target = event.target;
+      if (!target) return;
+      if (target.id === 'voiceLibraryModelFilter') {
+        voiceLibraryModelFilterValue = String(target.value || 'All models');
+        renderSavedVoiceLibrary();
+      } else if (target.matches('[data-library-select]')) {
+        if (target.checked) voiceLibrarySelectedProfiles.add(target.dataset.librarySelect);
+        else voiceLibrarySelectedProfiles.delete(target.dataset.librarySelect);
+        renderSavedVoiceLibrary();
+      }
+    });
+    root.addEventListener('click',function(event) {
+      var kind = event.target.closest('[data-library-kind]');
+      if (kind) {
+        event.preventDefault();
+        voiceLibraryKindFilter = kind.dataset.libraryKind || 'All';
+        renderSavedVoiceLibrary();
+      }
+    });
+    document.addEventListener('click',async function(event) {
+      var button = event.target.closest('[data-library-load],[data-library-inspect],[data-library-export],[data-library-delete],#voiceLibraryImport,#voiceLibraryRefresh,#voiceLibraryExportSelected');
+      if (!button) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      var name = String(button.dataset.libraryLoad || button.dataset.libraryInspect || button.dataset.libraryExport || button.dataset.libraryDelete || '').trim();
+      if (button.id === 'voiceLibraryImport') await chooseVoiceLibraryImport();
+      else if (button.id === 'voiceLibraryRefresh') {
+        await refreshVoices();
+        message('Saved Voice Library refreshed from the local profile catalogue.');
+      }
+      else if (button.id === 'voiceLibraryExportSelected') await exportVoiceLibraryProfiles(Array.from(voiceLibrarySelectedProfiles));
+      else if (button.hasAttribute('data-library-load')) {
+        var profile = voices.find(function(item){return item.saved === true && item.name === name;});
+        if (!profile) { message('The saved profile is no longer available. Refresh the Voice Library.',true); return; }
+        applySavedVoiceProfile(profile);
+        document.querySelector('#voices .step[data-step="3"]')?.click();
+      } else if (button.hasAttribute('data-library-inspect')) await inspectSavedVoiceProfile(name);
+      else if (button.hasAttribute('data-library-export')) await exportVoiceLibraryProfiles([name]);
+      else if (button.hasAttribute('data-library-delete')) await deleteVoiceLibraryProfile(name);
+    },true);
+    renderSavedVoiceLibrary();
+  }
+
   function qwenModelSizeLabel(value) {
     return ({auto:'Automatic (hardware-aware)','0.6b':'0.6B (lighter, lower memory)','1.7b':'1.7B (larger model)'})[String(value || 'auto').toLowerCase()] || 'Automatic (hardware-aware)';
   }
@@ -2567,6 +2948,8 @@
       profileSearch.addEventListener('input', updateSavedProfileOptions);
     }
     updateSavedProfileOptions();
+    bindSavedVoiceLibrary();
+    renderSavedVoiceLibrary();
     const activeProviderKey = document.querySelector('#voices .provider.active')?.dataset.provider || 'offline';
     void inventoryTask.then(() => {
       if (requestToken !== voiceListEpoch) return null;

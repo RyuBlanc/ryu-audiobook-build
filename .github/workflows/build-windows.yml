@@ -253,6 +253,20 @@ jobs:
           & $pythonExe -B -m unittest -v tests.test_qwen_profile_import
           if ($LASTEXITCODE -ne 0) { throw "Focused Stage D3 transactional import/recovery acceptance failed with exit code $LASTEXITCODE." }
 
+      - name: Run focused Stage D4 saved Voice Library taxonomy, compatibility and UI contract acceptance
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          if ($pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "setup-python did not provide a real Python interpreter: $pythonExe"
+          }
+          $repoRoot = $env:GITHUB_WORKSPACE
+          $env:PYTHONPATH = $repoRoot
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -B -m unittest -v tests.test_qwen_profile_library tests.test_voice_library_ui_contract
+          if ($LASTEXITCODE -ne 0) { throw "Focused Stage D4 Voice Library acceptance failed with exit code $LASTEXITCODE." }
+
       - name: Run full regression suite (remaining tests)
         shell: pwsh
         run: |

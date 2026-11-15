@@ -450,6 +450,10 @@ class PremiumV2Bridge(QObject):
                 "import.start": self._import_start,
                 "import.latest.get": self._import_latest_get,
                 "voice.list": self._voice_list,
+                "voice.library.inspect": self._voice_library_inspect,
+                "voice.bundle.export": self._voice_bundle_export,
+                "voice.bundle.choose_import": self._voice_bundle_choose_import,
+                "voice.bundle.import": self._voice_bundle_import,
                 "voice.catalog": self._voice_catalog,
                 "voice.credentials.set": self._voice_credentials_set,
                 "elevenlabs.open_web": self._elevenlabs_open_web,
@@ -618,6 +622,10 @@ class PremiumV2Bridge(QObject):
             "import.start": True,
             "import.latest.get": True,
             "voice.list": True,
+            "voice.library.inspect": True,
+            "voice.bundle.export": True,
+            "voice.bundle.choose_import": True,
+            "voice.bundle.import": True,
             "voice.catalog": True,
             "voice.credentials.set": True,
             "elevenlabs.open_web": True,
@@ -3437,16 +3445,18 @@ class PremiumV2Bridge(QObject):
         return {"opened": True, "target": target, "url": url}
 
     def _voice_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
-        # The UI needs to distinguish installed catalogue voices from saved,
-        # reusable profiles. It must not infer "saved" from a provider or voice ID:
-        # a saved alias may legitimately point at the same installed Amy/David voice.
+        # Keep installed catalogue entries and persistent user profiles distinct.
+        # The Voice Library only renders entries explicitly marked saved=True.
         from app.tts.voice_profile import load_saved_profiles
+        from app.tts.voice_profile_library import profile_library_record
 
         profiles = load_profiles()
-        saved_names = {p.name.strip().casefold() for p in load_saved_profiles()}
+        saved_profiles = load_saved_profiles()
+        saved_names = {p.name.strip().casefold() for p in saved_profiles}
         rows = []
         for profile in profiles:
-            rows.append({
+            is_saved = profile.name.strip().casefold() in saved_names
+            row = {
                 "name": profile.name, "provider": profile.provider, "voice_id": profile.voice_id,
                 "model_id": profile.model_id, "backend": profile.backend, "language": profile.language or "",
                 "sample_path": profile.sample_path, "authorized": bool(profile.authorized),
@@ -3456,14 +3466,140 @@ class PremiumV2Bridge(QObject):
                 "qwen_profile_id": getattr(profile, "qwen_profile_id", ""),
                 "qwen_anchor_path": getattr(profile, "qwen_anchor_path", None),
                 "qwen_anchor_text": getattr(profile, "qwen_anchor_text", ""),
+                "qwen_profile_schema_version": getattr(profile, "qwen_profile_schema_version", 1),
                 "reference_text": getattr(profile, "reference_text", ""),
                 "notes": getattr(profile, "notes", ""),
                 "exaggeration": getattr(profile, "exaggeration", 0.5),
                 "cfg_weight": getattr(profile, "cfg_weight", 0.35),
                 "style_preset": getattr(profile, "style_preset", "Natural"),
-                "saved": profile.name.strip().casefold() in saved_names,
-            })
+                "saved": is_saved,
+            }
+            if is_saved:
+                row.update(profile_library_record(profile))
+            rows.append(row)
         return rows
+
+    def _voice_library_inspect(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Return saved-profile settings, current-PC compatibility and asset SHA-256 details."""
+        from app.tts.voice_profile import load_saved_profiles
+        from app.tts.voice_profile_library import profile_library_record
+
+        name = str(payload.get("profile_name") or payload.get("name") or "").strip()
+        if not name:
+            raise ValueError("Choose a saved voice profile to inspect.")
+        profile = next(
+            (item for item in load_saved_profiles() if item.name.strip().casefold() == name.casefold()),
+            None,
+        )
+        if profile is None:
+            raise ValueError("The selected saved voice profile no longer exists. Refresh the Voice Library.")
+        return profile_library_record(profile, inspect_assets=True)
+
+    def _voice_bundle_export(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Export selected saved Qwen profiles after the native Save dialog confirms a destination."""
+        from app.tts.qwen_model_preference import get_qwen_model_preference
+        from app.tts.qwen_profile_bundle import export_qwen_profiles_bundle
+        from app.tts.voice_profile import load_saved_profiles
+
+        requested = payload.get("profile_names")
+        if not isinstance(requested, list) or not requested:
+            raise ValueError("Select at least one saved Qwen profile to export.")
+        names = []
+        for value in requested:
+            name = str(value or "").strip()
+            if name and name.casefold() not in {item.casefold() for item in names}:
+                names.append(name)
+        saved = load_saved_profiles()
+        by_name = {profile.name.strip().casefold(): profile for profile in saved}
+        missing = [name for name in names if name.casefold() not in by_name]
+        if missing:
+            raise ValueError(
+                "Some selected profiles are no longer available: " + ", ".join(missing[:5])
+                + ". Refresh the Voice Library and try again."
+            )
+        profiles = [by_name[name.casefold()] for name in names]
+        non_qwen = [profile.name for profile in profiles if profile.provider != "qwen-character"]
+        if non_qwen:
+            raise ValueError(
+                "The .ryuvoice package format currently supports Qwen3-TTS profiles only. "
+                "These selected profiles were not exported: " + ", ".join(non_qwen[:5]) + "."
+            )
+        suggested = profiles[0].name.strip()
+        safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", suggested).strip("._") or "qwen-voice-profiles"
+        default_path = str(Path.home() / f"{safe_name}.ryuvoice")
+        selected_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Qwen Voice Profile Package",
+            default_path,
+            "Ryu Qwen Voice Profiles (*.ryuvoice)",
+        )
+        if not selected_path:
+            return {"cancelled": True}
+        destination = Path(selected_path).expanduser()
+        if destination.suffix.casefold() != ".ryuvoice":
+            destination = destination.with_suffix(".ryuvoice")
+        result = export_qwen_profiles_bundle(
+            profiles,
+            destination,
+            source_model_preference=get_qwen_model_preference(),
+            # QFileDialog is the native explicit Save action; it owns the
+            # overwrite confirmation before the atomic exporter is called.
+            overwrite=True,
+        )
+        return {
+            "cancelled": False,
+            "path": str(result.path),
+            "profile_count": result.profile_count,
+            "asset_count": result.asset_count,
+            "sha256": result.sha256,
+            "revision_ids": list(result.revision_ids),
+            "size_bytes": result.path.stat().st_size,
+            "model_weights_included": False,
+            "runtime_included": False,
+        }
+
+    def _voice_bundle_choose_import(self, _payload: dict[str, Any]) -> dict[str, Any]:
+        """Let the user choose a .ryuvoice file and preflight it without importing."""
+        from app.tts.qwen_profile_import import plan_qwen_profiles_import
+
+        selected_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Qwen Voice Profile Package",
+            str(Path.home()),
+            "Ryu Qwen Voice Profiles (*.ryuvoice)",
+        )
+        if not selected_path:
+            return {"cancelled": True}
+        plan = plan_qwen_profiles_import(Path(selected_path).expanduser())
+        return {
+            "cancelled": False,
+            "path": str(Path(selected_path).expanduser().resolve()),
+            "plan": plan,
+        }
+
+    def _voice_bundle_import(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Commit a preflighted bundle through the Stage D3 all-or-nothing importer."""
+        from app.tts.qwen_profile_import import import_qwen_profiles_bundle
+
+        raw_path = str(payload.get("bundle_path") or "").strip()
+        if not raw_path:
+            raise ValueError("Choose and review a Qwen profile package before importing.")
+        resolutions = payload.get("resolutions")
+        if resolutions is not None and not isinstance(resolutions, dict):
+            raise ValueError("Profile collision resolutions must be a JSON object.")
+        result = import_qwen_profiles_bundle(
+            Path(raw_path).expanduser(),
+            resolutions=resolutions,
+            allow_missing_voicedesign_anchor=payload.get("allow_missing_voicedesign_anchor") is True,
+        )
+        return {
+            "imported_profile_ids": list(result.imported_profile_ids),
+            "stored_revision_ids": list(result.stored_revision_ids),
+            "skipped_profile_ids": list(result.skipped_profile_ids),
+            "renamed_profiles": dict(result.renamed_profiles),
+            "warnings": list(result.warnings),
+            "compatibility": list(result.compatibility),
+        }
 
     def _find_profile(self, name: str | None):
         wanted = str(name or "").strip().casefold()

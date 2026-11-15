@@ -4,8 +4,9 @@
 **Repository:** `RyuBlanc/ryu-audiobook-build`  
 **Implementation branch:** `dragon-studio/stage-d3-transactional-qwen-profile-import-2026-11-15`  
 **Accepted D2 baseline:** `06895803d859e748dc8c7292c6a3bfd895af9304` (Build #3436 and #3437)  
-**Current hosted-test head:** `bdebf78ef3680b92010c9585830ae85ed1e614bb` (Build #3442)  
-**Status:** implementation and hosted test gates passed; exact-head Windows artifact checkpoint pending
+**Accepted source head:** `946049393836d9f2628f1e1c6bd26312b0111197` (Build #3443)  
+**Accepted test predecessor:** `bdebf78ef3680b92010c9585830ae85ed1e614bb` (Build #3442)  
+**Status:** COMPLETE — exact-head Windows artifact checkpoint passed
 
 ## 1. Deliverable
 
@@ -93,18 +94,33 @@ Build #3441 passed the initial 17 tests. Build #3442 expanded the suite to **20/
 | #3440 | `e598c0c` | Failed | The first descriptor correction changed the import-metadata temporary writer but did not change the read-only catalogue-backup descriptor; the same 6 D3 errors persisted. |
 | #3441 | `aac10a5` | Passed | Catalogue backup is flushed using a non-truncating writable `r+b` handle. D3 focused tests 17/17; full regression 1,642/1,642. |
 | #3442 | `bdebf78` | Passed | Added fresh-process reload, disk-full staging and permission-denied catalogue rollback tests. D3 focused tests 20/20; full regression 1,645/1,645. Windows package job was skipped because this was a test checkpoint. |
+| #3443 | `9460493` | **Passed — final D3 artifact checkpoint** | Reconciled D2 and D3 documentation on the exact accepted head. D3 focused tests 20/20; full regression 1,645/1,645; both jobs passed; Windows frozen app, bundled Qwen worker, Piper M4B, Sound Design, core/HTML installers, install/launch/upgrade/uninstall, Defender and expected artifact/hash uploads passed. |
 
 None of the failed attempts is relabelled or removed. Build #3441 is the first clean D3 test checkpoint; #3442 is the current expanded hosted test checkpoint.
 
-## 8. Remaining D3 exit gate
+## 8. Final D3 hosted Windows artifact acceptance — COMPLETE
 
-D3 is **not yet declared fully accepted**. The next `[artifact-checkpoint]` push must pass on one exact head:
-- Focused D1/D2 and D3 suites.
-- Full regression suite.
-- Frozen Windows application and packaged Qwen helper validation.
-- Real bundled-Piper M4B and packaged Sound Design gates.
-- Core and HTML installer, installer startup, install/launch/upgrade/uninstall.
-- Branding/hash and package-size checks.
-- Microsoft Defender and all expected artifact uploads.
+Accepted exact source SHA: `946049393836d9f2628f1e1c6bd26312b0111197`.
 
-D3 does not claim that the Voice Library UI exists, that packaged import/export round-trip is complete, or that a two-PC profile transfer has been performed. Those remain D4, D5 and D6.
+Build Windows App **#3443** / [run 43678950405](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43678950405) completed successfully on the exact D3 checkpoint:
+- Focused D3 transactional import/recovery suite: **20/20**.
+- Cumulative regression suite: **1,645/1,645**.
+- Both workflow jobs (`tests` and `build`) passed.
+- Frozen Windows application and bundled Qwen worker checks passed.
+- Real bundled-Piper multi-chapter M4B and packaged Sound Design acceptance passed.
+- Core installer, HTML installer/startup, install/launch/upgrade/uninstall, branding/hash, package-size and Microsoft Defender checks passed.
+- Installer, portable, release manifest, Piper benchmark and M4B artifacts uploaded.
+
+### Build #3443 artifacts
+
+| Artifact | ID | Size (bytes) | GitHub artifact ZIP digest |
+|---|---:|---:|---|
+| Installer | `14148665602` | 847,318,566 | `sha256:ab486f8a177db2d12d0411f3c3620ee84904189186a6b4a556e67bff56015936` |
+| Portable | `14148655632` | 1,190,939,819 | `sha256:6c816346852d2c9b50c5ae1a3c5318708d3bc2e583d9643877dc82b0717e647c` |
+| Release SHA-256 manifest | `14147499614` | 3,051 | `sha256:b1f897015e59b8cf1426285e0647bfbd95bb4854e1faa12e617577408a1b771e` |
+| Stage 7 Piper benchmark | `14147409806` | 802 | `sha256:1798c0c2e36d8aa654bf0a1bb4ddb240c82a74ed6b00529855abf54ab8fb6ba7` |
+| Real multi-chapter M4B | `14147338093` | 8,986,784 | `sha256:e05aa589b912746836d0ad1bb1c90eb6bf8b3014332fd01bafa9c101ccc8ed36` |
+
+These are GitHub Actions artifact ZIP digests. The application/installer file hashes are in the release SHA-256 manifest. GitHub reported artifact expiry on 15 December 2026.
+
+D3 closes transactional profile import and recovery in the hosted application. It does **not** claim that the Voice Library UI, packaged import/export round-trip, or real two-PC transfer is complete. Those remain D4, D5 and D6.
