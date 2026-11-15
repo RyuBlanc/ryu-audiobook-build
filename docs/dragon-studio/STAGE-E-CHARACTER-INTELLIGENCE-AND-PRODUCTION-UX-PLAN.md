@@ -5,8 +5,8 @@
 **Implementation branch:** `dragon-studio/stage-e-character-intelligence-cast-production-ux-2026-11-15`  
 **Base source head:** `6d970bf70911848c90bcb178b1a166a10bf8305d`  
 **Previous stage:** Stage D engineering closeout — D0–D5 accepted; D6 deferred to Stage F  
-**Latest Stage E source/test regression:** Build #3469 / [run 43710739978](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43710739978), exact tested head a99786938d98004ceb1df91d603d31d05babd858, passed focused E1 40/40, E2 181/181, E3 41/41, E4 8/8 and full regression 1,692/1,692. The Windows build job was skipped because this was not yet an explicit artifact-checkpoint commit.
-**Status:** E1–E4 SOURCE/TEST GATES PASSED; E5 EXACT-HEAD WINDOWS PACKAGE PENDING.
+**Latest Stage E exact-head artifact checkpoint:** Build #3470 / [run 43714021829](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43714021829), exact source SHA fc3a0f8e1d64790b1a61024f8d883653b2dad51c: full regression **1,692/1,692**, E1–E4 focused gates passed, and both tests and Windows build jobs passed. The exact-head package includes the frozen app, D5 profile round-trip, production generation/recovery and installer/portable acceptance.
+**Status:** COMPLETE — E0–E5 hosted engineering, full regression and exact-head Windows package accepted. All physical target-device checks remain explicitly deferred to Stage F.
 
 ## 1. Purpose
 
@@ -96,7 +96,7 @@ This inventory is not an assertion that every requirement is complete. Add targe
 4. **E2 — Cast/narrator integration: SOURCE/TEST GATE PASSED.** Preview now uses the same strict series-scoped cast resolution, exact chapter assignments, narrator identity and global Unassigned Character fallback as production generation.
 5. **E3 — Production presentation: SOURCE/TEST GATE PASSED.** 41 focused layout/progress/cover-art tests pass; real-cover/placeholder watermark separation remains covered. No additional source defect was accepted without a reproducible regression.
 6. **E4 — Help & Guide: SOURCE/TEST GATE PASSED.** Eight focused help tests pass, preserving the detailed seven-stage guide and documenting current limitations.
-7. **E5 — Exact-head package: IN PROGRESS.** The next artifact-checkpoint commit will run the full test job and, only after it succeeds, the frozen Windows application, integrated packaged UI/Production acceptance, installer, portable, install/launch/upgrade/uninstall, Defender and artifact/hash gates.
+7. **E5 — Exact-head package: COMPLETE.** Build #3470 passed the 1,692-test full regression and exact-head frozen Windows package on fc3a0f8; installer, portable, SHA-256 manifest, Defender and packaged acceptance evidence were uploaded.
 
 Every source change requires a focused regression and full-suite result. Test-only/documentation-only runs with a skipped build job are useful checks but are not artifact acceptance.
 
@@ -133,9 +133,15 @@ Stage F is consolidated physical/manual acceptance and final release-readiness. 
 - **Build #3467** / [run 43709935729](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43709935729), commit be4cc2f65326ed4f67974e71f167cf2be29ed497: the new E2 focused gate could not import the integration-contract test because escaped quotes produced a Python SyntaxError at line 316. It remains a failure.
 - **Build #3468** corrected those contract-test string literals; #3469 then independently passed E1–E4 and the full regression. The failed attempts above are not relabelled or removed.
 
-### E5 package gate — PENDING
+### E5 package gate — COMPLETE
 
-The next commit is explicitly marked with the artifact-checkpoint token so the workflow's Windows build job runs after the test job passes. Stage E is not package-accepted or closed until the same exact commit passes the frozen-app/package acceptance, integrated Production/Sound Design UI, installer and portable creation, install/launch/upgrade/uninstall, Defender scan, SHA-256 manifest and required artifact uploads. A passed test-only run with a skipped build job is not E5 acceptance.
+Build Windows App **#3470** / [run 43714021829](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43714021829) passed on the exact Stage E head fc3a0f8e1d64790b1a61024f8d883653b2dad51c. The tests and build jobs both completed successfully. The test job ran the Stage B, Stage 6, C1–C4, D3–D5 and E1–E4 gates before the full suite; the full suite reported **1,692 tests, OK**.
 
-Stage F physical checks remain separate and open, including D6 two-PC profile transfer/audition, real target-device Qwen/GPU measurements, full-book listening/recovery and physical UI/installer inspection.
+The Windows package job passed frozen-app verification, bundled voice assets/modules, real bundled-Piper multi-chapter M4B plus FFmpeg chapter-marker decode, packaged Sound Design/Production acceptance, the D5 three-profile bundle round-trip and fresh-process reload, real narrator-only full-book generation, retry/restart recovery, chaptered M4B playback/seek, installer build/startup, install/launch/upgrade/uninstall, logo/hash checks, package size reporting, Microsoft Defender scans and required artifact uploads. Defender reported no threats for the application, HTML installer and core installer. Only Publish verified installer release was skipped by the candidate workflow; no public release was published.
+
+Artifacts from #3470: installer 14162537175 (847,380,138 bytes), portable 14163025967 (1,191,837,669 bytes), SHA-256 manifest 14162528273 (3,049 bytes), real multi-chapter M4B evidence 14162070795 (9,033,841 bytes), and Stage 7 Piper benchmark 14162867421 (805 bytes). GitHub reported artifact expiry on **15 December 2026**. These sizes are GitHub artifact archives; the manifest contains the actual executable hashes.
+
+The earlier E1–E4 source/test evidence and failed-attempt history remain preserved above. Builds #3465–#3467 remain failed; #3468 corrected the regression-test literals, #3469 passed E1–E4, and #3470 completed the exact-head artifact checkpoint. Do not relabel the historical failures.
+
+Stage F is now the active final physical/manual acceptance stage. D6 two-PC transfer/audition, real target-device Qwen/GPU measurements, representative full-book listening/recovery, physical responsive/flicker/freeze inspection, and installed shell-icon/installer visual checks remain NOT RUN until performed on the user's actual systems.
 
