@@ -41,7 +41,8 @@ The Windows package test needs to call the same native export and import-preflig
 | #3447 | `2a1f9c54ee8a0548216ad20ca4c0922e10be15a0` | Passed | D3 rollback coverage restored and skipped-anchor case added; cumulative regression 1,665. |
 | #3448 | `67eacdd02b7cc2884057c28d1cf1564b4a0495e4` | Passed | Full saved identity detail correction; D4 focused 21 tests, cumulative regression 1,667. |
 | #3449 | `49e498938f2b5b28d6d655545f580776d764bf2b` | Passed | Opt-in path confinement for packaged export/preflight; D4 focused 22 tests, cumulative regression 1,668. |
-| #3450 | `bf9a91bbba15533b52d2a01313b68d9135f4a921` | **Passed** | D3 21/21, D4 22/22, D5 contract 3/3, cumulative regression **1,671/1,671**. |
+| #3450 | `bf9a91bbba15533b52d2a01313b68d9135f4a921` | Passed | D3 21/21, D4 22/22, D5 contract 3/3, cumulative regression 1,671/1,671; source-test checkpoint. |
+| #3457 | `fbed26a0beadd5ebe845173f8e2e059668248d8c` | **Passed — exact-head Windows package** | D3 21/21, D4 22/22, D5 contract 3/3, path security 10/10, full regression **1,681/1,681**; frozen-app D5 three-profile round-trip, installer/portable, Defender and install/launch/upgrade/uninstall passed. |
 
 The #3448–#3450 commits were source/test checkpoints. Their Windows build jobs were skipped because the commits did not request an artifact checkpoint. No D4 installer/portable artifact is claimed from those runs.
 

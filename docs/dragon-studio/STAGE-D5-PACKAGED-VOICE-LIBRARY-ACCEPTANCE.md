@@ -61,11 +61,6 @@ Source review found that export and import preflight used the opt-in confined ac
 
 The final hardening checkpoint passed the focused D3/D4/D5 contracts, all 10 path-security tests, the full regression suite, and the exact-head frozen Windows package on #3457.
 
-## 5. D6 is separate
-
-D5 verifies the application-managed data path and restart behaviour on one hosted Windows package. It does not prove two physical PCs have completed a real transfer or that an actual compatible Qwen model reproduces the voice acoustically. D6 remains a real user-device transfer/audition acceptance item and is deferred until the engineering stages are complete.
-
-
 ## 6. Final D5 exact-head Windows artifact acceptance — COMPLETE
 
 Build Windows App **#3457** / [run 43696836352](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43696836352), exact SHA **`fbed26a0beadd5ebe845173f8e2e059668248d8c`**:
@@ -86,7 +81,7 @@ The frozen-app log recorded:
 - Profile types Preset/CustomVoice, Designed/VoiceDesign and Cloned/Clone.
 - Successful export, preflight and transactional import with the same three IDs.
 - Bundle SHA-256: `9d69880a612182b2d0975c89832932097bdc97248d67b4aa9f5b5de3340a5c2e`.
-- Two byte-verified audio assets: `3def3ca0f1b5c8848457c6aac08486c5e143c0f8f9f90773e840f7d267b5d478` and `3c645d884345694df222d7ef7b0144b71e7ba05d306b8bd2eba343f1a5a6a6d2`.
+- Two byte-verified audio assets: `3def3ca0f1b5c8842076c9aac08486c5e143c0f8f9f90773e840f7d267b5d478` and `3c645d884345694df222d7ef7b0144b71e7ba05d306b8bd2eba343f1a5a6a6d2`.
 - Fresh frozen-app process reload of all three profiles and both verified assets.
 
 The 10 path-security tests cover disabled acceptance mode, missing path rejection, relative and absolute in-root destinations, relative traversal, absolute out-of-root paths, import file existence/type, direct symlink, symlinked parent and invalid acceptance root. The final import-commit handler applies the same confined path resolution as export and preflight; outside the opt-in test environment the normal native file dialogs remain unchanged.
@@ -104,3 +99,7 @@ The 10 path-security tests cover disabled acceptance mode, missing path rejectio
 The values above are GitHub Actions artifact ZIP digests and sizes, not the hashes of the installer/portable files inside those archives. The application/installer file hashes are in the release SHA-256 manifest. GitHub reported expiry on **15 December 2026**.
 
 D5 closes hosted one-machine packaged import/export and import-path security acceptance. It does **not** replace D6 physical two-PC transfer/audition acceptance.
+
+## 7. D6 is separate
+
+D5 verifies the application-managed data path and restart behaviour on one hosted Windows package. It does not prove two physical PCs have completed a real transfer or that an actual compatible Qwen model reproduces the voice acoustically. D6 remains a real user-device transfer/audition acceptance item and is deferred until the engineering stages are complete.
