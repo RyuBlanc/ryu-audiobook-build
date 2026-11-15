@@ -3,6 +3,7 @@
 from __future__ import annotations
 import argparse
 import json
+import hashlib
 import math
 import os
 from pathlib import Path
@@ -412,6 +413,128 @@ def _run(args: argparse.Namespace) -> int:
     app_root = Path.home() / "Ryu's Audiobook"
     audio_root = app_root / "Audio Library"
     audio_root.mkdir(parents=True, exist_ok=True)
+
+    # Stage D5 drives the actual native Voice Library bridge in the frozen app.
+    # The original user catalogue is backed up inside the runner's try/finally.
+    from app.tts.voice_profile import VoiceProfile, profile_record
+
+    voices_root = app_root / "Voices"
+    voices_root.mkdir(parents=True, exist_ok=True)
+    voice_catalogue_path = voices_root / "voices.json"
+    original_voice_catalogue_bytes = None
+    voice_catalogue_existed = False
+    voice_catalogue_seeded = False
+
+    voice_library_source_root = temp_root / "voice-library-source"
+    voice_library_source_root.mkdir(parents=True, exist_ok=False)
+    design_source_root = voice_library_source_root / "design"
+    clone_source_root = voice_library_source_root / "clone"
+    design_source_root.mkdir()
+    clone_source_root.mkdir()
+    design_anchor_path = design_source_root / "design-anchor.wav"
+    clone_reference_path = clone_source_root / "clone-reference.wav"
+    write_tone_fixture(design_anchor_path, 523.25, duration_seconds=12.0)
+    write_tone_fixture(clone_reference_path, 659.25, duration_seconds=12.0)
+
+    voice_library_profiles = [
+        VoiceProfile(
+            name="Stage D5 CustomVoice " + token,
+            provider="qwen-character",
+            voice_id="Ryan",
+            model_id="custom-0.6b",
+            backend="automatic",
+            language="Japanese",
+            notes="Stage D5 isolated CustomVoice fixture.",
+            authorized=True,
+            qwen_mode="custom",
+            qwen_prompt="A clear and steady Japanese narration voice.",
+            qwen_seed=701,
+            style_preset="Natural",
+            exaggeration=0.58,
+            cfg_weight=0.24,
+            qwen_profile_id="stage-d5-custom-" + token.lower(),
+        ),
+        VoiceProfile(
+            name="Stage D5 VoiceDesign " + token,
+            provider="qwen-character",
+            voice_id="stage-d5-design-" + token.lower(),
+            model_id="design-1.7b",
+            backend="automatic",
+            language="Japanese",
+            notes="Stage D5 isolated VoiceDesign fixture.",
+            authorized=True,
+            qwen_mode="design",
+            qwen_prompt="A calm, expressive Japanese voice with natural phrasing.",
+            qwen_seed=1702,
+            qwen_anchor_text="この声の保存された中立アンカーです。",
+            qwen_anchor_path=str(design_anchor_path.resolve()),
+            style_preset="Expressive",
+            exaggeration=0.63,
+            cfg_weight=0.21,
+            qwen_profile_id="stage-d5-design-" + token.lower(),
+        ),
+        VoiceProfile(
+            name="Stage D5 Clone " + token,
+            provider="qwen-character",
+            voice_id="StageD5Clone-" + token,
+            model_id="base-0.6b",
+            backend="automatic",
+            language="English",
+            notes="Stage D5 isolated Clone fixture.",
+            authorized=True,
+            qwen_mode="clone",
+            qwen_prompt="Preserve the supplied reference voice identity.",
+            qwen_seed=417,
+            reference_text="The Stage D5 Clone retains this exact reference transcript and audio.",
+            sample_path=str(clone_reference_path.resolve()),
+            style_preset="Natural",
+            exaggeration=0.5,
+            cfg_weight=0.35,
+            qwen_profile_id="stage-d5-clone-" + token.lower(),
+        ),
+    ]
+    voice_library_profiles_payload = []
+    for profile in voice_library_profiles:
+        asset_path = (
+            Path(profile.qwen_anchor_path) if profile.qwen_mode == "design"
+            else Path(profile.sample_path) if profile.qwen_mode == "clone"
+            else None
+        )
+        asset_role = (
+            "Explicit VoiceDesign identity anchor" if profile.qwen_mode == "design"
+            else "Clone reference audio" if profile.qwen_mode == "clone"
+            else None
+        )
+        voice_library_profiles_payload.append({
+            "name": profile.name,
+            "profile_id": profile.qwen_profile_id,
+            "mode": profile.qwen_mode,
+            "profile_kind": (
+                "Designed" if profile.qwen_mode == "design"
+                else "Cloned" if profile.qwen_mode == "clone"
+                else "Preset"
+            ),
+            "provider": profile.provider,
+            "model_id": profile.model_id,
+            "language": profile.language,
+            "qwen_prompt": profile.qwen_prompt,
+            "notes": profile.notes,
+            "qwen_seed": profile.qwen_seed,
+            "qwen_anchor_text": profile.qwen_anchor_text,
+            "reference_text": profile.reference_text,
+            "style_preset": profile.style_preset,
+            "exaggeration": profile.exaggeration,
+            "cfg_weight": profile.cfg_weight,
+            "authorized": profile.authorized,
+            "asset_role": asset_role,
+            "asset_sha256": (
+                hashlib.sha256(asset_path.read_bytes()).hexdigest() if asset_path else None
+            ),
+        })
+    voice_library_acceptance_root = temp_root / "voice-library-acceptance"
+    voice_library_acceptance_root.mkdir(parents=True, exist_ok=False)
+    voice_library_bundle_path = voice_library_acceptance_root / "stage-d5-voice-library-roundtrip.ryuvoice"
+
     music_imported_paths = [audio_root / alpha_source.name, audio_root / beta_source.name]
     category_imported_paths = [audio_root / item["source"].name for item in category_sources]
     cue_paths = [audio_root / cue_alpha_source.name, audio_root / cue_beta_source.name]
@@ -779,6 +902,10 @@ def _run(args: argparse.Namespace) -> int:
         "metadata_history": metadata_history,
         "metadata_cover_path": str(metadata_cover_source.resolve()),
         "audiobook_library_fixtures": stage6_audiobook_fixtures,
+        "voice_library_acceptance": {
+            "profiles": voice_library_profiles_payload,
+            "export_path": str(voice_library_bundle_path.resolve()),
+        },
     }, ensure_ascii=True, indent=2), encoding="utf-8")
 
     environment = os.environ.copy()
@@ -789,6 +916,7 @@ def _run(args: argparse.Namespace) -> int:
     environment["RYU_SOUND_UI_ACCEPTANCE_MARKER"] = str(marker)
     environment["RYU_SOUND_UI_ACCEPTANCE_PREVIEW_SAVE_PATH"] = str(production_preview_save_path)
     environment["RYU_SOUND_UI_ACCEPTANCE_TIMEOUT_SECONDS"] = "840"
+    environment["RYU_VOICE_LIBRARY_ACCEPTANCE_ROOT"] = str(voice_library_acceptance_root.resolve())
     environment.pop("RYU_UI_MODE", None)
     environment.pop("RYU_STARTUP_SMOKE_MARKER", None)
     flags = environment.get("QTWEBENGINE_CHROMIUM_FLAGS", "").strip()
@@ -799,6 +927,37 @@ def _run(args: argparse.Namespace) -> int:
 
     process = None
     try:
+        original_voice_catalogue_bytes = (
+            voice_catalogue_path.read_bytes() if voice_catalogue_path.is_file() else None
+        )
+        voice_catalogue_existed = original_voice_catalogue_bytes is not None
+        if original_voice_catalogue_bytes is None:
+            existing_voice_records = []
+        else:
+            existing_voice_records = json.loads(original_voice_catalogue_bytes.decode("utf-8"))
+            if not isinstance(existing_voice_records, list):
+                raise ValueError("The packaged Voice Library acceptance found a non-list voices.json catalogue.")
+        requested_ids = {profile.qwen_profile_id for profile in voice_library_profiles}
+        requested_names = {profile.name.casefold() for profile in voice_library_profiles}
+        if any(
+            isinstance(item, dict) and (
+                str(item.get("qwen_profile_id") or "") in requested_ids
+                or str(item.get("name") or "").casefold() in requested_names
+            )
+            for item in existing_voice_records
+        ):
+            raise FileExistsError("A unique Stage D5 Voice Library profile ID or name already exists.")
+        seeded_records = existing_voice_records + [
+            profile_record(profile) for profile in voice_library_profiles
+        ]
+        catalogue_temporary = voice_catalogue_path.with_suffix(".json.stage-d5.tmp")
+        catalogue_temporary.write_text(
+            json.dumps(seeded_records, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        catalogue_temporary.replace(voice_catalogue_path)
+        voice_catalogue_seeded = True
+
         def launch_acceptance(label: str, selected_environment: dict[str, str]) -> tuple[subprocess.Popen, str]:
             print(f"Launching packaged Premium V2 executable ({label}): {exe}")
             process = subprocess.Popen(
@@ -851,6 +1010,7 @@ def _run(args: argparse.Namespace) -> int:
             "stage54_real_generation_pause_resume_cancel",
             "stage54_real_generation_retry_and_history_ownership",
             "stage54_real_restart_interruption_staged",
+            "stage_d5_packaged_voice_library_export_preflight_import_asset_roundtrip",
         ):
             if required_check not in first_checks:
                 raise AssertionError("The packaged app did not complete required Stage 5.4 installed-app acceptance: " + required_check)
@@ -886,6 +1046,41 @@ def _run(args: argparse.Namespace) -> int:
             json.dumps({"path":str(control_output_path),"bytes":control_output_path.stat().st_size}, ensure_ascii=False))
         if process.returncode != 0:
             raise RuntimeError(f"Packaged app returned exit code {process.returncode} after reporting success.")
+
+        if not voice_library_bundle_path.is_file() or voice_library_bundle_path.stat().st_size < 1024:
+            raise AssertionError(
+                "The frozen Voice Library export action did not create a non-empty .ryuvoice bundle: "
+                + str(voice_library_bundle_path)
+            )
+        from app.tts.qwen_profile_bundle import inspect_qwen_profile_bundle
+        exported_voice_bundle = inspect_qwen_profile_bundle(voice_library_bundle_path)
+        exported_voice_profiles = exported_voice_bundle.get("profiles") or []
+        exported_profile_ids = {
+            str(item.get("profile_id") or "")
+            for item in exported_voice_profiles if isinstance(item, dict)
+        }
+        expected_profile_ids = {str(item["profile_id"]) for item in voice_library_profiles_payload}
+        if exported_voice_bundle.get("integrity_verified") is not True or exported_profile_ids != expected_profile_ids:
+            raise AssertionError(
+                "The frozen-app Voice Library export did not produce an independently verified bundle "
+                "containing all three exact profile IDs: "
+                + json.dumps({
+                    "integrity_verified": exported_voice_bundle.get("integrity_verified"),
+                    "expected_profile_ids": sorted(expected_profile_ids),
+                    "exported_profile_ids": sorted(exported_profile_ids),
+                }, ensure_ascii=False)
+            )
+        bundle_sha256 = hashlib.sha256(voice_library_bundle_path.read_bytes()).hexdigest()
+        print(
+            "PACKAGED STAGE D5 VOICE LIBRARY BUNDLE VERIFIED: "
+            + json.dumps({
+                "path": str(voice_library_bundle_path),
+                "bytes": voice_library_bundle_path.stat().st_size,
+                "sha256": bundle_sha256,
+                "profile_ids": sorted(exported_profile_ids),
+                "integrity_verified": exported_voice_bundle.get("integrity_verified"),
+            }, ensure_ascii=False)
+        )
 
         # The UI project-switch sequence must have returned to the primary book;
         # do not repair the registry here, because the second launch must prove the
@@ -941,6 +1136,7 @@ def _run(args: argparse.Namespace) -> int:
             "stage6_responsive_shared_shell_bounds_41_resolutions",
             "stage6_responsive_viewport_matrix_41_resolutions",
             "stage6_responsive_window_and_scale_emulation",
+            "stage_d5_packaged_voice_library_fresh_process_reload",
         ):
             if required_check not in restart_checks:
                 raise AssertionError("The restarted packaged app did not complete required acceptance: " + required_check)
@@ -956,7 +1152,15 @@ def _run(args: argparse.Namespace) -> int:
 
         combined_checks = dict(first_result.get("checks") or {})
         combined_checks.update(restart_result.get("checks") or {})
-        print("PACKAGED STAGE 2 SOUND DESIGN ACCEPTANCE PASSED")
+        print("PACKAGED STAGE 2 SOUND DESIGN AND STAGE D5 VOICE LIBRARY ACCEPTANCE PASSED")
+        print(
+            "PACKAGED STAGE D5 PROFILE ROUND-TRIP VERIFIED: "
+            + json.dumps({
+                "profile_ids": sorted({str(item["profile_id"]) for item in voice_library_profiles_payload}),
+                "bundle_sha256": bundle_sha256,
+                "fresh_process_reload": True,
+            }, ensure_ascii=False)
+        )
         for name, detail in combined_checks.items():
             print(f"[PASS] {name}: {detail}")
         print("[PASS] State JSON retained Chapter-Based strategy, restored book-default preference, chapter tracks/rules, timing, and per-chapter levels.")
@@ -971,6 +1175,17 @@ def _run(args: argparse.Namespace) -> int:
             except subprocess.TimeoutExpired:
                 pass
         set_active_project_setting(previous_active)
+        if voice_catalogue_seeded:
+            if voice_catalogue_existed and original_voice_catalogue_bytes is not None:
+                voice_catalogue_path.write_bytes(original_voice_catalogue_bytes)
+            else:
+                voice_catalogue_path.unlink(missing_ok=True)
+        for profile in voice_library_profiles:
+            profile_id = str(profile.qwen_profile_id)
+            shutil.rmtree(voices_root / "Qwen Profile Assets" / profile_id, ignore_errors=True)
+            shutil.rmtree(voices_root / "Qwen Profile Revisions" / profile_id, ignore_errors=True)
+        catalogue_temporary = voice_catalogue_path.with_suffix(".json.stage-d5.tmp")
+        catalogue_temporary.unlink(missing_ok=True)
         for path in imported_paths:
             path.unlink(missing_ok=True)
             path.with_name(path.name + ".license.json").unlink(missing_ok=True)
