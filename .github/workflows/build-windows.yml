@@ -309,6 +309,20 @@ jobs:
           & $pythonExe -B -m unittest -v tests.test_character_detection_regression tests.test_character_identity_unicode tests.test_character_name_quality tests.test_character_ai_analysis_contract tests.test_live_character_studio_contract tests.test_stage_e_character_analysis
           if ($LASTEXITCODE -ne 0) { throw "Focused Stage E1 character analysis/full-book coverage regression failed with exit code $LASTEXITCODE." }
 
+      - name: Run focused Stage E2 production-preview and series-scoped cast parity regression
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          if ($pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "setup-python did not provide a real Python interpreter: $pythonExe"
+          }
+          $repoRoot = $env:GITHUB_WORKSPACE
+          $env:PYTHONPATH = $repoRoot
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -B -m unittest -v tests.test_stage5_production_preview_parity tests.test_stage4_voice_preview_contract tests.test_legacy_voice_cast_generation_routing tests.test_narrator_only_generation tests.test_premium_v2_integration_contract
+          if ($LASTEXITCODE -ne 0) { throw "Focused Stage E2 production preview/cast parity regression failed with exit code $LASTEXITCODE." }
+
       - name: Run full regression suite (remaining tests)
         shell: pwsh
         run: |

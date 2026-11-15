@@ -26,6 +26,12 @@ class VoicePreviewContractTests(unittest.TestCase):
                     _job_update=Mock(),
                     _now=premium_v2_host.PremiumV2Bridge._now,
                     _preview_worker=premium_v2_host.PremiumV2Bridge._preview_worker,
+                    _preview_cast_routing_snapshot=lambda _project, _state, require_unassigned=False: {
+                        "cast_profiles": {},
+                        "cast_assignments": {},
+                        "identity_assignments": {},
+                        "unassigned_voice": "",
+                    },
                 )
                 with patch.object(premium_v2_host, "load_state", return_value={}), \
                      patch.object(premium_v2_host.threading, "Thread", return_value=thread) as thread_factory:

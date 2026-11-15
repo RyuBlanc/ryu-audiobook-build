@@ -312,9 +312,16 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
     def test_voice_preview_uses_saved_character_voice_assignments(self):
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         worker = host.split("def _preview_worker", 1)[1].split("def _character_list", 1)[0]
-        self.assertIn("available_profiles = {p.name.casefold(): p for p in load_profiles()}", worker)
+        self.assertIn('routing = state.get("_preview_cast_routing") if route_character_cast else {}', worker)
+        self.assertIn("identity_assignments = dict(routing.get(\\"identity_assignments\\") or {})", worker)
+        self.assertIn("unassigned_voice = str(routing.get(\\"unassigned_voice\\") or \\"\\")", worker)
+        self.assertIn("if cast_assignments or identity_assignments or unassigned_voice:", worker)
         self.assertIn("from app.tts.cast_provider import CastAwareProvider", worker)
-        self.assertIn("cast_assignments[character_name] = assigned_profile.name", worker)
+        routing_helper = self.host.split("def _preview_cast_routing_snapshot", 1)[1].split("def _preview_worker", 1)[0]
+        self.assertIn("cast_assignments[character_name] = assigned_profile.name", routing_helper)
+        self.assertIn("identity_assignments[", routing_helper)
+        self.assertIn("strict=True", routing_helper)
+        self.assertIn('dialogue_assignments=state.get("_preview_dialogue_assignments") or []', worker)
         self.assertIn("target_seconds=seconds", worker)
         self.assertIn('"actual_duration_seconds": duration', worker)
 
