@@ -69,6 +69,35 @@ class VoiceLibraryUiContractTests(unittest.TestCase):
         self.assertIn("wasOpenInEditor", self.adapter)
         self.assertIn("voiceLibraryRefresh", self.adapter)
 
+    def test_profile_inspection_displays_voice_design_anchor_and_saved_configuration(self):
+        start = self.adapter.index("async function inspectSavedVoiceProfile")
+        end = self.adapter.index("function importCompatibilityText", start)
+        inspection = self.adapter[start:end]
+        for field in (
+            "profile.qwen_prompt",
+            "profile.notes",
+            "profile.qwen_anchor_text",
+            "profile.reference_text",
+            "profile.qwen_seed",
+            "profile.style_preset",
+            "profile.exaggeration",
+            "profile.cfg_weight",
+            "profile.qwen_profile_schema_version",
+        ):
+            self.assertIn(field, inspection)
+        for label in (
+            "Qwen voice prompt",
+            "Saved notes",
+            "VoiceDesign anchor transcript",
+            "Reference text",
+            "Style preset",
+            "Exaggeration",
+            "CFG weight",
+            "Profile schema",
+        ):
+            self.assertIn(label, inspection)
+
+
     def test_native_bridge_advertises_every_new_library_command(self):
         commands = (
             "voice.library.inspect",

@@ -269,6 +269,40 @@ class VoiceProfileLibraryAssetTests(unittest.TestCase):
         self.assertEqual(result["assets"][0]["status"], "not cached on this PC")
         self.assertTrue(result["required_assets_ready"])
 
+    def test_detail_record_exposes_voice_design_anchor_and_all_saved_controls(self):
+        profile = VoiceProfile(
+            name="Japanese VoiceDesign",
+            provider="qwen-character",
+            voice_id="Ono_Anna",
+            model_id="design-1.7b",
+            language="Japanese",
+            qwen_mode="design",
+            qwen_prompt="A calm and expressive Japanese voice.",
+            qwen_anchor_text="この声の保存された中立アンカーです。",
+            qwen_seed=417,
+            style_preset="Expressive",
+            exaggeration=0.63,
+            cfg_weight=0.21,
+            qwen_profile_id="d4-design-detail",
+        )
+        with (
+            patch("app.tts.qwen_model_preference.get_qwen_model_preference", return_value="auto"),
+            patch("app.tts.qwen_model_preference.get_qwen_backend_preference", return_value="automatic"),
+            patch("app.tts.qwen_character_runtime.model_installed", return_value=True),
+            patch("app.tts.qwen_character_runtime.runtime_ready", return_value=True),
+        ):
+            result = profile_library_record(profile)
+
+        self.assertEqual(result["profile_kind"], "Designed")
+        self.assertEqual(result["qwen_anchor_text"], profile.qwen_anchor_text)
+        self.assertEqual(result["qwen_prompt"], profile.qwen_prompt)
+        self.assertEqual(result["qwen_seed"], 417)
+        self.assertEqual(result["style_preset"], "Expressive")
+        self.assertEqual(result["exaggeration"], 0.63)
+        self.assertEqual(result["cfg_weight"], 0.21)
+        self.assertEqual(result["qwen_profile_schema_version"], profile.qwen_profile_schema_version)
+
+
     def test_detail_record_preserves_identity_and_does_not_expose_absolute_paths(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "voice.wav"

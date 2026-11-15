@@ -2647,10 +2647,16 @@
         '<div><small>Profile ID</small><b class="saved-library-hash">' + esc(profile.qwen_profile_id || 'Not applicable') + '</b></div>' +
         '<div><small>Asset integrity</small><b>' + esc(assets.status || 'Not inspected') + '</b></div></div>' +
         '<h3 style="font-size:13px;margin:16px 0 7px">Saved configuration</h3>' +
-        '<div class="saved-library-import-row"><p><b>Prompt / notes</b></p><p>' + esc(profile.qwen_prompt || profile.notes || 'No prompt or notes saved.') + '</p>' +
-        '<p><b>Seed</b> · ' + esc(profile.qwen_seed == null ? 'Not set' : profile.qwen_seed) + ' · <b>Authorization</b> · ' +
-        (profile.authorized ? 'Confirmed in saved record' : 'Not confirmed') + '</p><p><b>Reference text</b></p><p>' +
-        esc(profile.reference_text || 'No reference transcript saved.') + '</p></div>' +
+        '<div class="saved-library-import-row"><p><b>Qwen voice prompt</b></p><p>' + esc(profile.qwen_prompt || 'No Qwen prompt saved.') + '</p>' +
+        '<p><b>Saved notes</b></p><p>' + esc(profile.notes || 'No notes saved.') + '</p>' +
+        '<p><b>VoiceDesign anchor transcript</b></p><p>' + esc(profile.qwen_anchor_text || 'No VoiceDesign anchor transcript saved.') + '</p>' +
+        '<p><b>Reference text</b></p><p>' + esc(profile.reference_text || 'No reference transcript saved.') + '</p>' +
+        '<p><b>Seed</b> · ' + esc(profile.qwen_seed == null ? 'Not set' : profile.qwen_seed) +
+        ' · <b>Style preset</b> · ' + esc(profile.style_preset || 'Natural') +
+        ' · <b>Exaggeration</b> · ' + esc(profile.exaggeration == null ? 'Not set' : profile.exaggeration) +
+        ' · <b>CFG weight</b> · ' + esc(profile.cfg_weight == null ? 'Not set' : profile.cfg_weight) +
+        ' · <b>Profile schema</b> · ' + esc(profile.qwen_profile_schema_version == null ? 'Not recorded' : profile.qwen_profile_schema_version) +
+        '</p><p><b>Authorization</b> · ' + (profile.authorized ? 'Confirmed in saved record' : 'Not confirmed') + '</p></div>' +
         '<h3 style="font-size:13px;margin:16px 0 7px">Destination compatibility</h3>' +
         '<div class="saved-library-import-row"><b>' + esc(compatibility.status || 'Provider-specific') + '</b><p>Runtime: ' +
         (compatibility.runtime_ready === true ? 'Ready' : compatibility.runtime_ready === false ? 'Not ready' : 'Not applicable') +

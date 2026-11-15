@@ -434,6 +434,8 @@ def profile_library_record(profile: VoiceProfile, *, inspect_assets: bool = Fals
         "qwen_anchor_text": str(getattr(profile, "qwen_anchor_text", "") or ""),
         "reference_text": str(getattr(profile, "reference_text", "") or ""),
         "style_preset": str(getattr(profile, "style_preset", "Natural") or "Natural"),
+        "exaggeration": getattr(profile, "exaggeration", 0.5),
+        "cfg_weight": getattr(profile, "cfg_weight", 0.35),
         "profile_kind": category,
         "model_group": model_group,
         "saved": True,
