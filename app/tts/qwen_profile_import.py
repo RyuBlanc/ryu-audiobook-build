@@ -1107,12 +1107,16 @@ def _write_import_info(
     fd, temporary_name = tempfile.mkstemp(
         prefix=".import-info.", suffix=".tmp", dir=str(directory)
     )
-    os.close(fd)
     temporary = Path(temporary_name)
-    _register_created_path(transaction_dir, journal, temporary)
-    _register_created_path(transaction_dir, journal, destination)
+    fd_open = True
     try:
-        with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+        _register_created_path(transaction_dir, journal, temporary)
+        _register_created_path(transaction_dir, journal, destination)
+        # Keep the original mkstemp descriptor and wrap it directly. Reopening
+        # the path through Path.open on Windows can detach the descriptor used
+        # by fsync, producing EBADF even though the write itself succeeded.
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            fd_open = False
             json.dump(payload, handle, ensure_ascii=False, sort_keys=True, indent=2)
             handle.write("\n")
             handle.flush()
@@ -1121,6 +1125,11 @@ def _write_import_info(
             raise OSError("Import metadata verification failed.")
         os.replace(temporary, destination)
     finally:
+        if fd_open:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
         try:
             temporary.unlink(missing_ok=True)
         except OSError:
