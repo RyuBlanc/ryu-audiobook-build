@@ -3502,34 +3502,10 @@ class PremiumV2Bridge(QObject):
         *,
         must_exist: bool = False,
     ) -> Path | None:
-        """Resolve a packaged-acceptance file only inside its opt-in temporary root.
+        """Resolve CI-only Voice Library paths without weakening desktop dialogs."""
+        from app.ui.voice_library_acceptance import resolve_voice_library_acceptance_path
 
-        Normal application sessions do not set RYU_VOICE_LIBRARY_ACCEPTANCE_ROOT,
-        so the Voice Library continues to use native file dialogs. The frozen
-        Windows acceptance runner sets this variable to a unique temporary
-        directory, allowing it to exercise the same bridge methods without
-        automating an OS file-picker window.
-        """
-        acceptance_root_raw = str(os.environ.get("RYU_VOICE_LIBRARY_ACCEPTANCE_ROOT") or "").strip()
-        raw_path = str(payload.get(key) or "").strip()
-        if not acceptance_root_raw or not raw_path:
-            return None
-        root = Path(acceptance_root_raw).expanduser().resolve(strict=True)
-        candidate = Path(raw_path).expanduser()
-        if not candidate.is_absolute():
-            candidate = root / candidate
-        if candidate.is_symlink():
-            raise ValueError("Voice Library acceptance paths cannot be symbolic links.")
-        resolved = candidate.resolve(strict=must_exist)
-        try:
-            resolved.relative_to(root)
-        except ValueError as exc:
-            raise ValueError("Voice Library acceptance paths must stay inside the isolated acceptance directory.") from exc
-        if not resolved.parent.is_dir():
-            raise ValueError("The Voice Library acceptance destination directory is unavailable.")
-        if must_exist and not resolved.is_file():
-            raise ValueError("The Voice Library acceptance bundle must be a regular file.")
-        return resolved
+        return resolve_voice_library_acceptance_path(payload, key, must_exist=must_exist)
 
     def _voice_bundle_export(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Export selected saved Qwen profiles after the native Save dialog confirms a destination."""
@@ -3640,8 +3616,12 @@ class PremiumV2Bridge(QObject):
         resolutions = payload.get("resolutions")
         if resolutions is not None and not isinstance(resolutions, dict):
             raise ValueError("Profile collision resolutions must be a JSON object.")
+        acceptance_bundle = self._voice_library_acceptance_path(
+            payload, "bundle_path", must_exist=True
+        )
+        bundle_path = acceptance_bundle if acceptance_bundle is not None else Path(raw_path).expanduser()
         result = import_qwen_profiles_bundle(
-            Path(raw_path).expanduser(),
+            bundle_path,
             resolutions=resolutions,
             allow_missing_voicedesign_anchor=payload.get("allow_missing_voicedesign_anchor") is True,
         )

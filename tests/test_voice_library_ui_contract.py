@@ -126,15 +126,19 @@ class VoiceLibraryUiContractTests(unittest.TestCase):
 
     def test_packaged_acceptance_file_paths_are_opt_in_and_confined_to_temporary_root(self):
         self.assertIn("def _voice_library_acceptance_path(", self.host)
-        self.assertIn("RYU_VOICE_LIBRARY_ACCEPTANCE_ROOT", self.host)
+        path_guard = (ROOT / "app" / "ui" / "voice_library_acceptance.py").read_text(encoding="utf-8")
+        self.assertIn("RYU_VOICE_LIBRARY_ACCEPTANCE_ROOT", path_guard)
         helper = self.host[
             self.host.index("def _voice_library_acceptance_path"):
             self.host.index("def _voice_bundle_export")
         ]
-        self.assertIn("resolved.relative_to(root)", helper)
-        self.assertIn("candidate.is_symlink()", helper)
+        self.assertIn("resolve_voice_library_acceptance_path(payload, key, must_exist=must_exist)", helper)
+        self.assertIn("candidate.absolute().relative_to(root)", path_guard)
+        self.assertIn("_is_link_or_junction", path_guard)
+        self.assertIn("must be supplied", path_guard)
         self.assertIn('payload, "acceptance_output_path"', self.host)
         self.assertIn('payload, "acceptance_bundle_path", must_exist=True', self.host)
+        self.assertIn('payload, "bundle_path", must_exist=True', self.host)
         self.assertIn("QFileDialog.getSaveFileName(", self.host)
         self.assertIn("QFileDialog.getOpenFileName(", self.host)
 
