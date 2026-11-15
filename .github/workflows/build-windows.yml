@@ -323,6 +323,34 @@ jobs:
           & $pythonExe -B -m unittest -v tests.test_stage5_production_preview_parity tests.test_stage4_voice_preview_contract tests.test_legacy_voice_cast_generation_routing tests.test_narrator_only_generation tests.test_premium_v2_integration_contract
           if ($LASTEXITCODE -ne 0) { throw "Focused Stage E2 production preview/cast parity regression failed with exit code $LASTEXITCODE." }
 
+      - name: Run focused Stage E3 Production layout, progress and cover-art acceptance
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          if ($pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "setup-python did not provide a real Python interpreter: $pythonExe"
+          }
+          $repoRoot = $env:GITHUB_WORKSPACE
+          $env:PYTHONPATH = $repoRoot
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -B -m unittest -v tests.test_stage5_generation_eta_stability tests.test_stage5_production_preview_parity tests.test_cover_art_presentation tests.test_task_manager_responsive
+          if ($LASTEXITCODE -ne 0) { throw "Focused Stage E3 Production layout/progress/cover-art acceptance failed with exit code $LASTEXITCODE." }
+
+      - name: Run focused Stage E4 Help and Guide accuracy acceptance
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          if ($pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "setup-python did not provide a real Python interpreter: $pythonExe"
+          }
+          $repoRoot = $env:GITHUB_WORKSPACE
+          $env:PYTHONPATH = $repoRoot
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -B -m unittest -v tests.test_help_guide_current_requirements
+          if ($LASTEXITCODE -ne 0) { throw "Focused Stage E4 Help & Guide accuracy acceptance failed with exit code $LASTEXITCODE." }
+
       - name: Run full regression suite (remaining tests)
         shell: pwsh
         run: |
