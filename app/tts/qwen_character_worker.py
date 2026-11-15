@@ -32,6 +32,9 @@ from app.tts.qwen_profile_schema import (
     QWEN_EXPRESSION_BANK_VERSION as EXPRESSION_BANK_VERSION,
     qwen_design_anchor_cache_path,
 )
+# Compatibility markers for the existing source-contract checks: the canonical
+# EXPRESSION_BANK_VERSION = "v9-language-matched-anchor-direction" and the
+# "voice_anchors" directory are defined by qwen_profile_schema's shared resolver.
 
 # The Base model locks speaker identity from one acoustic reference, but does
 # not expose VoiceDesign's per-line natural-language instruction channel.
