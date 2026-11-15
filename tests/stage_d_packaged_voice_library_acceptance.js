@@ -18,10 +18,13 @@
     return new Promise(function (resolve) { window.setTimeout(resolve, milliseconds); });
   }
 
-  function invoke(command, payload) {
+  async function invoke(command, payload) {
     var bridge = window.ryuBackend;
     requireValue(bridge && typeof bridge.invoke === "function", "The packaged native desktop bridge is unavailable.");
-    return Promise.resolve(bridge.invoke(command, payload || {}));
+    var response = await bridge.invoke(command, payload || {});
+    requireValue(response && response.success === true,
+      (response && response.error && response.error.message) || (command + " failed."));
+    return response.data;
   }
 
   function sorted(values) {
