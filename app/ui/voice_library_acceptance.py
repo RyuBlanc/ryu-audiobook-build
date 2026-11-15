@@ -49,6 +49,10 @@ def resolve_voice_library_acceptance_path(
     candidate = Path(raw_path).expanduser()
     if not candidate.is_absolute():
         candidate = root / candidate
+    if ".." in candidate.parts:
+        raise ValueError(
+            "Voice Library acceptance paths must stay inside the isolated acceptance directory."
+        )
     candidate = candidate.absolute()
 
     try:
