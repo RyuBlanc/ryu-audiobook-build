@@ -1,0 +1,124 @@
+# Stage F — Final Physical and Manual Acceptance
+
+**Stage:** F — final physical/manual acceptance and release-readiness evidence  
+**Repository:** RyuBlanc/ryu-audiobook-build  
+**Branch:** dragon-studio/stage-f-physical-final-acceptance-2026-11-15  
+**Engineering baseline:** Stage A–E hosted/source engineering complete; Stage E exact-head package Build #3470 / [run 43714021829](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43714021829), commit fc3a0f8e1d64790b1a61024f8d883653b2dad51c.  
+**Status:** ACTIVE — engineering handoff accepted; all physical/manual acceptance rows below remain NOT RUN until executed on the user's actual Windows systems.
+
+## 1. Purpose and boundary
+
+Stage F consolidates the physical checks deliberately deferred from Stages B, C and D, plus the remaining installed-app, full-book, UI, installer and user-review checks. It is not permission to rebuild or repeat accepted Stage A–E work. Its purpose is to verify that the accepted code and exact Windows package behave correctly on the actual target machines and with real saved profiles, models, audio and displays.
+
+The user explicitly requested that physical tests requiring their participation be deferred until engineering stages were complete. Stages A–E have now reached their hosted engineering/package exit criteria. Stage F is therefore the active handoff, but no physical test has been performed or marked passed by this document.
+
+## 2. Frozen hosted baseline — Build #3470
+
+- Exact commit: fc3a0f8e1d64790b1a61024f8d883653b2dad51c.
+- Actions: [Build Windows App #3470](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43714021829), run ID 43714021829.
+- Jobs: tests = success; build = success.
+- Regression: **1,692/1,692**.
+- Installer artifact: Ryu-Audiobook-Installer-3470, ID 14162537175, 847,380,138 bytes.
+- Portable artifact: Ryu-Audiobook-Portable-3470, ID 14163025967, 1,191,837,669 bytes.
+- SHA-256 manifest: Ryu-Audiobook-Release-SHA256-3470, ID 14162528273, 3,049 bytes.
+- Real two-chapter M4B evidence: ID 14162070795, 9,033,841 bytes.
+- Stage 7 Piper benchmark evidence: ID 14162867421, 805 bytes.
+- Artifacts are retained until **15 December 2026** according to the Actions API. Download and preserve the installer, portable package and manifest before expiry.
+
+Build #3470 passed frozen-app verification, bundled voice assets/modules, real bundled-Piper multi-chapter M4B and FFmpeg decode, packaged Sound Design/Production acceptance, Stage D5 three-profile export/preflight/import and fresh-process reload, narrator-only full-book generation, retry/restart recovery, chaptered M4B playback/seek, installer creation/startup, install/launch/upgrade/uninstall, logo/hash checks, size reporting, Defender scans and artifact uploads. Defender reported no threats for the app, HTML installer or core installer. Public release publication was skipped by design.
+
+This is hosted package evidence, not physical PC, GPU or acoustic sign-off.
+
+## 3. Stage A–F status at handoff
+
+| Stage | Engineering disposition | Physical disposition |
+|---|---|---|
+| A — baseline/reconciliation | Complete | Relevant real-device checks consolidated into F |
+| B — truthful progress/ETA/duration | Hosted source, regression and package work complete (Build #3369 baseline plus later regression coverage) | Long-running real Qwen/Piper progress, ETA and duration observation NOT RUN |
+| C — Qwen identity/lifecycle/accelerator/multilingual | C1–C4 hosted engineering/provider/package gates complete; Stage C main integrated package baseline #3420 | Real CUDA/ROCm/XPU inference, target-PC voice identity and performance NOT RUN / NOT PASSED |
+| D — Voice Library/profile portability | D0–D5 hosted engineering/package complete; #3457 and repeat #3458 passed | D6 two-PC transfer/audition NOT RUN / NOT PASSED |
+| E — character intelligence/cast/Production/Help | E0–E5 complete; #3469 source/test gates and #3470 exact-head package passed | Physical UI/full-book/installed-app observations NOT RUN |
+| F — physical/manual acceptance | Active | Open; no physical item is passed by CI |
+
+## 4. F1 — Real two-PC profile transfer (D6)
+
+**Status: NOT RUN — explicitly deferred until this physical acceptance stage.** Use [STAGE-D6-TWO-PC-TRANSFER-ACCEPTANCE.md](STAGE-D6-TWO-PC-TRANSFER-ACCEPTANCE.md) as the controlling detailed worksheet. It requires:
+
+1. PC-A and PC-B to be two separate physical Windows PCs using the same accepted Build #3470 artifact/source SHA where possible.
+2. Real saved CustomVoice, VoiceDesign and authorized Clone profiles selected on PC-A; export one .ryuvoice bundle without altering the source catalogue.
+3. Matching PC-A/PC-B bundle SHA-256, compatible-model preflight, exact stable profile IDs and voice-defining configuration parity.
+4. SHA-256 verification for each VoiceDesign anchor and Clone reference asset; additive import without overwriting destination profiles.
+5. A real close/relaunch on PC-B and fresh-process identity/asset reload.
+6. Controlled CustomVoice, VoiceDesign and Clone audition on both PCs using matched text, profile/model settings and recorded actual backends.
+
+A same-PC second process or CI fixture cannot pass D6. A missing model on PC-B must be reported honestly; do not remove a working model simply to manufacture a negative test.
+
+## 5. F2 — Qwen device selection, real inference and performance
+
+**Status: NOT RUN on target hardware.** The formal accelerator matrix is in [STAGE-C3-QWEN-ACCELERATOR-ACCEPTANCE.md](STAGE-C3-QWEN-ACCELERATOR-ACCEPTANCE.md). Execute only on hardware and backends that are actually available and supported.
+
+| Device/workload | Required physical proof | Target/disposition |
+|---|---|---|
+| NVIDIA CUDA with 7 GiB+ usable VRAM | Actual CUDA-enabled runtime plus worker-reported CUDA device during warmed VoiceDesign 1.7B + exact Base pairing | 30-second decoded preview in under 60 seconds; no CPU fallback |
+| Lower-memory NVIDIA tier, including 4 GiB where loadable | Real 0.6B CustomVoice saved-profile preview and backend telemetry | 30-second preview under 60 seconds where supported; report exact limits if it cannot load |
+| AMD ROCm | HIP-enabled runtime and actual worker telemetry on supported AMD hardware | Test only if supported runtime/hardware is present; never label CPU output as ROCm |
+| Intel XPU | XPU-enabled runtime and actual worker telemetry on supported Intel hardware | Test only if supported runtime/hardware is present |
+| CPU | Functional comparison, accurate backend identity and timing | CPU functional pass does not satisfy the GPU speed target |
+
+For each available device test the 0.6B/1.7B selector and the applicable CustomVoice, VoiceDesign and Clone paths, including saved profile preview, save/reload, restart and production use. Record cold start and warmed inference separately, requested/decoded duration, elapsed synthesis time, model revision, driver/runtime versions, actual backend/device and memory use. User timing targets: approximately 10 seconds of preview within 20 seconds and 30 seconds of preview in under 60 seconds on supported accelerated hardware. A detection result or model download is not inference acceptance.
+
+The exact-head CPU evidence from Provider Runtime Smoke #448 produced 30-second VoiceDesign previews in 187.318 and 336.607 seconds. The log explicitly marked the CPU under-60-second goal NOT MET. These CPU timings must not be rewritten as GPU evidence or used to claim the target has passed.
+
+## 6. F3 — Installed-app voice identity and full-book production
+
+**Status: NOT RUN as a representative user-book physical test.** CI has passed packaged fixture and multi-chapter smoke tests; it has not replaced user acceptance on a real novel and target device.
+
+- Install and launch the exact #3470 candidate; record version/SHA and target environment. Verify saved Qwen models/profile identity after restart and after model install/repair actions where applicable.
+- Exercise CustomVoice, VoiceDesign and authorized Clone previews and ensure the selected profile/model/voice reaches the actual synthesis worker. Record the actual backend; no silent CPU/model substitution during GPU acceptance.
+- Analyse a representative Japanese/Korean/Indian-language/English book as applicable. Review source-grounded character names, aliases and dialogue assignments across the full chapter set; check false positives and later-chapter coverage.
+- Verify narrator-only is a real explicit setting with default OFF when cast selection is available; verify the valid saved narrator fallback for a book with no valid character voice profiles; verify series-scoped same-name characters and global Unassigned Character routing.
+- Generate a representative multi-chapter/full-book audiobook. Record total input chapters/passages, eligible/skipped chapters, generated audio duration, elapsed time, progress, ETA revisions, validated chunks, model/provider/backend and errors.
+- During a controlled run, test pause/resume, cancel, retry, process interruption/restart and recovery. Confirm the correct job owns the output, valid completed chunks are reused, stale output is never attached, and cancellation stops the intended work promptly.
+- Validate the final M4B in an independent supported player: chapter titles/order/markers, duration, metadata, author, cover, audio decode, seek, playback and main/mini-player state. Listen for narrator/character identity continuity, pronunciation, missing/duplicated text, clipping, silence and sound-design transitions.
+
+## 7. F4 — UI responsiveness, stability and display matrix
+
+**Status: NOT RUN physically.** Automated viewport/overlap and source tests have passed; they are not proof of no flicker, freeze or crash on the user's display hardware.
+
+Inspect all 15 application destinations with the installed app, including rapid module switching and repeated open/close. Record launch time, navigation delay, stalls, unresponsive controls, rendering flicker, crashes and diagnostic logs. Confirm progress/ETA remain truthful during long-running generation and the cancel action responds promptly.
+
+Run the responsive matrix across these aspect ratios: 4:3, 5:4, 3:2, 16:10, 16:9, 21:9, 32:9 and portrait. Include at least 1280×720, common laptop/desktop sizes, restored/maximized/minimized, split-screen, ultrawide, portrait, mixed-monitor arrangements and 100%, 125%, 150% and 200% display scaling. Check clipped text, overlapping controls, inaccessible actions, excessive/nested scrolling, scroll jumps and dialogs that extend beyond the viewport. Retain the agreed 41-viewport automated matrix as a separate CI result, not as a substitute for these observations.
+
+## 8. F5 — Windows installer, shell identity and Help & Guide
+
+**Status: NOT RUN physically.** Build #3470 already passed installer build/startup, install/launch/upgrade/uninstall, transparency/hash contracts and Defender scanning.
+
+- Install the exact candidate on a clean or controlled target Windows environment; verify first launch, app shortcut, taskbar identity, multi-size icon and transparent logo edges/corners.
+- Inspect the actual installer wizard at the target display size/scaling: full footer, Next/Back controls, details, progress, window centering, no cropped content and no unwanted black center bar/frame.
+- Verify upgrades preserve user projects, models, profiles and saved output. Verify uninstall behaviour preserves user data where specified.
+- Open Help & Guide in the installed application; follow import, chapter, voice/profile, character, pronunciation, Sound Design, generation/recovery, playback, model and troubleshooting instructions. Confirm wording matches the actual controls and clearly labels unsupported/deferred features.
+
+## 9. Failure handling and release gate
+
+If any physical item fails, record the exact build SHA, machine label, reproducible steps, expected/actual result, logs/screenshots/audio evidence and affected stable bug ID. Do not relabel it as a successful test. Reopen only the specific affected implementation; preserve completed unrelated Stage A–E work. The correction must receive focused tests, full regression and an exact-head Windows package before the affected physical check is repeated.
+
+Stage F closes only when every applicable physical row is either PASS with evidence or explicitly approved as a documented exception. Unsupported device/backend combinations remain NOT SUPPORTED/NOT RUN, not passed. Version 1.2.0 publication and final release sign-off are separate and require explicit owner approval after this ledger is complete.
+
+## 10. Current checklist
+
+| Check | Status |
+|---|---|
+| Exact-head Build #3470 hosted baseline | PASS |
+| D6 PC-A → PC-B real transfer | NOT RUN |
+| Real NVIDIA CUDA inference/performance | NOT RUN |
+| Real AMD ROCm inference/performance, where supported | NOT RUN |
+| Real Intel XPU inference/performance, where supported | NOT RUN |
+| Target-PC CustomVoice/VoiceDesign/Clone audition | NOT RUN |
+| Representative full-book generation and listening | NOT RUN |
+| Physical pause/resume/cancel/recovery | NOT RUN |
+| Real progress/ETA/duration observation | NOT RUN |
+| Physical responsive/flicker/freeze/multi-monitor matrix | NOT RUN |
+| Installed shortcut/taskbar/logo transparency | NOT RUN |
+| Actual installer geometry and navigation | NOT RUN |
+| Installed-app Help & Guide walkthrough | NOT RUN |
+| Final owner release approval | NOT RUN |
