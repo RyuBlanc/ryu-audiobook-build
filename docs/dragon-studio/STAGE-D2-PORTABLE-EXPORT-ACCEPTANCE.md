@@ -3,8 +3,8 @@
 Stage: D2 — portable profile export and bundle validation
 Branch: dragon-studio/stage-d-qwen-voice-profile-library-2026-11-14
 Stage C baseline: 154bf0e0c1c1fe8334f68655d1629a3a9d1e3691
-Current source head: 18e5391c2d42d18afb8d830ffee114746febdc38
-Status: source implementation and hosted test gates passed; exact-head Windows artifact checkpoint pending
+Current accepted source head: 06895803d859e748dc8c7292c6a3bfd895af9304
+Status: COMPLETE — exact-head Windows artifact checkpoint passed at Build #3436; repeated on the same accepted SHA by Build #3437
 
 ## 1. Deliverable
 

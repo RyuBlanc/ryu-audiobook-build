@@ -132,8 +132,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Premium V2 backend adapter JavaScript syntax validation failed with exit code $LASTEXITCODE." }
           & $nodeExe --check 'tests\stage2_packaged_sound_ui_acceptance.js'
           if ($LASTEXITCODE -ne 0) { throw "Packaged Sound Design acceptance JavaScript syntax validation failed with exit code $LASTEXITCODE." }
-          & $nodeExe --check 'tests\stage_d_packaged_voice_library_acceptance.js'
-          if ($LASTEXITCODE -ne 0) { throw "Packaged Stage D Voice Library acceptance JavaScript syntax validation failed with exit code $LASTEXITCODE." }
           & $nodeExe --check 'installer\ryu_installer.js'
           if ($LASTEXITCODE -ne 0) { throw "Installer JavaScript syntax validation failed with exit code $LASTEXITCODE." }
 
@@ -269,6 +267,20 @@ jobs:
           & $pythonExe -B -m unittest -v tests.test_qwen_profile_library tests.test_voice_library_ui_contract
           if ($LASTEXITCODE -ne 0) { throw "Focused Stage D4 Voice Library acceptance failed with exit code $LASTEXITCODE." }
 
+      - name: Run focused Stage D5 packaged Voice Library acceptance contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          if ($pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "setup-python did not provide a real Python interpreter: $pythonExe"
+          }
+          $repoRoot = $env:GITHUB_WORKSPACE
+          $env:PYTHONPATH = $repoRoot
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -B -m unittest -v tests.test_stage_d5_packaged_voice_library
+          if ($LASTEXITCODE -ne 0) { throw "Focused Stage D5 packaged Voice Library acceptance contract failed with exit code $LASTEXITCODE." }
+
       - name: Run focused Stage D5 Voice Library acceptance-path security regression
         shell: pwsh
         run: |
@@ -378,8 +390,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Premium V2 backend adapter syntax validation failed with exit code $LASTEXITCODE." }
           & $nodeExe --check 'tests\stage2_packaged_sound_ui_acceptance.js'
           if ($LASTEXITCODE -ne 0) { throw "Packaged Sound Design acceptance JavaScript syntax validation failed with exit code $LASTEXITCODE." }
-          & $nodeExe --check 'tests\stage_d_packaged_voice_library_acceptance.js'
-          if ($LASTEXITCODE -ne 0) { throw "Packaged Stage D Voice Library acceptance JavaScript syntax validation failed with exit code $LASTEXITCODE." }
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -1022,35 +1032,6 @@ jobs:
           $env:PYTHONDONTWRITEBYTECODE = '1'
           & $pythonExe -B 'tests\packaged_sound_ui_acceptance.py' --exe "dist\Ryu's Audiobook\Ryu's Audiobook.exe" --script 'tests\stage2_packaged_sound_ui_acceptance.js'
           if ($LASTEXITCODE -ne 0) { throw "Packaged Sound Design Music Library acceptance failed with exit code $LASTEXITCODE." }
-
-      - name: Run packaged Stage D Voice Library export/import/fresh-process acceptance
-        timeout-minutes: 20
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $privatePython = Join-Path $env:RUNNER_TEMP 'ryu-qwen-python-bootstrap\python312\python.exe'
-          $pythonExe = $privatePython
-          if (-not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
-            $pythonExe = $env:RYU_CI_PYTHON_EXE
-          }
-          if ([string]::IsNullOrWhiteSpace($pythonExe) -or $pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
-            throw "Neither the durable private Python nor setup-python is available for packaged Stage D acceptance. Private=$privatePython; CI=$($env:RYU_CI_PYTHON_EXE)"
-          }
-          $env:PYTHONPATH = (Get-Location).Path
-          $env:PYTHONDONTWRITEBYTECODE = '1'
-          $outputDir = Join-Path $env:RUNNER_TEMP 'ryu-stage-d-voice-library-acceptance'
-          New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
-          & $pythonExe -B 'tests\packaged_voice_library_acceptance.py' --exe "dist\Ryu's Audiobook\Ryu's Audiobook.exe" --script 'tests\stage_d_packaged_voice_library_acceptance.js' --output $outputDir
-          if ($LASTEXITCODE -ne 0) { throw "Packaged Stage D Voice Library export/import/fresh-process acceptance failed with exit code $LASTEXITCODE." }
-
-      - name: Upload packaged Stage D Voice Library round-trip evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Ryu-StageD-Voice-Library-RoundTrip-${{ github.run_number }}
-          path: ${{ runner.temp }}\ryu-stage-d-voice-library-acceptance\
-          if-no-files-found: warn
-          retention-days: 30
 
       - name: Install Inno Setup
         shell: pwsh

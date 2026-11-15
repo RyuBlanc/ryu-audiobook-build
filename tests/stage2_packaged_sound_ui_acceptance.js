@@ -199,6 +199,149 @@
     window.go("production");
   }
 
+  async function runPackagedVoiceLibraryAcceptance() {
+    const acceptance = config.voice_library_acceptance;
+    if (!acceptance) return;
+    const profiles = Array.isArray(acceptance.profiles) ? acceptance.profiles : [];
+    const profileIds = profiles.map(item => String(item.profile_id || ""));
+    const profileNames = profiles.map(item => String(item.name || ""));
+    must(profiles.length === 3 && profileIds.every(Boolean) && profileNames.every(Boolean),
+      "Stage D5 must provide CustomVoice, VoiceDesign and Clone fixtures.");
+
+    async function locateSavedProfiles() {
+      const rows = await invoke("voice.list", {});
+      must(Array.isArray(rows), "Packaged voice.list did not return the saved voice catalogue.");
+      return profiles.map(expected => {
+        const row = rows.find(item => String(item.qwen_profile_id || "") === String(expected.profile_id));
+        must(row && row.saved === true && row.provider === "qwen-character" &&
+          row.qwen_mode === expected.mode && row.name === expected.name &&
+          row.model_id === expected.model_id && row.language === expected.language,
+          "The frozen app did not load the exact saved " + expected.mode + " identity: " +
+            JSON.stringify({expected:expected,row:row}));
+        return row;
+      });
+    }
+
+    async function inspectSavedProfiles() {
+      const inspected = [];
+      for (const expected of profiles) {
+        const details = await invoke("voice.library.inspect", {profile_name:expected.name});
+        must(String(details.qwen_profile_id || "") === expected.profile_id &&
+          details.profile_kind === expected.profile_kind &&
+          details.qwen_mode === expected.mode &&
+          details.model_id === expected.model_id &&
+          details.language === expected.language &&
+          details.qwen_prompt === expected.qwen_prompt &&
+          details.notes === expected.notes &&
+          details.qwen_seed === expected.qwen_seed &&
+          details.qwen_anchor_text === expected.qwen_anchor_text &&
+          details.reference_text === expected.reference_text &&
+          details.style_preset === expected.style_preset &&
+          Number(details.exaggeration) === Number(expected.exaggeration) &&
+          Number(details.cfg_weight) === Number(expected.cfg_weight) &&
+          details.authorized === expected.authorized,
+          "Packaged Voice Library inspection changed saved " + expected.mode + " profile settings: " +
+            JSON.stringify({expected:expected,details:details}));
+        if (expected.asset_role) {
+          const asset = (details.asset_integrity && Array.isArray(details.asset_integrity.assets)
+            ? details.asset_integrity.assets : []).find(item => item.role === expected.asset_role);
+          must(Boolean(asset && asset.present === true && asset.sha256 === expected.asset_sha256),
+            "Packaged Voice Library inspection did not verify the exact " + expected.asset_role + " bytes: " +
+              JSON.stringify({expected:expected.asset_sha256,asset:asset}));
+        } else {
+          must(!details.asset_integrity || Number(details.asset_integrity.asset_count || 0) === 0,
+            "CustomVoice unexpectedly acquired profile-owned audio assets.");
+        }
+        inspected.push(details);
+      }
+      return inspected;
+    }
+
+    if (config.phase === "restart") {
+      const rows = await locateSavedProfiles();
+      const details = await inspectSavedProfiles();
+      record("stage_d5_packaged_voice_library_fresh_process_reload", true,
+        JSON.stringify({
+          profile_ids:profileIds,
+          saved_count:rows.length,
+          profile_kinds:details.map(item => item.profile_kind),
+          verified_asset_hashes:details.flatMap(item =>
+            (item.asset_integrity && Array.isArray(item.asset_integrity.assets)
+              ? item.asset_integrity.assets : []).filter(asset => asset.present).map(asset => asset.sha256))
+        }));
+      return;
+    }
+
+    const sourceRows = await locateSavedProfiles();
+    const sourceDetails = await inspectSavedProfiles();
+    const exported = await invoke("voice.bundle.export", {profile_names:profileNames});
+    must(exported && exported.cancelled !== true &&
+      Number(exported.profile_count) === profiles.length &&
+      Number(exported.asset_count) >= 2 &&
+      /^[0-9a-f]{64}$/i.test(String(exported.sha256 || "")) &&
+      exported.model_weights_included === false && exported.runtime_included === false,
+      "Frozen Voice Library export did not report all profiles/assets, a digest and no model/runtime weights: " +
+        JSON.stringify(exported));
+
+    for (const profileName of profileNames) {
+      const deleted = await invoke("voice.delete", {profile_name:profileName});
+      must(deleted && deleted.deleted === true,
+        "Packaged acceptance could not remove its isolated source profile before import: " +
+          JSON.stringify({profile_name:profileName,deleted:deleted}));
+    }
+
+    const preflight = await invoke("voice.bundle.choose_import", {});
+    must(preflight && preflight.cancelled !== true && preflight.plan &&
+      Array.isArray(preflight.plan.profiles),
+      "Packaged Voice Library import preflight did not return the validated destination plan: " +
+        JSON.stringify(preflight));
+    const plannedById = new Map(preflight.plan.profiles.map(item => [String(item.profile_id || ""), item]));
+    for (const profileId of profileIds) {
+      const planned = plannedById.get(profileId);
+      must(planned && planned.classification === "new_profile",
+        "The exported profile was not classified as a new destination profile after deletion: " +
+          JSON.stringify(planned));
+    }
+
+    const resolutions = Object.fromEntries(profileIds.map(profileId => [profileId, "import"]));
+    const imported = await invoke("voice.bundle.import", {
+      bundle_path:preflight.path,
+      resolutions:resolutions
+    });
+    const importedIds = Array.isArray(imported && imported.imported_profile_ids)
+      ? imported.imported_profile_ids.map(String) : [];
+    must(profileIds.every(profileId => importedIds.includes(profileId)),
+      "Packaged Voice Library import did not restore all original stable profile IDs: " +
+        JSON.stringify(imported));
+
+    const restoredRows = await locateSavedProfiles();
+    const restoredDetails = await inspectSavedProfiles();
+    for (let index = 0; index < profiles.length; index += 1) {
+      const expected = profiles[index];
+      const originalRow = sourceRows[index];
+      const restoredRow = restoredRows[index];
+      const originalDetails = sourceDetails[index];
+      const restoredDetail = restoredDetails[index];
+      must(restoredRow.name === originalRow.name &&
+        restoredDetail.qwen_prompt === originalDetails.qwen_prompt &&
+        restoredDetail.qwen_seed === originalDetails.qwen_seed &&
+        restoredDetail.qwen_anchor_text === originalDetails.qwen_anchor_text &&
+        restoredDetail.reference_text === originalDetails.reference_text,
+        "The packaged Voice Library round-trip altered saved " + expected.mode + " identity/configuration.");
+    }
+    record("stage_d5_packaged_voice_library_export_preflight_import_asset_roundtrip", true,
+      JSON.stringify({
+        profile_ids:profileIds,
+        profile_kinds:restoredDetails.map(item => item.profile_kind),
+        imported_profile_ids:importedIds,
+        asset_count:exported.asset_count,
+        bundle_sha256:exported.sha256,
+        verified_asset_hashes:restoredDetails.flatMap(item =>
+          (item.asset_integrity && Array.isArray(item.asset_integrity.assets)
+            ? item.asset_integrity.assets : []).filter(asset => asset.present).map(asset => asset.sha256))
+      }));
+  }
+
   try {
     const bridge = window.ryuBackend;
     must(bridge && typeof bridge.invoke === "function", "The native desktop bridge is unavailable.");
@@ -209,6 +352,11 @@
     const wrappedBridge = Object.freeze({
       invoke: function (command, payload) {
         const request = Object.assign({}, payload || {});
+        if (config.voice_library_acceptance && command === "voice.bundle.export") {
+          request.acceptance_output_path = String(config.voice_library_acceptance.export_path || "");
+        } else if (config.voice_library_acceptance && command === "voice.bundle.choose_import") {
+          request.acceptance_bundle_path = String(config.voice_library_acceptance.export_path || "");
+        }
         if (command === "sound.import" && request.target_kind === "music" &&
             (!Array.isArray(request.paths) || !request.paths.length)) {
           const category = String(request.category || "universal");
@@ -275,6 +423,8 @@
       configurable: true, enumerable: true, writable: true, value: wrappedBridge
     });
     record("native_bridge", true, "Real Qt WebChannel bridge connected; the UI import action delegates to the native backend.");
+
+    await runPackagedVoiceLibraryAcceptance();
 
     if (config.phase === "restart") {
       const persistedProject = await invoke("project.get_active", {});

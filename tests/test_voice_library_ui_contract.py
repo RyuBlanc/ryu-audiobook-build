@@ -152,6 +152,8 @@ class VoiceLibraryUiContractTests(unittest.TestCase):
         self.assertIn("import_qwen_profiles_bundle(", commit)
         self.assertIn("allow_missing_voicedesign_anchor", commit)
         self.assertIn("resolutions=resolutions", commit)
+        self.assertIn('payload, "bundle_path", must_exist=True', commit)
+        self.assertIn("acceptance_bundle if acceptance_bundle is not None", commit)
 
 
 if __name__ == "__main__":
