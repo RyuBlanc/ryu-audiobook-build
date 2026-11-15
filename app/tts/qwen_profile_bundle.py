@@ -116,6 +116,10 @@ def _wav_metadata(path: Path, label: str) -> dict[str, int]:
 
 
 def _audio_media_type(path: Path) -> str:
+    # Python's system MIME registry varies between platforms (e.g. audio/x-wav
+    # on Linux and audio/wav elsewhere). Use one portable label in manifests.
+    if path.suffix.casefold() == ".wav":
+        return "audio/wav"
     guessed, _ = mimetypes.guess_type(path.name)
     return guessed or f"audio/{path.suffix.lower().lstrip('.') or 'unknown'}"
 
