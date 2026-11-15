@@ -313,8 +313,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         worker = host.split("def _preview_worker", 1)[1].split("def _character_list", 1)[0]
         self.assertIn('routing = state.get("_preview_cast_routing") if route_character_cast else {}', worker)
-        self.assertIn("identity_assignments = dict(routing.get(\\"identity_assignments\\") or {})", worker)
-        self.assertIn("unassigned_voice = str(routing.get(\\"unassigned_voice\\") or \\"\\")", worker)
+        self.assertIn('identity_assignments = dict(routing.get("identity_assignments") or {})', worker)
+        self.assertIn('unassigned_voice = str(routing.get("unassigned_voice") or "")', worker)
         self.assertIn("if cast_assignments or identity_assignments or unassigned_voice:", worker)
         self.assertIn("from app.tts.cast_provider import CastAwareProvider", worker)
         routing_helper = self.host.split("def _preview_cast_routing_snapshot", 1)[1].split("def _preview_worker", 1)[0]
