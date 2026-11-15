@@ -112,6 +112,24 @@ class ProductionPreviewSavedNarratorTests(unittest.TestCase):
         self.assertIn("Unassigned Character", routing["cast_profiles"])
         self.assertEqual(routing["unassigned_voice"], "Unassigned Character")
 
+    def test_preview_cast_snapshot_keeps_unassigned_voice_even_without_named_cast_entries(self):
+        bridge = premium_v2_host.PremiumV2Bridge.__new__(premium_v2_host.PremiumV2Bridge)
+        bridge._project_series_name = lambda _project, _state: "Series One"
+        bridge._unassigned_character_default_read = lambda: {
+            "profile_name": "Unassigned Character",
+            "profile_available": True,
+        }
+        profile = SimpleNamespace(name="Unassigned Character", voice_id="unassigned", provider="piper")
+        with patch.object(premium_v2_host, "load_profiles", return_value=[profile]):
+            routing = premium_v2_host.PremiumV2Bridge._preview_cast_routing_snapshot(
+                bridge, SimpleNamespace(folder=Path("project-preview")), {"characters": []},
+                require_unassigned=True,
+            )
+        self.assertEqual(routing["cast_assignments"], {})
+        self.assertEqual(routing["identity_assignments"], {})
+        self.assertEqual(routing["unassigned_voice"], "Unassigned Character")
+        self.assertIn("Unassigned Character", routing["cast_profiles"])
+
     def test_preview_cast_snapshot_fails_closed_when_required_unassigned_profile_is_missing(self):
         bridge = premium_v2_host.PremiumV2Bridge.__new__(premium_v2_host.PremiumV2Bridge)
         bridge._project_series_name = lambda _project, _state: "Series One"
@@ -411,6 +429,7 @@ class ProductionPreviewParitySourceContracts(unittest.TestCase):
         self.assertIn('routing = state.get("_preview_cast_routing") if route_character_cast else {}', worker)
         self.assertIn("identity_assignments=identity_assignments", worker)
         self.assertIn("unassigned_voice=unassigned_voice or None", worker)
+        self.assertIn("if cast_assignments or identity_assignments or unassigned_voice:", worker)
         self.assertIn('dialogue_assignments=state.get("_preview_dialogue_assignments") or []', worker)
         self.assertIn("self._preview_cast_routing_snapshot(", self.host_source)
 

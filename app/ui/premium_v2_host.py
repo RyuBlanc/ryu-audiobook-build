@@ -4535,7 +4535,7 @@ class PremiumV2Bridge(QObject):
                 # bank. The one-pass design-preview engine can sound different from the
                 # saved production voice, so do not rewrite the selected profile mode.
                 provider, voice = provider_from_profile(profile)
-                if cast_assignments:
+                if cast_assignments or identity_assignments or unassigned_voice:
                     from app.tts.cast_provider import CastAwareProvider
                     provider = CastAwareProvider(
                         provider, voice, cast_profiles, cast_assignments,
