@@ -133,7 +133,8 @@ class VoiceLibraryUiContractTests(unittest.TestCase):
             self.host.index("def _voice_bundle_export")
         ]
         self.assertIn("resolve_voice_library_acceptance_path(payload, key, must_exist=must_exist)", helper)
-        self.assertIn("candidate.absolute().relative_to(root)", path_guard)
+        self.assertIn("candidate = candidate.absolute()", path_guard)
+        self.assertIn("relative_candidate = candidate.relative_to(root)", path_guard)
         self.assertIn("_is_link_or_junction", path_guard)
         self.assertIn("must be supplied", path_guard)
         self.assertIn('payload, "acceptance_output_path"', self.host)
