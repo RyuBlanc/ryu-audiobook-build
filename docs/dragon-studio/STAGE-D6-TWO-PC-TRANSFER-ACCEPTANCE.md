@@ -3,8 +3,8 @@
 **Stage:** D6 — real-device transfer, destination compatibility and voice audition  
 **Repository:** `RyuBlanc/ryu-audiobook-build`  
 **Acceptance branch:** `dragon-studio/stage-d6-two-pc-voice-profile-transfer-2026-11-15`  
-**Accepted hosted baseline:** `fbed26a0beadd5ebe845173f8e2e059668248d8c` (Build Windows App #3457)  
-**Status:** READY FOR PHYSICAL USER ACCEPTANCE — NOT PASSED. No two-PC transfer or audition is represented by the hosted CI evidence.
+**Accepted hosted baseline:** `fbed26a0beadd5ebe845173f8e2e059668248d8c` (Build Windows App #3457; exact-SHA package revalidated by Build #3458 / [run 43699897254](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43699897254))  
+**Status:** DEFERRED TO STAGE F — NOT PASSED. Per the user's sequencing decision, execute this physical two-PC check only after engineering stages A–E have completed. No physical transfer or audition is represented by hosted CI.
 
 ## 1. Purpose and boundary
 
@@ -138,6 +138,6 @@ For each profile, add its mode, ID, revision, model requirements, field-parity r
 
 **Result:** NOT RUN — awaiting a real PC-A to PC-B transfer and audition.
 
-**Reason:** No source/destination device session or user-provided physical acceptance evidence has been completed in this hosted run. Build #3457 proves the packaged one-machine path only.
+**Reason:** The user has explicitly scheduled physical checks until after every engineering stage is complete. Builds #3457 and #3458 prove the packaged one-machine path only; they do not establish a separate PC-B transfer, destination compatibility, real restart, or paired voice audition.
 
 When physical testing is complete, replace this status with PASS only after every applicable gate in Section 8 is supported. Preserve any failed/partial attempts and distinguish NOT RUN, BLOCKED, FAIL and PASS for each case.

@@ -464,3 +464,31 @@ These code and regression results demonstrate that repeated unrelated-project lo
 - PR #35 tracking branch dragon-studio/1.2.0-post-release-bugfixes was fast-forwarded from expected old HEAD 65adc53da81e8faeca09bc50cf4f21f663cc5138 to 1ab7c27ead88e55df644f703c339bc608bfef897. Compare verified the new candidate was 39 commits ahead / 0 behind before promotion. PR #35 remains open and draft, not merged or release-published.
 - **Stage C is not fully closed.** C1/C2 hosted gates are passed but installed target-PC profile audition/repair/restart checks remain. C3 physical NVIDIA CUDA / AMD ROCm / Intel XPU inference and the relevant under-60-second 30-second preview targets remain open. C4 installed-app voice identity/narrator-cast checks and representative full-novel Qwen generation/playback remain open. Long real-generation progress/ETA/duration, interruption recovery, physical DPI/multi-monitor, shell icon/installer visual and final Help & Guide checks also remain open.
 - The #3414 package checkpoint is not a final Stage 8 sign-off or a release publication. Do not start Stage D until the outstanding Stage C manual/hardware/full-book acceptance is recorded with evidence. No CPU fallback, hosted CI result or two-chapter fixture closes those requirements.
+
+
+
+## Stage D engineering closeout and Stage E handoff — 15 November 2026
+
+### Exact hosted/package evidence
+
+- **Build #3457** / [run 43696836352](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43696836352), exact SHA `fbed26a0beadd5ebe845173f8e2e059668248d8c`: tests and Windows build passed; D3 21/21, D4 22/22, D5 contract 3/3, path security 10/10, full regression 1,681/1,681; packaged CustomVoice/VoiceDesign/Clone export → preflight → transactional import, two asset hashes and fresh-process reload passed.
+- **Build #3458** / [run 43699897254](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43699897254), same exact SHA `fbed26a0beadd5ebe845173f8e2e059668248d8c`: both tests and Windows package passed again; installer, portable, SHA manifest, M4B and Piper benchmark artifacts uploaded.
+- **Build #3459** / [run 43700613272](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43700613272), documentation commit `e3dd1259453f04d3d9dc9f19062cbbe6cc8b66f8`: tests and full regression **1,681/1,681** passed; build skipped because the change was documentation-only.
+- **Build #3460** / [run 43700894123](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43700894123), documentation commit `6d970bf70911848c90bcb178b1a166a10bf8305d`: tests and full regression **1,681/1,681** passed; build skipped because the change was documentation-only.
+
+### Stage D disposition
+
+**D0–D5 hosted engineering/package acceptance is complete. D6 physical acceptance is NOT PASSED and is deferred to Stage F by user direction.** Stage D is closed as the current engineering workstream; physical acceptance remains an explicit final gate.
+
+### Stage E scope
+
+- Active branch: `dragon-studio/stage-e-character-intelligence-cast-production-ux-2026-11-15`.
+- Base SHA: `6d970bf70911848c90bcb178b1a166a10bf8305d`.
+- Charter: [STAGE-E-CHARACTER-INTELLIGENCE-AND-PRODUCTION-UX-PLAN.md](STAGE-E-CHARACTER-INTELLIGENCE-AND-PRODUCTION-UX-PLAN.md).
+- Included IDs: DS-AI-012, DS-CAST-008, DS-UI-009 and DS-HELP-014.
+- First audit gap: Indian-script speaker labels with combining marks are not represented in the existing multilingual fixtures; `SPEAKER_NAME_TOKEN` uses Python `\w`, which excludes Unicode mark categories. Add the regression first and validate the full analyzer before selecting the narrowest correction.
+- Preserve Stage C/D accepted behavior. Hardware, installed-app and real-listening checks remain open for Stage F.
+
+### Stage F disposition
+
+Stage F will consolidate D6 two-PC transfer/audition, saved Qwen profile/device acceptance, real long-book generation/playback/recovery, physical display/DPI/flicker, shell icon and installer visual checks, and final Help & Guide user review. These checks must run after engineering stages are complete and cannot be replaced by CI simulation.
