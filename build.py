@@ -467,6 +467,7 @@ args = [
     f"--add-data={ROOT / "app" / "tts" / "chatterbox_worker.py"};app/tts",
     f"--add-data={ROOT / "app" / "tts" / "expression.py"};app/tts",
     f"--add-data={ROOT / "app" / "tts" / "qwen_profile_schema.py"};app/tts",
+    f"--add-data={ROOT / "app" / "tts" / "qwen_model_preference.py"};app/tts",
     f"--add-data={ROOT / "app" / "tts" / "qwen_character_worker.py"};app/tts",
     # Qwen runs in its own Python venv outside the frozen EXE. Its accelerator
     # selector reads saved performance history through app.core.paths, so the

@@ -684,6 +684,12 @@ jobs:
           $sourceSchemaHash = (Get-FileHash -Algorithm SHA256 $sourceSchema).Hash
           $packagedSchemaHash = (Get-FileHash -Algorithm SHA256 $packagedSchema).Hash
           if ($sourceSchemaHash -ne $packagedSchemaHash) { throw "Packaged Qwen profile schema helper differs from repository source. Source=$sourceSchemaHash Packaged=$packagedSchemaHash" }
+          $packagedPreference = Join-Path $worker.DirectoryName 'qwen_model_preference.py'
+          if (-not (Test-Path -LiteralPath $packagedPreference -PathType Leaf)) { throw 'Bundled Qwen model preference helper is missing beside the standalone worker.' }
+          $sourcePreference = Join-Path (Get-Location) 'app\tts\qwen_model_preference.py'
+          $sourcePreferenceHash = (Get-FileHash -Algorithm SHA256 $sourcePreference).Hash
+          $packagedPreferenceHash = (Get-FileHash -Algorithm SHA256 $packagedPreference).Hash
+          if ($sourcePreferenceHash -ne $packagedPreferenceHash) { throw "Packaged Qwen model preference helper differs from repository source. Source=$sourcePreferenceHash Packaged=$packagedPreferenceHash" }
           $packagedText = Get-Content $worker.FullName -Raw
           if ($packagedText -notmatch '_APPLICATION_ROOT = Path\(__file__\)\.resolve\(\)\.parents\[2\]') { throw 'Packaged Qwen worker is missing the application-root bootstrap.' }
           $pythonExe = $env:RYU_CI_PYTHON_EXE

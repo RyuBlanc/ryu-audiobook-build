@@ -342,6 +342,7 @@ class QwenProfileBundleExportTests(unittest.TestCase):
     def test_standalone_qwen_worker_schema_helper_is_physically_bundled(self):
         build_script = (Path(__file__).resolve().parents[1] / "build.py").read_text(encoding="utf-8")
         self.assertIn("qwen_profile_schema.py", build_script)
+        self.assertIn("qwen_model_preference.py", build_script)
         self.assertIn("--add-data", build_script)
         self.assertIn("app/tts", build_script)
         worker_source = (
