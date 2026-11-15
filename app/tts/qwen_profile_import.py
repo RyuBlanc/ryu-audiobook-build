@@ -1265,7 +1265,11 @@ def import_qwen_profiles_bundle(
         if catalogue_existed:
             backup = transaction_dir / "catalogue.before.json"
             shutil.copy2(catalogue, backup)
-            with backup.open("rb") as handle:
+            # Windows requires a write-capable descriptor for fsync. The
+            # backup is already copied; reopen without truncation, then flush
+            # the existing bytes to durable storage before journaling the transaction.
+            with backup.open("r+b") as handle:
+                handle.flush()
                 os.fsync(handle.fileno())
         journal: dict[str, object] = {
             "transaction_id": transaction_id,
