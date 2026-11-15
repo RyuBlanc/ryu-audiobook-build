@@ -135,8 +135,8 @@ Import must restore assets to application-managed, profile-owned storage and rem
 ## 9. Implementation sequence
 
 1. **D0 — Inventory and schema design: COMPLETE.** See [STAGE-D0-CURRENT-PROFILE-INVENTORY.md](STAGE-D0-CURRENT-PROFILE-INVENTORY.md) and [STAGE-D0-BUNDLE-SCHEMA-DESIGN.md](STAGE-D0-BUNDLE-SCHEMA-DESIGN.md). The docs map current profile fields, model/runtime resolution, Clone source/normalized reference assets, derived VoiceDesign anchor storage, and a versioned bundle manifest proposal. No runtime code was changed.
-2. **D1 — Versioned profile domain model:** add explicit schema/revision/model-compatibility metadata with backwards-compatible readers and migration tests. Existing profile behaviour must remain unchanged.
-3. **D2 — Asset ownership and portable serialization:** implement deterministic export with relative paths, content hashes, validation and round-trip tests.
+2. **D1 — Versioned profile domain model: COMPLETE (hosted checkpoint).** Build Windows App #3428 / [run 43586273325](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43586273325), exact SHA `32b6c77d569e3e8d920d0348349834dc6aa48f6a`, passed. The focused D1 schema suite covered legacy migration, unknown-field preservation, path-independent revision hashes, required/malformed asset-hash rejection, CustomVoice/Clone/VoiceDesign model-role compatibility, schema-independent generation signatures, and future-schema fail-closed provider creation. The full regression passed **1,605 tests**. The Windows frozen app/package, installer, portable artifact, SHA manifest, Defender and install/launch/upgrade/uninstall steps passed. This is hosted implementation/package acceptance; real transfer of profile assets is D2/D3/D6, not claimed complete here.
+3. **D2 — Portable profile export:** implement a versioned ZIP bundle with stable manifest serialization, relative asset paths, exact Clone and VoiceDesign asset capture, SHA-256 verification and export round-trip tests. Model weights/runtime are excluded.
 4. **D3 — Transactional import and recovery:** implement preflight, compatibility report, additive import, collision choices, safe replacement/rollback and interrupted-operation recovery.
 5. **D4 — Voice Library UI:** add the profile management experience, type/model filters, compatibility display, export/import and clear error/recovery notifications.
 6. **D5 — Exact-head integration checkpoint:** focused tests, full regression, packaged import/export acceptance, Windows installer/portable artifacts and hashes.
@@ -159,6 +159,6 @@ Stage D may proceed independently. A Stage D regression must not be used as a re
 
 ## 11. Current status
 
-**D0 inventory and schema proposal committed; application implementation has not started.**
+**D0 complete. D1 hosted implementation and package checkpoint complete at `32b6c77`; D2 is the next active sub-stage.**
 
-The next engineering gate is D1: add tests for canonical revision identity, legacy read compatibility, exact asset binding/round-trip and derived-anchor discovery before modifying VoiceProfile or catalogue persistence. Resolve any mismatch those tests expose before changing the runtime. The branch remains based on the accepted Stage C checkpoint lineage. No application source, model runtime, existing saved profile or user asset has been changed by the Stage D planning/inventory commits.
+D1 run #3428 passed 1,605 full-regression tests and the Windows package/installer gates. The source profile catalogue retains legacy and unknown fields, and unsupported future schema versions are blocked before Qwen provider creation. D2 will add export only; import remains D3. No existing profile catalogue or user asset is modified by the export path.
