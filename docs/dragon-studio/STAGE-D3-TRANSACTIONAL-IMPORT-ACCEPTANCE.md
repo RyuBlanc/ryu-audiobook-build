@@ -124,3 +124,7 @@ Build Windows App **#3443** / [run 43678950405](https://github.com/RyuBlanc/ryu-
 These are GitHub Actions artifact ZIP digests. The application/installer file hashes are in the release SHA-256 manifest. GitHub reported artifact expiry on 15 December 2026.
 
 D3 closes transactional profile import and recovery in the hosted application. It does **not** claim that the Voice Library UI, packaged import/export round-trip, or real two-PC transfer is complete. Those remain D4, D5 and D6.
+
+## 9. Post-checkpoint regression extension — preserved separately from D3 package acceptance
+
+The accepted D3 artifact checkpoint remains Build #3443 on exact SHA `946049393836d9f2628f1e1c6bd26312b0111197`, with its then-current 20/20 focused D3 suite and 1,645/1,645 cumulative regression. The shared Stage D4 branch later added an explicit skipped-VoiceDesign-anchor coverage case in Build #3447. That expanded D3 suite passed **21/21** again in Build #3450 / [run 43690410288](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43690410288), alongside the D4 and D5 gates and 1,671/1,671 cumulative regression. This is continuing regression protection; it does not replace, rewrite or require repeating the already accepted D3 #3443 package checkpoint.
