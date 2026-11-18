@@ -40,6 +40,7 @@ function Get-FileEvidence {
         expected_sha256 = $ExpectedSha256
         matches_expected = $null
         status = 'not_found'
+        error_type = $null
     }
     try {
         if (-not (Test-Path -LiteralPath $CandidatePath -PathType Leaf)) {
@@ -47,23 +48,38 @@ function Get-FileEvidence {
             return [pscustomobject]$record
         }
         $item = Get-Item -LiteralPath $CandidatePath -ErrorAction Stop
-        $hash = (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
-        $record.exists = $true
-        $record.size_bytes = [long]$item.Length
-        $record.sha256 = $hash
-        $record.status = 'hashed'
+        $stream = $null
+        $sha256 = $null
+        try {
+            $stream = [System.IO.File]::OpenRead($item.FullName)
+            $sha256 = [System.Security.Cryptography.SHA256]::Create()
+            $digest = $sha256.ComputeHash($stream)
+            $hash = ([System.BitConverter]::ToString($digest)).Replace('-', '').ToLowerInvariant()
+        } finally {
+            if ($null -ne $stream) {
+                $stream.Dispose()
+            }
+            if ($null -ne $sha256) {
+                $sha256.Dispose()
+            }
+        }
+        $record['exists'] = $true
+        $record['size_bytes'] = [long]$item.Length
+        $record['sha256'] = $hash
+        $record['status'] = 'hashed'
         if (-not [string]::IsNullOrWhiteSpace($ExpectedSha256)) {
-            $record.matches_expected = ($hash -eq $ExpectedSha256.ToLowerInvariant())
+            $record['matches_expected'] = ($hash -eq $ExpectedSha256.ToLowerInvariant())
             if ($record.matches_expected) {
-                $record.status = 'hash_match'
+                $record['status'] = 'hash_match'
             } else {
-                $record.status = 'hash_mismatch'
+                $record['status'] = 'hash_mismatch'
                 $script:CaptureErrors.Add("$Kind does not match the pinned Build #3470 SHA-256.")
             }
         }
     } catch {
-        $record.status = 'read_error'
-        $script:CaptureErrors.Add("$Kind could not be read ($($_.Exception.GetType().Name)).")
+        $record['status'] = 'read_error'
+        $record['error_type'] = $_.Exception.GetType().FullName
+        $script:CaptureErrors.Add("$Kind could not be read ($($_.Exception.GetType().FullName)).")
     }
     return [pscustomobject]$record
 }

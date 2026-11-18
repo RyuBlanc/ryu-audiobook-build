@@ -168,7 +168,7 @@ class StageFAcceptanceToolTests(unittest.TestCase):
             self.assertFalse(report["privacy"]["voice_audio_contents_included"])
 
             app_record = next(item for item in report["evidence_files"] if item["kind"] == "application_exe")
-            self.assertEqual(app_record["status"], "hash_mismatch")
+            self.assertEqual(app_record["status"], "hash_mismatch", json.dumps({"app_record": app_record, "errors": report["errors"]}))
             self.assertFalse(app_record["matches_expected"])
             self.assertNotIn(str(root), report_text)
             self.assertNotIn(fake_exe.name, report_text)
