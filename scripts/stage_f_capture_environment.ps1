@@ -78,7 +78,7 @@ function Get-CimRows {
     }
 }
 
-$osRows = Get-CimRows -ClassName 'Win32_OperatingSystem'
+$osRows = @(Get-CimRows -ClassName 'Win32_OperatingSystem')
 $osInfo = $null
 if ($osRows.Count -gt 0) {
     $os = $osRows[0]
@@ -111,7 +111,7 @@ $gpuInfo = @(
 )
 
 $memoryGiB = $null
-$computerRows = Get-CimRows -ClassName 'Win32_ComputerSystem'
+$computerRows = @(Get-CimRows -ClassName 'Win32_ComputerSystem')
 if ($computerRows.Count -gt 0 -and $null -ne $computerRows[0].TotalPhysicalMemory) {
     $memoryGiB = [math]::Round(([double]$computerRows[0].TotalPhysicalMemory / 1GB), 2)
 }
