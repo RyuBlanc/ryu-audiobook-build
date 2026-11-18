@@ -4,7 +4,9 @@
 **Repository:** `RyuBlanc/ryu-audiobook-build`  
 **Acceptance branch:** `dragon-studio/stage-d6-two-pc-voice-profile-transfer-2026-11-15`  
 **Accepted hosted baseline:** `fbed26a0beadd5ebe845173f8e2e059668248d8c` (Build Windows App #3457; exact-SHA package revalidated by Build #3458 / [run 43699897254](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43699897254))  
-**Status:** DEFERRED TO STAGE F — NOT PASSED. Per the user's sequencing decision, execute this physical two-PC check only after engineering stages A–E have completed. No physical transfer or audition is represented by hosted CI.
+**Status:** STAGE F EXECUTION-READY — NOT RUN / NOT PASSED. Engineering stages A–E are complete. Per the user's sequencing decision, execute this physical two-PC check now as part of Stage F; no transfer, compatibility check, restart or audition has been represented as passed by hosted CI.
+
+**Current recommended application package:** Build Windows App #3470 / [run 43714021829](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43714021829), source SHA `fc3a0f8e1d64790b1a61024f8d883653b2dad51c`. The D5 implementation baseline #3457/#3458 remains the accepted hosted profile-library evidence; #3470 is the newer integrated application package for the user's physical Stage F run.
 
 ## 1. Purpose and boundary
 
@@ -138,6 +140,6 @@ For each profile, add its mode, ID, revision, model requirements, field-parity r
 
 **Result:** NOT RUN — awaiting a real PC-A to PC-B transfer and audition.
 
-**Reason:** The user has explicitly scheduled physical checks until after every engineering stage is complete. Builds #3457 and #3458 prove the packaged one-machine path only; they do not establish a separate PC-B transfer, destination compatibility, real restart, or paired voice audition.
+**Reason:** The user has explicitly scheduled physical checks until after all engineering stages were complete. Stage F is now active. Builds #3457/#3458 prove the packaged one-machine D5 path, and Build #3470 is the current integrated application package; none of these hosted runs establishes a separate PC-B transfer, destination compatibility, a real destination restart or paired voice audition.
 
 When physical testing is complete, replace this status with PASS only after every applicable gate in Section 8 is supported. Preserve any failed/partial attempts and distinguish NOT RUN, BLOCKED, FAIL and PASS for each case.

@@ -76,11 +76,16 @@ Build Windows App #3405 / [run 43462518581](https://github.com/RyuBlanc/ryu-audi
 - Full regression: **1,595/1,595**.
 - Windows packaging was skipped by design; this was an intermediate fix, not an artifact checkpoint.
 
-## Exact-head next gates
+## Hosted C4 closeout and Stage F physical carry-forward
 
-1. Run one exact-head Windows artifact checkpoint from candidate SHA `6348eb0bd9f915d76f432ce1d899f023552a5e89` using [artifact-checkpoint]. Require the complete focused and full regression suite before packaging. Preserve every existing frozen-app, bundled-assets, M4B, Sound Design, installer, install/launch/upgrade/uninstall, user-data, transparency/hash, package-size, Defender and artifact-upload gate unchanged.
-2. After the package succeeds, promote this accepted candidate to the long-lived PR #35 tracking branch by a verified fast-forward only. Keep PR #35 in draft until its accumulated review and applicable physical acceptance are addressed; do not force-push or rewrite the failed-run history.
-3. Keep installed target-PC profile audition, restart/repair and representative long-book production acceptance open. Keep C3 NVIDIA CUDA / AMD ROCm / Intel XPU acceptance open until real self-hosted inference proves actual backend and timing.
+The hosted C4 work is complete; no further C4 source change or repeat package is required without a reproducible regression.
+
+- Provider Runtime Smoke #448 / [run 43499302368](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43499302368) passed the real CPU CustomVoice 0.6B/1.7B, authorized Base Clone, saved multilingual VoiceDesign reload/identity and two-chapter Qwen character-to-M4B checks on the candidate application source.
+- Build Windows App #3414 / [run 43567794677](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43567794677) passed the exact-head C1–C4 focused suite (C4 37/37; full suite 1,596/1,596) and the Windows artifact checkpoint, including installer, portable, SHA manifest, Defender and install/launch/upgrade/uninstall gates.
+- The integrated Stage C engineering/package checkpoint is Build Windows App #3420 / [run 43580180275](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43580180275), exact baseline `154bf0e0c1c1fe8334f68655d1629a3a9d1e3691`.
+- Builds #3411 and #3412 remain preserved failures; their late HTML-installer Python restore issue was corrected and #3414 passed. Do not rerun C4 merely to refresh status.
+
+**Still open only in Stage F:** installed-app save/reload/audition of CustomVoice, VoiceDesign and Clone; narrator/cast identity on a representative full novel; M4B metadata/cover/chapter/duration and listening/seek; real NVIDIA CUDA, supported AMD ROCm and Intel XPU inference/telemetry. The #448 CPU VoiceDesign 30-second runs took 187.318 and 336.607 seconds and did not meet the under-60-second goal. These are CPU functional results, not GPU acceptance.
 
 ## Non-negotiable acceptance rules
 
@@ -98,8 +103,8 @@ Build Windows App #3405 / [run 43462518581](https://github.com/RyuBlanc/ryu-audi
 - The application source tree is unchanged from Build Windows App #3405 (source baseline `45a0d5ee66363f3c258e1512e28347e457212027`). The five later commits contain C4 acceptance documentation, ledger updates and the provider-workflow path-filter correction; they do not change application source.
 - Build Windows App #3410 / [run 43499302199](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43499302199) passed on this exact head: Stage B 16/16, Stage 6 48/48, C1 10/10, C2 9/9, C3 8/8, C4 37/37 and full regression 1,595/1,595. The Windows build job was skipped because this was not yet an artifact-checkpoint push.
 - Provider Runtime Smoke #448 / [run 43499302368](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43499302368) completed successfully on the same exact SHA and uploaded the three real-audio evidence archives listed above.
-- Exact-head real CPU provider acceptance is passed. Windows artifact/package acceptance remains pending. CPU timing explicitly misses the under-60-second goal; no GPU result is implied.
-- The next commit carries [artifact-checkpoint] only. It requests the Windows package after the full regression suite; it does not repeat the expensive real-provider smoke chain. Do not infer package success from the test job alone.
+- Exact-head real CPU provider acceptance passed, and Windows artifact/package acceptance subsequently passed in Build #3414. CPU timing explicitly misses the under-60-second goal; no GPU result is implied.
+- This checkpoint is closed by Build #3414; the integrated Stage C baseline is Build #3420. Do not repeat the expensive real-provider smoke chain or package without a relevant source change or reproducible regression.
 
 
 ## Windows package checkpoint failure diagnosis and correction — 14 November 2026

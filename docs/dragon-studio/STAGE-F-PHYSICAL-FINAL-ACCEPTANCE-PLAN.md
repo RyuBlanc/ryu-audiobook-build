@@ -12,7 +12,27 @@ Stage F consolidates the physical checks deliberately deferred from Stages B, C 
 
 The user explicitly requested that physical tests requiring their participation be deferred until engineering stages were complete. Stages A–E have now reached their hosted engineering/package exit criteria. Stage F is therefore the active handoff, but no physical test has been performed or marked passed by this document.
 
-## 2. Frozen hosted baseline — Build #3470
+## 2. F0 — Non-physical engineering preparation
+
+**Disposition:** source/docs/tooling preparation only. No physical PC, GPU, two-PC transfer, audio audition or visual acceptance is performed by this preparation.
+
+The following assets are part of the Stage F preparation checkpoint:
+
+- `scripts/stage_f_capture_environment.ps1` records privacy-minimized Windows environment metadata and SHA-256/size evidence for explicitly supplied files. It pins the Build #3470 application, HTML installer and core installer hashes.
+- `tests/test_stage_f_acceptance_tools.py` protects the pinned baseline, privacy exclusions, the rule that device discovery is not inference evidence, and the distinction between the legacy quote-span count and the canonical source-position passage index. Its Windows PowerShell integration test runs in the hosted Windows regression suite.
+- [STAGE-F-USER-CHECKLIST.md](STAGE-F-USER-CHECKLIST.md) gives the physical sequence and the commands for collecting PC-A/PC-B evidence.
+
+The capture tool does not capture or upload audio contents, profile names, filenames, absolute paths, account names, machine identifiers, serial numbers or network identifiers. For supplied files it records only their role, byte size and SHA-256. GPU utility presence and WMI adapter information are inventory only; neither is evidence of the backend selected by a synthesis worker.
+
+### Historical Stage B failure diagnosis
+
+The original Build Windows App failures #3198, #3199 and #3200 have now been traced to their exact Actions logs. All three remain historical failures: each ran 1,489 tests and ended with **4 failures and 1 error**. The shared causes were a progress test harness missing the production clock method `_now()` (which caused the two pause/resume assertions to cascade), a stale narration-versus-packaging progress expectation, and a source assertion that still expected the removed `Loading voice model` stage literal. The import-worker fixture also logged a `record_latest_import` ValueError while its test itself passed; that warning was not one of the five suite failures. Later Stage B and integrated checkpoints supersede these failures; this diagnosis does not relabel them as passed.
+
+### DS-AI-012 passage-count reconciliation boundary
+
+The historic 1,175-versus-1,196 figures cannot be reconciled from the repository alone because the original source book/export and the exact source revision used for both totals are not retained in the acceptance record. The implementation has two different measures: the legacy character analyzer's `dialogue_total` counts quote/dash spans, while the canonical passage index counts all non-narration source segments, including saved assignments and exact-source AI review spans. The new deterministic test demonstrates why those totals are not interchangeable. This is a metric-definition/source-evidence issue, not proof that either historical total is correct. Stage F must use the same source book/revision and report both metric definitions before comparing counts.
+
+## 3. Frozen hosted baseline — Build #3470
 
 - Exact commit: fc3a0f8e1d64790b1a61024f8d883653b2dad51c.
 - Actions: [Build Windows App #3470](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43714021829), run ID 43714021829.
@@ -40,7 +60,7 @@ This is hosted package evidence, not physical PC, GPU or acoustic sign-off.
 | E — character intelligence/cast/Production/Help | E0–E5 complete; #3469 source/test gates and #3470 exact-head package passed | Physical UI/full-book/installed-app observations NOT RUN |
 | F — physical/manual acceptance | Active | Open; no physical item is passed by CI |
 
-## 4. F1 — Real two-PC profile transfer (D6)
+## 5. F1 — Real two-PC profile transfer (D6)
 
 **Status: NOT RUN — explicitly deferred until this physical acceptance stage.** Use [STAGE-D6-TWO-PC-TRANSFER-ACCEPTANCE.md](STAGE-D6-TWO-PC-TRANSFER-ACCEPTANCE.md) as the controlling detailed worksheet. It requires:
 
@@ -53,7 +73,7 @@ This is hosted package evidence, not physical PC, GPU or acoustic sign-off.
 
 A same-PC second process or CI fixture cannot pass D6. A missing model on PC-B must be reported honestly; do not remove a working model simply to manufacture a negative test.
 
-## 5. F2 — Qwen device selection, real inference and performance
+## 6. F2 — Qwen device selection, real inference and performance
 
 **Status: NOT RUN on target hardware.** The formal accelerator matrix is in [STAGE-C3-QWEN-ACCELERATOR-ACCEPTANCE.md](STAGE-C3-QWEN-ACCELERATOR-ACCEPTANCE.md). Execute only on hardware and backends that are actually available and supported.
 
@@ -69,7 +89,7 @@ For each available device test the 0.6B/1.7B selector and the applicable CustomV
 
 The exact-head CPU evidence from Provider Runtime Smoke #448 produced 30-second VoiceDesign previews in 187.318 and 336.607 seconds. The log explicitly marked the CPU under-60-second goal NOT MET. These CPU timings must not be rewritten as GPU evidence or used to claim the target has passed.
 
-## 6. F3 — Installed-app voice identity and full-book production
+## 7. F3 — Installed-app voice identity and full-book production
 
 **Status: NOT RUN as a representative user-book physical test.** CI has passed packaged fixture and multi-chapter smoke tests; it has not replaced user acceptance on a real novel and target device.
 
@@ -81,7 +101,7 @@ The exact-head CPU evidence from Provider Runtime Smoke #448 produced 30-second 
 - During a controlled run, test pause/resume, cancel, retry, process interruption/restart and recovery. Confirm the correct job owns the output, valid completed chunks are reused, stale output is never attached, and cancellation stops the intended work promptly.
 - Validate the final M4B in an independent supported player: chapter titles/order/markers, duration, metadata, author, cover, audio decode, seek, playback and main/mini-player state. Listen for narrator/character identity continuity, pronunciation, missing/duplicated text, clipping, silence and sound-design transitions.
 
-## 7. F4 — UI responsiveness, stability and display matrix
+## 8. F4 — UI responsiveness, stability and display matrix
 
 **Status: NOT RUN physically.** Automated viewport/overlap and source tests have passed; they are not proof of no flicker, freeze or crash on the user's display hardware.
 
@@ -89,7 +109,7 @@ Inspect all 15 application destinations with the installed app, including rapid 
 
 Run the responsive matrix across these aspect ratios: 4:3, 5:4, 3:2, 16:10, 16:9, 21:9, 32:9 and portrait. Include at least 1280×720, common laptop/desktop sizes, restored/maximized/minimized, split-screen, ultrawide, portrait, mixed-monitor arrangements and 100%, 125%, 150% and 200% display scaling. Check clipped text, overlapping controls, inaccessible actions, excessive/nested scrolling, scroll jumps and dialogs that extend beyond the viewport. Retain the agreed 41-viewport automated matrix as a separate CI result, not as a substitute for these observations.
 
-## 8. F5 — Windows installer, shell identity and Help & Guide
+## 9. F5 — Windows installer, shell identity and Help & Guide
 
 **Status: NOT RUN physically.** Build #3470 already passed installer build/startup, install/launch/upgrade/uninstall, transparency/hash contracts and Defender scanning.
 
@@ -98,13 +118,21 @@ Run the responsive matrix across these aspect ratios: 4:3, 5:4, 3:2, 16:10, 16:9
 - Verify upgrades preserve user projects, models, profiles and saved output. Verify uninstall behaviour preserves user data where specified.
 - Open Help & Guide in the installed application; follow import, chapter, voice/profile, character, pronunciation, Sound Design, generation/recovery, playback, model and troubleshooting instructions. Confirm wording matches the actual controls and clearly labels unsupported/deferred features.
 
-## 9. Failure handling and release gate
+## 10. Failure handling and release gate
 
 If any physical item fails, record the exact build SHA, machine label, reproducible steps, expected/actual result, logs/screenshots/audio evidence and affected stable bug ID. Do not relabel it as a successful test. Reopen only the specific affected implementation; preserve completed unrelated Stage A–E work. The correction must receive focused tests, full regression and an exact-head Windows package before the affected physical check is repeated.
 
 Stage F closes only when every applicable physical row is either PASS with evidence or explicitly approved as a documented exception. Unsupported device/backend combinations remain NOT SUPPORTED/NOT RUN, not passed. Version 1.2.0 publication and final release sign-off are separate and require explicit owner approval after this ledger is complete.
 
-## 10. Current checklist
+## 11. Evidence capture and handling
+
+Run `scripts/stage_f_capture_environment.ps1` on PC-A and PC-B before the matching physical tasks. The tool's JSON is a supporting environment/hash record only. For a backend-specific Qwen PASS, retain the application's real synthesis worker diagnostic showing the resolved device/backend during the actual preview. Record audio durations and elapsed time separately.
+
+Keep the source `.ryuvoice` bundle, imported-asset hashes, local listening notes and any private audio evidence under the user's control. Public GitHub records should contain only the non-sensitive machine labels (PC-A/PC-B), build SHA, test state, model/backend details as appropriate, timings and hashes. Do not publish recordings, account names, machine identifiers or local file paths.
+
+The step-by-step user sequence is in [STAGE-F-USER-CHECKLIST.md](STAGE-F-USER-CHECKLIST.md).
+
+## 12. Current checklist
 
 | Check | Status |
 |---|---|
@@ -121,4 +149,5 @@ Stage F closes only when every applicable physical row is either PASS with evide
 | Installed shortcut/taskbar/logo transparency | NOT RUN |
 | Actual installer geometry and navigation | NOT RUN |
 | Installed-app Help & Guide walkthrough | NOT RUN |
+| Stage F non-physical tooling/docs/test contracts | PREPARED — exact-head checkpoint validation required |
 | Final owner release approval | NOT RUN |
