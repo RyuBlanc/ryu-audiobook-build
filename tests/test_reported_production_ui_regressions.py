@@ -174,7 +174,9 @@ class ReportedProductionUiRegressionTests(unittest.TestCase):
 
     def test_icon_pack_selection_refreshes_full_saved_state(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
-        self.assertIn("await call('settings.save', {icon_pack:selected});\\n          await ensureIconPackSettingsRefresh();", adapter)
+        self.assertIn("await call('settings.save', {icon_pack:selected});", adapter)
+        self.assertNotIn("ensureIconPackSettingsRefresh(saved)", adapter)
+        self.assertIn("await ensureIconPackSettingsRefresh();", adapter)
         self.assertIn("const settings = await call('settings.get', {})", adapter)
         self.assertIn("settings.custom_icon_url", adapter)
 
