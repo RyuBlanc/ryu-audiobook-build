@@ -184,7 +184,9 @@ class ReportedProductionUiRegressionTests(unittest.TestCase):
         self.assertIn("ryuMultiSpeakerSelectionActions", adapter)
         self.assertIn("assignPassageToCharacters", adapter)
         self.assertIn("mode:speakers.length > 1 ? 'chorus' : 'single'", adapter)
-        self.assertIn('id="selectionPlus" aria-label="Assign speakers to selected text"', html)
+        self.assertIn('id="selectionPlus"', html)
+        self.assertIn('aria-label="Assign speakers to selected text"', html)
+        self.assertIn("Every character in a multi-voice blend needs a saved voice profile", adapter)
         self.assertIn("requestAnimationFrame(() => positionCharacterAssignmentPopover", adapter)
 
     def test_official_drake_and_fang_cursor_assets_are_packaged_as_valid_pngs(self):

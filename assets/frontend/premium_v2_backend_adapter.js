@@ -4673,6 +4673,12 @@
     for (const item of selections) {
       let character = await ensureCharacterInActiveProject(item.name,item.series,item.profile || '');
       const selectedProfile = String(item.profile || character.voice_profile || '').trim();
+      if (selectedProfile && !characterProfileByName(selectedProfile)) {
+        throw new Error('The saved voice profile for ' + characterCanonical(character) + ' is unavailable. Choose or restore a valid profile first.');
+      }
+      if (selections.length > 1 && !selectedProfile) {
+        throw new Error('Every character in a multi-voice blend needs a saved voice profile. Assign each character a voice in Character Studio before combining them.');
+      }
       if (selectedProfile && selectedProfile !== String(character.voice_profile || '')) {
         if (!characterProfileByName(selectedProfile)) throw new Error('Choose a saved voice profile for ' + characterCanonical(character) + '.');
         await call('character.assign',{name:characterCanonical(character),series:characterSeries(character),profile_name:selectedProfile});

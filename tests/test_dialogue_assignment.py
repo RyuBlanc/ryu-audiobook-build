@@ -106,7 +106,7 @@ class DialogueAssignmentTests(unittest.TestCase):
     def test_repeated_quote_markers_are_one_dialogue_passage(self):
         for source in ('Prefix. ""hi there"" Suffix.', 'Prefix. {""hi there""} Suffix.'):
             chapter = Chapter(1, "Multi voice", source)
-            marker_start = source.index('""')
+            marker_start = source.index('{""') if '{""' in source else source.index('""')
             marker_end = source.index('}', marker_start) + 1 if '{""' in source else source.rindex('""') + 2
             spans = _all_dialogue_spans(source)
             matched = next((row for row in spans if row[0] == marker_start and row[1] == marker_end), None)
