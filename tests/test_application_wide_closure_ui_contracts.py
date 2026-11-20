@@ -97,7 +97,7 @@ class CharacterStudioUIContracts(unittest.TestCase):
         self.assertIn("Automatically enabled because this book has no configured character voice profiles", adapter)
         self.assertIn("You can enable it even when character profiles are assigned", adapter)
         self.assertIn("Press OK, then click Generate full audiobook again to continue.", adapter)
-        self.assertIn("They will use the global Unassigned Character profile", adapter)
+        self.assertIn("They will use the global Third Person profile", adapter)
         self.assertIn("production.narrator_only.save", adapter)
         self.assertIn("narrator_only_generation:narratorOnly", adapter)
         self.assertIn('state["narrator_only_generation"] = enabled', host)
