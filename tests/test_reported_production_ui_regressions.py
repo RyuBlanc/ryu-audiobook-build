@@ -172,8 +172,8 @@ class ReportedProductionUiRegressionTests(unittest.TestCase):
         self.assertIn('settings_root() / "Icon Packs"', host)
         self.assertIn('"drake": assets_directory / "drake_cursor_32.png"', host)
         self.assertIn('"fang": assets_directory / "fang_cursor_32.png"', host)
-        self.assertIn("drake_cursor_32.png';assets", build)
-        self.assertIn("fang_cursor_32.png';assets", build)
+        self.assertIn("ROOT / 'assets' / 'drake_cursor_32.png'};assets", build)
+        self.assertIn("ROOT / 'assets' / 'fang_cursor_32.png'};assets", build)
 
     def test_third_person_role_is_visible_and_separate_from_narrator_profile(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
