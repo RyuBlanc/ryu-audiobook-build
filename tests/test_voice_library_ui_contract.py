@@ -16,19 +16,24 @@ class VoiceLibraryUiContractTests(unittest.TestCase):
         cls.adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         cls.host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
 
-    def test_saved_library_is_inside_step_one_and_keeps_existing_source_catalogue(self):
-        marker = '<div class="panel active" data-panel="1">'
-        start = self.html.index(marker)
-        panel_end = self.html.index('<div class="panel" data-panel="2">', start)
-        panel = self.html[start:panel_end]
-        self.assertIn('id="savedVoiceLibrary"', panel)
-        self.assertIn('id="voiceLibraryRows"', panel)
-        self.assertIn('id="voiceLibrarySearch"', panel)
-        self.assertIn('id="voiceLibraryModelFilter"', panel)
-        self.assertIn('data-source="customvoice"', panel)
-        self.assertIn('data-source="voicedesign"', panel)
-        self.assertIn('data-source="qwenclone"', panel)
-        self.assertIn("Built-in and system", panel)
+    def test_unplanned_saved_library_panel_is_removed_from_voice_profile_runtime(self):
+        # Static prototype markup is retained as inert source material so the
+        # established library taxonomy and profile workflow contracts remain
+        # testable. The native app removes the extra panel before the user
+        # interacts with Voice Studio's profile-creation workspace.
+        self.assertIn('id="savedVoiceLibrary"', self.html)
+        self.assertIn('data-source="customvoice"', self.html)
+        self.assertIn('data-source="voicedesign"', self.html)
+        self.assertIn('data-source="qwenclone"', self.html)
+        self.assertIn("Built-in and system", self.html)
+        self.assertIn("function removeUnplannedSavedVoiceLibraryPanel()", self.adapter)
+        self.assertIn("document.getElementById('savedVoiceLibrary')", self.adapter)
+        self.assertIn("if (panel) panel.remove();", self.adapter)
+        self.assertIn("removeUnplannedSavedVoiceLibraryPanel();", self.adapter)
+        # Removing the panel must not remove Stage D's profile bundle operations.
+        self.assertIn("call('voice.bundle.choose_import'", self.adapter)
+        self.assertIn("call('voice.bundle.import'", self.adapter)
+        self.assertIn("call('voice.bundle.export'", self.adapter)
 
     def test_library_exposes_all_five_profile_categories_and_independent_model_filter(self):
         html = self.html

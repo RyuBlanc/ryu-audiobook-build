@@ -9143,6 +9143,15 @@ function renderProductionMetadataGate(active) {
     }
   }
 
+  function removeUnplannedSavedVoiceLibraryPanel() {
+    // The profile-creation workspace should stay focused on selecting and
+    // configuring the active voice. Keep the saved-profile records, native
+    // inspection, bundle preflight/import/export and revision APIs intact;
+    // remove only the extra management card from this workspace.
+    const panel = document.getElementById('savedVoiceLibrary');
+    if (panel) panel.remove();
+  }
+
   function ensureStableStudioLayout() {
     if (document.getElementById('ryuStableStudioLayoutStyle')) return;
     const style = document.createElement('style');
@@ -11348,6 +11357,7 @@ function renderProductionMetadataGate(active) {
     // to these buttons. Replace those DOM nodes before attaching real playback,
     // so the demo timer can never masquerade as audiobook audio.
     ensureStableStudioLayout();
+    removeUnplannedSavedVoiceLibraryPanel();
     installProductionOverflowTooltips();
     ensureIconPackSettings();
     ensureVoiceStudioRuntimeControls();
