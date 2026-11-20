@@ -58,7 +58,7 @@ class NarratorResolverHarness:
 
 
 class NarratorOnlyGenerationTests(unittest.TestCase):
-    def test_zero_profiles_auto_enable_narrator_only_without_speaker_review(self):
+    def test_zero_profiles_default_to_third_person_without_speaker_review(self):
         project = SimpleNamespace(title="Narrator-only book")
         state = {"characters": []}
         harness = NarratorResolverHarness(SimpleNamespace(name="Saved Narrator"))
@@ -71,9 +71,11 @@ class NarratorOnlyGenerationTests(unittest.TestCase):
                 [Chapter(1, "Opening", '“Hello there,” she said.')],
             )
         self.assertEqual(profile.name, "Saved Narrator")
-        self.assertTrue(selection["narrator_only"])
-        self.assertEqual(selection["generation_mode"], "narrator_only")
-        self.assertTrue(state["narrator_only_generation"])
+        self.assertFalse(selection["narrator_only"])
+        self.assertEqual(selection["generation_mode"], "character_cast")
+        self.assertEqual(selection["unassigned_character_profile_name"], "Global Unassigned Character")
+        self.assertEqual(selection["pending_dialogue_count"], 0)
+        self.assertFalse(state["narrator_only_generation"])
 
     def test_cast_aware_default_allows_narration_only_text_without_speaker_review(self):
         project = SimpleNamespace(title="Cast-aware book")
@@ -83,9 +85,11 @@ class NarratorOnlyGenerationTests(unittest.TestCase):
             project, {"characters": []}, [Chapter(1, "Opening", "The journey began.")],
         )
         self.assertEqual(profile.name, "Saved Narrator")
-        self.assertTrue(selection["narrator_only"])
-        self.assertEqual(selection["generation_mode"], "narrator_only")
-        self.assertEqual(selection["dialogue_routing"], "narrator_for_all_passages")
+        self.assertFalse(selection["narrator_only"])
+        self.assertEqual(selection["generation_mode"], "character_cast")
+        self.assertEqual(selection["dialogue_routing"], "saved_character_assignments_with_unassigned_fallback")
+        self.assertEqual(selection["unassigned_character_profile_name"], "Global Unassigned Character")
+        self.assertEqual(selection["pending_dialogue_count"], 0)
 
     def test_saved_user_opt_out_routes_unreviewed_dialogue_to_global_fallback(self):
         project = SimpleNamespace(title="Narrator-only book")
@@ -113,7 +117,7 @@ class NarratorOnlyGenerationTests(unittest.TestCase):
         self.assertEqual(selection["pending_dialogue_count"], 1)
         self.assertTrue(selection["unassigned_character_profile_required"])
 
-    def test_zero_profiles_with_226_unassigned_characters_still_auto_uses_narrator(self):
+    def test_zero_profiles_with_226_unassigned_characters_still_auto_uses_third_person(self):
         project = SimpleNamespace(title="Narrator-only book")
         chapters = [Chapter(1, "Opening", '“Hello there,” she said.')]
         characters = [{"name": f"Candidate {n}", "voice_profile": ""} for n in range(226)]
@@ -126,8 +130,12 @@ class NarratorOnlyGenerationTests(unittest.TestCase):
             _profile, selection = harness._resolve_narrator_for_generation(
                 project, {"characters": characters}, chapters
             )
-        self.assertTrue(selection["narrator_only"])
+        self.assertFalse(selection["narrator_only"])
+        self.assertEqual(selection["generation_mode"], "character_cast")
         self.assertEqual(selection["character_voice_profile_count"], 0)
+        self.assertEqual(selection["unassigned_character_count"], 226)
+        self.assertEqual(selection["unassigned_character_profile_name"], "Global Unassigned Character")
+        self.assertEqual(selection["pending_dialogue_count"], 0)
 
     def test_explicit_narrator_only_remains_enabled_when_character_profile_is_added(self):
         project = SimpleNamespace(title="Narrator-only book")
@@ -276,7 +284,7 @@ class NarratorOnlyGenerationTests(unittest.TestCase):
             adapter,
         )
         self.assertIn(
-            "global Unassigned Character profile",
+            "global Third Person voice",
             adapter,
         )
         self.assertNotIn(

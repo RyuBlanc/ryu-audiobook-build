@@ -968,7 +968,7 @@
     const dialogueIndexIssues = Math.max(0, Number(project.dialogue_index_issue_count || 0));
     const unassignedCharacters = Math.max(0, Number(project.unassigned_character_count || 0));
     const unassignedProfileReady = project.unassigned_character_profile_available === true;
-    const unassignedProfileName = String(project.unassigned_character_profile_name || 'Unassigned Character');
+    const unassignedProfileName = String(project.unassigned_character_profile_name || 'Third Person');
     const charactersReady = narratorOnly || (
       dialogueRoutingReady &&
       characterAssignmentIssues === 0 &&
@@ -3642,7 +3642,7 @@
     try {
       selected = await call('voice.unassigned_character.default.get', {});
     } catch (error) {
-      console.warn('[Ryu Unassigned Character default]', error);
+      console.warn('[Ryu Third Person default]', error);
       selected = null;
     }
     let card = $('unassignedCharacterDefaultCard');
@@ -3737,7 +3737,7 @@
     try {
       saved = await call('voice.unassigned_character.default.get', {});
     } catch (error) {
-      console.warn('[Ryu Unassigned Character default]', error);
+      console.warn('[Ryu Third Person default]', error);
       saved = {profile_name:null,profile_available:false};
     }
     if (requestEpoch !== unassignedCharacterDefaultRefreshEpoch) return saved;
@@ -3760,7 +3760,7 @@
     ).join('');
     const selectedAvailable = saved?.profile_available === true;
     card.innerHTML =
-      '<div style="font-weight:750;margin-bottom:5px">Unassigned Character · Global Default</div>' +
+      '<div style="font-weight:750;margin-bottom:5px">Third Person · Global Default</div>' +
       '<div class="muted" style="font-size:12px;line-height:1.5;margin-bottom:10px">' +
       'Used for detected characters and dialogue passages that do not have a valid saved character voice assignment. This profile applies across all books and series. The narrator remains a separate required profile.' +
       '</div>' +
@@ -3780,7 +3780,7 @@
     if (save) save.onclick = async () => {
       const profileName = String(select?.value || '').trim();
       if (!profileName) {
-        message('Choose a saved Voice Studio profile for Unassigned Character.', true);
+        message('Choose a saved Voice Studio profile for Third Person.', true);
         return;
       }
       save.disabled = true;
@@ -3788,7 +3788,7 @@
         const result = await call('voice.unassigned_character.default.save', {profile_name:profileName});
         unassignedCharacterDefaultProfileName = String(result.profile_name || profileName);
         await refreshUnassignedCharacterDefaultControls();
-        message('Global Unassigned Character profile saved: ' + unassignedCharacterDefaultProfileName);
+        message('Global Third Person profile saved: ' + unassignedCharacterDefaultProfileName);
       } catch (error) {
         message(error?.message || String(error), true);
       } finally {
@@ -6343,7 +6343,7 @@
         + indexIssues + ' source/index issue(s). Resolve these structural conflicts in Character Studio first.';
     }
     if (!narratorOnly && active.unassigned_character_profile_available !== true) {
-      return 'Choose and save the required global Unassigned Character profile in Voice Studio before character-based generation.';
+      return 'Choose and save the required global Third Person profile in Voice Studio before character-based generation.';
     }
     const unsaved = metadataDialogDirty && metadataDialogProjectFolder === String(active.folder);
     if (unsaved) return 'Save or discard Input Project Details changes before generation.';
@@ -7475,7 +7475,7 @@ function renderProductionMetadataGate(active) {
                 ? (saved.automatic === true
                   ? 'Automatically enabled because this book has no configured character voice profiles. The saved narrator reads all narration and dialogue.'
                   : 'Saved for this book. The narrator reads all narration and dialogue.')
-                : 'Off by your choice. Assigned character profiles are used; other speakers use the global Unassigned Character profile.';
+                : 'Off by your choice. Assigned character profiles are used; other speakers use the global Third Person profile.';
             } catch (error) {
               const currentProject = window.ryuPremiumActiveProject || null;
               input.checked = currentProject?.narrator_only_generation === true;
@@ -7502,7 +7502,7 @@ function renderProductionMetadataGate(active) {
         info.title = 'Narrator-only generation information';
         const tooltip = document.createElement('span');
         tooltip.className = 'ryu-info-tooltip';
-        tooltip.textContent = 'When on, the saved narrator reads every passage, including dialogue, and all character assignments are ignored for this book. When off, saved character voice assignments are used; any remaining unassigned speakers use the app-wide Unassigned Character profile selected in Voice Studio.';
+        tooltip.textContent = 'When on, the saved narrator reads every passage, including dialogue, and all character assignments are ignored for this book. When off, saved character voice assignments are used; any remaining unassigned speakers use the app-wide Third Person profile selected in Voice Studio.';
         infoWrap.append(info,tooltip);
         const status = document.createElement('small');
         status.id = 'narratorOnlyGenerationStatus';
@@ -7515,7 +7515,7 @@ function renderProductionMetadataGate(active) {
             ? 'Automatically enabled because this book has no configured character voice profiles. The saved narrator reads all narration and dialogue.'
             : 'On · the saved narrator reads all passages, including dialogue. Character assignments are ignored for this book.')
           : (project?.narrator_only_generation_user_opt_out === true
-            ? 'Off by your choice · assigned character profiles are used; other speakers use the global Unassigned Character profile.'
+            ? 'Off by your choice · assigned character profiles are used; other speakers use the global Third Person profile.'
             : (!narratorReadyForOnly ? 'Unavailable · save an available narrator profile first.' : 'Off · available. You can enable it even when character profiles are assigned.'));
         copy.append(title,infoWrap,status);
         row.append(input,copy);
@@ -7537,7 +7537,7 @@ function renderProductionMetadataGate(active) {
             ? 'Automatically enabled because this book has no configured character voice profiles. The saved narrator reads all narration and dialogue.'
             : 'On · the saved narrator reads all passages, including dialogue. Character assignments are ignored for this book.')
           : (project?.narrator_only_generation_user_opt_out === true
-            ? 'Off by your choice · assigned character profiles are used; other speakers use the global Unassigned Character profile.'
+            ? 'Off by your choice · assigned character profiles are used; other speakers use the global Third Person profile.'
             : (!narratorReadyForOnly ? 'Unavailable · save an available narrator profile first.' : 'Off · available. You can enable it even when character profiles are assigned.'));
       }
     }
@@ -10782,7 +10782,7 @@ function renderProductionMetadataGate(active) {
         .includes('unresolved dialogue must be reviewed or assigned'));
       if (unassignedItem) {
         unassignedItem.textContent =
-          'When Narrator-Only Generation is off, unassigned characters and dialogue use the app-wide Unassigned Character profile. Production shows the pending counts and asks you to acknowledge the fallback; after choosing OK, click Generate full audiobook again. Explicitly assigned character profiles remain in use, and the narrator continues to read narration.';
+          'When Narrator-Only Generation is off, unassigned characters and dialogue use the app-wide Third Person profile. Production shows the pending counts and asks you to acknowledge the fallback; after choosing OK, click Generate full audiobook again. Explicitly assigned character profiles remain in use, and the narrator continues to read narration.';
       }
       root.dataset.ryuHelpGuideRendered = 'preserved-static-guide';
       return;
@@ -10864,7 +10864,7 @@ function renderProductionMetadataGate(active) {
           'Narrator-Only Generation is an explicit per-book choice and remains available even when character voice profiles are configured. When enabled, the saved narrator reads all narration and dialogue; character assignments are ignored for that book.',
           'Choose a valid, available saved narrator profile using the project narrator or its series default. A narrator profile is mandatory in both narrator-only and character-cast modes.',
           'When narrator-only is enabled, the narrator reads every passage, including quoted and dash-led dialogue. Existing character assignments are preserved but ignored for this book; switching the option off restores cast-aware routing.',
-          'When narrator-only is off, explicitly assigned characters use their saved Voice Studio profiles. Any unassigned character or dialogue passage uses the mandatory app-wide Unassigned Character profile selected in Voice Studio.',
+          'When narrator-only is off, explicitly assigned characters use their saved Voice Studio profiles. Any unassigned character or dialogue passage uses the mandatory app-wide Third Person profile selected in Voice Studio.',
           'Before cast-aware generation, Production shows the number of unassigned characters and pending dialogue passages and asks you to confirm the fallback. Press OK, then click Generate full audiobook again to continue. Acknowledgement is invalidated if the project counts or fallback profile change.',
           'Required project metadata, valid chapters, output-folder permissions and an available saved narrator remain mandatory in both modes. The global fallback profile is additionally required for character-cast mode.'
         ]
@@ -12112,7 +12112,7 @@ function renderProductionMetadataGate(active) {
       const needsFallback = !narratorOnly && (unassignedCharacters > 0 || pendingDialogue > 0);
       if (needsFallback) {
         if (activeProject?.unassigned_character_profile_available !== true) {
-          throw new Error('Save a global Unassigned Character profile in Voice Studio before continuing with unassigned characters or dialogue.');
+          throw new Error('Save a global Third Person profile in Voice Studio before continuing with unassigned characters or dialogue.');
         }
         const acknowledgementKey = [
           String(activeProject?.folder || ''),
@@ -12125,7 +12125,7 @@ function renderProductionMetadataGate(active) {
             'Some characters are still pending profile assigning.\n\n' +
             unassignedCharacters + ' character(s) and ' + pendingDialogue +
             ' dialogue passage(s) do not have their own valid voice assignment.\n' +
-            'They will use the global Unassigned Character profile: ' +
+            'They will use the global Third Person profile: ' +
             String(activeProject.unassigned_character_profile_name || '') + '.\n\n' +
             'Press OK, then click Generate full audiobook again to continue.'
           );

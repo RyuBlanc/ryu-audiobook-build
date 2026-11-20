@@ -60,7 +60,7 @@ from app.chapters.characters import (
 )
 from app.chapters.dialogue_review import retain_current_dialogue_skips
 from app.tts.manager import GenerationManager
-from app.tts.generation_mode import narrator_only_for_generation
+from app.tts.generation_mode import narrator_only_for_generation, has_legacy_character_voice_reference
 from app.tts.preview import build_voice_preview
 from app.tts.profile_provider import provider_from_profile
 from app.tts.pronunciation_suggester import suggest_names_from_text, suggest_pronunciation
@@ -1008,6 +1008,8 @@ class PremiumV2Bridge(QObject):
             narrator_only_enabled
             and not narrator_only_user_choice
             and not narrator_only_user_opt_out
+            and not has_legacy_character_voice_reference(state)
+            and configured_character_voice_profile_count == 0
         )
         metadata_missing = missing_required_metadata_fields(
             project.title, state, effective_narrator_profile if narrator_ready else ""
@@ -4039,7 +4041,7 @@ class PremiumV2Bridge(QObject):
         if route_character_cast and project is not None:
             # Resolve all saved assignments against the same strict, series-aware
             # production cast before the worker starts. This fails closed on stale
-            # profile references and preserves the Unassigned Character fallback.
+            # profile references and preserves the Third Person fallback.
             state["_preview_cast_routing"] = self._preview_cast_routing_snapshot(
                 project, state, require_unassigned=production_preview
             )
@@ -7922,6 +7924,15 @@ class PremiumV2Bridge(QObject):
             len(configured_profiles),
             unassigned_profile_available,
         )
+        # When Third Person is the automatic global fallback and no character
+        # voice is individually assigned, speaker review cannot improve routing:
+        # narration stays on Narrator and every dialogue passage receives Third Person.
+        auto_third_person_default = bool(
+            unassigned_profile_available
+            and not configured_profiles
+            and state.get("narrator_only_generation_user_choice") is not True
+            and state.get("narrator_only_generation_user_opt_out") is not True
+        )
 
         if narrator_only:
             state["narrator_only_generation"] = True
@@ -7955,13 +7966,14 @@ class PremiumV2Bridge(QObject):
         unresolved: list[tuple[int, str]] = []
         passage_index: dict[str, Any] = {"issues": [], "counts": {}}
         if getattr(project, "folder", None) is None:
-            from app.chapters.speaker_segmentation import segment_chapter_speakers
-            unresolved = [
-                (int(chapter.number), str(segment.text or ""))
-                for chapter in chapters
-                for segment in segment_chapter_speakers(chapter)
-                if segment.needs_review or segment.kind in {"needs_speaker_review", "review_required"}
-            ]
+            if not auto_third_person_default:
+                from app.chapters.speaker_segmentation import segment_chapter_speakers
+                unresolved = [
+                    (int(chapter.number), str(segment.text or ""))
+                    for chapter in chapters
+                    for segment in segment_chapter_speakers(chapter)
+                    if segment.needs_review or segment.kind in {"needs_speaker_review", "review_required"}
+                ]
         else:
             from app.chapters.passage_index import load_or_build_passage_index
             passage_index = load_or_build_passage_index(
@@ -7969,17 +7981,18 @@ class PremiumV2Bridge(QObject):
                 project.chapters,
                 suggested_passages=state.get("character_dialogue_suggestions") or [],
             )
-            unresolved = [
-                (int(row.get("chapter_number") or 0), str(row.get("text") or ""))
-                for row in passage_index.get("passages", [])
-                if str(row.get("chapter_id") or "") in eligible_chapter_ids
-                and bool(row.get("needs_review"))
-            ]
-            unresolved.extend(
-                (int(issue.get("chapter_number") or 0), str(issue.get("text") or ""))
-                for issue in passage_index.get("issues", [])
-                if str(issue.get("chapter_id") or "") in eligible_chapter_ids
-            )
+            if not auto_third_person_default:
+                unresolved = [
+                    (int(row.get("chapter_number") or 0), str(row.get("text") or ""))
+                    for row in passage_index.get("passages", [])
+                    if str(row.get("chapter_id") or "") in eligible_chapter_ids
+                    and bool(row.get("needs_review"))
+                ]
+                unresolved.extend(
+                    (int(issue.get("chapter_number") or 0), str(issue.get("text") or ""))
+                    for issue in passage_index.get("issues", [])
+                    if str(issue.get("chapter_id") or "") in eligible_chapter_ids
+                )
 
         index_issues = passage_index.get("issues") or []
         if index_issues and getattr(project, "folder", None) is not None:
@@ -9469,7 +9482,8 @@ class PremiumV2Bridge(QObject):
                 value = str(folder)
             self.settings.setValue(setting, value)
         self.settings.sync()
-        if self.settings.status() != QSettings.Status.NoError:
+        status_method = getattr(self.settings, "status", None)
+        if callable(status_method) and status_method() != QSettings.Status.NoError:
             raise OSError("Windows could not confirm the settings write.")
         if "icon_pack" in payload:
             window = self.parent()

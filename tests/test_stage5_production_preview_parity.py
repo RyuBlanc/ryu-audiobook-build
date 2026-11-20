@@ -138,7 +138,7 @@ class ProductionPreviewSavedNarratorTests(unittest.TestCase):
             "profile_available": False,
         }
         with patch.object(premium_v2_host, "load_profiles", return_value=[]):
-            with self.assertRaisesRegex(ValueError, "Unassigned Character.*required"):
+            with self.assertRaisesRegex(ValueError, "Third Person.*required"):
                 premium_v2_host.PremiumV2Bridge._preview_cast_routing_snapshot(
                     bridge, SimpleNamespace(folder=Path("project-preview")), {}, require_unassigned=True
                 )
