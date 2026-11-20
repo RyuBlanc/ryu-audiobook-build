@@ -23,7 +23,7 @@ class CurrentHelpGuideRequirements(unittest.TestCase):
             "even when character voice profiles are configured",
             "including quoted and dash-led dialogue",
             "app-wide Third Person profile",
-            "explicitly assigned character profiles remain in use",
+            "Explicitly assigned character profiles remain in use",
             "narrator continues to read narration",
             "click Generate full audiobook again",
             "valid saved narrator profile is still required",
