@@ -287,7 +287,7 @@ class FunctionalCheckpoint20261111Tests(unittest.TestCase):
         backend = (Path(__file__).resolve().parents[1] / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         self.assertIn("voice/unassigned_character_profile", backend)
         self.assertIn("scope", backend)
-        self.assertIn("Save for All Series and Books", adapter)
+        self.assertIn("Save Third Person Voice", adapter)
         self.assertIn("Some characters are still pending profile assigning.", adapter)
         self.assertIn("Press OK, then click Generate full audiobook again to continue.", adapter)
         self.assertIn("productionUnassignedAcknowledgementKey !== acknowledgementKey", adapter)
