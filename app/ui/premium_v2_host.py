@@ -12737,7 +12737,7 @@ class PremiumV2Window(QMainWindow):
             "let style=document.getElementById(id);"
             "if(!style){style=document.createElement('style');style.id=id;(document.head||document.documentElement).appendChild(style);}"
             "const url=" + json.dumps(cursor_url) + ";"
-            "style.textContent='html,body,html *,body *{cursor:url(\\"'+url+'\\") 2 2,auto!important;}';})();"
+            "style.textContent='html,body,html *,body *{cursor:url(\"'+url+'\") 2 2,auto!important;}';})();"
         )
         try:
             self.web.page().runJavaScript(script)
