@@ -2,13 +2,13 @@
 
 **Purpose:** Run only after the Stage F engineering-preparation checkpoint has passed. This checklist is for the real Windows PC checks that cannot be completed by hosted CI.
 
-**Accepted application baseline:** Ryu Audiobook Build #3470, source commit `fc3a0f8e1d64790b1a61024f8d883653b2dad51c`.  
-**Reference package:** [Build #3470 artifacts](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43714021829).  
-**Artifact retention shown by GitHub:** 15 December 2026. Download and preserve the installer, portable package and SHA-256 manifest before expiry.
+**Accepted application baseline:** Ryu Audiobook Build #3497, source commit `cee26183af700ad9bafb17c7fcaea887207d4a72`.  
+**Reference package:** [Build #3497 artifacts](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/44795887496).  
+**Artifact retention shown by GitHub:** 20 December 2026. Download and preserve the installer, portable package and SHA-256 manifest before expiry.
 
 ## Before testing
 
-- [ ] Download the Build #3470 installer, portable package and SHA-256 manifest.
+- [ ] Download the Build #3497 installer, portable package and SHA-256 manifest.
 - [ ] Keep the installer, portable package and manifest together in a safe local folder.
 - [ ] Install the same accepted application build on each PC that will participate in a test.
 - [ ] Do not delete existing projects, profiles, models or assets to create a test condition.
@@ -36,7 +36,7 @@ For the Voice Library transfer, add the relevant file arguments to the command o
 -ProfileAssetPaths @("D:\D6\voice-design-anchor.wav", "D:\D6\clone-reference.wav")
 ```
 
-For `-ProfileAssetPaths`, use the actual profile-owned asset paths reported by Voice Library. The resulting JSON records file sizes and SHA-256 values but deliberately omits the supplied file names and paths. A mismatch against the pinned Build #3470 application/installer hash is reported as an error and returns exit code `2`; preserve that report instead of ignoring the mismatch.
+For `-ProfileAssetPaths`, use the actual profile-owned asset paths reported by Voice Library. The resulting JSON records file sizes and SHA-256 values but deliberately omits the supplied file names and paths. A mismatch against the pinned Build #3497 application/installer hash is reported as an error and returns exit code `2`; preserve that report instead of ignoring the mismatch.
 
 The script's hardware inventory is **not** proof that Qwen used CUDA, ROCm, XPU or any other backend. For that, capture the synthesis worker's actual backend/device telemetry during inference.
 

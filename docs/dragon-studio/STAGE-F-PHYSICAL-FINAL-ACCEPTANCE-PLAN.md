@@ -2,8 +2,8 @@
 
 **Stage:** F — final physical/manual acceptance and release-readiness evidence  
 **Repository:** RyuBlanc/ryu-audiobook-build  
-**Branch:** dragon-studio/stage-f-physical-final-acceptance-2026-11-15  
-**Engineering baseline:** Stage A–E hosted/source engineering complete; Stage E exact-head package Build #3470 / [run 43714021829](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43714021829), commit fc3a0f8e1d64790b1a61024f8d883653b2dad51c.  
+**Branch:** dragon-studio/stage-f-ui-reliability-followup-2026-11-20  
+**Engineering baseline:** Stage A–E hosted/source engineering and Stage F UI-reliability follow-up package Build #3497 / [run 44795887496](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/44795887496), commit cee26183af700ad9bafb17c7fcaea887207d4a72.  
 **Status:** ACTIVE — engineering handoff accepted; all physical/manual acceptance rows below remain NOT RUN until executed on the user's actual Windows systems.
 
 ## 1. Purpose and boundary
@@ -18,7 +18,7 @@ The user explicitly requested that physical tests requiring their participation 
 
 The following assets are part of the Stage F preparation checkpoint:
 
-- `scripts/stage_f_capture_environment.ps1` records privacy-minimized Windows environment metadata and SHA-256/size evidence for explicitly supplied files. It pins the Build #3470 application, HTML installer and core installer hashes.
+- `scripts/stage_f_capture_environment.ps1` records privacy-minimized Windows environment metadata and SHA-256/size evidence for explicitly supplied files. It pins the Build #3497 application, HTML installer and core installer hashes.
 - `tests/test_stage_f_acceptance_tools.py` protects the pinned baseline, privacy exclusions, the rule that device discovery is not inference evidence, and the distinction between the legacy quote-span count and the canonical source-position passage index. Its Windows PowerShell integration test runs in the hosted Windows regression suite.
 - [STAGE-F-USER-CHECKLIST.md](STAGE-F-USER-CHECKLIST.md) gives the physical sequence and the commands for collecting PC-A/PC-B evidence.
 
@@ -49,7 +49,24 @@ Build #3470 passed frozen-app verification, bundled voice assets/modules, real b
 
 This is hosted package evidence, not physical PC, GPU or acoustic sign-off.
 
-## 3. Stage A–F status at handoff
+## 3A. Current exact-head follow-up package — Build #3497
+
+- Exact source commit: `cee26183af700ad9bafb17c7fcaea887207d4a72` (artifact-checkpoint commit; application source tree is the tested #3496 tree).
+- Branch: `dragon-studio/stage-f-ui-reliability-followup-2026-11-20`.
+- Actions: [Build Windows App #3497](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/44795887496), run ID 44795887496; overall conclusion SUCCESS.
+- Test job: SUCCESS. Frontend JavaScript syntax, native Qt lifecycle, focused Stage B–D regressions, Stage E1–E4 acceptance and the full regression suite all passed. Full suite: **1,718/1,718**.
+- Build job: SUCCESS. Frozen app verification, bundled voice assets/modules, real bundled-Piper multi-chapter M4B acceptance, packaged Sound Design/Production acceptance, functional installer startup, install/launch/upgrade/uninstall, logo/hash checks, Microsoft Defender scan step and artifact uploads all passed.
+- Installer artifact: [Ryu-Audiobook-Installer-3497](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/44795887496/artifacts/14659354996), artifact ID 14659354996; 847,661,430 bytes (Actions artifact ZIP).
+- Portable artifact: [Ryu-Audiobook-Portable-3497](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/44795887496/artifacts/14661421253), artifact ID 14661421253; 1,191,901,157 bytes (Actions artifact ZIP).
+- SHA-256 manifest and package-size report: [Ryu-Audiobook-Release-SHA256-3497](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/44795887496/artifacts/14661900012), artifact ID 14661900012.
+- Real multi-chapter M4B evidence: [artifact 14659122243](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/44795887496/artifacts/14659122243).
+- Stage 7 Piper benchmark evidence: [artifact 14661475891](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/44795887496/artifacts/14661475891).
+- Artifacts expire **20 December 2026** according to the Actions API. Download and preserve the installer, portable package, manifest and M4B evidence before expiry.
+- Binary SHA-256 values pinned by the PC capture tool: app `c82a61fbf3927f334fcab0eb033aca5ce7c0fa7394a97a63994393259bcb574d`; HTML installer `5626423f680fc45a06a6c8ccbdc41867cd3758b59851b081c7738994a470c48a`; core installer `98f9adf51e24421561b741a85d2ea7c1aa7748bad04f2abf313db22e01f9ce66`.
+
+This replaces Build #3470 as the physical-test package baseline. Build #3470 remains historical evidence only. The #3497 package does **not** close F1–F5 physical checks: two-PC transfer, real GPU inference, representative-book listening, physical UI/display testing and target-PC walkthrough remain NOT RUN until completed on the actual PCs. The public release publication step was skipped by design; this workflow creates Actions artifacts, not a published stable release.
+
+## 4. Stage A–F status at handoff
 
 | Stage | Engineering disposition | Physical disposition |
 |---|---|---|
@@ -64,7 +81,7 @@ This is hosted package evidence, not physical PC, GPU or acoustic sign-off.
 
 **Status: NOT RUN — explicitly deferred until this physical acceptance stage.** Use [STAGE-D6-TWO-PC-TRANSFER-ACCEPTANCE.md](STAGE-D6-TWO-PC-TRANSFER-ACCEPTANCE.md) as the controlling detailed worksheet. It requires:
 
-1. PC-A and PC-B to be two separate physical Windows PCs using the same accepted Build #3470 artifact/source SHA where possible.
+1. PC-A and PC-B to be two separate physical Windows PCs using the same accepted Build #3497 artifact/source SHA where possible.
 2. Real saved CustomVoice, VoiceDesign and authorized Clone profiles selected on PC-A; export one .ryuvoice bundle without altering the source catalogue.
 3. Matching PC-A/PC-B bundle SHA-256, compatible-model preflight, exact stable profile IDs and voice-defining configuration parity.
 4. SHA-256 verification for each VoiceDesign anchor and Clone reference asset; additive import without overwriting destination profiles.
@@ -93,7 +110,7 @@ The exact-head CPU evidence from Provider Runtime Smoke #448 produced 30-second 
 
 **Status: NOT RUN as a representative user-book physical test.** CI has passed packaged fixture and multi-chapter smoke tests; it has not replaced user acceptance on a real novel and target device.
 
-- Install and launch the exact #3470 candidate; record version/SHA and target environment. Verify saved Qwen models/profile identity after restart and after model install/repair actions where applicable.
+- Install and launch the exact #3497 candidate; record version/SHA and target environment. Verify saved Qwen models/profile identity after restart and after model install/repair actions where applicable.
 - Exercise CustomVoice, VoiceDesign and authorized Clone previews and ensure the selected profile/model/voice reaches the actual synthesis worker. Record the actual backend; no silent CPU/model substitution during GPU acceptance.
 - Analyse a representative Japanese/Korean/Indian-language/English book as applicable. Review source-grounded character names, aliases and dialogue assignments across the full chapter set; check false positives and later-chapter coverage.
 - Verify narrator-only is a real explicit setting with default OFF when cast selection is available; verify the valid saved narrator fallback for a book with no valid character voice profiles; verify series-scoped same-name characters and global Unassigned Character routing.
@@ -111,7 +128,7 @@ Run the responsive matrix across these aspect ratios: 4:3, 5:4, 3:2, 16:10, 16:9
 
 ## 9. F5 — Windows installer, shell identity and Help & Guide
 
-**Status: NOT RUN physically.** Build #3470 already passed installer build/startup, install/launch/upgrade/uninstall, transparency/hash contracts and Defender scanning.
+**Status: NOT RUN physically.** Build #3497 passed installer build/startup, install/launch/upgrade/uninstall, transparency/hash contracts and the Microsoft Defender scan step.
 
 - Install the exact candidate on a clean or controlled target Windows environment; verify first launch, app shortcut, taskbar identity, multi-size icon and transparent logo edges/corners.
 - Inspect the actual installer wizard at the target display size/scaling: full footer, Next/Back controls, details, progress, window centering, no cropped content and no unwanted black center bar/frame.
@@ -136,7 +153,7 @@ The step-by-step user sequence is in [STAGE-F-USER-CHECKLIST.md](STAGE-F-USER-CH
 
 | Check | Status |
 |---|---|
-| Exact-head Build #3470 hosted baseline | PASS |
+| Historical Build #3470 hosted baseline | SUPERSEDED |
 | D6 PC-A → PC-B real transfer | NOT RUN |
 | Real NVIDIA CUDA inference/performance | NOT RUN |
 | Real AMD ROCm inference/performance, where supported | NOT RUN |

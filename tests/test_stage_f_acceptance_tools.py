@@ -18,12 +18,12 @@ CAPTURE_SCRIPT = ROOT / "scripts" / "stage_f_capture_environment.ps1"
 
 
 class StageFAcceptanceToolTests(unittest.TestCase):
-    def test_capture_script_pins_the_accepted_build_3470_binary_hashes(self):
+    def test_capture_script_pins_the_accepted_build_3497_binary_hashes(self):
         source = CAPTURE_SCRIPT.read_text(encoding="utf-8").casefold()
-        self.assertIn("fc3a0f8e1d64790b1a61024f8d883653b2dad51c", source)
-        self.assertIn("29e733e73c1d19b21aa89e512fd4b7ff5f7160b2d492b791c224d0ebdbee699c", source)
-        self.assertIn("d759411795704cbbc69539616c81797b23bd5313e80b5474a13461bd053f5512", source)
-        self.assertIn("0af7f21d1d379ed65e7d9aa166e2ccbb72c85aa85ecfec136bb5369f5dd77110", source)
+        self.assertIn("cee26183af700ad9bafb17c7fcaea887207d4a72", source)
+        self.assertIn("c82a61fbf3927f334fcab0eb033aca5ce7c0fa7394a97a63994393259bcb574d", source)
+        self.assertIn("5626423f680fc45a06a6c8ccbdc41867cd3758b59851b081c7738994a470c48a", source)
+        self.assertIn("98f9adf51e24421561b741a85d2ea7c1aa7748bad04f2abf313db22e01f9ce66", source)
 
     def test_capture_script_does_not_collect_machine_or_network_identifiers(self):
         source = CAPTURE_SCRIPT.read_text(encoding="utf-8")
@@ -156,10 +156,10 @@ class StageFAcceptanceToolTests(unittest.TestCase):
 
             self.assertEqual(report["schema_version"], 1)
             self.assertEqual(report["role"], "CI")
-            self.assertEqual(report["accepted_application_baseline"]["build_number"], 3470)
+            self.assertEqual(report["accepted_application_baseline"]["build_number"], 3497)
             self.assertEqual(
                 report["accepted_application_baseline"]["source_commit"],
-                "fc3a0f8e1d64790b1a61024f8d883653b2dad51c",
+                "cee26183af700ad9bafb17c7fcaea887207d4a72",
             )
             self.assertFalse(report["limitations"]["hardware_discovery_is_inference_evidence"])
             self.assertEqual(report["limitations"]["resolved_qwen_backend"], "NOT_CAPTURED_BY_THIS_TOOL")
