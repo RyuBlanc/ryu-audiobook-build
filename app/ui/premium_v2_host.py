@@ -60,6 +60,7 @@ from app.chapters.characters import (
 )
 from app.chapters.dialogue_review import retain_current_dialogue_skips
 from app.tts.manager import GenerationManager
+from app.tts.generation_mode import narrator_only_for_generation
 from app.tts.preview import build_voice_preview
 from app.tts.profile_provider import provider_from_profile
 from app.tts.pronunciation_suggester import suggest_names_from_text, suggest_pronunciation
@@ -3521,7 +3522,6 @@ class PremiumV2Bridge(QObject):
     def _voice_bundle_export(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Export selected saved Qwen profiles after the native Save dialog confirms a destination."""
         from app.tts.qwen_model_preference import get_qwen_model_preference
-from app.tts.generation_mode import narrator_only_for_generation
         from app.tts.qwen_profile_bundle import export_qwen_profiles_bundle
         from app.tts.voice_profile import load_saved_profiles
 
