@@ -981,7 +981,7 @@
         : (characterAssignmentIssues > 0
           ? characterAssignmentIssues + ' saved character assignment(s) need attention'
           : (!unassignedProfileReady
-            ? 'Choose the global Unassigned Character profile in Voice Studio'
+            ? 'Choose the global Third Person voice in Voice Studio'
             : (unassignedCharacters > 0 || pendingDialogue > 0
               ? unassignedCharacters + ' unassigned character(s) · ' + pendingDialogue
                 + ' pending dialogue passage(s) will use ' + unassignedProfileName
@@ -3663,24 +3663,24 @@
       '>' + esc(characterSavedProfileLabel(profile)) + '</option>'
     ).join('');
     card.innerHTML =
-      '<div style="font-weight:750;margin-bottom:5px">Unassigned Character · Global Default</div>' +
+      '<div style="font-weight:750;margin-bottom:5px">Third Person Voice · Global Default</div>' +
       '<div class="muted" style="font-size:12px;line-height:1.45;margin-bottom:10px">' +
-      'Mandatory fallback voice for every series and book. In character-based generation, ' +
-      'dialogue or detected characters without a valid individual assignment use this profile. ' +
-      'It does not replace the narrator or explicitly assigned character voices.</div>' +
+      'Used automatically for character dialogue when no individual character voice is assigned. ' +
+      'The narrator continues to read ordinary narration, and explicitly assigned characters keep their own voices. ' +
+      'Narrator-only mode remains available as a per-book override.</div>' +
       '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
-      '<select id="unassignedCharacterProfile" class="input" aria-label="Global Unassigned Character voice profile" style="min-width:220px;flex:1">' +
-      '<option value="">Choose a saved voice profile</option>' + profileOptions + '</select>' +
-      '<button class="btn small" type="button" id="saveUnassignedCharacterProfile">Save for All Series and Books</button></div>' +
+      '<select id="unassignedCharacterProfile" class="input" aria-label="Global Third Person voice profile" style="min-width:220px;flex:1">' +
+      '<option value="">Choose a saved profile for Third Person</option>' + profileOptions + '</select>' +
+      '<button class="btn small" type="button" id="saveUnassignedCharacterProfile">Save Third Person Voice</button></div>' +
       '<div id="unassignedCharacterDefaultStatus" class="muted" style="font-size:12px;margin-top:8px">' +
       (savedName && available
-        ? 'Saved global fallback · ' + esc(savedName)
-        : 'Required · choose and save a valid Voice Studio profile before character-based generation.') +
+        ? 'Saved Third Person voice · ' + esc(savedName)
+        : 'Choose a saved profile for Third Person. It will be used automatically for unassigned character dialogue.') +
       '</div>';
     $('saveUnassignedCharacterProfile')?.addEventListener('click', async () => {
       const profileName = String($('unassignedCharacterProfile')?.value || '').trim();
       if (!profileName) {
-        message('Select a saved Voice Studio profile for Unassigned Character.', true);
+        message('Select a saved Voice Studio profile for Third Person.', true);
         return;
       }
       const button = $('saveUnassignedCharacterProfile');
@@ -3689,12 +3689,21 @@
         const saved = await call('voice.unassigned_character.default.save', {
           profile_name:profileName
         });
+        let currentBookUpdated = false;
+        try {
+          const mode = await call('production.narrator_only.save', {enabled:false});
+          currentBookUpdated = mode?.saved === true;
+        } catch (modeError) {
+          console.warn('[Ryu Third Person role] Could not update the active book mode:', modeError);
+        }
         const status = $('unassignedCharacterDefaultStatus');
         if (status) status.textContent =
-          'Saved global fallback · ' + String(saved.profile_name || profileName) +
-          ' · applies to all series and books.';
-        message('Unassigned Character default saved for all series and books: ' +
-          String(saved.profile_name || profileName));
+          'Saved Third Person voice · ' + String(saved.profile_name || profileName) +
+          ' · Narrator reads narration; Third Person handles unassigned dialogue.';
+        message('Third Person voice saved as the global character fallback. ' +
+          (currentBookUpdated
+            ? 'Narrator-only is OFF for the active book.'
+            : 'It is the default for character-cast generation; Narrator-only remains a per-book override.'));
         await refreshCurrentProjectCard().catch(() => {});
       } catch (error) {
         message(error?.message || String(error), true);
@@ -6070,13 +6079,237 @@
     const mixOverrides = $('mixOverrides');
     if (mixOverrides) mixOverrides.textContent = Object.values(overrides).filter(o => o.rule === 'custom' || o.rule === 'none').length + ' chapters';
   }
+  const RYU_PRODUCTION_OVERFLOW_SELECTOR = [
+    '#generate #genPercent', '#generate .ryu-gen-percent-label',
+    '#generate #genStage', '#generate #genChapter', '#generate #elapsed',
+    '#generate #eta', '#generate #remaining', '#generate #genTiming',
+    '#generate #genStatus', '#productionBookMetadata', '#productionNarrator',
+    '#productionVoiceCastCount', '#productionOutputSummary',
+    '#productionBookImported', '#productionChaptersReady',
+    '#productionNarratorReady', '#productionCharacterVoices',
+    '#productionPronunciationReady', '#productionOutputReady',
+    '#generate .ready b'
+  ].join(',');
+
+  function refreshProductionOverflowStates() {
+    const nodes = [...document.querySelectorAll(RYU_PRODUCTION_OVERFLOW_SELECTOR)];
+    for (const node of nodes) {
+      if (!(node instanceof HTMLElement)) continue;
+      node.classList.add('ryu-production-truncate');
+      const fullText = String(node.dataset.ryuFullText || node.textContent || '').trim();
+      if (fullText) node.dataset.ryuFullText = fullText;
+      const bounds = node.getBoundingClientRect();
+      if (bounds.width < 2 || bounds.height < 2) continue;
+      const truncated = node.scrollHeight > node.clientHeight + 2 ||
+        node.scrollWidth > node.clientWidth + 2;
+      node.dataset.ryuTruncated = truncated ? 'true' : 'false';
+      node.classList.toggle('ryu-production-truncated', truncated);
+      if (fullText) node.setAttribute('aria-label', fullText);
+      if (truncated && !node.hasAttribute('tabindex')) node.tabIndex = 0;
+    }
+  }
+
+  function scheduleProductionOverflowRefresh() {
+    if (window.__ryuProductionOverflowFrame) return;
+    window.__ryuProductionOverflowFrame = requestAnimationFrame(() => {
+      window.__ryuProductionOverflowFrame = 0;
+      refreshProductionOverflowStates();
+    });
+  }
+
+  function installProductionOverflowTooltips() {
+    if (!window.__ryuProductionOverflowTooltipInstalled) {
+      window.__ryuProductionOverflowTooltipInstalled = true;
+      const tooltip = document.createElement('div');
+      tooltip.id = 'ryuProductionOverflowTooltip';
+      tooltip.className = 'ryu-production-overflow-tooltip';
+      tooltip.setAttribute('role', 'tooltip');
+      tooltip.setAttribute('aria-hidden', 'true');
+      document.body.appendChild(tooltip);
+      let currentTarget = null;
+      const hide = () => {
+        currentTarget = null;
+        tooltip.style.display = 'none';
+        tooltip.setAttribute('aria-hidden', 'true');
+      };
+      const show = target => {
+        if (!target || target.dataset.ryuTruncated !== 'true') return;
+        const fullText = String(target.dataset.ryuFullText || target.textContent || '').trim();
+        if (!fullText) return;
+        currentTarget = target;
+        tooltip.textContent = fullText;
+        tooltip.style.display = 'block';
+        tooltip.setAttribute('aria-hidden', 'false');
+        requestAnimationFrame(() => {
+          if (currentTarget !== target) return;
+          const rect = target.getBoundingClientRect();
+          const width = Math.min(380, Math.max(180, window.innerWidth - 24));
+          const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
+          tooltip.style.width = width + 'px';
+          tooltip.style.left = left + 'px';
+          const tipHeight = tooltip.offsetHeight;
+          const below = rect.bottom + 8;
+          const top = below + tipHeight <= window.innerHeight - 12
+            ? below : Math.max(12, rect.top - tipHeight - 8);
+          tooltip.style.top = top + 'px';
+        });
+      };
+      document.addEventListener('pointerover', event => {
+        const target = event.target?.closest?.('.ryu-production-truncated');
+        if (target) show(target);
+      }, true);
+      document.addEventListener('pointerout', event => {
+        const target = event.target?.closest?.('.ryu-production-truncated');
+        if (!target) return;
+        if (event.relatedTarget && target.contains(event.relatedTarget)) return;
+        if (currentTarget === target) hide();
+      }, true);
+      document.addEventListener('focusin', event => {
+        const target = event.target?.closest?.('.ryu-production-truncated');
+        if (target) show(target);
+      }, true);
+      document.addEventListener('focusout', event => {
+        const target = event.target?.closest?.('.ryu-production-truncated');
+        if (target && currentTarget === target) hide();
+      }, true);
+      window.addEventListener('resize', hide, {passive:true});
+      window.addEventListener('scroll', hide, {passive:true,capture:true});
+    }
+    if (!window.__ryuProductionOverflowObserver && window.ResizeObserver) {
+      window.__ryuProductionOverflowObserver = new ResizeObserver(scheduleProductionOverflowRefresh);
+      const root = document.querySelector('#generate');
+      if (root) window.__ryuProductionOverflowObserver.observe(root);
+    }
+    scheduleProductionOverflowRefresh();
+  }
+
+  function installNativeDropdownSupport() {
+    if (window.__ryuNativeDropdownSupportInstalled) return;
+    window.__ryuNativeDropdownSupportInstalled = true;
+    // Restore Chromium's native select popup from a trusted user pointer gesture.
+    // Focus is forced first; the native default action remains the fallback.
+    document.addEventListener('pointerdown', event => {
+      const select = event.target?.closest?.('select');
+      if (!select || select.disabled || typeof select.showPicker !== 'function') return;
+      try {
+        select.focus({preventScroll:true});
+        select.showPicker();
+      } catch (_error) {
+        // Leave the browser's native default action untouched if the picker
+        // is unavailable or a picker is already open.
+      }
+    }, true);
+  }
+
+  function ensureIconPackSettings() {
+    const settingsPage = $('settings');
+    if (!settingsPage) return;
+    let card = $('ryuIconPackSettings');
+    if (!card) {
+      card = document.createElement('section');
+      card.id = 'ryuIconPackSettings';
+      card.className = 'card';
+      card.innerHTML =
+        '<div class="card-head"><div><h3 class="card-title">Icon Pack</h3>' +
+        '<p class="card-desc">Choose the pointer style used inside Ryu Audiobook. This does not change the Windows pointer outside the application.</p></div>' +
+        '<span class="badge accent">App only</span></div>' +
+        '<div class="ryu-icon-pack-grid">' +
+        '<button type="button" class="ryu-icon-pack-option" data-icon-pack="drake">' +
+        '<img src="../drake_cursor_32.png" alt="Drake dragon cursor"><b>Drake</b><small>Red dragon pointer</small></button>' +
+        '<button type="button" class="ryu-icon-pack-option" data-icon-pack="fang">' +
+        '<img src="../fang_cursor_32.png" alt="Fang dragon cursor"><b>Fang</b><small>Soft-glow dragon pointer</small></button>' +
+        '<button type="button" class="ryu-icon-pack-option" data-icon-pack="aether">' +
+        '<span class="ryu-icon-pack-aether" aria-hidden="true">↖</span><b>Aether</b><small>Standard pointer</small></button>' +
+        '<button type="button" class="ryu-icon-pack-option" data-icon-pack="custom">' +
+        '<span class="ryu-icon-pack-custom" aria-hidden="true">＋</span><b>Custom</b><small id="ryuCustomIconState">Import an image</small></button>' +
+        '</div><div class="ryu-icon-pack-actions"><button type="button" class="btn small" id="ryuImportCustomIcon">Import custom icon</button>' +
+        '<span id="ryuIconPackStatus" class="muted" aria-live="polite">Loading saved icon pack…</span></div>';
+      settingsPage.appendChild(card);
+      card.addEventListener('click', async event => {
+        const importButton = event.target?.closest?.('#ryuImportCustomIcon');
+        if (importButton) {
+          importButton.disabled = true;
+          try {
+            const result = await call('icon.pack.import', {});
+            if (result?.cancelled) return;
+            await ensureIconPackSettingsRefresh();
+            message('Custom icon imported and saved for this application.');
+          } catch (error) {
+            message(error?.message || String(error), true);
+          } finally {
+            importButton.disabled = false;
+          }
+          return;
+        }
+        const option = event.target?.closest?.('[data-icon-pack]');
+        if (!option || option.disabled) return;
+        const selected = String(option.dataset.iconPack || 'aether');
+        try {
+          const saved = await call('settings.save', {icon_pack:selected});
+          await ensureIconPackSettingsRefresh(saved);
+          message('Icon Pack saved: ' + selected.charAt(0).toUpperCase() + selected.slice(1) + '.');
+        } catch (error) {
+          message(error?.message || String(error), true);
+          await ensureIconPackSettingsRefresh();
+        }
+      });
+    }
+    void ensureIconPackSettingsRefresh();
+  }
+
+  async function ensureIconPackSettingsRefresh(settingsValue) {
+    const card = $('ryuIconPackSettings');
+    if (!card) return;
+    const settings = settingsValue || await call('settings.get', {}).catch(() => ({
+      icon_pack:'aether', custom_icon_available:false
+    }));
+    const selected = String(settings.icon_pack || 'aether').toLowerCase();
+    card.querySelectorAll('[data-icon-pack]').forEach(button => {
+      const choice = String(button.dataset.iconPack || '');
+      button.classList.toggle('selected', choice === selected);
+      button.setAttribute('aria-pressed', choice === selected ? 'true' : 'false');
+      if (choice === 'custom') button.disabled = settings.custom_icon_available !== true;
+    });
+    const customState = $('ryuCustomIconState');
+    if (customState) customState.textContent = settings.custom_icon_available === true
+      ? 'Imported icon saved' : 'Import an image';
+    const status = $('ryuIconPackStatus');
+    if (status) status.textContent = 'Active: ' +
+      (selected === 'aether' ? 'Aether · standard pointer' :
+       selected === 'custom' ? 'Custom icon' :
+       selected.charAt(0).toUpperCase() + selected.slice(1));
+  }
+
   function setProductionStatus(id, value, kind = 'info') {
     const node = $(id);
     if (!node) return;
     const next = String(value ?? '');
-    if (node.textContent !== next) node.textContent = next;
+    if (id === 'genPercent') {
+      const match = next.match(/^(\d+(?:\.\d+)?%)\s*(.*)$/);
+      if (match && match[2]) {
+        const valueNode = document.createElement('span');
+        valueNode.className = 'ryu-gen-percent-value';
+        valueNode.textContent = match[1];
+        const labelNode = document.createElement('span');
+        labelNode.className = 'ryu-gen-percent-label';
+        labelNode.textContent = match[2];
+        labelNode.dataset.ryuFullText = match[2];
+        labelNode.setAttribute('aria-label', match[2]);
+        node.replaceChildren(valueNode, labelNode);
+      } else if (node.textContent !== next) {
+        node.textContent = next;
+      }
+    } else if (node.textContent !== next) {
+      node.textContent = next;
+    }
+    node.dataset.ryuFullText = next;
+    node.setAttribute('aria-label', next);
+    if (node.closest('#generate') && (/^(gen|elapsed|eta|remaining)/i.test(id))) {
+      node.classList.add('ryu-production-truncate');
+    }
     if (node.style) node.style.color = kind === 'ready' ? 'var(--green)' :
       (kind === 'warn' ? 'var(--amber)' : 'var(--muted)');
+    scheduleProductionOverflowRefresh();
   }
 
   function setMetadataDialogStatus(value, kind = 'info') {
@@ -8929,6 +9162,25 @@ function renderProductionMetadataGate(active) {
       '.has-project-cover::before,.has-project-cover::after{content:none!important;display:none!important;background:none!important;opacity:0!important}',
       '.has-project-cover .cover-watermark,.has-project-cover .cover-placeholder,.has-project-cover .cover-branding{display:none!important}',
       '#genRing{background:conic-gradient(var(--red2,#d4375d) 0 var(--progress,0%),var(--border,#353c49) var(--progress,0%) 100%)!important;transition:filter .2s ease;will-change:filter}',
+      '#generate #genPercent{display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;gap:4px!important;min-width:0!important;max-width:100%!important;overflow:hidden!important;text-align:center!important;line-height:1.08!important}',
+      '#generate .ryu-gen-percent-value{display:block!important;font-size:clamp(26px,3.2vw,42px)!important;line-height:1!important;font-weight:800!important;max-width:100%!important;white-space:nowrap!important}',
+      '#generate .ryu-gen-percent-label{display:-webkit-box!important;-webkit-box-orient:vertical!important;-webkit-line-clamp:2!important;max-width:100%!important;min-width:0!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:normal!important;overflow-wrap:anywhere!important;font-size:clamp(12px,1.35vw,18px)!important;line-height:1.2!important;font-weight:700!important}',
+      '#generate .ryu-production-truncate{display:-webkit-box!important;-webkit-box-orient:vertical!important;-webkit-line-clamp:2!important;max-width:100%!important;min-width:0!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:normal!important;overflow-wrap:anywhere!important;word-break:normal!important;line-height:1.3!important}',
+      '#generate #genPercent.ryu-production-truncate{display:flex!important;-webkit-line-clamp:unset!important}',
+      '#generate #genStage,#generate #genChapter,#generate #elapsed,#generate #eta,#generate #remaining{box-sizing:border-box!important;min-width:0!important;max-width:100%!important;text-align:left!important}',
+      '#productionBookMetadata.ryu-production-truncate,#productionNarrator.ryu-production-truncate,#productionVoiceCastCount.ryu-production-truncate,#productionOutputSummary.ryu-production-truncate,#productionBookImported.ryu-production-truncate,#productionChaptersReady.ryu-production-truncate,#productionNarratorReady.ryu-production-truncate,#productionCharacterVoices.ryu-production-truncate,#productionPronunciationReady.ryu-production-truncate,#productionOutputReady.ryu-production-truncate{-webkit-line-clamp:3!important}',
+      '.ryu-production-overflow-tooltip{display:none;position:fixed;z-index:100000;width:min(380px,calc(100vw - 24px));max-height:min(260px,calc(100vh - 24px));overflow:auto;padding:10px 12px;border:1px solid rgba(212,55,93,.55);border-radius:10px;background:#101620;color:#f5f7fb;box-shadow:0 12px 32px rgba(0,0,0,.55);font-size:12px;line-height:1.5;white-space:normal;overflow-wrap:anywhere;pointer-events:none}',
+      '.ryu-production-truncated{cursor:help!important}',
+      '.ryu-icon-pack-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:12px}',
+      '.ryu-icon-pack-option{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-width:0;padding:12px 8px;border:1px solid var(--border,rgba(148,163,184,.25));border-radius:12px;background:var(--panel2,#111722);color:inherit;cursor:pointer;text-align:center}',
+      '.ryu-icon-pack-option.selected{border-color:var(--red2,#d4375d);box-shadow:0 0 0 1px var(--red2,#d4375d) inset;background:rgba(212,55,93,.12)}',
+      '.ryu-icon-pack-option:disabled{opacity:.45;cursor:not-allowed}',
+      '.ryu-icon-pack-option img,.ryu-icon-pack-aether,.ryu-icon-pack-custom{width:42px;height:42px;object-fit:contain;display:grid;place-items:center}',
+      '.ryu-icon-pack-aether,.ryu-icon-pack-custom{font-size:34px;line-height:1;color:var(--red2,#d4375d)}',
+      '.ryu-icon-pack-option small{font-size:11px;line-height:1.3;color:var(--muted,#aeb6c5)}',
+      '.ryu-icon-pack-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:12px}',
+      'select:not(:disabled){pointer-events:auto!important;cursor:pointer!important;touch-action:manipulation}',
+      '@media(max-width:760px){.ryu-icon-pack-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}',
       '#genRing[data-active="true"]{filter:drop-shadow(0 0 8px rgba(212,55,93,.35))}',
       '#genRing[data-active="true"]::after{content:"";position:absolute;inset:-4px;border:2px solid transparent;border-top-color:var(--red2,#d4375d);border-right-color:rgba(212,55,93,.16);border-radius:50%;pointer-events:none;animation:ryuGenerationRingSpin 1.8s linear infinite}',
       '@keyframes ryuGenerationRingSpin{to{transform:rotate(360deg)}}',
@@ -11078,6 +11330,8 @@ function renderProductionMetadataGate(active) {
       message:'Preparing studio controls and local services…',
       progress:null
     });
+    installNativeDropdownSupport();
+    installProductionOverflowTooltips();
     installUiTextScaleRuntime();
     renderHelpGuide();
     wireModelDetails();
@@ -11094,6 +11348,8 @@ function renderProductionMetadataGate(active) {
     // to these buttons. Replace those DOM nodes before attaching real playback,
     // so the demo timer can never masquerade as audiobook audio.
     ensureStableStudioLayout();
+    installProductionOverflowTooltips();
+    ensureIconPackSettings();
     ensureVoiceStudioRuntimeControls();
     ensurePreviewDurationOptions();
     for (const id of ['mainPlay','miniPlay']) {

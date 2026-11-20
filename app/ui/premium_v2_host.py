@@ -26,7 +26,7 @@ from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QApplication, QFileDialog, QLabel, QMainWindow, QProgressBar, QPushButton, QStackedWidget, QVBoxLayout, QWidget
-from PySide6.QtGui import QDesktopServices, QImageReader, QPixmap
+from PySide6.QtGui import QCursor, QDesktopServices, QImageReader, QPixmap
 
 from app.core.paths import app_root, audiobooks_root, ensure_roots, library_root, settings_root, models_root, runtimes_root
 from app.audio.playback import is_iso_bmff_file, prepare_audiobook_playback_source
@@ -517,6 +517,7 @@ class PremiumV2Bridge(QObject):
                 "player.position.save": self._player_position_save,
                 "settings.get": self._settings_get,
                 "settings.save": self._settings_save,
+                "icon.pack.import": self._icon_pack_import,
                 "storage.get": self._storage_get,
                 "storage.choose_root": self._storage_choose_root,
                 "storage.open_root": self._storage_open_root,
@@ -689,6 +690,7 @@ class PremiumV2Bridge(QObject):
             "player.position.save": True,
             "settings.get": True,
             "settings.save": True,
+            "icon.pack.import": True,
             "storage.get": True,
             "storage.choose_root": True,
             "storage.open_root": True,
@@ -963,6 +965,7 @@ class PremiumV2Bridge(QObject):
             log.exception("Could not resolve the canonical dialogue passage index for Production readiness")
 
         narrator_only_user_opt_out = state.get("narrator_only_generation_user_opt_out", False) is True
+        narrator_only_user_choice = state.get("narrator_only_generation_user_choice", False) is True
         try:
             generation_character_voice_profile_count = max(
                 0,
@@ -991,13 +994,19 @@ class PremiumV2Bridge(QObject):
             effective_narrator_profile and narrator_selection.get("profile_available")
         )
         narrator_only_eligible = narrator_ready
-        narrator_only_automatic = (
-            narrator_ready
-            and configured_character_voice_profile_count == 0
-            and not narrator_only_user_opt_out
+        third_person_available = bool(
+            unassigned_character_default.get("profile_available")
+            and unassigned_character_default.get("profile")
         )
-        narrator_only_enabled = (
-            state.get("narrator_only_generation") is True or narrator_only_automatic
+        narrator_only_enabled = narrator_ready and narrator_only_for_generation(
+            state,
+            configured_character_voice_profile_count,
+            third_person_available,
+        )
+        narrator_only_automatic = (
+            narrator_only_enabled
+            and not narrator_only_user_choice
+            and not narrator_only_user_opt_out
         )
         metadata_missing = missing_required_metadata_fields(
             project.title, state, effective_narrator_profile if narrator_ready else ""
@@ -1139,6 +1148,8 @@ class PremiumV2Bridge(QObject):
             "unassigned_character_count": unassigned_character_count,
             "unassigned_character_profile_name": unassigned_character_default.get("profile_name"),
             "unassigned_character_profile_available": bool(unassigned_character_default.get("profile_available")),
+            "third_person_profile_name": unassigned_character_default.get("profile_name"),
+            "third_person_profile_available": bool(unassigned_character_default.get("profile_available")),
             "output_duration_seconds": state.get("output_duration_seconds"),
             "character_assignment_issue_count": len(character_assignment_issues),
             "dialogue_index_ready": dialogue_index_ready,
@@ -3510,6 +3521,7 @@ class PremiumV2Bridge(QObject):
     def _voice_bundle_export(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Export selected saved Qwen profiles after the native Save dialog confirms a destination."""
         from app.tts.qwen_model_preference import get_qwen_model_preference
+from app.tts.generation_mode import narrator_only_for_generation
         from app.tts.qwen_profile_bundle import export_qwen_profiles_bundle
         from app.tts.voice_profile import load_saved_profiles
 
@@ -4461,7 +4473,7 @@ class PremiumV2Bridge(QObject):
         )
         if require_unassigned and not unassigned_available:
             raise ValueError(
-                "The app-wide 'Unassigned Character' voice profile is required for character-based preview. "
+                "The global 'Third Person' voice profile is required for character-based preview. "
                 "Choose and save it in Voice Studio, then retry the preview."
             )
         if unassigned_available and unassigned_profile is not None:
@@ -6265,7 +6277,7 @@ class PremiumV2Bridge(QObject):
         try:
             stored_name = settings.value("voice/unassigned_character_profile", "") if settings is not None else ""
         except Exception:
-            log.warning("Could not read the app-wide Unassigned Character voice setting.", exc_info=True)
+            log.warning("Could not read the global Third Person voice setting.", exc_info=True)
             stored_name = ""
         profile_name = str(stored_name or "").strip()
         profile = self._find_profile(profile_name) if profile_name else None
@@ -6276,7 +6288,7 @@ class PremiumV2Bridge(QObject):
         }
 
     def _unassigned_character_default_get(self, _payload: dict[str, Any]) -> dict[str, Any]:
-        """Return the mandatory app-wide Unassigned Character voice selection."""
+        """Return the mandatory global Third Person voice selection."""
         selected = self._unassigned_character_default_read()
         return {
             "profile_name": selected.get("profile_name"),
@@ -6286,16 +6298,16 @@ class PremiumV2Bridge(QObject):
     def _unassigned_character_default_save(self, payload: dict[str, Any]) -> dict[str, Any]:
         profile_name = str(payload.get("profile_name") or "").strip()
         if not profile_name:
-            raise ValueError("Choose a saved Voice Studio profile for Unassigned Character.")
+            raise ValueError("Choose a saved Voice Studio profile for Third Person.")
         profile = self._find_profile(profile_name)
         if profile is None:
             raise ValueError(
-                f"The selected Unassigned Character profile '{profile_name}' is not in the saved Voice Studio catalogue."
+                f"The selected Third Person profile '{profile_name}' is not in the saved Voice Studio catalogue."
             )
         self.settings.setValue("voice/unassigned_character_profile", profile.name)
         self.settings.sync()
         if self.settings.status() != QSettings.Status.NoError:
-            raise RuntimeError("Windows could not confirm the Unassigned Character voice setting was saved.")
+            raise RuntimeError("Windows could not confirm the Third Person voice setting was saved.")
         return {
             "saved": True,
             "profile_name": profile.name,
@@ -7846,11 +7858,12 @@ class PremiumV2Bridge(QObject):
         # This is a routing preference, not a cast-eligibility rule. When enabled,
         # it deliberately ignores every character assignment for this generation.
         state["narrator_only_generation"] = enabled
+        state["narrator_only_generation_user_choice"] = True
         if enabled:
             state.pop("narrator_only_generation_user_opt_out", None)
         else:
-            # Persist the user's choice so zero-cast books do not silently switch
-            # back to narrator-only mode on the next Production refresh.
+            # Persist the explicit off choice so zero-cast books continue using
+            # Narrator + Third Person rather than defaulting back to narrator-only.
             state["narrator_only_generation_user_opt_out"] = True
         state["modified_at"] = self._now()
         save_state(project.folder, state)
@@ -7879,7 +7892,6 @@ class PremiumV2Bridge(QObject):
                 "Restore the saved Voice Studio profile or choose another narrator."
             )
 
-        user_opt_out = state.get("narrator_only_generation_user_opt_out", False) is True
         saved_profiles = load_profiles()
         saved_profile_names = {
             str(getattr(saved_profile, "name", "") or "").strip().casefold()
@@ -7897,15 +7909,19 @@ class PremiumV2Bridge(QObject):
             if str(row.get("voice_profile") or "").strip().casefold() in saved_profile_names
         ]
 
-        # A saved explicit choice always wins. A book with no configured cast
-        # defaults to narrator-only only when the user has not explicitly opted out.
-        narrator_only = (
-            state.get("narrator_only_generation") is True
-            or (not configured_profiles and not user_opt_out)
-        )
         unassigned_default = self._unassigned_character_default_read()
         unassigned_profile_name = str(unassigned_default.get("profile_name") or "").strip()
-        unassigned_profile_available = bool(unassigned_profile_name and unassigned_default.get("profile_available"))
+        unassigned_profile_available = bool(
+            unassigned_profile_name and unassigned_default.get("profile_available")
+        )
+        # A saved Third Person profile makes character-cast routing the default,
+        # including books with no individually assigned character voices.
+        # Only an explicit per-book Narrator-only choice bypasses Third Person.
+        narrator_only = narrator_only_for_generation(
+            state,
+            len(configured_profiles),
+            unassigned_profile_available,
+        )
 
         if narrator_only:
             state["narrator_only_generation"] = True
@@ -7975,7 +7991,7 @@ class PremiumV2Bridge(QObject):
             )
 
         unassigned_character_count = max(0, len(character_rows) - len(configured_profiles))
-        # The Unassigned Character profile is a required global production
+        # The Third Person profile is a required global production
         # default for every character-cast book, even when the currently known
         # cast happens to be fully assigned. Future/ambiguous dialogue must have
         # a deterministic fallback that never silently becomes the narrator.
@@ -7987,7 +8003,7 @@ class PremiumV2Bridge(QObject):
             )
             detail = f" {examples}" if examples else ""
             raise ValueError(
-                "The app-wide 'Unassigned Character' voice profile is required for character-based generation. "
+                "The global 'Third Person' voice profile is required for character-based generation. "
                 "Choose and save it in Voice Studio, then retry generation." + detail
             )
 
@@ -8092,7 +8108,7 @@ class PremiumV2Bridge(QObject):
             unassigned_profile = available_profiles.get(unassigned_name.casefold()) if unassigned_name else None
             if unassigned_profile is None:
                 raise ValueError(
-                    "The app-wide Unassigned Character voice profile is missing or unavailable. "
+                    "The app-wide Third Person voice profile is missing or unavailable. "
                     "Choose and save it in Voice Studio before using character-cast generation."
                 )
             if unassigned_profile is not None:
@@ -9368,13 +9384,20 @@ class PremiumV2Bridge(QObject):
                    "qwen_low_memory": "qwen/low_memory_mode", "local_first": "privacy/local_first",
                    "output_folder": "paths/output_folder",
                    "player_rate": "player/playback_rate",
-                   "player_volume": "player/playback_volume"}
+                   "player_volume": "player/playback_volume",
+                   "icon_pack": "ui/icon_pack"}
         for key, setting in allowed.items():
             if key not in payload:
                 continue
             value = payload[key]
             if key == "theme" and value not in {"dark", "light"}:
                 raise ValueError("Theme must be dark or light.")
+            if key == "icon_pack":
+                value = str(value or "aether").strip().casefold()
+                if value not in {"drake", "fang", "aether", "custom"}:
+                    raise ValueError("Choose Drake, Fang, Aether or an imported custom icon.")
+                if value == "custom" and not Path(str(self.settings.value("ui/custom_icon_path", "") or "")).is_file():
+                    raise ValueError("Import a valid custom icon before selecting the Custom icon pack.")
             if key == "reduce_motion" and not isinstance(value, bool):
                 raise ValueError("Reduce motion must be a boolean preference.")
             if key == "text_scale":
@@ -9446,6 +9469,13 @@ class PremiumV2Bridge(QObject):
                 value = str(folder)
             self.settings.setValue(setting, value)
         self.settings.sync()
+        if self.settings.status() != QSettings.Status.NoError:
+            raise OSError("Windows could not confirm the settings write.")
+        if "icon_pack" in payload:
+            window = self.parent()
+            apply_cursor = getattr(window, "_apply_icon_pack_cursor", None)
+            if callable(apply_cursor):
+                apply_cursor()
         if "window_size" in payload:
             window = self.parent()
             apply_size = getattr(window, "apply_window_size", None)
@@ -12313,6 +12343,57 @@ class PremiumV2Bridge(QObject):
         return {"cleaned": True, "candidate_count": len(candidates),
                 "candidate_bytes": candidate_bytes, "candidates": candidates, "removed": removed}
 
+    def _icon_pack_import(self, _payload: dict[str, Any]) -> dict[str, Any]:
+        """Import a validated image as a persistent application-only custom cursor."""
+        file_name, _selected_filter = QFileDialog.getOpenFileName(
+            self.parent(), "Import Custom Icon", "",
+            "Image files (*.png *.jpg *.jpeg *.bmp *.ico *.webp)",
+        )
+        if not file_name:
+            return {"cancelled": True}
+        source = Path(file_name)
+        if not source.is_file():
+            raise ValueError("The selected icon file is no longer available.")
+        if source.stat().st_size > 12 * 1024 * 1024:
+            raise ValueError("Custom icons must be 12 MB or smaller.")
+        reader = QImageReader(str(source))
+        reader.setAutoTransform(True)
+        dimensions = reader.size()
+        if dimensions.isValid() and (
+            dimensions.width() > 2048 or dimensions.height() > 2048
+            or dimensions.width() * dimensions.height() > 4_000_000
+        ):
+            raise ValueError("Custom icons must not exceed 2048 × 2048 pixels.")
+        image = reader.read()
+        if image.isNull():
+            detail = reader.errorString() or "Unsupported or corrupt image."
+            raise ValueError(f"The custom icon could not be read: {detail}")
+        if (
+            image.width() < 16 or image.height() < 16
+            or image.width() > 2048 or image.height() > 2048
+            or image.width() * image.height() > 4_000_000
+        ):
+            raise ValueError("Custom icons must be between 16 and 2048 pixels per side.")
+        icon_directory = settings_root() / "Icon Packs"
+        icon_directory.mkdir(parents=True, exist_ok=True)
+        digest = hashlib.sha256(source.read_bytes()).hexdigest()[:16]
+        target = icon_directory / f"custom-{digest}.png"
+        if not target.is_file() and not image.save(str(target), "PNG"):
+            raise OSError("Windows could not save the imported icon in application settings.")
+        self.settings.setValue("ui/custom_icon_path", str(target))
+        self.settings.setValue("ui/icon_pack", "custom")
+        self.settings.sync()
+        if self.settings.status() != QSettings.Status.NoError:
+            raise OSError("Windows could not confirm the custom icon settings were saved.")
+        window = self.parent()
+        apply_cursor = getattr(window, "_apply_icon_pack_cursor", None)
+        if callable(apply_cursor):
+            apply_cursor()
+        return {
+            "saved": True, "icon_pack": "custom",
+            "width": int(image.width()), "height": int(image.height()),
+        }
+
     def _settings_get(self, _payload: dict[str, Any]) -> dict[str, Any]:
         self.settings.sync()
         try:
@@ -12348,6 +12429,8 @@ class PremiumV2Bridge(QObject):
             "qwen_backend": str(self.settings.value("qwen/backend_preference", "automatic") or "automatic"),
             "qwen_model_size": str(self.settings.value("qwen/model_size_preference", "auto") or "auto"),
             "qwen_low_memory": bool(self.settings.value("qwen/low_memory_mode", False, type=bool)),
+            "icon_pack": str(self.settings.value("ui/icon_pack", "aether") or "aether"),
+            "custom_icon_available": Path(str(self.settings.value("ui/custom_icon_path", "") or "")).is_file(),
         }
 
 
@@ -12401,9 +12484,11 @@ class PremiumV2Window(QMainWindow):
         self.resize(1440, 900)
 
         self.web = StableQWebEngineView(self)
+        self.web.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.web.setPage(DiagnosticQWebEnginePage(self.web))
         self.web.setZoomFactor(1.0)
         self.web.settings().setAttribute(QWebEngineSettings.WebAttribute.JavascriptCanOpenWindows, False)
+        self.web.settings().setAttribute(QWebEngineSettings.WebAttribute.FocusOnNavigationEnabled, True)
         self.web.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, False)
         self.web.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
 
@@ -12414,6 +12499,8 @@ class PremiumV2Window(QMainWindow):
         self.channel = QWebChannel(self.web.page())
         self.channel.registerObject("ryuBackend", self.bridge)
         self.web.page().setWebChannel(self.channel)
+        self.web.loadFinished.connect(lambda _ok: self.web.setFocus(Qt.FocusReason.OtherFocusReason))
+        self._apply_icon_pack_cursor()
         self._renderer_restart_attempts = 0
         self._frontend_generation = 0
         self._frontend_ready = False
@@ -12574,6 +12661,42 @@ class PremiumV2Window(QMainWindow):
             self._uses_html_startup_loader = False
             self.web.load(QUrl.fromLocalFile(str(path.resolve())))
         self.apply_window_size(str(QSettings("RyuBlanc", "Ryu's Audiobook").value("ui/window_size", "auto")))
+
+    def _apply_icon_pack_cursor(self) -> None:
+        """Apply the selected pointer only inside the Ryu Audiobook application window."""
+        settings = QSettings("RyuBlanc", "Ryu's Audiobook")
+        pack = str(settings.value("ui/icon_pack", "aether") or "aether").strip().casefold()
+        if pack == "aether":
+            self.unsetCursor()
+            self.web.unsetCursor()
+            return
+        assets_directory = frontend_path().parent.parent
+        built_in = {
+            "drake": assets_directory / "drake_cursor_32.png",
+            "fang": assets_directory / "fang_cursor_32.png",
+        }
+        icon_path = (
+            Path(str(settings.value("ui/custom_icon_path", "") or ""))
+            if pack == "custom" else built_in.get(pack, Path())
+        )
+        if not icon_path.is_file():
+            log.warning("Selected icon pack '%s' has no readable cursor image; restoring Aether.", pack)
+            self.unsetCursor()
+            self.web.unsetCursor()
+            return
+        pixmap = QPixmap(str(icon_path))
+        if pixmap.isNull():
+            log.warning("Selected icon pack '%s' could not be decoded; restoring Aether.", pack)
+            self.unsetCursor()
+            self.web.unsetCursor()
+            return
+        cursor = QCursor(
+            pixmap,
+            min(2, max(0, pixmap.width() - 1)),
+            min(2, max(0, pixmap.height() - 1)),
+        )
+        self.setCursor(cursor)
+        self.web.setCursor(cursor)
 
     def apply_window_size(self, choice: str) -> None:
         """Apply a persisted native window size; never change WebEngine zoom."""

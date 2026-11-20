@@ -13,7 +13,7 @@ from app.audio.assembler import assemble_m4b
 from app.audio.metadata import sanitize_metadata, validate_cover
 from app.chapters.detector import Chapter
 from app.tts.base import TTSProvider
-from app.tts.generator import generate_chapter
+from app.tts.generator import generate_chapter, safe_name
 from app.tts.chunker import split_text
 from app.tts.narration import apply_pronunciation_dictionary_with_counts, prepare_for_narration
 
@@ -597,5 +597,5 @@ class GenerationManager:
 
     @staticmethod
     def _safe_title(value: str) -> str:
-        import re
-        return re.sub(r'[<>:"/\\|?*]+', "_", value).strip() or "chapter"
+        """Share the chapter generator's deterministic Windows-safe title policy."""
+        return safe_name(value)

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import re
+import tempfile
+import time
 import wave
 
 
@@ -351,10 +354,11 @@ def pause_after_ms(
 
 
 def append_silence(path: Path, duration_ms: int) -> None:
-    """Append PCM silence to a generated WAV without changing its voice/pitch."""
+    """Append PCM silence and atomically replace a WAV with bounded Windows lock retries."""
     if duration_ms <= 0:
         return
 
+    path = Path(path)
     with wave.open(str(path), "rb") as source:
         params = source.getparams()
         frames = source.readframes(source.getnframes())
@@ -367,8 +371,33 @@ def append_silence(path: Path, duration_ms: int) -> None:
         return
 
     silence = b"\x00" * silence_frames * params.nchannels * params.sampwidth
-    temp = path.with_suffix(".pacing.wav")
-    with wave.open(str(temp), "wb") as target:
-        target.setparams(params)
-        target.writeframes(frames + silence)
-    temp.replace(path)
+    temp_name: str | None = None
+    try:
+        file_descriptor, temp_name = tempfile.mkstemp(
+            prefix=f"{path.stem}.",
+            suffix=".pacing.wav",
+            dir=str(path.parent),
+        )
+        os.close(file_descriptor)
+        with wave.open(temp_name, "wb") as target:
+            target.setparams(params)
+            target.writeframes(frames + silence)
+
+        # Defender/indexing or a reader may briefly hold the destination on Windows.
+        # Retry only transient access/share violations; preserve the source WAV
+        # and fail clearly if the operating system continues denying replacement.
+        for attempt in range(8):
+            try:
+                os.replace(temp_name, str(path))
+                temp_name = None
+                break
+            except PermissionError as exc:
+                if getattr(exc, "winerror", None) not in {5, 32} or attempt == 7:
+                    raise
+                time.sleep(min(0.1 * (2 ** attempt), 1.6))
+    finally:
+        if temp_name:
+            try:
+                Path(temp_name).unlink(missing_ok=True)
+            except OSError:
+                pass

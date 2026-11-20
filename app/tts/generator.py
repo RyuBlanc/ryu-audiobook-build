@@ -38,8 +38,24 @@ class ChapterPlan:
 
 
 def safe_name(value: str) -> str:
-    value = re.sub(r'[<>:"/\\|?*]+', "_", value).strip()
-    return value or "chapter"
+    """Return one bounded, deterministic Windows-safe chapter folder component."""
+    raw = str(value or "")
+    # Extracted chapter headings can contain CR/LF and other control bytes.
+    raw = re.sub(r"[\x00-\x1f\x7f-\x9f]", " ", raw)
+    raw = re.sub(r'[<>:"/\\|?*]+', "_", raw)
+    raw = re.sub(r"\s+", " ", raw).strip(" .")
+    reserved = {
+        "con", "prn", "aux", "nul",
+        *(f"com{index}" for index in range(1, 10)),
+        *(f"lpt{index}" for index in range(1, 10)),
+    }
+    device_base = raw.split(".", 1)[0].strip(" .").casefold()
+    if device_base in reserved:
+        raw = "_" + raw
+    if len(raw) > 120:
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+        raw = raw[:107].rstrip(" ._") + "_" + digest
+    return raw or "chapter"
 
 
 def state_path(chapter_dir: Path) -> Path:

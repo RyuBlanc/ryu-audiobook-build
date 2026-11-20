@@ -75,7 +75,8 @@ Performance targets: approximately 10 seconds of preview audio within 20 seconds
 - [ ] Confirm saved CustomVoice, VoiceDesign and Clone profiles persist after app close/relaunch.
 - [ ] Confirm model installation/repair/remove paths preserve saved user profiles/assets according to the lifecycle rules.
 - [ ] Analyse a representative book; compare detected characters and dialogue with the actual source text across the whole book.
-- [ ] Verify narrator-only default-off behavior when cast selection is available, saved narrator fallback for a book with no valid character profiles, series-scoped same-name characters and Unassigned Character handling.
+- [ ] Verify narrator-only is off by default when a global Third Person profile exists; ordinary narration stays on the narrator and unassigned character dialogue uses Third Person. Explicit per-book Narrator-only remains an override.
+- [ ] Verify Third Person and narrator profiles remain separate; individually assigned character profiles keep their own voices.
 - [ ] Generate a representative multi-chapter/full-book audiobook.
 - [ ] Record chapter count, eligible/skipped chapters, audio duration, elapsed time, progress, ETA and validated chunk count.
 - [ ] Test pause, resume, cancel, retry and a controlled process interruption/restart/recovery.
@@ -87,6 +88,10 @@ For the historical 1,175-vs-1,196 dialogue/passage discrepancy, use the same imp
 ## F4 — UI, responsiveness and stability
 
 - [ ] Inspect every application destination, rapid navigation and repeated open/close.
+- [ ] Open and operate every dropdown in Voice Studio, Character Studio, Production, Sound Design, Performance and Settings; verify click, keyboard navigation and selection work.
+- [ ] In Production, verify the percentage, stage, chapter, elapsed time and ETA stay within their assigned areas; long labels end with an ellipsis and reveal the complete text in a floating hover/focus tooltip.
+- [ ] In Settings > Icon Pack, select Drake, Fang and Aether; verify the cursor changes inside the app only and is restored after restart.
+- [ ] Import a custom icon image, restart the app, and verify the custom icon remains selected and available.
 - [ ] Check for flicker, freeze, delayed response, inaccessible controls, crashes and excessive scroll nesting.
 - [ ] Test 1280×720 and the agreed responsive matrix.
 - [ ] Test aspect ratios 4:3, 5:4, 3:2, 16:10, 16:9, 21:9, 32:9 and portrait.
