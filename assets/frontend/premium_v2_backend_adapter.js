@@ -6070,6 +6070,358 @@
     const mixOverrides = $('mixOverrides');
     if (mixOverrides) mixOverrides.textContent = Object.values(overrides).filter(o => o.rule === 'custom' || o.rule === 'none').length + ' chapters';
   }
+  function installStableSelectPopovers() {
+    if (window.__ryuStableSelectPopoversInstalled === true || !document.body) return;
+    window.__ryuStableSelectPopoversInstalled = true;
+
+    let activeSelect = null;
+    let activePopup = null;
+    let activeIndex = -1;
+    let popupSequence = 0;
+
+    const isEligible = select =>
+      select instanceof HTMLSelectElement &&
+      !select.multiple &&
+      Number(select.size || 0) <= 1;
+
+    const isOptionEnabled = option =>
+      Boolean(option) &&
+      option.disabled !== true &&
+      option.hidden !== true &&
+      !(option.parentElement?.tagName === 'OPTGROUP' && option.parentElement.disabled);
+
+    const optionRows = select => Array.from(select.options)
+      .map((option, index) => ({option, index}))
+      .filter(row => !row.option.hidden);
+
+    const closePopover = () => {
+      const previous = activeSelect;
+      if (previous) {
+        previous.setAttribute('aria-expanded', 'false');
+        previous.classList.remove('ryu-stable-select-open');
+        previous.removeAttribute('aria-activedescendant');
+        previous.removeAttribute('aria-controls');
+      }
+      if (activePopup) activePopup.remove();
+      activeSelect = null;
+      activePopup = null;
+      activeIndex = -1;
+    };
+
+    const placePopover = () => {
+      if (!activeSelect || !activePopup || !activeSelect.isConnected) {
+        closePopover();
+        return;
+      }
+      const rect = activeSelect.getBoundingClientRect();
+      if (rect.width < 1 || rect.height < 1) {
+        closePopover();
+        return;
+      }
+
+      const margin = 8;
+      const width = Math.max(96, Math.min(rect.width, window.innerWidth - margin * 2));
+      const left = Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin));
+      const maxHeight = Math.max(80, Math.min(300, window.innerHeight - margin * 2));
+      const below = Math.max(0, window.innerHeight - rect.bottom - margin);
+      const above = Math.max(0, rect.top - margin);
+      const openAbove = below < Math.min(160, maxHeight) && above > below;
+
+      activePopup.style.width = width + 'px';
+      activePopup.style.left = left + 'px';
+      activePopup.style.maxHeight = Math.max(80, Math.min(maxHeight, openAbove ? above : below)) + 'px';
+      activePopup.style.top = openAbove
+        ? Math.max(margin, rect.top - activePopup.offsetHeight - 6) + 'px'
+        : Math.min(window.innerHeight - margin - activePopup.offsetHeight, rect.bottom + 6) + 'px';
+    };
+
+    const setActiveOption = requestedIndex => {
+      if (!activeSelect || !activePopup) return;
+      const rows = optionRows(activeSelect);
+      if (!rows.length) {
+        activeIndex = -1;
+        activeSelect.removeAttribute('aria-activedescendant');
+        return;
+      }
+
+      let candidate = Number(requestedIndex);
+      if (!Number.isInteger(candidate)) candidate = activeSelect.selectedIndex;
+      if (!isOptionEnabled(activeSelect.options[candidate])) {
+        const firstEnabled = rows.find(row => isOptionEnabled(row.option));
+        candidate = firstEnabled ? firstEnabled.index : -1;
+      }
+      activeIndex = candidate;
+
+      activePopup.querySelectorAll('[data-ryu-select-option-index]').forEach(row => {
+        const index = Number(row.dataset.ryuSelectOptionIndex);
+        row.classList.toggle('active', index === activeIndex);
+        row.setAttribute('aria-selected', String(index === activeSelect.selectedIndex));
+      });
+
+      if (activeIndex >= 0) {
+        const activeRow = activePopup.querySelector(
+          '[data-ryu-select-option-index="' + activeIndex + '"]'
+        );
+        if (activeRow) {
+          activeSelect.setAttribute('aria-activedescendant', activeRow.id);
+          activeRow.scrollIntoView({block: 'nearest'});
+        }
+      } else {
+        activeSelect.removeAttribute('aria-activedescendant');
+      }
+    };
+
+    const chooseOption = requestedIndex => {
+      if (!activeSelect || !activePopup) return;
+      const select = activeSelect;
+      const index = Number(requestedIndex);
+      const option = select.options[index];
+      if (!isOptionEnabled(option)) return;
+
+      const previousIndex = select.selectedIndex;
+      select.selectedIndex = index;
+      closePopover();
+      if (previousIndex !== select.selectedIndex) {
+        select.dispatchEvent(new Event('input', {bubbles: true}));
+        select.dispatchEvent(new Event('change', {bubbles: true}));
+      }
+    };
+
+    const renderPopoverOptions = () => {
+      if (!activeSelect || !activePopup) return;
+      activePopup.replaceChildren();
+      let previousGroup = '';
+
+      optionRows(activeSelect).forEach(({option, index}) => {
+        const group = option.parentElement?.tagName === 'OPTGROUP'
+          ? String(option.parentElement.label || '').trim()
+          : '';
+        if (group && group !== previousGroup) {
+          const heading = document.createElement('div');
+          heading.className = 'ryu-stable-select-group';
+          heading.textContent = group;
+          activePopup.appendChild(heading);
+        }
+        previousGroup = group;
+
+        const row = document.createElement('div');
+        row.id = activePopup.id + '-option-' + index;
+        row.className = 'ryu-stable-select-option';
+        row.dataset.ryuSelectOptionIndex = String(index);
+        row.setAttribute('role', 'option');
+        row.setAttribute('aria-disabled', String(!isOptionEnabled(option)));
+        row.setAttribute('aria-selected', String(index === activeSelect.selectedIndex));
+        row.textContent = String(option.label || option.textContent || '').trim();
+        row.title = row.textContent;
+        row.addEventListener('click', event => {
+          event.preventDefault();
+          event.stopPropagation();
+          chooseOption(index);
+        });
+        activePopup.appendChild(row);
+      });
+
+      if (!activePopup.childElementCount) {
+        const empty = document.createElement('div');
+        empty.className = 'ryu-stable-select-empty';
+        empty.textContent = 'No options available';
+        activePopup.appendChild(empty);
+      }
+
+      const selected = activeSelect.selectedIndex;
+      const firstEnabled = optionRows(activeSelect).find(row => isOptionEnabled(row.option));
+      setActiveOption(
+        isOptionEnabled(activeSelect.options[selected])
+          ? selected
+          : (firstEnabled ? firstEnabled.index : -1)
+      );
+      placePopover();
+    };
+
+    const openPopover = select => {
+      if (!isEligible(select) || select.disabled || !select.isConnected) return;
+      if (activeSelect === select && activePopup) return;
+      closePopover();
+
+      activeSelect = select;
+      activePopup = document.createElement('div');
+      activePopup.id = 'ryu-stable-select-popover-' + (++popupSequence);
+      activePopup.className = 'ryu-stable-select-popover';
+      activePopup.setAttribute('role', 'listbox');
+      activePopup.setAttribute(
+        'aria-label',
+        String(select.getAttribute('aria-label') || select.name || select.id || 'Options')
+      );
+      document.body.appendChild(activePopup);
+
+      select.classList.add('ryu-stable-select-open');
+      select.setAttribute('aria-haspopup', 'listbox');
+      select.setAttribute('aria-expanded', 'true');
+      select.setAttribute('aria-controls', activePopup.id);
+      try {
+        select.focus({preventScroll: true});
+      } catch (_) {
+        select.focus();
+      }
+      renderPopoverOptions();
+    };
+
+    const moveActiveOption = direction => {
+      if (!activeSelect || !activePopup) return;
+      const total = activeSelect.options.length;
+      if (!total) return;
+      let candidate = activeIndex;
+      for (let step = 0; step < total; step += 1) {
+        candidate = (candidate + direction + total) % total;
+        if (isOptionEnabled(activeSelect.options[candidate])) {
+          setActiveOption(candidate);
+          return;
+        }
+      }
+    };
+
+    const moveToBoundary = direction => {
+      if (!activeSelect || !activePopup) return;
+      const rows = optionRows(activeSelect).filter(row => isOptionEnabled(row.option));
+      if (!rows.length) return;
+      setActiveOption(direction < 0 ? rows[0].index : rows[rows.length - 1].index);
+    };
+
+    const enhanceSelect = select => {
+      if (!isEligible(select) || select.dataset.ryuStableSelectBound === 'true') return;
+      select.dataset.ryuStableSelectBound = 'true';
+      select.classList.add('ryu-stable-select-bound');
+      select.setAttribute('aria-haspopup', 'listbox');
+      select.setAttribute('aria-expanded', 'false');
+
+      const openEvent = ('PointerEvent' in window) ? 'pointerdown' : 'mousedown';
+      select.addEventListener(openEvent, event => {
+        if (select.disabled) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (activeSelect === select && activePopup) closePopover();
+        else openPopover(select);
+      }, true);
+
+      select.addEventListener('keydown', event => {
+        if (select.disabled) return;
+        const opens = ['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(event.key);
+        if (!opens || (activeSelect === select && activePopup)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        openPopover(select);
+        if (event.key === 'ArrowDown') moveActiveOption(1);
+        else if (event.key === 'ArrowUp') moveActiveOption(-1);
+      }, true);
+
+      select.addEventListener('change', () => {
+        if (activeSelect === select && activePopup) renderPopoverOptions();
+      });
+      select.addEventListener('blur', () => {
+        window.setTimeout(() => {
+          if (activeSelect === select && !activePopup?.contains(document.activeElement)) closePopover();
+        }, 0);
+      });
+    };
+
+    const collectSelects = root => {
+      if (!root) return;
+      if (root.nodeType === Node.ELEMENT_NODE && root.matches('select')) enhanceSelect(root);
+      if (typeof root.querySelectorAll === 'function') {
+        root.querySelectorAll('select').forEach(enhanceSelect);
+      }
+    };
+
+    document.addEventListener('pointerdown', event => {
+      if (!activeSelect || !activePopup) return;
+      const target = event.target;
+      if (target === activeSelect || activeSelect.contains(target) || activePopup.contains(target)) return;
+      closePopover();
+    }, true);
+
+    document.addEventListener('keydown', event => {
+      if (!activeSelect || !activePopup) return;
+      if (event.target !== activeSelect) return;
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closePopover();
+      } else if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        moveActiveOption(1);
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        moveActiveOption(-1);
+      } else if (event.key === 'Home') {
+        event.preventDefault();
+        moveToBoundary(-1);
+      } else if (event.key === 'End') {
+        event.preventDefault();
+        moveToBoundary(1);
+      } else if (event.key === 'PageDown') {
+        event.preventDefault();
+        for (let index = 0; index < 6; index += 1) moveActiveOption(1);
+      } else if (event.key === 'PageUp') {
+        event.preventDefault();
+        for (let index = 0; index < 6; index += 1) moveActiveOption(-1);
+      } else if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        chooseOption(activeIndex);
+      } else if (event.key === 'Tab') {
+        closePopover();
+      }
+    }, true);
+
+    const style = document.createElement('style');
+    style.id = 'ryuStableSelectPopoverStyle';
+    style.textContent = [
+      'select.ryu-stable-select-bound{appearance:none!important;-webkit-appearance:none!important;cursor:pointer!important;padding-right:36px!important;background-image:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%278%27 viewBox=%270 0 12 8%27%3E%3Cpath d=%27M1 1l5 5 5-5%27 fill=%27none%27 stroke=%27%23aeb8c8%27 stroke-width=%271.6%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27/%3E%3C/svg%3E")!important;background-repeat:no-repeat!important;background-position:right 13px center!important;background-size:12px 8px!important}',
+      'select.ryu-stable-select-bound:disabled{cursor:not-allowed!important;opacity:.55}',
+      '.ryu-stable-select-popover{position:fixed;z-index:10020;box-sizing:border-box;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;padding:5px;border:1px solid var(--border,rgba(148,163,184,.28));border-radius:11px;background:var(--card,#171d28);color:var(--text,#eef2f7);box-shadow:0 18px 48px rgba(0,0,0,.42);scrollbar-width:thin}',
+      '.ryu-stable-select-option{box-sizing:border-box;display:flex;align-items:center;min-height:34px;width:100%;padding:7px 10px;border-radius:7px;color:inherit;font:inherit;font-size:13px;line-height:1.4;white-space:normal;overflow-wrap:anywhere;cursor:pointer}',
+      '.ryu-stable-select-option.active,.ryu-stable-select-option:hover{background:rgba(205,35,76,.18);outline:none}',
+      '.ryu-stable-select-option[aria-selected=true]{color:var(--text,#fff);font-weight:700}',
+      '.ryu-stable-select-option[aria-disabled=true]{opacity:.42;cursor:not-allowed}',
+      '.ryu-stable-select-group{padding:8px 10px 4px;color:var(--muted,#aeb6c5);font-size:11px;font-weight:750;letter-spacing:.06em;text-transform:uppercase}',
+      '.ryu-stable-select-empty{padding:10px;color:var(--muted,#aeb6c5);font-size:12px}'
+    ].join('');
+    document.head.appendChild(style);
+
+    collectSelects(document);
+    const observer = new MutationObserver(records => {
+      let refreshOpen = false;
+      records.forEach(record => {
+        if (record.type === 'childList') {
+          record.addedNodes.forEach(collectSelects);
+          if (activeSelect &&
+              (record.target === activeSelect || activeSelect.contains(record.target))) {
+            refreshOpen = true;
+          }
+        } else if (record.type === 'characterData' && activeSelect &&
+                   activeSelect.contains(record.target)) {
+          refreshOpen = true;
+        } else if (record.type === 'attributes' && record.target === activeSelect) {
+          if (activeSelect.disabled || activeSelect.multiple || Number(activeSelect.size || 0) > 1) {
+            closePopover();
+          } else {
+            refreshOpen = true;
+          }
+        }
+      });
+      if (activeSelect && !activeSelect.isConnected) closePopover();
+      else if (refreshOpen && activeSelect && activePopup) renderPopoverOptions();
+    });
+    observer.observe(document.body, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ['disabled', 'multiple', 'size']
+    });
+    window.addEventListener('resize', closePopover);
+    window.addEventListener('scroll', closePopover, true);
+  }
+
   function setProductionStatus(id, value, kind = 'info') {
     const node = $(id);
     if (!node) return;
@@ -11071,6 +11423,7 @@ function renderProductionMetadataGate(active) {
   }
 
   async function wire() {
+    installStableSelectPopovers();
     // The native splash is still visible while controls are bound and the first
     // local backend calls are verified. Keep it animated instead of showing a
     // stationary percentage during this real setup work.
