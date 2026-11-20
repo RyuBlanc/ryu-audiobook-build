@@ -16,13 +16,15 @@ class CurrentHelpGuideRequirements(unittest.TestCase):
         help_end = html.index("</main>", help_start)
         cls.original_guide = html[help_start:help_end]
 
-    def test_gen07_explains_explicit_narrator_only_choice_and_global_unassigned_fallback(self):
+    def test_gen07_explains_explicit_narrator_only_choice_and_global_third_person_fallback(self):
         for phrase in (
             "Narrator-only audiobook generation (GEN-07)",
             "per-book choice",
             "even when character voice profiles are configured",
             "including quoted and dash-led dialogue",
-            "mandatory app-wide Unassigned Character profile",
+            "app-wide Third Person profile",
+            "explicitly assigned character profiles remain in use",
+            "narrator continues to read narration",
             "click Generate full audiobook again",
             "valid saved narrator profile is still required",
         ):
@@ -73,7 +75,8 @@ class CurrentHelpGuideRequirements(unittest.TestCase):
         self.assertIn("narratorOnlyItem.textContent", self.guide)
         self.assertIn("unassignedItem.textContent", self.guide)
         self.assertIn("Narrator-Only Generation is an explicit per-book choice", self.guide)
-        self.assertIn("mandatory app-wide Unassigned Character profile", self.guide)
+        self.assertIn("app-wide Third Person profile", self.guide)
+        self.assertIn("narrator continues to read narration", self.guide)
         self.assertIn("zero valid character voice profiles are configured", self.original_guide)
         self.assertIn("unresolved dialogue must be reviewed or assigned", self.original_guide)
 
