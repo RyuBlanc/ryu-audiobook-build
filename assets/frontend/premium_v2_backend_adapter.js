@@ -4695,7 +4695,7 @@
   async function assignPassageToCharacter(name, preferredSeries = '', preferredProfile = '', assignmentSource = 'manual', assignmentConfidence = 1.0) {
     return assignPassageToCharacters([{
       name:String(name || '').trim(),
-      series:String(preferredSeries || activeCharacterProjectSeries() || '').trim(),
+      series:String(preferredSeries || '').trim(),
       profile:String(preferredProfile || '').trim()
     }], assignmentSource, assignmentConfidence);
   }
@@ -4710,7 +4710,7 @@
     if (profile && !characterProfileByName(profile)) throw new Error('Choose one of the saved audio profiles.');
     const result = await call('character.create',{name,series,aliases,short:name.split(/\\s+/)[0],voice_profile:profile,dialogue_sample:String(window.ryuPremiumPendingDialogueText || '')});
     await refreshCharacters();
-    const current = characterRowForName(result?.character?.name || name,series);
+    const current = characterRowForName(result?.character?.name || name, series);
     if (!current) throw new Error('The character was created but could not be loaded into the active project cast.');
     const selected = Array.isArray(window.ryuPremiumSelectedDialogueSpeakers) ? window.ryuPremiumSelectedDialogueSpeakers : [];
     const key = characterAssignmentKey(characterCanonical(current),characterSeries(current));
