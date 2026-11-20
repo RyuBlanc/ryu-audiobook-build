@@ -91,7 +91,11 @@ For the historical 1,175-vs-1,196 dialogue/passage discrepancy, use the same imp
 - [ ] Open and operate every dropdown in Voice Studio, Character Studio, Production, Sound Design, Performance and Settings; verify click, keyboard navigation and selection work.
 - [ ] In Production, verify the percentage, stage, chapter, elapsed time and ETA stay within their assigned areas; long labels end with an ellipsis and reveal the complete text in a floating hover/focus tooltip.
 - [ ] In Settings > Icon Pack, select Drake, Fang and Aether; verify the cursor changes inside the app only and is restored after restart.
-- [ ] Import a custom icon image, restart the app, and verify the custom icon remains selected and available.
+- [ ] Import a custom icon image; verify its preview appears in the Custom tile, select it, restart the app and verify the pointer is applied inside the application.
+- [ ] Move between Appearance, Storage & library, Speech & AI, Production and Diagnostics; confirm each pane stays responsive without a Windows Not Responding pause.
+- [ ] Click dropdowns to open them, select with the mouse, then repeat using keyboard navigation and Space; the popup must not immediately close.
+- [ ] In Voice Studio, verify the Third Person global selector is visible beside the narrator controls and remains separate from the narrator.
+- [ ] In Character Studio, assign three or more characters to one dialogue passage and confirm simultaneous voice blending without the assignment popover moving out of position.
 - [ ] Check for flicker, freeze, delayed response, inaccessible controls, crashes and excessive scroll nesting.
 - [ ] Test 1280×720 and the agreed responsive matrix.
 - [ ] Test aspect ratios 4:3, 5:4, 3:2, 16:10, 16:9, 21:9, 32:9 and portrait.

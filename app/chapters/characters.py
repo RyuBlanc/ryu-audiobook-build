@@ -36,6 +36,8 @@ class CharacterAnalysis:
 
 
 DIALOGUE_PATTERNS = (
+    # Repeated straight quotes (optionally wrapped in braces) mark a multi-speaker passage.
+    re.compile(r'(?<!")\{?"{2,}([^"\r\n]{2,1800})"{2,}\}?(?!")'),
     re.compile(r'[\u201c]([^\u201d]{2,1800})[\u201d]'),
     re.compile(r'"([^"]{2,1800})"'),
     re.compile(r'[\u300c]([^\u300d]{2,1800})[\u300d]'),

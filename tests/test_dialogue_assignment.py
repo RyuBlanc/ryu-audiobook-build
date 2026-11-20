@@ -4,6 +4,9 @@ from pathlib import Path
 from app.chapters.detector import Chapter
 from app.chapters.dialogue import dialogue_segments, dialogue_segment_for_selection
 from app.chapters.assignment_utils import assignment_speakers, normalize_assignment, build_book_character_registry
+from app.chapters.characters import _all_dialogue_spans
+from app.chapters.speaker_segmentation import segment_chapter_speakers
+from app.tts.cast_provider import CastAwareProvider
 
 
 class DialogueAssignmentTests(unittest.TestCase):
@@ -99,6 +102,40 @@ class DialogueAssignmentTests(unittest.TestCase):
         self.assertEqual(assignment_speakers(item), ["Rias", "Akeno"])
         self.assertEqual(item["speaker"], "Rias")
         self.assertEqual(item["multi_speaker_mode"], "chorus")
+
+    def test_repeated_quote_markers_are_one_dialogue_passage(self):
+        for source in ('Prefix. ""hi there"" Suffix.', 'Prefix. {""hi there""} Suffix.'):
+            chapter = Chapter(1, "Multi voice", source)
+            marker_start = source.index('""')
+            marker_end = source.index('}', marker_start) + 1 if '{""' in source else source.rindex('""') + 2
+            spans = _all_dialogue_spans(source)
+            matched = next((row for row in spans if row[0] == marker_start and row[1] == marker_end), None)
+            self.assertIsNotNone(matched, source)
+            self.assertEqual(matched[2], "hi there")
+            segment = next(row for row in segment_chapter_speakers(chapter) if row.start == marker_start)
+            self.assertEqual(segment.text, source[marker_start:marker_end])
+            self.assertEqual(segment.kind, "needs_speaker_review")
+            self.assertTrue(segment.needs_review)
+
+    def test_repeated_quote_marker_routes_multiple_profiles_to_simultaneous_chorus(self):
+        class UnusedProvider:
+            pass
+        source = 'Before. {""hello together""} After.'
+        start = source.index('{""')
+        end = source.index('} ', start) + 1
+        assignment = {
+            "start":start,"end":end,"text":source[start:end],
+            "speakers":["Rias","Akeno"],"speaker":"Rias",
+            "multi_speaker_mode":"chorus","series":"Test Series"
+        }
+        router = CastAwareProvider(
+            narrator_provider=UnusedProvider(),narrator_voice="Narrator",profiles={},
+            assignments={"rias":"Rias Voice","akeno":"Akeno Voice"},unassigned_voice="Third Person"
+        )
+        parts = router.split_for_cast(source,"Narrator",[assignment])
+        self.assertEqual(parts[0],("Before.","Narrator"))
+        self.assertEqual(parts[1],("hello together",["Rias Voice","Akeno Voice"]))
+        self.assertEqual(parts[2],("After.","Narrator"))
 
     def test_book_character_registry_includes_other_chapters_and_cast(self):
         from tempfile import TemporaryDirectory

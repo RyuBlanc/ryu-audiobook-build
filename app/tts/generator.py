@@ -27,7 +27,7 @@ class GenerationResult:
     chunks_completed: int
 
 
-GENERATION_PIPELINE_VERSION = "2026-10-qwen3-story-expression-v6"
+GENERATION_PIPELINE_VERSION = "2026-11-multi-speaker-marker-chorus-v7"
 
 @dataclass(frozen=True)
 class ChapterPlan:

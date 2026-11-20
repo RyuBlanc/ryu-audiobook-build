@@ -3748,9 +3748,13 @@
       card.id = 'unassignedCharacterDefaultCard';
       card.className = 'card';
       card.style.cssText = 'margin:14px 0;padding:14px;border:1px solid rgba(150,160,180,.22);border-radius:12px;';
-      const narratorCard = $('seriesNarratorDefaultCard');
-      if (narratorCard?.parentNode) narratorCard.insertAdjacentElement('afterend', card);
-      else panel.appendChild(card);
+      panel.appendChild(card);
+    }
+    const summary = panel.querySelector('.summary');
+    const narratorLine = $('assignedSide')?.closest('p');
+    if (summary && card.parentNode !== summary) {
+      if (narratorLine?.parentNode === summary) narratorLine.insertAdjacentElement('afterend', card);
+      else summary.appendChild(card);
     }
     const savedProfiles = characterSavedProfiles();
     const options = savedProfiles.map(profile =>
@@ -4411,6 +4415,14 @@
     if (!popover || characterManualFormBound) return;
     const quick = $('quickCharacterList');
     if (!quick) return;
+    const actions = document.createElement('div');
+    actions.id = 'ryuMultiSpeakerSelectionActions';
+    actions.className = 'ryu-multi-speaker-actions';
+    actions.innerHTML =
+      '<div class="ryu-multi-speaker-summary" id="ryuMultiSpeakerSelectionSummary">Select one or more characters for this passage</div>' +
+      '<div class="ryu-multi-speaker-buttons"><button type="button" class="btn small secondary" id="clearSelectedCharacterSpeakers">Clear selection</button>' +
+      '<button type="button" class="btn small" id="assignSelectedCharactersTogether" disabled>Assign selected voices</button></div>';
+    quick.insertAdjacentElement('afterend', actions);
     const form = document.createElement('div');
     form.id = 'ryuManualCharacterCreate';
     form.className = 'ryu-manual-create';
@@ -4421,8 +4433,8 @@
       '<label>Character name<input id="ryuManualNewName" maxlength="160" placeholder="Canonical character name"/></label>' +
       '<label>Aliases<input id="ryuManualNewAliases" maxlength="1000" placeholder="Nickname, short name, other aliases"/></label>' +
       '<label>Audio profile<select id="ryuManualNewProfile"><option value="">Unassigned</option></select></label>' +
-      '<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap"><button type="button" class="btn small secondary" id="cancelManualCharacterCreate">Cancel</button><button type="button" class="btn small" id="saveManualCharacterCreate">Save & Assign</button></div>';
-    quick.insertAdjacentElement('afterend', form);
+      '<div class="ryu-manual-create-actions"><button type="button" class="btn small secondary" id="cancelManualCharacterCreate">Cancel</button><button type="button" class="btn small" id="saveManualCharacterCreate">Save & Add to Selection</button></div>';
+    actions.insertAdjacentElement('afterend', form);
     const series = $('ryuManualSeries');
     series.addEventListener('change', () => {
       characterStudioSelectedSeries = series.value === '__new_series__' ? '' : series.value;
@@ -4461,6 +4473,39 @@
     const form = $('ryuManualCharacterCreate'), quick = $('quickCharacterList');
     if (form) form.hidden = false;
     if (quick) quick.hidden = true;
+    const actions = $('ryuMultiSpeakerSelectionActions');
+    if (actions) actions.hidden = true;
+    requestAnimationFrame(() => positionCharacterAssignmentPopover($('characterAssignPopover'),window.__ryuCharacterAssignmentAnchor?.x,window.__ryuCharacterAssignmentAnchor?.y));
+  }
+  function renderSelectedCharacterSpeakerControls() {
+    const actions = $('ryuMultiSpeakerSelectionActions');
+    if (!actions) return;
+    const selected = Array.isArray(window.ryuPremiumSelectedDialogueSpeakers) ? window.ryuPremiumSelectedDialogueSpeakers : [];
+    const summary = $('ryuMultiSpeakerSelectionSummary'), assign = $('assignSelectedCharactersTogether');
+    if (summary) {
+      summary.textContent = selected.length ? 'Selected ' + selected.length + ': ' + selected.map(item => item.name).join(', ') : 'Select one or more characters for this exact passage';
+      summary.title = selected.map(item => item.name + ' · ' + item.series).join('\n');
+    }
+    if (assign) {
+      assign.disabled = selected.length === 0;
+      assign.textContent = selected.length > 1 ? 'Assign ' + selected.length + ' voices together' : selected.length === 1 ? 'Assign 1 voice' : 'Assign selected voices';
+    }
+    const keys = new Set(selected.map(item => characterAssignmentKey(item.name,item.series)));
+    document.querySelectorAll('#quickCharacterList [data-live-character]').forEach(item => {
+      const active = keys.has(characterAssignmentKey(item.dataset.liveCharacter,item.dataset.liveSeries));
+      item.classList.toggle('selected',active); item.setAttribute('aria-pressed',active?'true':'false');
+    });
+  }
+  function toggleCharacterSpeakerSelection(button) {
+    const selected = Array.isArray(window.ryuPremiumSelectedDialogueSpeakers) ? window.ryuPremiumSelectedDialogueSpeakers : [];
+    const name = String(button.dataset.liveCharacter || '').trim(), series = String(button.dataset.liveSeries || '').trim();
+    if (!name || !series) throw new Error('Choose a character with a known series before assigning it.');
+    const key = characterAssignmentKey(name,series);
+    const index = selected.findIndex(item => characterAssignmentKey(item.name,item.series) === key);
+    if (index >= 0) selected.splice(index,1);
+    else selected.push({name,series,profile:String(button.dataset.liveProfile || '').trim(),project:button.dataset.liveProject === 'true'});
+    window.ryuPremiumSelectedDialogueSpeakers = selected;
+    renderSelectedCharacterSpeakerControls();
   }
   function renderManualCharacterChoices() {
     const list = $('quickCharacterList');
@@ -4483,23 +4528,33 @@
       merged.push({name, series, aliases:characterAliases(item), voice_profile:String(item.voice_profile || item.voice || ''), project:false, item});
     }
     const visible = merged.filter(item => [item.name,item.series,item.voice_profile,...item.aliases].join(' ').toLowerCase().includes(query));
-    list.innerHTML = visible.map(item => '<button type="button" class="quick-character" data-live-character="' + esc(item.name) + '" data-live-series="' + esc(item.series) + '" data-live-profile="' + esc(item.voice_profile) + '" data-live-project="' + (item.project ? 'true' : 'false') + '"><b>' + esc(item.name) + '</b><small>' + esc(item.series) + ' · ' + esc(item.voice_profile || 'Unassigned audio profile') + (item.project ? ' · This project' : ' · Character Library') + '</small></button>').join('') ||
-      '<div class="ryu-character-empty"><b>No matching characters</b>Create a new character and assign a series.</div>';
+    const keys = new Set((window.ryuPremiumSelectedDialogueSpeakers || []).map(item => characterAssignmentKey(item.name,item.series)));
+    list.innerHTML = visible.map(item => {
+      const selected = keys.has(characterAssignmentKey(item.name,item.series));
+      return '<button type="button" class="quick-character' + (selected ? ' selected' : '') + '" aria-pressed="' + (selected ? 'true' : 'false') +
+        '" data-live-character="' + esc(item.name) + '" data-live-series="' + esc(item.series) + '" data-live-profile="' + esc(item.voice_profile) +
+        '" data-live-project="' + (item.project ? 'true' : 'false') + '"><span class="quick-character-check" aria-hidden="true">' + (selected ? '✓' : '+') +
+        '</span><b>' + esc(item.name) + '</b><small>' + esc(item.series) + ' · ' + esc(item.voice_profile || 'Unassigned audio profile') +
+        (item.project ? ' · This project' : ' · Character Library') + '</small></button>';
+    }).join('') || '<div class="ryu-character-empty"><b>No matching characters</b>Create a new character and assign a series.</div>';
+    renderSelectedCharacterSpeakerControls();
   }
   function positionCharacterAssignmentPopover(popover, x, y) {
     if (!popover) return;
     const viewportWidth = Math.max(320, Number(window.innerWidth || 1024));
     const viewportHeight = Math.max(240, Number(window.innerHeight || 768));
     const maxHeight = Math.max(180, Math.min(680, viewportHeight - 24));
-    const width = Math.max(280, Math.min(390, viewportWidth - 24));
+    const width = Math.max(300, Math.min(480, viewportWidth - 24));
     popover.style.position = 'fixed';
     popover.style.boxSizing = 'border-box';
     popover.style.width = width + 'px';
     popover.style.maxHeight = maxHeight + 'px';
     popover.style.overflowY = 'auto';
-    const measuredHeight = Math.min(Math.max(160, popover.scrollHeight || popover.offsetHeight || 420), maxHeight);
-    const left = Math.max(12, Math.min(viewportWidth - width - 12, Number(x || 0) + 10));
-    const top = Math.max(12, Math.min(viewportHeight - measuredHeight - 12, Number(y || 0) + 10));
+    const anchor = window.__ryuCharacterAssignmentAnchor || {x:Number(x || 0),y:Number(y || 0)};
+    const measuredHeight = Math.min(Math.max(180, popover.scrollHeight || popover.offsetHeight || 420), maxHeight);
+    const left = Math.max(12, Math.min(viewportWidth - width - 12, Number(anchor.x || 0) + 10));
+    const below = Number(anchor.y || 0) + 12;
+    const top = below + measuredHeight + 12 <= viewportHeight ? below : Math.max(12, Number(anchor.y || 0) - measuredHeight - 12);
     popover.style.left = left + 'px';
     popover.style.top = top + 'px';
   }
@@ -4513,6 +4568,12 @@
     window.ryuPremiumPendingDialogueStart = Number(passage.start);
     window.ryuPremiumPendingDialogueEnd = Number(passage.end);
     window.ryuPremiumPendingDialogueId = String(passage.id || '');
+    window.__ryuCharacterAssignmentAnchor = {x:Number(x || 0),y:Number(y || 0)};
+    const priorNames = Array.isArray(passage.speakers) ? passage.speakers : (passage.speaker ? [passage.speaker] : []);
+    window.ryuPremiumSelectedDialogueSpeakers = priorNames.map(name => {
+      const candidate = [...characters,...libraryCharacters].find(item => characterCanonical(item).toLowerCase() === String(name).toLowerCase());
+      return candidate ? {name:characterCanonical(candidate),series:characterSeries(candidate),profile:String(candidate.voice_profile || ''),project:characters.includes(candidate)} : null;
+    }).filter(Boolean);
     if ($('selectedTextPreview')) $('selectedTextPreview').textContent = String(passage.text);
     $('characterAssignPopover')?.classList.add('show');
     const popover = $('characterAssignPopover');
@@ -4527,14 +4588,18 @@
     const form = $('ryuManualCharacterCreate');
     if (form) form.hidden = true;
     if ($('quickCharacterList')) $('quickCharacterList').hidden = false;
-    // The list grows asynchronously after the popup opens; recalculate using its
-    // final live content so it remains on-screen at common display sizes.
-    positionCharacterAssignmentPopover(popover, x, y);
+    const selectionActions = $('ryuMultiSpeakerSelectionActions');
+    if (selectionActions) selectionActions.hidden = false;
+    renderSelectedCharacterSpeakerControls();
+    requestAnimationFrame(() => positionCharacterAssignmentPopover(popover,x,y));
   }
   function closeCharacterAssignmentPopover() {
     $('characterAssignPopover')?.classList.remove('show');
     $('ryuManualCharacterCreate') && ($('ryuManualCharacterCreate').hidden = true);
     $('quickCharacterList') && ($('quickCharacterList').hidden = false);
+    const actions = $('ryuMultiSpeakerSelectionActions');
+    if (actions) actions.hidden = false;
+    window.ryuPremiumSelectedDialogueSpeakers = [];
   }
   async function ensureCharacterInActiveProject(name, preferredSeries = '', preferredProfile = '') {
     const canonical = String(name || '').trim();
@@ -4588,59 +4653,83 @@
     if (!created) throw new Error('The character was created but could not be loaded into the active project cast for the selected series.');
     return created;
   }
-  async function assignPassageToCharacter(name, preferredSeries = '', preferredProfile = '', assignmentSource = 'manual', assignmentConfidence = 1.0) {
+  async function assignPassageToCharacters(selectionRows, assignmentSource = 'manual', assignmentConfidence = 1.0) {
     const dialogueText = String(window.ryuPremiumPendingDialogueText || '');
     const chapterNumber = Number(window.ryuPremiumPendingDialogueChapter);
     const start = Number(window.ryuPremiumPendingDialogueStart), end = Number(window.ryuPremiumPendingDialogueEnd);
     if (!dialogueText || !Number.isInteger(chapterNumber) || !Number.isInteger(start) || !Number.isInteger(end) || end <= start) {
       throw new Error('The selected passage is stale. Select the source text again.');
     }
-    let character = await ensureCharacterInActiveProject(name, preferredSeries, preferredProfile);
-    const selectedProfile = String(preferredProfile || '').trim();
-    if (selectedProfile && selectedProfile !== String(character.voice_profile || '')) {
-      if (!characterProfileByName(selectedProfile)) throw new Error('Choose a saved voice profile.');
-      await call('character.assign', {name:characterCanonical(character),series:characterSeries(character),profile_name:selectedProfile});
-      await refreshCharacters();
-      character = characterRowForName(characterCanonical(character), characterSeries(character)) || character;
+    const selections = [], seen = new Set();
+    for (const item of (Array.isArray(selectionRows) ? selectionRows : [])) {
+      const name = String(item?.name || '').trim(), series = String(item?.series || '').trim();
+      const key = characterAssignmentKey(name,series);
+      if (name && series && !seen.has(key)) { seen.add(key); selections.push({...item,name,series}); }
     }
-    const result = await call('chapter.dialogue.assign', {
-      dialogue_text:dialogueText, speakers:[characterCanonical(character)], series:characterSeries(character),
-      chapter_number:chapterNumber, start, end, mode:'single', source:assignmentSource, confidence:assignmentConfidence
+    if (!selections.length) throw new Error('Select at least one character for this passage.');
+    const seriesKeys = [...new Set(selections.map(item => item.series.toLowerCase()))];
+    if (seriesKeys.length !== 1) throw new Error('All speakers in one passage must belong to the same series. Select characters from one series, then assign them together.');
+    const series = selections[0].series, speakers = [];
+    for (const item of selections) {
+      let character = await ensureCharacterInActiveProject(item.name,item.series,item.profile || '');
+      const selectedProfile = String(item.profile || character.voice_profile || '').trim();
+      if (selectedProfile && selectedProfile !== String(character.voice_profile || '')) {
+        if (!characterProfileByName(selectedProfile)) throw new Error('Choose a saved voice profile for ' + characterCanonical(character) + '.');
+        await call('character.assign',{name:characterCanonical(character),series:characterSeries(character),profile_name:selectedProfile});
+        await refreshCharacters();
+        character = characterRowForName(characterCanonical(character),characterSeries(character)) || character;
+      }
+      speakers.push(characterCanonical(character));
+    }
+    const result = await call('chapter.dialogue.assign',{
+      dialogue_text:dialogueText,speakers,series,chapter_number:chapterNumber,start,end,
+      mode:speakers.length > 1 ? 'chorus' : 'single',source:assignmentSource,confidence:assignmentConfidence
     });
     closeCharacterAssignmentPopover();
-    await refreshChapters();
-    await refreshCharacters();
-    await refreshCharacterLibrary();
-    message('Saved assignment: ' + characterCanonical(character) + ' · ' + characterSeries(character) + '.');
+    await refreshChapters(); await refreshCharacters(); await refreshCharacterLibrary();
+    message(speakers.length > 1
+      ? 'Saved simultaneous voice blend for ' + speakers.length + ' characters: ' + speakers.join(', ') + '.'
+      : 'Saved assignment: ' + speakers[0] + '.');
     return result;
+  }
+  async function assignPassageToCharacter(name, preferredSeries = '', preferredProfile = '', assignmentSource = 'manual', assignmentConfidence = 1.0) {
+    return assignPassageToCharacters([{
+      name:String(name || '').trim(),
+      series:String(preferredSeries || activeCharacterProjectSeries() || '').trim(),
+      profile:String(preferredProfile || '').trim()
+    }], assignmentSource, assignmentConfidence);
   }
   async function saveManualCharacterAndAssign() {
     const name = String($('ryuManualNewName')?.value || '').trim();
     if (!name) throw new Error('Enter the character name before saving.');
     const seriesChoice = String($('ryuManualSeries')?.value || '');
-    const series = seriesChoice === '__new_series__'
-      ? String($('ryuManualNewSeries')?.value || '').trim()
-      : seriesChoice.trim();
+    const series = seriesChoice === '__new_series__' ? String($('ryuManualNewSeries')?.value || '').trim() : seriesChoice.trim();
     if (!series) throw new Error('Choose an existing series or enter a new series name.');
     const aliases = String($('ryuManualNewAliases')?.value || '').split(/[,\\n]/).map(value => value.trim()).filter(Boolean);
     const profile = String($('ryuManualNewProfile')?.value || '').trim();
     if (profile && !characterProfileByName(profile)) throw new Error('Choose one of the saved audio profiles.');
-    const result = await call('character.create', {
-      name, series, aliases, short:name.split(/\\s+/)[0], voice_profile:profile,
-      dialogue_sample:String(window.ryuPremiumPendingDialogueText || '')
-    });
+    const result = await call('character.create',{name,series,aliases,short:name.split(/\\s+/)[0],voice_profile:profile,dialogue_sample:String(window.ryuPremiumPendingDialogueText || '')});
     await refreshCharacters();
-    const current = characterRowForName(result?.character?.name || name, series);
-    if (!current) throw new Error('Character was not returned by the active project cast.');
-    await call('chapter.dialogue.assign', {
-      dialogue_text:String(window.ryuPremiumPendingDialogueText || ''),
-      speakers:[characterCanonical(current)], series:characterSeries(current),
-      chapter_number:Number(window.ryuPremiumPendingDialogueChapter),
-      start:Number(window.ryuPremiumPendingDialogueStart), end:Number(window.ryuPremiumPendingDialogueEnd), mode:'single'
-    });
-    closeCharacterAssignmentPopover();
-    await refreshChapters(); await refreshCharacters(); await refreshCharacterLibrary();
-    message('Created ' + name + ' in ' + series + ' and saved its selected passage assignment.');
+    const current = characterRowForName(result?.character?.name || name,series);
+    if (!current) throw new Error('The character was created but could not be loaded into the active project cast.');
+    const selected = Array.isArray(window.ryuPremiumSelectedDialogueSpeakers) ? window.ryuPremiumSelectedDialogueSpeakers : [];
+    const key = characterAssignmentKey(characterCanonical(current),characterSeries(current));
+    if (!selected.some(item => characterAssignmentKey(item.name,item.series) === key)) {
+      selected.push({name:characterCanonical(current),series:characterSeries(current),profile:String(current.voice_profile || profile || ''),project:true});
+    }
+    window.ryuPremiumSelectedDialogueSpeakers = selected;
+    const form = $('ryuManualCharacterCreate'), quick = $('quickCharacterList');
+    if (form) form.hidden = true;
+    if (quick) quick.hidden = false;
+    const actions = $('ryuMultiSpeakerSelectionActions');
+    if (actions) actions.hidden = false;
+    if ($('ryuManualNewName')) $('ryuManualNewName').value = '';
+    if ($('ryuManualNewAliases')) $('ryuManualNewAliases').value = '';
+    await refreshCharacterLibrary();
+    renderManualCharacterChoices();
+    renderSelectedCharacterSpeakerControls();
+    requestAnimationFrame(() => positionCharacterAssignmentPopover($('characterAssignPopover'),window.__ryuCharacterAssignmentAnchor?.x,window.__ryuCharacterAssignmentAnchor?.y));
+    message('Added ' + characterCanonical(current) + ' to this passage. Select more speakers if needed, then assign them together.');
   }
   async function runCharacterAnalysis() {
     const data = await call('character.analyze');
@@ -6186,18 +6275,13 @@
   function installNativeDropdownSupport() {
     if (window.__ryuNativeDropdownSupportInstalled) return;
     window.__ryuNativeDropdownSupportInstalled = true;
-    // Restore Chromium's native select popup from a trusted user pointer gesture.
-    // Focus is forced first; the native default action remains the fallback.
+    // Focus the native control but never open it in capture-phase pointerdown.
+    // Qt WebEngine can dismiss a showPicker() popup with the following click
+    // default action. Let the browser open mouse popups; keyboard and Space stay native.
     document.addEventListener('pointerdown', event => {
       const select = event.target?.closest?.('select');
-      if (!select || select.disabled || typeof select.showPicker !== 'function') return;
-      try {
-        select.focus({preventScroll:true});
-        select.showPicker();
-      } catch (_error) {
-        // Leave the browser's native default action untouched if the picker
-        // is unavailable or a picker is already open.
-      }
+      if (!select || select.disabled) return;
+      try { select.focus({preventScroll:true}); } catch (_error) {}
     }, true);
   }
 
@@ -6221,7 +6305,9 @@
         '<button type="button" class="ryu-icon-pack-option" data-icon-pack="aether">' +
         '<span class="ryu-icon-pack-aether" aria-hidden="true">↖</span><b>Aether</b><small>Standard pointer</small></button>' +
         '<button type="button" class="ryu-icon-pack-option" data-icon-pack="custom">' +
-        '<span class="ryu-icon-pack-custom" aria-hidden="true">＋</span><b>Custom</b><small id="ryuCustomIconState">Import an image</small></button>' +
+        '<span class="ryu-icon-pack-custom" aria-hidden="true" id="ryuCustomIconFallback">＋</span>' +
+        '<img id="ryuCustomIconPreview" alt="Imported custom cursor preview" hidden>' +
+        '<b>Custom</b><small id="ryuCustomIconState">Import an image</small></button>' +
         '</div><div class="ryu-icon-pack-actions"><button type="button" class="btn small" id="ryuImportCustomIcon">Import custom icon</button>' +
         '<span id="ryuIconPackStatus" class="muted" aria-live="polite">Loading saved icon pack…</span></div>';
       settingsPage.appendChild(card);
@@ -6273,6 +6359,14 @@
     const customState = $('ryuCustomIconState');
     if (customState) customState.textContent = settings.custom_icon_available === true
       ? 'Imported icon saved' : 'Import an image';
+    const customPreview = $('ryuCustomIconPreview');
+    const customFallback = $('ryuCustomIconFallback');
+    if (customPreview) {
+      const previewUrl = settings.custom_icon_available === true ? String(settings.custom_icon_url || '') : '';
+      if (previewUrl && customPreview.src !== previewUrl) customPreview.src = previewUrl;
+      customPreview.hidden = !previewUrl;
+      if (customFallback) customFallback.hidden = Boolean(previewUrl);
+    }
     const status = $('ryuIconPackStatus');
     if (status) status.textContent = 'Active: ' +
       (selected === 'aether' ? 'Aether · standard pointer' :
@@ -8959,16 +9053,15 @@ function renderProductionMetadataGate(active) {
         return;
       }
       if (button.matches('#quickCharacterList [data-live-character]')) {
-        handle(async () => {
-          const name = button.dataset.liveCharacter;
-          const selectedSeries = String(button.dataset.liveSeries || '').trim().toLowerCase();
-          const candidate = [...characters,...libraryCharacters].find(item =>
-            characterCanonical(item).toLowerCase() === String(name).toLowerCase() &&
-            characterSeries(item).toLowerCase() === selectedSeries);
-          if (!candidate) throw new Error('That character is no longer in the live project or Character Library.');
-          await assignPassageToCharacter(name, button.dataset.liveSeries || characterSeries(candidate),
-            String(button.dataset.liveProfile || $('ryuManualNewProfile')?.value || ''));
-        });
+        handle(() => toggleCharacterSpeakerSelection(button));
+        return;
+      }
+      if (button.id === 'clearSelectedCharacterSpeakers') {
+        handle(() => { window.ryuPremiumSelectedDialogueSpeakers = []; renderSelectedCharacterSpeakerControls(); });
+        return;
+      }
+      if (button.id === 'assignSelectedCharactersTogether') {
+        handle(() => assignPassageToCharacters(window.ryuPremiumSelectedDialogueSpeakers || []));
         return;
       }
       if (button.id === 'createCharacterQuick') {
@@ -8978,11 +9071,24 @@ function renderProductionMetadataGate(active) {
           if ($('ryuManualNewAliases')) $('ryuManualNewAliases').value = '';
           if ($('ryuManualNewProfile')) $('ryuManualNewProfile').value = '';
           $('ryuManualNewName')?.focus();
+          requestAnimationFrame(() => positionCharacterAssignmentPopover($('characterAssignPopover'),window.__ryuCharacterAssignmentAnchor?.x,window.__ryuCharacterAssignmentAnchor?.y));
         });
         return;
       }
       if (button.id === 'saveManualCharacterCreate') { handle(() => saveManualCharacterAndAssign()); return; }
-      if (button.id === 'cancelManualCharacterCreate' || button.hasAttribute('data-close-popover')) {
+      if (button.id === 'cancelManualCharacterCreate') {
+        handle(() => {
+          const form = $('ryuManualCharacterCreate'), quick = $('quickCharacterList');
+          if (form) form.hidden = true;
+          if (quick) quick.hidden = false;
+          const actions = $('ryuMultiSpeakerSelectionActions');
+          if (actions) actions.hidden = false;
+          renderManualCharacterChoices();
+          requestAnimationFrame(() => positionCharacterAssignmentPopover($('characterAssignPopover'),window.__ryuCharacterAssignmentAnchor?.x,window.__ryuCharacterAssignmentAnchor?.y));
+        });
+        return;
+      }
+      if (button.hasAttribute('data-close-popover')) {
         handle(() => closeCharacterAssignmentPopover());
         return;
       }
@@ -9185,6 +9291,22 @@ function renderProductionMetadataGate(active) {
       '.ryu-icon-pack-option.selected{border-color:var(--red2,#d4375d);box-shadow:0 0 0 1px var(--red2,#d4375d) inset;background:rgba(212,55,93,.12)}',
       '.ryu-icon-pack-option:disabled{opacity:.45;cursor:not-allowed}',
       '.ryu-icon-pack-option img,.ryu-icon-pack-aether,.ryu-icon-pack-custom{width:42px;height:42px;object-fit:contain;display:grid;place-items:center}',
+      '#ryuCustomIconPreview{border-radius:8px;background:rgba(127,127,127,.08);}',
+      '#characterAssignPopover{position:fixed!important;width:min(480px,calc(100vw - 24px))!important;max-height:calc(100vh - 24px)!important;overflow:auto!important;box-sizing:border-box!important;z-index:10030!important;}',
+      '#quickCharacterList{display:grid;gap:6px;max-height:min(38vh,320px);overflow:auto;min-width:0;}',
+      '#quickCharacterList .quick-character{display:grid;grid-template-columns:24px minmax(0,1fr);grid-template-rows:auto auto;align-items:center;text-align:left;min-width:0;}',
+      '#quickCharacterList .quick-character b,#quickCharacterList .quick-character small{grid-column:2;min-width:0;overflow-wrap:anywhere;}',
+      '#quickCharacterList .quick-character.selected{border-color:var(--red2,#d4375d)!important;background:rgba(212,55,93,.12)!important;}',
+      '.quick-character-check{grid-column:1;grid-row:1 / span 2;display:grid;place-items:center;width:20px;height:20px;border-radius:50%;border:1px solid var(--border,rgba(148,163,184,.35));font-weight:800;}',
+      '.quick-character.selected .quick-character-check{background:var(--red2,#d4375d);color:white;border-color:transparent;}',
+      '.ryu-multi-speaker-actions{display:grid;gap:8px;padding:10px 0;border-top:1px solid var(--border,rgba(148,163,184,.2));border-bottom:1px solid var(--border,rgba(148,163,184,.2));}',
+      '.ryu-multi-speaker-summary{font-size:12px;line-height:1.45;overflow-wrap:anywhere;}',
+      '.ryu-multi-speaker-buttons{display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap;}',
+      '.ryu-manual-create{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;min-width:0;padding-top:10px;}',
+      '.ryu-manual-create>label{min-width:0;}',
+      '.ryu-manual-create input,.ryu-manual-create select{width:100%;min-width:0;box-sizing:border-box;}',
+      '.ryu-manual-create-actions{grid-column:1/-1;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;}',
+      '@media(max-width:520px){.ryu-manual-create{grid-template-columns:minmax(0,1fr);}.ryu-manual-create-actions{grid-column:1;}}',
       '.ryu-icon-pack-aether,.ryu-icon-pack-custom{font-size:34px;line-height:1;color:var(--red2,#d4375d)}',
       '.ryu-icon-pack-option small{font-size:11px;line-height:1.3;color:var(--muted,#aeb6c5)}',
       '.ryu-icon-pack-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:12px}',
@@ -10719,9 +10841,8 @@ function renderProductionMetadataGate(active) {
       if (capacity) {
         const format = value => formatModelBytes(Math.max(0, Number(value || 0)));
         capacity.textContent = row.available
-          ? Number(row.file_count || 0).toLocaleString() + ' files · ' + format(row.component_bytes) +
-            ' component data · ' + format(row.used_bytes) + ' used · ' + format(row.free_bytes) +
-            ' free · ' + format(row.total_bytes) + ' total'
+          ? 'Folder ready · detailed inventory deferred · ' + format(row.used_bytes) + ' used · ' +
+            format(row.free_bytes) + ' free · ' + format(row.total_bytes) + ' total'
           : 'Location unavailable · configured path preserved; reconnect the drive to restore access.';
       }
     }

@@ -388,9 +388,12 @@ class CastAwareProvider(TTSProvider):
             raw = text[start:end].strip()
             dialogue = raw
 
-            # Normalize only the dialogue marker for synthesis. The source
-            # text stays untouched in narration.json and the project.
-            if len(dialogue) >= 2 and (
+            # Normalize marker syntax only for synthesis. Source offsets and
+            # project text remain untouched. Repeated quotes are assignment syntax.
+            repeated_marker = re.fullmatch(r'\s*\{?"{2,}(.*?)"{2,}\}?\s*', dialogue, flags=re.S)
+            if repeated_marker:
+                dialogue = repeated_marker.group(1).strip()
+            elif len(dialogue) >= 2 and (
                 (dialogue[0], dialogue[-1]) in {
                     ("“", "”"), ('"', '"'), ("「", "」"),
                     ("『", "』"), ("‘", "’"), ("'", "'"),

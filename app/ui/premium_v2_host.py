@@ -11994,24 +11994,31 @@ class PremiumV2Bridge(QObject):
         }
 
     def _storage_get(self, _payload: dict[str, Any]) -> dict[str, Any]:
-        from app.core.storage_migration import inventory_storage_root
+        """Return fast storage status; reserve recursive inventories for explicit operations.
+
+        This WebChannel handler runs on the UI thread. Walking the Library, Models,
+        Runtime and cache roots here can freeze Settings on large installations.
+        """
         rows = []
         for kind, (key, current, default) in self._storage_root_map().items():
             path = Path(current).expanduser()
-            info = inventory_storage_root(path, include_hashes=False)
+            try:
+                available = path.is_dir()
+            except OSError:
+                available = False
             capacity = {"total_bytes": 0, "used_bytes": 0, "free_bytes": 0}
-            if info.get("available"):
+            if available:
                 try:
                     usage = shutil.disk_usage(str(path))
                     capacity = {"total_bytes": int(usage.total),
                                 "used_bytes": max(0, int(usage.total) - int(usage.free)),
                                 "free_bytes": int(usage.free)}
                 except OSError:
-                    pass
+                    available = False
             rows.append({"kind": kind, "settings_key": key, "path": str(path),
-                         "default_path": str(default), "available": bool(info.get("available")),
-                         "file_count": int(info.get("file_count", 0)),
-                         "component_bytes": int(info.get("total_bytes", 0)), **capacity})
+                         "default_path": str(default), "available": bool(available),
+                         "inventory_ready": False, "file_count": None,
+                         "component_bytes": None, **capacity})
         pending_cleanup = []
         journal_root = app_root() / "Settings" / "Storage Migrations"
         if journal_root.is_dir():
@@ -12362,6 +12369,7 @@ class PremiumV2Bridge(QObject):
         file_name, _selected_filter = QFileDialog.getOpenFileName(
             self.parent(), "Import Custom Icon", "",
             "Image files (*.png *.jpg *.jpeg *.bmp *.ico *.webp)",
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
         if not file_name:
             return {"cancelled": True}
@@ -12422,6 +12430,9 @@ class PremiumV2Bridge(QObject):
             player_volume = 0.8
         if not math.isfinite(player_volume) or not 0.0 <= player_volume <= 1.0:
             player_volume = 0.8
+        custom_icon_path = Path(str(self.settings.value("ui/custom_icon_path", "") or ""))
+        custom_icon_available = custom_icon_path.is_file()
+        custom_icon_url = QUrl.fromLocalFile(str(custom_icon_path.resolve())).toString() if custom_icon_available else ""
         return {
             "theme": self.settings.value("ui/theme", "dark"),
             "effects": self.settings.value("ui/effects", "high"),
@@ -12444,7 +12455,8 @@ class PremiumV2Bridge(QObject):
             "qwen_model_size": str(self.settings.value("qwen/model_size_preference", "auto") or "auto"),
             "qwen_low_memory": bool(self.settings.value("qwen/low_memory_mode", False, type=bool)),
             "icon_pack": str(self.settings.value("ui/icon_pack", "aether") or "aether"),
-            "custom_icon_available": Path(str(self.settings.value("ui/custom_icon_path", "") or "")).is_file(),
+            "custom_icon_available": custom_icon_available,
+            "custom_icon_url": custom_icon_url,
         }
 
 
@@ -12513,7 +12525,7 @@ class PremiumV2Window(QMainWindow):
         self.channel = QWebChannel(self.web.page())
         self.channel.registerObject("ryuBackend", self.bridge)
         self.web.page().setWebChannel(self.channel)
-        self.web.loadFinished.connect(lambda _ok: self.web.setFocus(Qt.FocusReason.OtherFocusReason))
+        self.web.loadFinished.connect(self._on_web_load_finished)
         self._apply_icon_pack_cursor()
         self._renderer_restart_attempts = 0
         self._frontend_generation = 0
@@ -12677,40 +12689,64 @@ class PremiumV2Window(QMainWindow):
         self.apply_window_size(str(QSettings("RyuBlanc", "Ryu's Audiobook").value("ui/window_size", "auto")))
 
     def _apply_icon_pack_cursor(self) -> None:
-        """Apply the selected pointer only inside the Ryu Audiobook application window."""
+        """Apply the selected pointer in both the native host and WebEngine DOM."""
         settings = QSettings("RyuBlanc", "Ryu's Audiobook")
         pack = str(settings.value("ui/icon_pack", "aether") or "aether").strip().casefold()
+
+        def clear_web_cursor() -> None:
+            try:
+                self.web.page().runJavaScript(
+                    "(function(){const s=document.getElementById('ryuNativeCursorPackStyle');if(s)s.remove();})();"
+                )
+            except RuntimeError:
+                pass
+
         if pack == "aether":
+            clear_web_cursor()
             self.unsetCursor()
             self.web.unsetCursor()
             return
+
         assets_directory = frontend_path().parent.parent
         built_in = {
             "drake": assets_directory / "drake_cursor_32.png",
             "fang": assets_directory / "fang_cursor_32.png",
         }
-        icon_path = (
-            Path(str(settings.value("ui/custom_icon_path", "") or ""))
-            if pack == "custom" else built_in.get(pack, Path())
-        )
+        icon_path = Path(str(settings.value("ui/custom_icon_path", "") or "")) if pack == "custom" else built_in.get(pack, Path())
         if not icon_path.is_file():
             log.warning("Selected icon pack '%s' has no readable cursor image; restoring Aether.", pack)
+            clear_web_cursor()
             self.unsetCursor()
             self.web.unsetCursor()
             return
         pixmap = QPixmap(str(icon_path))
         if pixmap.isNull():
             log.warning("Selected icon pack '%s' could not be decoded; restoring Aether.", pack)
+            clear_web_cursor()
             self.unsetCursor()
             self.web.unsetCursor()
             return
-        cursor = QCursor(
-            pixmap,
-            min(2, max(0, pixmap.width() - 1)),
-            min(2, max(0, pixmap.height() - 1)),
-        )
+
+        cursor_url = QUrl.fromLocalFile(str(icon_path.resolve())).toString()
+        cursor_pixmap = pixmap.scaled(64,64,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation)
+        cursor = QCursor(cursor_pixmap,2,2)
         self.setCursor(cursor)
         self.web.setCursor(cursor)
+        script = (
+            "(function(){const id='ryuNativeCursorPackStyle';"
+            "let style=document.getElementById(id);"
+            "if(!style){style=document.createElement('style');style.id=id;(document.head||document.documentElement).appendChild(style);}"
+            "const url=" + json.dumps(cursor_url) + ";"
+            "style.textContent='html,body,html *,body *{cursor:url(\\"'+url+'\\") 2 2,auto!important;}';})();"
+        )
+        try:
+            self.web.page().runJavaScript(script)
+        except RuntimeError:
+            log.debug("WebEngine was not ready to apply the icon cursor; loadFinished will retry.")
+
+    def _on_web_load_finished(self, _ok: bool) -> None:
+        self.web.setFocus(Qt.FocusReason.OtherFocusReason)
+        self._apply_icon_pack_cursor()
 
     def apply_window_size(self, choice: str) -> None:
         """Apply a persisted native window size; never change WebEngine zoom."""

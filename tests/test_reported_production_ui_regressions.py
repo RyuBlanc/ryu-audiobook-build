@@ -143,15 +143,49 @@ class ReportedProductionUiRegressionTests(unittest.TestCase):
         self.assertIn("ryu-gen-percent-label", adapter)
         self.assertIn("scheduleProductionOverflowRefresh", adapter)
 
-    def test_dropdowns_retain_native_select_action_and_webengine_page_focus(self):
+    def test_dropdown_mouse_open_uses_native_default_and_retains_keyboard_focus(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         self.assertIn("installNativeDropdownSupport", adapter)
-        self.assertIn("select.showPicker()", adapter)
+        self.assertNotIn("select.showPicker()", adapter)
+        self.assertIn("select.focus({preventScroll:true})", adapter)
         self.assertIn("select:not(:disabled){pointer-events:auto!important", adapter)
         self.assertIn("Qt.FocusPolicy.StrongFocus", host)
         self.assertIn("FocusOnNavigationEnabled", host)
         self.assertIn("self.web.setFocus", host)
+
+    def test_storage_status_does_not_recursively_inventory_roots_on_ui_thread(self):
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        start = host.index("    def _storage_get(")
+        end = host.index("    def _validate_storage_root_separation(", start)
+        method = host[start:end]
+        self.assertNotIn("inventory_storage_root", method)
+        self.assertIn("path.is_dir()", method)
+        self.assertIn('"inventory_ready": False', method)
+
+    def test_custom_icon_preview_and_webengine_cursor_are_wired(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn("ryuCustomIconPreview", adapter)
+        self.assertIn("settings.custom_icon_url", adapter)
+        self.assertIn("self.web.page().runJavaScript(script)", host)
+        self.assertIn("_on_web_load_finished", host)
+        self.assertIn("DontUseNativeDialog", host)
+
+    def test_third_person_global_default_is_in_visible_summary_with_narrator(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("Third Person · Global Default", adapter)
+        self.assertIn("panel.querySelector('.summary')", adapter)
+        self.assertIn("assignedSide", adapter)
+
+    def test_character_assignment_has_multi_select_and_anchored_layout(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        html = (ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
+        self.assertIn("ryuMultiSpeakerSelectionActions", adapter)
+        self.assertIn("assignPassageToCharacters", adapter)
+        self.assertIn("mode:speakers.length > 1 ? 'chorus' : 'single'", adapter)
+        self.assertIn('id="selectionPlus" aria-label="Assign speakers to selected text"', html)
+        self.assertIn("requestAnimationFrame(() => positionCharacterAssignmentPopover", adapter)
 
     def test_official_drake_and_fang_cursor_assets_are_packaged_as_valid_pngs(self):
         for file_name in ("drake_cursor_32.png", "fang_cursor_32.png"):
