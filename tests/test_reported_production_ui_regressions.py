@@ -172,6 +172,12 @@ class ReportedProductionUiRegressionTests(unittest.TestCase):
         self.assertIn("_on_web_load_finished", host)
         self.assertIn("DontUseNativeDialog", host)
 
+    def test_icon_pack_selection_refreshes_full_saved_state(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("await call('settings.save', {icon_pack:selected});\\n          await ensureIconPackSettingsRefresh();", adapter)
+        self.assertIn("const settings = await call('settings.get', {})", adapter)
+        self.assertIn("settings.custom_icon_url", adapter)
+
     def test_third_person_global_default_is_in_visible_summary_with_narrator(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("Third Person · Global Default", adapter)

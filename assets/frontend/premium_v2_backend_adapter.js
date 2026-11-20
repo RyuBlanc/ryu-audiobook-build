@@ -6337,8 +6337,8 @@
         if (!option || option.disabled) return;
         const selected = String(option.dataset.iconPack || 'aether');
         try {
-          const saved = await call('settings.save', {icon_pack:selected});
-          await ensureIconPackSettingsRefresh(saved);
+          await call('settings.save', {icon_pack:selected});
+          await ensureIconPackSettingsRefresh();
           message('Icon Pack saved: ' + selected.charAt(0).toUpperCase() + selected.slice(1) + '.');
         } catch (error) {
           message(error?.message || String(error), true);
@@ -6349,10 +6349,10 @@
     void ensureIconPackSettingsRefresh();
   }
 
-  async function ensureIconPackSettingsRefresh(settingsValue) {
+  async function ensureIconPackSettingsRefresh() {
     const card = $('ryuIconPackSettings');
     if (!card) return;
-    const settings = settingsValue || await call('settings.get', {}).catch(() => ({
+    const settings = await call('settings.get', {}).catch(() => ({
       icon_pack:'aether', custom_icon_available:false
     }));
     const selected = String(settings.icon_pack || 'aether').toLowerCase();
