@@ -12739,6 +12739,10 @@ class PremiumV2Window(QMainWindow):
     def _apply_icon_pack_cursor(self) -> None:
         """Apply the selected pointer in both the native host and WebEngine DOM."""
         settings = QSettings("RyuBlanc", "Ryu's Audiobook")
+        # Selection and import persist through the bridge's QSettings instance.
+        # Refresh this reader before resolving the image so it cannot reuse a
+        # stale pack/path and leave the previous cursor active.
+        settings.sync()
         pack = str(settings.value("ui/icon_pack", "aether") or "aether").strip().casefold()
 
         def clear_web_cursor() -> None:
