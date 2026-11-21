@@ -53,6 +53,157 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
         self.assertIn("self.web.page().runJavaScript(script)", cursor)
         self.assertIn("self.web.setCursor(cursor)", cursor)
 
+    def test_icon_pack_selection_and_import_replace_the_live_cursor_immediately(self):
+        import base64
+        from PySide6.QtCore import QSettings as NativeQSettings
+        from PySide6.QtGui import QImage
+        from app.ui.premium_v2_host import PremiumV2Bridge, PremiumV2Window
+
+        class Settings:
+            def __init__(self):
+                self.values = {"ui/icon_pack": "aether"}
+                self.sync_count = 0
+
+            def value(self, key, default=None):
+                return self.values.get(key, default)
+
+            def setValue(self, key, value):
+                self.values[key] = value
+
+            def sync(self):
+                self.sync_count += 1
+
+            def status(self):
+                return NativeQSettings.Status.NoError
+
+        settings = Settings()
+
+        class SettingsFactory:
+            Status = NativeQSettings.Status
+
+            def __new__(cls, *_args, **_kwargs):
+                return settings
+
+        class FakePixmap:
+            def __init__(self, path):
+                self.path = Path(path)
+
+            def isNull(self):
+                return not self.path.is_file()
+
+            def scaled(self, *_args):
+                return self
+
+            def save(self, buffer, _format):
+                buffer.payload = self.path.read_bytes()
+                return True
+
+        class FakeBuffer:
+            def __init__(self):
+                self.payload = b""
+
+            def open(self, _mode):
+                return True
+
+            def data(self):
+                return self.payload
+
+            def close(self):
+                pass
+
+        class FakeCursor:
+            def __init__(self, pixmap, _hot_x, _hot_y):
+                self.path = pixmap.path
+
+        class FakeApplication:
+            def __init__(self):
+                self.current = None
+                self.set_calls = []
+                self.change_calls = []
+
+            def overrideCursor(self):
+                return self.current
+
+            def setOverrideCursor(self, cursor):
+                self.current = cursor
+                self.set_calls.append(cursor)
+
+            def changeOverrideCursor(self, cursor):
+                self.current = cursor
+                self.change_calls.append(cursor)
+
+            def restoreOverrideCursor(self):
+                self.current = None
+
+        application = FakeApplication()
+        web = Mock()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            frontend = root / "assets" / "frontend" / "index.html"
+            frontend.parent.mkdir(parents=True)
+            frontend.write_text("<html></html>", encoding="utf-8")
+            assets = root / "assets"
+            drake_asset = assets / "drake_cursor_32.png"
+            custom_source = root / "imported-pointer.png"
+
+            for path, pixel in ((drake_asset, 0xFFFF2200), (custom_source, 0xFF00DD55)):
+                image = QImage(32, 32, QImage.Format.Format_ARGB32)
+                image.fill(pixel)
+                self.assertTrue(image.save(str(path), "PNG"))
+
+            window = types.SimpleNamespace(
+                web=web,
+                _icon_pack_cursor_override_active=False,
+                setCursor=Mock(),
+            )
+            window._apply_icon_pack_cursor = lambda: PremiumV2Window._apply_icon_pack_cursor(window)
+            bridge = types.SimpleNamespace(
+                settings=settings,
+                parent=lambda: window,
+                _settings_get=lambda _payload: {"icon_pack": settings.value("ui/icon_pack")},
+            )
+
+            with (
+                patch("app.ui.premium_v2_host.QSettings", SettingsFactory),
+                patch("app.ui.premium_v2_host.QPixmap", FakePixmap),
+                patch("app.ui.premium_v2_host.QCursor", FakeCursor),
+                patch("app.ui.premium_v2_host.QBuffer", FakeBuffer),
+                patch(
+                    "app.ui.premium_v2_host.QIODevice",
+                    types.SimpleNamespace(OpenModeFlag=types.SimpleNamespace(WriteOnly=object())),
+                ),
+                patch("app.ui.premium_v2_host.QApplication.instance", return_value=application),
+                patch("app.ui.premium_v2_host.frontend_path", return_value=frontend),
+                patch("app.ui.premium_v2_host.settings_root", return_value=root / "settings"),
+            ):
+                PremiumV2Bridge._settings_save(bridge, {"icon_pack": "drake"})
+                self.assertEqual(application.current.path, drake_asset)
+
+                with patch(
+                    "app.ui.premium_v2_host.QFileDialog.getOpenFileName",
+                    return_value=(str(custom_source), "PNG"),
+                ):
+                    imported = PremiumV2Bridge._icon_pack_import(bridge, {})
+
+                custom_path = Path(settings.value("ui/custom_icon_path"))
+                self.assertTrue(imported["saved"])
+                self.assertEqual(imported["icon_pack"], "custom")
+                self.assertTrue(custom_path.is_file())
+                self.assertEqual(application.current.path, custom_path)
+
+            self.assertEqual(len(application.set_calls), 1)
+            self.assertEqual(len(application.change_calls), 1)
+            self.assertEqual(application.change_calls[0].path, custom_path)
+            self.assertEqual(settings.value("ui/icon_pack"), "custom")
+            self.assertGreaterEqual(settings.sync_count, 4)
+
+            javascript_calls = web.page.return_value.runJavaScript.call_args_list
+            self.assertEqual(len(javascript_calls), 2)
+            custom_data_url = "data:image/png;base64," + base64.b64encode(custom_path.read_bytes()).decode("ascii")
+            self.assertIn(custom_data_url, javascript_calls[-1].args[0])
+            self.assertEqual(window.setCursor.call_args.args[0].path, custom_path)
+            self.assertEqual(web.setCursor.call_args.args[0].path, custom_path)
+
     def test_icon_pack_cursor_uses_application_override_without_stacking_and_restores_on_aether(self):
         from app.ui.premium_v2_host import PremiumV2Window
 
