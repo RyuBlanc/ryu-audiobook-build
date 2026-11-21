@@ -801,7 +801,7 @@ jobs:
           if ($sourceSchemaHash -ne $packagedSchemaHash) { throw "Packaged Qwen profile schema helper differs from repository source. Source=$sourceSchemaHash Packaged=$packagedSchemaHash" }
           $packagedAudioValidation = Join-Path $worker.DirectoryName 'audio_validation.py'
           if (-not (Test-Path -LiteralPath $packagedAudioValidation -PathType Leaf)) { throw 'Bundled Qwen audio validation helper is missing beside the standalone worker.' }
-          $sourceAudioValidation = Join-Path (Get-Location) 'app\\tts\\audio_validation.py'
+          $sourceAudioValidation = Join-Path (Get-Location) 'app\tts\audio_validation.py'
           $sourceAudioValidationHash = (Get-FileHash -Algorithm SHA256 $sourceAudioValidation).Hash
           $packagedAudioValidationHash = (Get-FileHash -Algorithm SHA256 $packagedAudioValidation).Hash
           if ($sourceAudioValidationHash -ne $packagedAudioValidationHash) { throw "Packaged Qwen audio validation helper differs from repository source. Source=$sourceAudioValidationHash Packaged=$packagedAudioValidationHash" }

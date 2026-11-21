@@ -750,6 +750,14 @@ class RegressionTests(unittest.TestCase):
             workflow,
         )
         self.assertIn(
+            String.raw`$sourceAudioValidation = Join-Path (Get-Location) 'app\tts\audio_validation.py'`,
+            workflow,
+        )
+        self.assertIn(
+            "$sourceAudioValidationHash -ne $packagedAudioValidationHash",
+            workflow,
+        )
+        self.assertIn(
             "from app.tts.audio_validation import wav_has_audible_content",
             worker,
         )
