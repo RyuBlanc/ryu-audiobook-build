@@ -54,7 +54,7 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         self.assertIn("conic-gradient(var(--red2,#d4375d) 0 var(--progress,0%)", adapter)
         self.assertIn("ryuGenerationRingSpin", adapter)
 
-    def test_notification_button_opens_recent_notifications_not_background_jobs(self):
+    def test_notification_button_opens_persistent_notifications_not_background_jobs(self):
         adapter = (
             ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
         ).read_text(encoding="utf-8")
@@ -67,9 +67,10 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         self.assertNotIn("backgroundJobsModal", handler)
         self.assertIn("window.toast =", adapter)
         self.assertIn("window.showToast =", adapter)
-        self.assertIn("}, 30000)", adapter)
+        self.assertIn("RYU_NOTIFICATION_TTL_MS = 24 * 60 * 60 * 1000", adapter)
+        self.assertNotIn("toasts.classList.add('show')", adapter)
 
-    def test_model_verification_keeps_long_diagnostic_inline_and_toast_compact(self):
+    def test_model_verification_keeps_long_diagnostic_inline_and_notification_history_persistent(self):
         adapter = (
             ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
         ).read_text(encoding="utf-8")
@@ -79,7 +80,8 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         self.assertIn("await refreshModels()", handler)
         self.assertIn("See its Models Center card for details.", handler)
         self.assertNotIn("+ result.detail", handler)
-        self.assertIn("}, 30000)", adapter)
+        self.assertIn("RYU_NOTIFICATION_TTL_MS = 24 * 60 * 60 * 1000", adapter)
+        self.assertNotIn("toasts.classList.add('show')", adapter)
 
     def test_generic_notifications_do_not_mutate_other_workflows(self):
         adapter = (
@@ -91,9 +93,14 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         self.assertNotIn("const node = $('importStatus')", helper)
         self.assertNotIn("const validation = $('validation')", helper)
         self.assertIn("document.querySelector('.page.active #validation')", helper)
-        self.assertIn("writeTextIfChanged(toasts, text)", helper)
-        self.assertIn("if (options.toast !== false)", helper)
-        self.assertIn("const entry = {text:content,error:Boolean(error),at:now}", helper)
+        self.assertIn("const entry = {", helper)
+        self.assertIn("id:String(now)", helper)
+        self.assertIn("text:content", helper)
+        self.assertIn("persistRyuNotifications()", helper)
+        self.assertIn("toasts.classList.remove('show')", helper)
+        self.assertNotIn("writeTextIfChanged(toasts, text)", helper)
+        self.assertNotIn("if (options.toast !== false)", helper)
+        self.assertNotIn("setTimeout", helper)
 
     def test_active_project_refresh_is_ordered_and_clears_stale_identity(self):
         adapter = (
