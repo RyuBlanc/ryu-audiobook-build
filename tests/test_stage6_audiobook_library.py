@@ -242,9 +242,18 @@ class Stage6AudiobookLibraryContractTests(unittest.TestCase):
         gate_end = self.adapter.index("function populateMetadataHistory(", gate_start)
         gate = self.adapter[gate_start:gate_end]
         self.assertIn("const generationBlockReason = productionGenerationBlockReason(active);", gate)
+        self.assertIn("const audioActive = productionAudioOperationIsActiveForProject(active.folder);", gate)
         self.assertIn("start.disabled = Boolean(generationBlockReason) || audioActive;", gate)
-        self.assertIn("productionJobIsActive(productionJobSnapshots.full)", gate)
-        self.assertIn("productionJobIsActive(productionJobSnapshots.preview)", gate)
+        self.assertNotIn("productionJobSnapshots.full", gate)
+        self.assertNotIn("productionJobSnapshots.preview", gate)
+
+        job_gate_start = self.adapter.index("function productionAudioOperationIsActiveForProject(")
+        job_gate_end = self.adapter.index("function productionJobDate(", job_gate_start)
+        job_gate = self.adapter[job_gate_start:job_gate_end]
+        self.assertIn("window.__ryuBackendLastJobs", job_gate)
+        self.assertIn("normalizeProjectFolderIdentity(job?.project_folder)", job_gate)
+        self.assertIn("type === 'audiobook-generation' || type === 'production-preview'", job_gate)
+        self.assertIn("productionJobIsActive(job)", job_gate)
 
         generation_start = self.adapter.index("function renderProductionGeneration(")
         generation_end = self.adapter.index("async function refreshChapterBgm(", generation_start)
