@@ -188,10 +188,15 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
                 patch("app.ui.premium_v2_host.frontend_path", return_value=frontend),
                 patch("app.ui.premium_v2_host.settings_root", return_value=root / "settings"),
             ):
-                # Startup with the default Aether preference must not touch the
-                # WebEngine viewport's cursor before its first page is loaded.
+                # A fresh Aether startup is a strict no-op: do not access
+                # the WebEngine viewport, mutate cursors, or run page JavaScript
+                # before the first document has loaded.
                 PremiumV2Window._apply_icon_pack_cursor(window)
-                self.assertEqual(web.viewport.return_value.unsetCursor.call_count, 0)
+                web.viewport.assert_not_called()
+                web.page.return_value.runJavaScript.assert_not_called()
+                window.unsetCursor.assert_not_called()
+                web.unsetCursor.assert_not_called()
+                self.assertEqual(application.restore_calls, [])
                 self.assertEqual(settings.sync_count, 0)
 
                 PremiumV2Bridge._settings_save(bridge, {"icon_pack": "drake"})
@@ -223,9 +228,11 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
             self.assertEqual(settings.sync_count, 3)
 
             javascript_calls = web.page.return_value.runJavaScript.call_args_list
-            self.assertEqual(len(javascript_calls), 4)
+            # Drake selection, custom import, and return-to-Aether cleanup.
+            # There must be no fourth call from the initial Aether startup.
+            self.assertEqual(len(javascript_calls), 3)
             custom_data_url = "data:image/png;base64," + base64.b64encode(custom_path.read_bytes()).decode("ascii")
-            self.assertIn(custom_data_url, javascript_calls[2].args[0])
+            self.assertIn(custom_data_url, javascript_calls[1].args[0])
             self.assertEqual(window.setCursor.call_args.args[0].path, custom_path)
             self.assertEqual(web.setCursor.call_args.args[0].path, custom_path)
             self.assertEqual(web.viewport.return_value.setCursor.call_args.args[0].path, custom_path)
