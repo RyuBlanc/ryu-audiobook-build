@@ -173,6 +173,7 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
                 parent=lambda: window,
                 _settings_get=lambda _payload: {"icon_pack": settings.value("ui/icon_pack")},
             )
+            window.bridge = bridge
 
             with (
                 patch("app.ui.premium_v2_host.QSettings", SettingsFactory),
@@ -191,6 +192,7 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
                 # WebEngine viewport's cursor before its first page is loaded.
                 PremiumV2Window._apply_icon_pack_cursor(window)
                 self.assertEqual(web.viewport.return_value.unsetCursor.call_count, 0)
+                self.assertEqual(settings.sync_count, 0)
 
                 PremiumV2Bridge._settings_save(bridge, {"icon_pack": "drake"})
                 self.assertEqual(application.current.path, drake_asset)
