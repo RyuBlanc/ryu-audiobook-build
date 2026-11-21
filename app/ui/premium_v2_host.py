@@ -12759,15 +12759,18 @@ class PremiumV2Window(QMainWindow):
 
         if pack == "aether":
             had_custom_cursor = bool(getattr(self, "_icon_pack_cursor_override_active", False))
+            # A fresh Aether launch has never installed our override and has no
+            # injected page style to remove. Do not touch WebEngine/Qt cursor
+            # state or issue JavaScript while its first document is starting.
+            # When changing back from Drake/Fang/Custom, restore every surface.
+            if not had_custom_cursor:
+                return
             self._clear_application_icon_pack_cursor()
             clear_web_cursor()
             self.unsetCursor()
             self.web.unsetCursor()
-            # A clean Aether startup has no custom viewport cursor to remove.
-            # Avoid touching the WebEngine viewport before its first page load;
-            # still reset it when the user switches back from a custom pack.
             viewport = self.web.viewport()
-            if had_custom_cursor and viewport is not None:
+            if viewport is not None:
                 viewport.unsetCursor()
             return
 
