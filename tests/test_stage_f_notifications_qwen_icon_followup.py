@@ -155,6 +155,13 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
                 web=web,
                 _icon_pack_cursor_override_active=False,
                 setCursor=Mock(),
+                unsetCursor=Mock(),
+            )
+            window._set_application_icon_pack_cursor = (
+                lambda cursor: PremiumV2Window._set_application_icon_pack_cursor(window, cursor)
+            )
+            window._clear_application_icon_pack_cursor = (
+                lambda: PremiumV2Window._clear_application_icon_pack_cursor(window)
             )
             window._apply_icon_pack_cursor = lambda: PremiumV2Window._apply_icon_pack_cursor(window)
             bridge = types.SimpleNamespace(
