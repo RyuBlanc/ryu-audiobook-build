@@ -12535,6 +12535,7 @@ class PremiumV2Window(QMainWindow):
         self.channel.registerObject("ryuBackend", self.bridge)
         self.web.page().setWebChannel(self.channel)
         self.web.loadFinished.connect(self._on_web_load_finished)
+        self._icon_pack_cursor_override_active = False
         self._apply_icon_pack_cursor()
         self._renderer_restart_attempts = 0
         self._frontend_generation = 0
@@ -12698,6 +12699,29 @@ class PremiumV2Window(QMainWindow):
         self.apply_window_size(str(QSettings("RyuBlanc", "Ryu's Audiobook").value("ui/window_size", "auto")))
 
 
+    def _set_application_icon_pack_cursor(self, cursor: QCursor) -> None:
+        """Apply the selected cursor at QApplication scope, not just one widget."""
+        app = QApplication.instance()
+        if app is None:
+            return
+        current = app.overrideCursor()
+        if getattr(self, "_icon_pack_cursor_override_active", False) and current is not None:
+            # Refresh the existing override instead of pushing another cursor
+            # onto Qt's override stack on each settings save or page reload.
+            app.changeOverrideCursor(cursor)
+        else:
+            app.setOverrideCursor(cursor)
+        self._icon_pack_cursor_override_active = True
+
+    def _clear_application_icon_pack_cursor(self) -> None:
+        """Remove only the application cursor override installed by this window."""
+        if not getattr(self, "_icon_pack_cursor_override_active", False):
+            return
+        app = QApplication.instance()
+        if app is not None and app.overrideCursor() is not None:
+            app.restoreOverrideCursor()
+        self._icon_pack_cursor_override_active = False
+
     @staticmethod
     def _cursor_webengine_script(cursor_url: str) -> str:
         """Build a WebEngine cursor rule with valid CSS url() quoting."""
@@ -12726,6 +12750,7 @@ class PremiumV2Window(QMainWindow):
                 pass
 
         if pack == "aether":
+            self._clear_application_icon_pack_cursor()
             clear_web_cursor()
             self.unsetCursor()
             self.web.unsetCursor()
@@ -12739,6 +12764,7 @@ class PremiumV2Window(QMainWindow):
         icon_path = Path(str(settings.value("ui/custom_icon_path", "") or "")) if pack == "custom" else built_in.get(pack, Path())
         if not icon_path.is_file():
             log.warning("Selected icon pack '%s' has no readable cursor image; restoring Aether.", pack)
+            self._clear_application_icon_pack_cursor()
             clear_web_cursor()
             self.unsetCursor()
             self.web.unsetCursor()
@@ -12746,6 +12772,7 @@ class PremiumV2Window(QMainWindow):
         pixmap = QPixmap(str(icon_path))
         if pixmap.isNull():
             log.warning("Selected icon pack '%s' could not be decoded; restoring Aether.", pack)
+            self._clear_application_icon_pack_cursor()
             clear_web_cursor()
             self.unsetCursor()
             self.web.unsetCursor()
@@ -12760,6 +12787,7 @@ class PremiumV2Window(QMainWindow):
             Qt.TransformationMode.SmoothTransformation,
         )
         cursor = QCursor(cursor_pixmap, 2, 2)
+        self._set_application_icon_pack_cursor(cursor)
         self.setCursor(cursor)
         self.web.setCursor(cursor)
 
