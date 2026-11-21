@@ -67,6 +67,55 @@ class QwenSpeechQualityRegressionTests(unittest.TestCase):
         self.assertEqual(reference_style("angry"), "concerned")
         self.assertNotEqual(expression_temperature("suspicious"), expression_temperature("angry"))
 
+
+    def test_customvoice_retries_silent_first_response_without_changing_speaker_or_style(self):
+        audible = np.sin(np.linspace(0.0, 8.0 * math.pi, 4000, dtype=np.float32))
+        silent = np.zeros(4000, dtype=np.float32)
+        model = unittest.mock.Mock()
+        model.generate_custom_voice.side_effect = [([silent], 24000), ([audible], 24000)]
+        soundfile = type("SoundFile", (), {"write": staticmethod(lambda *args, **kwargs: None)})()
+        with tempfile.TemporaryDirectory() as temporary, patch.object(
+            qwen_character_worker, "_worker_diagnostic"
+        ), patch.dict("sys.modules", {"soundfile": soundfile}):
+            output = Path(temporary) / "custom.wav"
+            qwen_character_worker._generate_custom(
+                model,
+                {"text": "Speak this complete sentence.", "speaker": "Ryan",
+                 "language": "English", "expression_style": "warm", "seed": 18},
+                output,
+            )
+        self.assertEqual(model.generate_custom_voice.call_count, 2)
+        first, second = [call.kwargs for call in model.generate_custom_voice.call_args_list]
+        self.assertEqual(first["speaker"], "Ryan")
+        self.assertEqual(first["speaker"], second["speaker"])
+        self.assertEqual(first["instruct"], second["instruct"])
+        self.assertEqual(first["temperature"], second["temperature"])
+
+    def test_silent_member_in_a_qwen_batch_is_retried_individually(self):
+        audible = np.sin(np.linspace(0.0, 8.0 * math.pi, 4000, dtype=np.float32))
+        silent = np.zeros(4000, dtype=np.float32)
+        calls = []
+
+        def render_one(index, request):
+            calls.append((index, dict(request)))
+            return [audible], 24000
+
+        def make_request(index):
+            return {"text": f"Sentence {index}", "profile_id": "saved-profile",
+                    "expression_style": "joyful", "seed": 20}
+
+        with patch.object(qwen_character_worker, "_worker_diagnostic"):
+            repaired = qwen_character_worker._repair_silent_batch_outputs(
+                [audible, silent], 24000, [0, 1],
+                ["First sentence.", "Second sentence."],
+                make_request, render_one, "saved VoiceDesign batch regression"
+            )
+        self.assertEqual(len(repaired), 2)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], 1)
+        self.assertEqual(calls[0][1]["profile_id"], "saved-profile")
+        self.assertTrue(qwen_character_worker._waveform_has_audible_content(repaired[1]))
+
     def test_saved_voice_silent_output_retries_once_with_same_identity_and_style(self):
         audible = np.sin(np.linspace(0.0, 8.0 * math.pi, 4000, dtype=np.float32))
         calls = []

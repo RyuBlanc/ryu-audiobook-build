@@ -28,6 +28,7 @@ from app.tts.expression import (
     reference_style,
     voice_design_anchor_instruction,
 )
+from app.tts.audio_validation import wav_has_audible_content
 from app.tts.qwen_accelerator import automatic_accelerator, best_accelerator
 from app.tts.qwen_profile_schema import (
     QWEN_EXPRESSION_BANK_VERSION as EXPRESSION_BANK_VERSION,
@@ -430,6 +431,42 @@ def _generate_with_silence_retry(generate, request: dict, text: str, task: str):
     return wavs, sample_rate
 
 
+def _repair_silent_batch_outputs(
+    wavs,
+    sample_rate: int,
+    indexes: list[int],
+    texts: list[str],
+    make_request,
+    render_one,
+    task: str,
+):
+    """Retry only silent batch members individually without changing identity."""
+    if len(wavs) != len(indexes):
+        raise RuntimeError(
+            f"Qwen {task} returned {len(wavs)} outputs for {len(indexes)} requested items."
+        )
+    repaired = []
+    for position, index in enumerate(indexes):
+        waveform = wavs[position]
+        if _waveform_has_audible_content(waveform):
+            repaired.append(waveform)
+            continue
+        item_request = make_request(index)
+
+        def render(current, selected_index=index):
+            return render_one(selected_index, current)
+
+        retry_wavs, retry_rate = _generate_with_silence_retry(
+            render, item_request, texts[index], task
+        )
+        if int(retry_rate) != int(sample_rate):
+            raise RuntimeError(
+                f"Qwen {task} retry changed the sample rate for batch item {index + 1}."
+            )
+        repaired.append(retry_wavs[0])
+    return repaired
+
+
 def _voice_design_instruct(request: dict, style: str | None = None):
     base = str(request.get("instruct") or "").strip()
     selected = style or _request_expression_style(request)
@@ -518,70 +555,76 @@ def _generate_custom(model, request: dict, output: Path) -> None:
         "temperature": request.get("temperature", expression_temperature(style)),
         "subtalker_temperature": request.get("subtalker_temperature", expression_temperature(style)),
     }
-    _set_seed(request.get("seed"))
-    wavs, sr = model.generate_custom_voice(
-        text=str(request.get("text") or ""),
-        language=str(request.get("language") or "English"),
-        speaker=speaker,
-        instruct=_voice_design_instruct(request, style),
-        **_generation_kwargs(request),
-    )
-    if not wavs:
-        raise RuntimeError("Qwen CustomVoice did not return audio.")
+    text = str(request.get("text") or "")
+
+    def render(current):
+        current_request = {**request, **current}
+        _set_seed(current_request.get("seed"))
+        return model.generate_custom_voice(
+            text=str(current_request.get("text") or ""),
+            language=str(current_request.get("language") or "English"),
+            speaker=speaker,
+            instruct=_voice_design_instruct(current_request, style),
+            **_generation_kwargs(current_request),
+        )
+
+    wavs, sr = _generate_with_silence_retry(render, request, text, "CustomVoice")
     output.parent.mkdir(parents=True, exist_ok=True)
     sf.write(str(output), wavs[0], sr)
 
 
 def _generate_design(model, request: dict, output: Path) -> None:
-    """Generate narration with the same VoiceDesign engine used by the UI preview."""
+    """Generate narration with VoiceDesign and reject silent responses."""
     import soundfile as sf
 
     style = _request_expression_style(request)
+    text = str(request.get("text") or "")
     request = {
         **request,
         "expression_style": style,
         "temperature": request.get("temperature", expression_temperature(style)),
         "subtalker_temperature": request.get("subtalker_temperature", expression_temperature(style)),
     }
-    _set_seed(request.get("seed"))
-    wavs, sr = model.generate_voice_design(
-        text=str(request.get("text") or ""),
-        language=str(request.get("language") or "English"),
-        instruct=_voice_design_instruct(request, style),
-        **_generation_kwargs(request),
-    )
-    if not wavs:
-        raise RuntimeError("Qwen VoiceDesign did not return narration audio.")
+
+    def render(current):
+        current_request = {**request, **current}
+        _set_seed(current_request.get("seed"))
+        return model.generate_voice_design(
+            text=str(current_request.get("text") or ""),
+            language=str(current_request.get("language") or "English"),
+            instruct=_voice_design_instruct(current_request, style),
+            **_generation_kwargs(current_request),
+        )
+
+    wavs, sr = _generate_with_silence_retry(render, request, text, "VoiceDesign")
     output.parent.mkdir(parents=True, exist_ok=True)
     sf.write(str(output), wavs[0], sr)
+
 
 def _generate_design_preview(model, request: dict, output: Path) -> None:
     import soundfile as sf
 
     style = _request_expression_style(request)
+    text = str(request.get("text") or "")
     request = {
         **request,
         "expression_style": style,
         "temperature": request.get("temperature", expression_temperature(style)),
         "subtalker_temperature": request.get("subtalker_temperature", expression_temperature(style)),
+        "max_new_tokens": min(_recommended_max_new_tokens(text), 1024),
     }
-    _set_seed(request.get("seed"))
-    wavs, sr = model.generate_voice_design(
-        text=str(request.get("text") or ""),
-        language=str(request.get("language") or "English"),
-        instruct=_voice_design_instruct(request, style),
-        **_generation_kwargs(
-            {
-                **request,
-                "max_new_tokens": min(
-                    _recommended_max_new_tokens(str(request.get("text") or "")),
-                    1024,
-                ),
-            }
-        ),
-    )
-    if not wavs:
-        raise RuntimeError("Qwen VoiceDesign did not return preview audio.")
+
+    def render(current):
+        current_request = {**request, **current}
+        _set_seed(current_request.get("seed"))
+        return model.generate_voice_design(
+            text=str(current_request.get("text") or ""),
+            language=str(current_request.get("language") or "English"),
+            instruct=_voice_design_instruct(current_request, style),
+            **_generation_kwargs(current_request),
+        )
+
+    wavs, sr = _generate_with_silence_retry(render, request, text, "VoiceDesign preview")
     output.parent.mkdir(parents=True, exist_ok=True)
     sf.write(str(output), wavs[0], sr)
 
@@ -594,22 +637,29 @@ def _generate_design_anchor(model, request: dict, anchor: Path) -> str:
         str(request.get("anchor_text") or "").strip()
         or "Hello. This is a short, natural voice sample. I speak clearly and comfortably."
     )
-    _set_seed(request.get("seed"))
-    wavs, sr = model.generate_voice_design(
-        text=anchor_text,
-        language=language,
-        instruct=_voice_design_instruct(request),
-        **_generation_kwargs(
-            {
-                **request,
-                "max_new_tokens": min(int(request.get("max_new_tokens", 768)), 768),
-            }
-        ),
+    anchor_request = {
+        **request,
+        "text": anchor_text,
+        "max_new_tokens": min(int(request.get("max_new_tokens", 768)), 768),
+    }
+
+    def render(current):
+        current_request = {**anchor_request, **current}
+        _set_seed(current_request.get("seed"))
+        return model.generate_voice_design(
+            text=anchor_text,
+            language=language,
+            instruct=_voice_design_instruct(current_request),
+            **_generation_kwargs(current_request),
+        )
+
+    wavs, sr = _generate_with_silence_retry(
+        render, anchor_request, anchor_text, "VoiceDesign anchor"
     )
-    if not wavs:
-        raise RuntimeError("Qwen VoiceDesign did not return a reusable voice anchor.")
     anchor.parent.mkdir(parents=True, exist_ok=True)
     sf.write(str(anchor), wavs[0], sr)
+    if not wav_has_audible_content(anchor):
+        raise RuntimeError("Qwen VoiceDesign anchor was not saved as audible PCM audio.")
     return anchor_text
 
 
@@ -636,7 +686,11 @@ def _create_expression_anchors(model, request: dict, root: Path) -> dict[str, Pa
     paths = {style: _anchor_path(root, request, style) for style in ANCHOR_STYLES}
     missing = [
         style for style, path in paths.items()
-        if not path.exists() or path.stat().st_size < 1024
+        if (
+            not path.is_file()
+            or path.stat().st_size < 1024
+            or not wav_has_audible_content(path)
+        )
     ]
     if not missing:
         return paths
@@ -680,20 +734,27 @@ def _create_expression_anchors(model, request: dict, root: Path) -> dict[str, Pa
             if style == "neutral"
             else expression_instruction(base_description, style)
         )
-        wavs, sr = model.generate_voice_design(
-            text=anchor_text,
-            language=language,
-            instruct=instruct,
-            **_generation_kwargs(anchor_request),
-        )
-        if not wavs:
-            raise RuntimeError(
-                f"Qwen VoiceDesign did not return the '{style}' character reference."
+        def render_anchor(current):
+            current_request = {**anchor_request, **current}
+            _set_seed(current_request.get("seed"))
+            return model.generate_voice_design(
+                text=anchor_text,
+                language=language,
+                instruct=instruct,
+                **_generation_kwargs(current_request),
             )
+
+        wavs, sr = _generate_with_silence_retry(
+            render_anchor, anchor_request, anchor_text, f"{style} identity anchor"
+        )
         path.parent.mkdir(parents=True, exist_ok=True)
         sf.write(str(path), wavs[0], sr)
-        if not path.exists() or path.stat().st_size < 1024:
-            raise RuntimeError(f"Qwen generated an invalid '{style}' character reference.")
+        if (
+            not path.is_file()
+            or path.stat().st_size < 1024
+            or not wav_has_audible_content(path)
+        ):
+            raise RuntimeError(f"Qwen generated an invalid or silent '{style}' character reference.")
 
     return paths
 
@@ -779,19 +840,21 @@ def _generate_clone(model, request: dict, output: Path) -> None:
         "temperature": request.get("temperature", expression_temperature(style)),
         "subtalker_temperature": request.get("subtalker_temperature", expression_temperature(style)),
     }
+    text = str(request.get("text") or "")
 
-    _set_seed(request.get("seed"))
-    kwargs = {
-        "text": str(request.get("text") or ""),
-        "language": str(request.get("language") or "English"),
-        "ref_audio": str(ref_audio),
-        "ref_text": ref_text or None,
-        "x_vector_only_mode": x_vector_only,
-        **_generation_kwargs(request),
-    }
-    wavs, sr = model.generate_voice_clone(**kwargs)
-    if not wavs:
-        raise RuntimeError("Qwen Base voice cloning did not return audio.")
+    def render(current):
+        current_request = {**request, **current}
+        _set_seed(current_request.get("seed"))
+        return model.generate_voice_clone(
+            text=text,
+            language=str(current_request.get("language") or "English"),
+            ref_audio=str(ref_audio),
+            ref_text=ref_text or None,
+            x_vector_only_mode=x_vector_only,
+            **_generation_kwargs(current_request),
+        )
+
+    wavs, sr = _generate_with_silence_retry(render, request, text, "Voice Clone")
     output.parent.mkdir(parents=True, exist_ok=True)
     sf.write(str(output), wavs[0], sr)
 
@@ -1059,6 +1122,31 @@ def server(args) -> int:
                                 f"Qwen VoiceDesign returned {len(wavs)} outputs for "
                                 f"{len(indexes)} {style} preview items."
                             )
+
+                        def make_preview_request(index):
+                            return {
+                                **request,
+                                "text": texts[index],
+                                "expression_style": style,
+                                "temperature": expression_temperature(style),
+                                "subtalker_temperature": expression_temperature(style),
+                                "max_new_tokens": min(_recommended_max_new_tokens(texts[index]), 1024),
+                            }
+
+                        def render_preview_item(index, current):
+                            current_request = {**make_preview_request(index), **current}
+                            _set_seed(current_request.get("seed"))
+                            return model.generate_voice_design(
+                                text=texts[index],
+                                language=str(current_request.get("language") or "English"),
+                                instruct=design_instructions[indexes.index(index)],
+                                **_generation_kwargs(current_request),
+                            )
+
+                        wavs = _repair_silent_batch_outputs(
+                            wavs, sr, indexes, texts, make_preview_request,
+                            render_preview_item, "VoiceDesign preview batch"
+                        )
                         for index, wav in zip(indexes, wavs):
                             destination = Path(str(batch_outputs[index]))
                             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -1093,6 +1181,30 @@ def server(args) -> int:
                             raise RuntimeError(
                                 f"Qwen returned {len(wavs)} outputs for {len(indexes)} {style} batch items."
                             )
+
+                        def make_locked_request(index):
+                            return {
+                                **request,
+                                "text": texts[index],
+                                "expression_style": style,
+                                "temperature": temperature,
+                                "subtalker_temperature": temperature,
+                            }
+
+                        def render_locked_item(index, current):
+                            current_request = {**make_locked_request(index), **current}
+                            _set_seed(current_request.get("seed"))
+                            return model.generate_voice_clone(
+                                text=texts[index],
+                                language=str(current_request.get("language") or "English"),
+                                voice_clone_prompt=prompt,
+                                **_generation_kwargs(current_request),
+                            )
+
+                        wavs = _repair_silent_batch_outputs(
+                            wavs, sr, indexes, texts, make_locked_request,
+                            render_locked_item, "saved VoiceDesign batch"
+                        )
                         for index, wav in zip(indexes, wavs):
                             destination = Path(str(batch_outputs[index]))
                             destination.parent.mkdir(parents=True, exist_ok=True)

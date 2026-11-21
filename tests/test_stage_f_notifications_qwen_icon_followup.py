@@ -400,7 +400,7 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
 
     def test_customvoice_receives_contextual_instruction_and_restrained_sampling(self):
         model = Mock()
-        model.generate_custom_voice.return_value = ([object()], 24000)
+        model.generate_custom_voice.return_value = ([[0.1] * 4096], 24000)
         soundfile = types.SimpleNamespace(write=Mock())
         with tempfile.TemporaryDirectory() as temp, patch.dict(sys.modules, {"soundfile": soundfile}):
             output = Path(temp) / "custom.wav"
@@ -419,7 +419,7 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
 
     def test_voice_design_preview_uses_selected_language_and_controlled_expression(self):
         model = Mock()
-        model.generate_voice_design.return_value = ([object()], 24000)
+        model.generate_voice_design.return_value = ([[0.1] * 4096], 24000)
         soundfile = types.SimpleNamespace(write=Mock())
         with tempfile.TemporaryDirectory() as temp, patch.dict(sys.modules, {"soundfile": soundfile}):
             output = Path(temp) / "design.wav"
@@ -437,7 +437,7 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
 
     def test_qwen_clone_keeps_reference_audio_and_uses_lower_contextual_temperature(self):
         model = Mock()
-        model.generate_voice_clone.return_value = ([object()], 24000)
+        model.generate_voice_clone.return_value = ([[0.1] * 4096], 24000)
         soundfile = types.SimpleNamespace(write=Mock())
         with tempfile.TemporaryDirectory() as temp, patch.dict(sys.modules, {"soundfile": soundfile}):
             reference = Path(temp) / "reference.wav"
