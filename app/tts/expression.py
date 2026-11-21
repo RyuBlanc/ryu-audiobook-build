@@ -221,7 +221,7 @@ EXPRESSION_TEMPERATURES = {
     "warm": 0.73,
     "concerned": 0.73,
     "excited": 0.76,
-    "joyful": 0.80,
+    "joyful": 0.79,
     "suspicious": 0.78,
     "soft": 0.70,
     "sad": 0.71,
