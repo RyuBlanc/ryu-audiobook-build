@@ -151,12 +151,14 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
                 image.fill(pixel)
                 self.assertTrue(image.save(str(path), "PNG"))
 
+            web.viewport.return_value = Mock()
             window = types.SimpleNamespace(
                 web=web,
                 _icon_pack_cursor_override_active=False,
                 setCursor=Mock(),
                 unsetCursor=Mock(),
             )
+            window._cursor_webengine_script = PremiumV2Window._cursor_webengine_script
             window._set_application_icon_pack_cursor = (
                 lambda cursor: PremiumV2Window._set_application_icon_pack_cursor(window, cursor)
             )
@@ -210,6 +212,7 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
             self.assertIn(custom_data_url, javascript_calls[-1].args[0])
             self.assertEqual(window.setCursor.call_args.args[0].path, custom_path)
             self.assertEqual(web.setCursor.call_args.args[0].path, custom_path)
+            self.assertEqual(web.viewport.return_value.setCursor.call_args.args[0].path, custom_path)
 
     def test_icon_pack_cursor_uses_application_override_without_stacking_and_restores_on_aether(self):
         from app.ui.premium_v2_host import PremiumV2Window
