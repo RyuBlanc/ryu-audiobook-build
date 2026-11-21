@@ -430,7 +430,7 @@ def _generate_with_silence_retry(generate, request: dict, text: str, task: str):
     return wavs, sample_rate
 
 
-def _voice_design_instruct(request: dict, style: str | None = None)
+def _voice_design_instruct(request: dict, style: str | None = None):
     base = str(request.get("instruct") or "").strip()
     selected = style or _request_expression_style(request)
     context = request.get("story_context")
