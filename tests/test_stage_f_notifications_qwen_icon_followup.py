@@ -53,6 +53,29 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
         self.assertIn("self.web.page().runJavaScript(script)", cursor)
         self.assertIn("self.web.setCursor(cursor)", cursor)
 
+    def test_icon_pack_cursor_uses_application_override_without_stacking_and_restores_on_aether(self):
+        from app.ui.premium_v2_host import PremiumV2Window
+
+        app = Mock()
+        app.overrideCursor.return_value = None
+        window = types.SimpleNamespace(_icon_pack_cursor_override_active=False)
+        cursor = object()
+
+        with patch("app.ui.premium_v2_host.QApplication.instance", return_value=app):
+            PremiumV2Window._set_application_icon_pack_cursor(window, cursor)
+            self.assertTrue(window._icon_pack_cursor_override_active)
+
+            # Reapplying after settings refresh or page reload must replace,
+            # not push another entry onto QApplication's override stack.
+            app.overrideCursor.return_value = cursor
+            PremiumV2Window._set_application_icon_pack_cursor(window, cursor)
+            PremiumV2Window._clear_application_icon_pack_cursor(window)
+
+        app.setOverrideCursor.assert_called_once_with(cursor)
+        app.changeOverrideCursor.assert_called_once_with(cursor)
+        app.restoreOverrideCursor.assert_called_once_with()
+        self.assertFalse(window._icon_pack_cursor_override_active)
+
     def test_yes_ellipsis_and_yes_exclamation_have_different_low_intensity_delivery(self):
         self.assertEqual(classify_expression("Yes..."), "thoughtful")
         self.assertEqual(classify_expression("Yes…"), "thoughtful")
