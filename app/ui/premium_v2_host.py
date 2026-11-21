@@ -21,7 +21,7 @@ import wave
 from datetime import datetime, timezone
 from typing import Any
 
-from PySide6.QtCore import QObject, QSettings, QTimer, QUrl, Slot, Qt
+from PySide6.QtCore import QBuffer, QIODevice, QObject, QSettings, QTimer, QUrl, Slot, Qt
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -12727,17 +12727,38 @@ class PremiumV2Window(QMainWindow):
             self.web.unsetCursor()
             return
 
-        cursor_url = QUrl.fromLocalFile(str(icon_path.resolve())).toString()
-        cursor_pixmap = pixmap.scaled(64,64,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation)
-        cursor = QCursor(cursor_pixmap,2,2)
+        # Use one small PNG for both Qt's native cursor and the WebEngine DOM.
+        # A file:// URL can be stored successfully yet be rejected by Chromium's
+        # CSS cursor loader in a packaged Qt WebEngine profile. A self-contained
+        # data URL avoids that origin/permission split and works for imports too.
+        cursor_pixmap = pixmap.scaled(
+            32, 32, Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        cursor = QCursor(cursor_pixmap, 2, 2)
         self.setCursor(cursor)
         self.web.setCursor(cursor)
+
+        image_buffer = QBuffer()
+        if not image_buffer.open(QIODevice.OpenModeFlag.WriteOnly):
+            log.warning("Could not open an in-memory buffer for icon pack '%s'.", pack)
+            return
+        try:
+            if not cursor_pixmap.save(image_buffer, "PNG"):
+                log.warning("Could not encode icon pack '%s' for WebEngine.", pack)
+                return
+            cursor_data = base64.b64encode(bytes(image_buffer.data())).decode("ascii")
+        finally:
+            image_buffer.close()
+        cursor_url = "data:image/png;base64," + cursor_data
         script = (
             "(function(){const id='ryuNativeCursorPackStyle';"
             "let style=document.getElementById(id);"
             "if(!style){style=document.createElement('style');style.id=id;(document.head||document.documentElement).appendChild(style);}"
             "const url=" + json.dumps(cursor_url) + ";"
-            "style.textContent='html,body,html *,body *{cursor:url(\"'+url+'\") 2 2,auto!important;}';})();"
+            "style.textContent='html,body,html *,body *,input,textarea,select,button,a,[role=button],[role=menuitem]{cursor:url(\\\"'+url+'\\\") 2 2,auto!important;}';"
+            "document.documentElement.style.setProperty('cursor','url(\\\"'+url+'\\\") 2 2,auto','important');"
+            "})();"
         )
         try:
             self.web.page().runJavaScript(script)

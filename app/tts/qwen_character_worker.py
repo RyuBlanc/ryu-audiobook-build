@@ -390,18 +390,20 @@ def _recommended_max_new_tokens(text: str | None) -> int:
     return max(96, min(2048, estimated))
 
 def _generation_kwargs(request: dict) -> dict:
+    text_value = request.get("text") or ""
+    style = str(request.get("expression_style") or classify_expression(str(text_value)))
+    temperature = expression_temperature(style)
     defaults = {
         "do_sample": True,
         "top_k": 50,
-        "top_p": 1.0,
-        "temperature": 0.9,
+        "top_p": 0.92,
+        "temperature": temperature,
         "repetition_penalty": 1.05,
         "subtalker_dosample": True,
         "subtalker_top_k": 50,
-        "subtalker_top_p": 1.0,
-        "subtalker_temperature": 0.9,
+        "subtalker_top_p": 0.92,
+        "subtalker_temperature": temperature,
     }
-    text_value = request.get("text") or ""
     max_new_tokens = request.get("max_new_tokens")
     if max_new_tokens is None:
         max_new_tokens = _recommended_max_new_tokens(str(text_value))
@@ -452,12 +454,19 @@ def _generate_custom(model, request: dict, output: Path) -> None:
     speaker = str(request.get("speaker") or "").strip()
     if not speaker:
         raise RuntimeError("A Qwen CustomVoice speaker is required.")
+    style = str(request.get("expression_style") or classify_expression(str(request.get("text") or "")))
+    request = {
+        **request,
+        "expression_style": style,
+        "temperature": request.get("temperature", expression_temperature(style)),
+        "subtalker_temperature": request.get("subtalker_temperature", expression_temperature(style)),
+    }
     _set_seed(request.get("seed"))
     wavs, sr = model.generate_custom_voice(
         text=str(request.get("text") or ""),
         language=str(request.get("language") or "English"),
         speaker=speaker,
-        instruct=str(request.get("instruct") or "").strip(),
+        instruct=_voice_design_instruct(request, style),
         **_generation_kwargs(request),
     )
     if not wavs:
@@ -470,11 +479,18 @@ def _generate_design(model, request: dict, output: Path) -> None:
     """Generate narration with the same VoiceDesign engine used by the UI preview."""
     import soundfile as sf
 
+    style = str(request.get("expression_style") or classify_expression(str(request.get("text") or "")))
+    request = {
+        **request,
+        "expression_style": style,
+        "temperature": request.get("temperature", expression_temperature(style)),
+        "subtalker_temperature": request.get("subtalker_temperature", expression_temperature(style)),
+    }
     _set_seed(request.get("seed"))
     wavs, sr = model.generate_voice_design(
         text=str(request.get("text") or ""),
         language=str(request.get("language") or "English"),
-        instruct=_voice_design_instruct(request),
+        instruct=_voice_design_instruct(request, style),
         **_generation_kwargs(request),
     )
     if not wavs:
@@ -485,11 +501,18 @@ def _generate_design(model, request: dict, output: Path) -> None:
 def _generate_design_preview(model, request: dict, output: Path) -> None:
     import soundfile as sf
 
+    style = str(request.get("expression_style") or classify_expression(str(request.get("text") or "")))
+    request = {
+        **request,
+        "expression_style": style,
+        "temperature": request.get("temperature", expression_temperature(style)),
+        "subtalker_temperature": request.get("subtalker_temperature", expression_temperature(style)),
+    }
     _set_seed(request.get("seed"))
     wavs, sr = model.generate_voice_design(
         text=str(request.get("text") or ""),
         language=str(request.get("language") or "English"),
-        instruct=_voice_design_instruct(request),
+        instruct=_voice_design_instruct(request, style),
         **_generation_kwargs(
             {
                 **request,
@@ -572,7 +595,7 @@ def _create_expression_anchors(model, request: dict, root: Path) -> dict[str, Pa
         anchor_text = _expression_anchor_text(request, style)
         # A slightly more expressive reference helps the locked Base voice
         # reproduce a natural range later without changing the chosen identity.
-        temperature = 0.88
+        temperature = expression_temperature(style)
         print(
             json.dumps({
                 "progress": (
@@ -691,6 +714,13 @@ def _generate_clone(model, request: dict, output: Path) -> None:
         raise RuntimeError(f"Qwen reference audio was not found: {ref_audio}")
     ref_text = str(request.get("ref_text") or "").strip()
     x_vector_only = bool(request.get("x_vector_only_mode", not bool(ref_text)))
+    style = str(request.get("expression_style") or classify_expression(str(request.get("text") or "")))
+    request = {
+        **request,
+        "expression_style": style,
+        "temperature": request.get("temperature", expression_temperature(style)),
+        "subtalker_temperature": request.get("subtalker_temperature", expression_temperature(style)),
+    }
 
     _set_seed(request.get("seed"))
     kwargs = {
@@ -938,6 +968,9 @@ def server(args) -> int:
                         batch_request = {
                             **request,
                             "text": longest_text,
+                            "expression_style": style,
+                            "temperature": expression_temperature(style),
+                            "subtalker_temperature": expression_temperature(style),
                             "max_new_tokens": min(_recommended_max_new_tokens(longest_text), 1024),
                         }
                         design_instructions = [
@@ -972,6 +1005,7 @@ def server(args) -> int:
                         batch_request = {
                             **request,
                             "text": max(selected_texts, key=len) if selected_texts else "",
+                            "expression_style": style,
                             "temperature": temperature,
                             "subtalker_temperature": temperature,
                         }

@@ -299,35 +299,133 @@
     return data;
   };
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const ryuNotificationHistory = [];
-  let ryuToastTimer = null, ryuToastLastText = '', ryuToastLastAt = 0;
+  const RYU_NOTIFICATION_STORAGE_KEY = 'ryu-audiobook-notification-history-v1';
+  const RYU_NOTIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
+  const RYU_NOTIFICATION_LIMIT = 100;
+  function loadRyuNotificationHistory() {
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(RYU_NOTIFICATION_STORAGE_KEY) || '[]');
+      if (!Array.isArray(parsed)) return [];
+      const cutoff = Date.now() - RYU_NOTIFICATION_TTL_MS;
+      return parsed.filter(item =>
+        item && typeof item.text === 'string' && item.text.trim() &&
+        Number.isFinite(Number(item.at)) && Number(item.at) >= cutoff
+      ).map((item, index) => ({
+        id:String(item.id || (String(item.at) + '-' + String(index))),
+        text:String(item.text),
+        error:Boolean(item.error),
+        at:Number(item.at)
+      })).slice(-RYU_NOTIFICATION_LIMIT);
+    } catch (error) {
+      console.warn('[Ryu notifications] Could not read saved notification history:', error);
+      return [];
+    }
+  }
+  const ryuNotificationHistory = loadRyuNotificationHistory();
+  let ryuToastLastText = '', ryuToastLastAt = 0, ryuNotificationExpiryTimer = null;
+  function persistRyuNotifications() {
+    try {
+      window.localStorage.setItem(
+        RYU_NOTIFICATION_STORAGE_KEY,
+        JSON.stringify(ryuNotificationHistory.slice(-RYU_NOTIFICATION_LIMIT))
+      );
+      return true;
+    } catch (error) {
+      console.warn('[Ryu notifications] Could not persist notification history:', error);
+      return false;
+    }
+  }
+  function pruneRyuNotifications() {
+    const cutoff = Date.now() - RYU_NOTIFICATION_TTL_MS;
+    const before = ryuNotificationHistory.length;
+    for (let index = ryuNotificationHistory.length - 1; index >= 0; index--) {
+      const item = ryuNotificationHistory[index];
+      if (!item || !Number.isFinite(Number(item.at)) || Number(item.at) < cutoff) {
+        ryuNotificationHistory.splice(index, 1);
+      }
+    }
+    if (before !== ryuNotificationHistory.length) persistRyuNotifications();
+    return before !== ryuNotificationHistory.length;
+  }
+  function scheduleRyuNotificationExpiry() {
+    if (ryuNotificationExpiryTimer) {
+      clearTimeout(ryuNotificationExpiryTimer);
+      ryuNotificationExpiryTimer = null;
+    }
+    pruneRyuNotifications();
+    if (!ryuNotificationHistory.length) return;
+    const earliest = Math.min(...ryuNotificationHistory.map(item => Number(item.at) + RYU_NOTIFICATION_TTL_MS));
+    const delay = Math.max(0, Math.min(2147480000, earliest - Date.now()));
+    ryuNotificationExpiryTimer = setTimeout(() => {
+      ryuNotificationExpiryTimer = null;
+      pruneRyuNotifications();
+      if ($('ryuNotificationsPanel')?.style.display !== 'none') renderRyuNotificationsPanel();
+      scheduleRyuNotificationExpiry();
+    }, delay);
+  }
   function renderRyuNotificationsPanel() {
     const panel = $('ryuNotificationsPanel');
     if (!panel) return;
-    const recent = ryuNotificationHistory.filter(item => Date.now() - item.at <= 30000);
+    pruneRyuNotifications();
+    const entries = ryuNotificationHistory.slice().reverse();
     panel.innerHTML =
-      '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px">' +
-        '<strong>Notifications</strong><button type="button" data-close-ryu-notifications aria-label="Close notifications" style="border:0;background:transparent;color:inherit;font-size:18px;cursor:pointer">×</button></div>' +
-      (recent.length ? recent.slice().reverse().map(item =>
-        '<article style="background:rgba(23,29,40,.98);border:1px solid rgba(148,163,184,.18);border-left:4px solid ' +
+      '<div style="position:sticky;top:-14px;z-index:2;display:flex;justify-content:space-between;align-items:center;gap:9px;margin:-14px -14px 10px;padding:12px 14px;background:rgba(12,16,24,.99);border-bottom:1px solid rgba(148,163,184,.16)">' +
+        '<strong>Notifications</strong><div style="display:flex;align-items:center;gap:7px">' +
+        '<button type="button" data-clear-all-ryu-notifications ' + (entries.length ? '' : 'disabled') +
+          ' style="border:1px solid rgba(148,163,184,.3);border-radius:8px;padding:5px 9px;background:transparent;color:inherit;font:inherit;font-size:12px;cursor:pointer;opacity:' + (entries.length ? '1' : '.45') + '">Clear all</button>' +
+        '<button type="button" data-close-ryu-notifications aria-label="Close notifications" title="Close notifications" ' +
+          'style="width:27px;height:27px;flex:0 0 27px;border:1px solid rgba(148,163,184,.3);border-radius:50%;background:transparent;color:inherit;font-size:18px;line-height:1;cursor:pointer">×</button>' +
+        '</div></div>' +
+      (entries.length ? entries.map(item =>
+        '<article style="display:grid;grid-template-columns:minmax(0,1fr) 28px;align-items:start;column-gap:9px;background:rgba(23,29,40,.98);border:1px solid rgba(148,163,184,.18);border-left:4px solid ' +
           (item.error ? '#d84d69' : '#36c77b') +
-          ';border-radius:12px;padding:10px 12px;margin-top:8px;box-shadow:0 8px 24px rgba(0,0,0,.22)">' +
-          '<div style="font-size:13px;line-height:1.45;overflow-wrap:anywhere">' + esc(item.text) + '</div>' +
-          '<small style="display:block;margin-top:5px;opacity:.68">' + esc(new Date(item.at).toLocaleTimeString()) + '</small></article>'
-      ).join('') : '<p class="muted" style="margin:8px 0">No recent notifications. New alerts remain visible for up to 30 seconds.</p>');
+          ';border-radius:12px;padding:10px 9px 10px 12px;margin-top:8px;box-shadow:0 8px 24px rgba(0,0,0,.18);min-width:0">' +
+          '<div style="min-width:0;overflow:hidden">' +
+            '<div style="font-size:13px;line-height:1.45;overflow-wrap:anywhere;word-break:break-word;white-space:pre-wrap">' + esc(item.text) + '</div>' +
+            '<small style="display:block;margin-top:6px;opacity:.68;font-size:11px">' + esc(new Date(item.at).toLocaleString()) + '</small>' +
+          '</div>' +
+          '<button type="button" data-clear-ryu-notification="' + esc(item.id) + '" aria-label="Clear this notification" title="Clear notification" ' +
+            'style="width:26px;height:26px;flex:0 0 26px;display:inline-flex;align-items:center;justify-content:center;border:1px solid rgba(148,163,184,.32);border-radius:50%;background:rgba(148,163,184,.08);color:inherit;font-size:15px;line-height:1;cursor:pointer">×</button>' +
+        '</article>'
+      ).join('') : '<p class="muted" style="margin:12px 2px;line-height:1.5">Notifications stay here until you clear them. Unread notifications are automatically removed after 24 hours.</p>');
   }
+  persistRyuNotifications();
+  scheduleRyuNotificationExpiry();
   function toggleRyuNotificationsPanel(forceOpen) {
     let panel = $('ryuNotificationsPanel');
     if (!panel) {
       panel = document.createElement('section');
       panel.id = 'ryuNotificationsPanel';
       panel.setAttribute('role', 'region');
-      panel.setAttribute('aria-label', 'Recent notifications');
-      panel.style.cssText = 'position:fixed;right:22px;bottom:78px;width:min(390px,calc(100vw - 32px));max-height:min(55vh,520px);overflow:auto;z-index:12000;padding:14px;border:1px solid rgba(148,163,184,.24);border-radius:16px;background:rgba(12,16,24,.98);color:#f4f6fa;box-shadow:0 18px 48px rgba(0,0,0,.42);display:none;box-sizing:border-box';
+      panel.setAttribute('aria-label', 'Notifications');
+      panel.style.cssText = 'position:fixed;right:22px;bottom:78px;width:min(430px,calc(100vw - 32px));max-height:min(65vh,620px);overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;z-index:12000;padding:14px;border:1px solid rgba(148,163,184,.24);border-radius:16px;background:rgba(12,16,24,.99);color:#f4f6fa;box-shadow:0 18px 48px rgba(0,0,0,.42);display:none;box-sizing:border-box';
       document.body.appendChild(panel);
       panel.addEventListener('click', event => {
-        if (event.target.closest('[data-close-ryu-notifications]')) {
+        const closeButton = event.target.closest('[data-close-ryu-notifications]');
+        if (closeButton) {
           panel.style.display = 'none';
+          event.stopPropagation();
+          return;
+        }
+        const clearAll = event.target.closest('[data-clear-all-ryu-notifications]');
+        if (clearAll) {
+          ryuNotificationHistory.length = 0;
+          persistRyuNotifications();
+          scheduleRyuNotificationExpiry();
+          renderRyuNotificationsPanel();
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        const clearOne = event.target.closest('[data-clear-ryu-notification]');
+        if (clearOne) {
+          const id = String(clearOne.getAttribute('data-clear-ryu-notification') || '');
+          const index = ryuNotificationHistory.findIndex(item => String(item.id) === id);
+          if (index >= 0) ryuNotificationHistory.splice(index, 1);
+          persistRyuNotifications();
+          scheduleRyuNotificationExpiry();
+          renderRyuNotificationsPanel();
+          event.preventDefault();
           event.stopPropagation();
         }
       });
@@ -357,34 +455,28 @@
     const activeValidation = document.querySelector('.page.active #validation');
     if (error && activeValidation) writeTextIfChanged(activeValidation, content);
     const now = Date.now();
-    const duplicate = content === ryuToastLastText && now - ryuToastLastAt < 30000;
+    const duplicate = content === ryuToastLastText && now - ryuToastLastAt < 2000;
     if (!duplicate) {
       ryuToastLastText = content;
       ryuToastLastAt = now;
-      const entry = {text:content,error:Boolean(error),at:now};
+      const entry = {
+        id:String(now) + '-' + Math.random().toString(36).slice(2, 9),
+        text:content,
+        error:Boolean(error),
+        at:now
+      };
       ryuNotificationHistory.push(entry);
-      while (ryuNotificationHistory.length > 20) ryuNotificationHistory.shift();
-      setTimeout(() => {
-        const index = ryuNotificationHistory.indexOf(entry);
-        if (index >= 0) ryuNotificationHistory.splice(index, 1);
-        if ($('ryuNotificationsPanel')?.style.display !== 'none') renderRyuNotificationsPanel();
-      }, 30000);
-      // Notification history is authoritative. Selected informational events
-      // (such as loading a saved profile) can be retained there without putting
-      // a duplicate plain-text toast over the active Studio page.
-      if (options.toast !== false) {
-        const toasts = $('toasts');
-        if (toasts) {
-          writeTextIfChanged(toasts, text);
-          toasts.classList.add('show');
-          toasts.setAttribute('role', error ? 'alert' : 'status');
-          if (ryuToastTimer) clearTimeout(ryuToastTimer);
-          ryuToastTimer = setTimeout(() => { toasts.classList.remove('show'); ryuToastTimer = null; }, 30000);
-        }
-      }
+      while (ryuNotificationHistory.length > RYU_NOTIFICATION_LIMIT) ryuNotificationHistory.shift();
+      persistRyuNotifications();
+      scheduleRyuNotificationExpiry();
       if ($('ryuNotificationsPanel')?.style.display !== 'none') renderRyuNotificationsPanel();
     }
+    // Notifications live in the persistent Notifications panel; do not cover
+    // the active page with a disappearing bottom toast.
+    const toasts = $('toasts');
+    if (toasts) toasts.classList.remove('show');
     if (error) console.error('[Ryu backend]', content);
+    void options;
   };
   // Route legacy prototype notifications through the same deduplicated panel.
   // This prevents an old toast helper from creating a second stack of popups.
@@ -8526,33 +8618,117 @@ function renderProductionMetadataGate(active) {
     message('Created the voice in ElevenLabs and saved its local Ryu profile. Narrator assignment is still explicit.');
   }
 
+  function ensureVoiceDesignLanguageOptions() {
+    const panel = document.querySelector('#voices .provider[data-provider="voicedesign"]');
+    const language = panel?.querySelector('.form2 select');
+    if (!language) return null;
+    for (const label of ['English','Japanese','Korean']) {
+      if (![...language.options].some(option => String(option.value || option.textContent).trim().toLowerCase() === label.toLowerCase())) {
+        const option = document.createElement('option');
+        option.value = label;
+        option.textContent = label;
+        language.appendChild(option);
+      }
+    }
+    if (!language.value) language.value = 'English';
+    return language;
+  }
+  function qwenVoiceDesignDefaultSpeaker(language) {
+    return ({English:'Ryan',Chinese:'Serena',Japanese:'Ono_Anna',Korean:'Sohee'}[String(language || 'English')] || 'Ryan');
+  }
+  function syncVoiceDesignDraftToProfile() {
+    const panel = document.querySelector('#voices .provider.active[data-provider="voicedesign"]');
+    if (!panel) return false;
+    const saved = selectedVoice
+      ? voices.find(item => item.saved === true && item.name.toLowerCase() === selectedVoice.toLowerCase())
+      : null;
+    // A loaded, saved VoiceDesign profile is authoritative until the user edits
+    // its preset/prompt. Do not replace it with the default active preset.
+    if (saved && saved.provider === 'qwen-character' && saved.qwen_mode === 'design' &&
+        String(profileEditOriginalName || '').toLowerCase() === String(saved.name || '').toLowerCase()) {
+      return true;
+    }
+    const activePreset = panel.querySelector('.preset.active') || panel.querySelector('.preset');
+    if (!panel.dataset.voiceDesignPresetApplied && activePreset) {
+      applyVoiceDesignPreset(activePreset);
+      return true;
+    }
+    const language = ensureVoiceDesignLanguageOptions();
+    const prompt = panel.querySelector('textarea');
+    const seed = panel.querySelector('input[type="number"]');
+    const presetLabel = String(activePreset?.textContent || 'Custom description').trim();
+    const rawName = String($('profileName')?.value || '').trim();
+    const genericName = !rawName || /^Qwen VoiceDesign\s*[·•-]\s*(?:Custom voice description|Custom description)?$/i.test(rawName);
+    const name = genericName ? 'Qwen VoiceDesign · ' + presetLabel : rawName;
+    const languageValue = String(language?.value || 'English');
+    const seedValue = Number(seed?.value || 0);
+    const voiceId = selectedVoiceId || qwenVoiceDesignDefaultSpeaker(languageValue);
+    if ($('profileName')) $('profileName').value = name;
+    if ($('premiumName')) $('premiumName').value = name;
+    if ($('profileLibrary')) $('profileLibrary').textContent = 'Qwen VoiceDesign';
+    if ($('profileVoice')) $('profileVoice').textContent = selectedVoiceId || presetLabel;
+    ensureVoiceProfileDetails();
+    const detailValues = {
+      detailProvider:'Qwen Character',
+      detailMode:'VoiceDesign',
+      detailVoiceId:voiceId,
+      detailLanguage:languageValue,
+      detailSeed:Number.isFinite(seedValue) && seedValue > 0 ? String(Math.trunc(seedValue)) : 'Automatic'
+    };
+    for (const [id,value] of Object.entries(detailValues)) if ($(id)) $(id).textContent = String(value || '—');
+    updateVoiceSummary({
+      name,
+      provider:'qwen-character',
+      qwen_mode:'design',
+      voice_id:voiceId,
+      display_voice:selectedVoiceId || presetLabel,
+      language:languageValue,
+      qwen_prompt:String(prompt?.value || '').trim(),
+      qwen_seed:Number.isFinite(seedValue) && seedValue > 0 ? Math.trunc(seedValue) : null
+    },{saved:false,previewReady:false,assignment:''});
+    updateVoiceActionButtons();
+    return true;
+  }
+
   function applyVoiceDesignPreset(button) {
     const panel=document.querySelector('.provider[data-provider="voicedesign"]'),textarea=panel?.querySelector('textarea');
     if(!panel||!textarea)return;
     const preset=String(button.textContent||'').trim().toLowerCase();
     const prompts={
-      'anime heroine':'Young adult female voice, bright and warm, slightly playful anime heroine timbre, clear natural English diction, expressive emotional reactions and cinematic storytelling.',
-      'anime hero':'Young adult male voice, confident and warm anime hero timbre, clear natural English diction, determined energy with sincere emotional range and cinematic storytelling.',
-      'anime rival':'Young adult voice with cool controlled intensity, precise diction, restrained emotion, competitive edge and a confident, slightly mysterious anime rival presence.',
-      'anime villain':'Mature, controlled voice with elegant menace, precise diction, quiet intensity and theatrical restraint for a fictional anime villain.',
-      'anime healer':'Gentle, reassuring voice with soft warmth, sincere emotion, clear diction and a calm, supportive anime healer presence.',
+      'anime heroine':'Young adult female voice, bright and warm, slightly playful anime heroine timbre, clear and natural diction in the selected language, expressive but restrained emotional range, natural audiobook dialogue.',
+      'anime hero':'Young adult male voice, confident and warm anime hero timbre, clear and natural diction in the selected language, determined energy with sincere but controlled emotional range, natural audiobook dialogue.',
+      'anime rival':'Young adult voice with cool controlled intensity, precise natural diction in the selected language, restrained emotion, competitive edge and a confident, slightly mysterious presence.',
+      'anime villain':'Mature, controlled voice with elegant menace, precise natural diction in the selected language, quiet intensity and deliberate restraint; avoid theatrical exaggeration.',
+      'anime healer':'Gentle, reassuring voice with soft warmth, sincere but restrained emotion, clear natural diction in the selected language and a calm, supportive presence.',
       'custom description':''
     };
     if(!(preset in prompts))return;
+    ensureVoiceDesignLanguageOptions();
     invalidateVoicePreview();selectedVoice=null;selectedVoiceId=null;selectedVoiceProvider='qwen-character';profileEditOriginalName='';
     clearSavedProfileSelection();
     panel.querySelectorAll('.preset').forEach(item=>item.classList.toggle('active',item===button));
+    panel.dataset.voiceDesignPresetApplied = preset;
     textarea.value=prompts[preset];
     const label=String(button.textContent||'Custom Description').trim(),name='Qwen VoiceDesign · '+label;
+    const language=String(panel.querySelector('.form2 select')?.value||'English');
+    const seed=Number(panel.querySelector('input[type="number"]')?.value||0);
+    const speaker=qwenVoiceDesignDefaultSpeaker(language);
     if($('profileName'))$('profileName').value=name;if($('premiumName'))$('premiumName').value=name;
     if($('profileLibrary'))$('profileLibrary').textContent='Qwen VoiceDesign';
     if($('profileVoice'))$('profileVoice').textContent=label;
     if($('previewProfile'))$('previewProfile').textContent=name;
     if($('sumProfile'))$('sumProfile').textContent='Unsaved';
     const assigned=$('assignedSide');if(assigned)assigned.textContent='';const p=assigned?.closest('p');if(p)p.hidden=true;
-    updateVoiceSummary({name,provider:'qwen-character',qwen_mode:'design'},{saved:false,previewReady:false,assignment:''});
-    textarea.dispatchEvent(new Event('input',{bubbles:true}));updateVoiceActionButtons();
-    message('VoiceDesign preset selected: '+label+'. The previous saved profile is no longer selected; save and preview this voice separately.');
+    ensureVoiceProfileDetails();
+    const details={detailProvider:'Qwen Character',detailMode:'VoiceDesign',detailVoiceId:speaker,detailLanguage:language,detailSeed:Number.isFinite(seed)&&seed>0?String(Math.trunc(seed)):'Automatic'};
+    for(const [id,value] of Object.entries(details))if($(id))$(id).textContent=String(value||'—');
+    updateVoiceSummary({
+      name,provider:'qwen-character',qwen_mode:'design',voice_id:speaker,
+      display_voice:label,language,qwen_prompt:prompts[preset],qwen_seed:Number.isFinite(seed)&&seed>0?Math.trunc(seed):null
+    },{saved:false,previewReady:false,assignment:''});
+    textarea.dispatchEvent(new Event('input',{bubbles:true}));
+    updateVoiceActionButtons();
+    message('VoiceDesign preset selected: '+label+'. It is now loaded into Voice Profile as an unsaved draft; save it before preview or assignment.');
   }
 
   function requestVoiceProfileSaveName(initialName, providerKey, voiceLabel, purpose = 'profile') {
@@ -8642,6 +8818,7 @@ function renderProductionMetadataGate(active) {
   }
 
   async function saveVoice(options = {}) {
+    if (document.querySelector('#voices .provider.active[data-provider="voicedesign"]')) syncVoiceDesignDraftToProfile();
     const name = String(options.nameOverride ?? ($('profileName')?.value || $('premiumName')?.value || '')).trim();
     const originalName = String(options.originalNameOverride ?? selectedVoice ?? profileEditOriginalName ?? '').trim();
     const existingSavedProfile = voices.find(profile =>
@@ -11633,6 +11810,23 @@ function renderProductionMetadataGate(active) {
     }, true);
     // These selectors change real UI state; the previous HTML prototype left them inert.
     document.addEventListener('click', event => {
+      const sourceCard = event.target.closest('#voices .source[data-source="voicedesign"]');
+      if (sourceCard) {
+        // The prototype's bubble handler first changes the active provider and
+        // fills generic fields. Apply the active VoiceDesign preset afterwards.
+        queueMicrotask(() => {
+          const panel = document.querySelector('#voices .provider.active[data-provider="voicedesign"]');
+          const preset = panel?.querySelector('.preset.active') || panel?.querySelector('.preset');
+          if (preset) applyVoiceDesignPreset(preset);
+        });
+        return;
+      }
+      const activeStep = document.querySelector('#voices .step.active')?.dataset.step;
+      const targetProfileStep = Boolean(
+        event.target.closest('#voices .step[data-step="3"]') ||
+        (event.target.closest('#voices .next') && activeStep === '2')
+      );
+      if (targetProfileStep) queueMicrotask(() => syncVoiceDesignDraftToProfile());
       const tab = event.target.closest('#voices [data-etab]');
       if (tab) {
         event.preventDefault(); event.stopImmediatePropagation();

@@ -196,21 +196,24 @@ EXPRESSION_STYLES = {
 }
 
 EXPRESSION_TEMPERATURES = {
-    "neutral": 0.82,
-    "thoughtful": 0.84,
-    "warm": 0.88,
-    "concerned": 0.86,
-    "excited": 0.89,
-    "soft": 0.83,
-    "sad": 0.84,
-    "angry": 0.87,
-    "tense": 0.86,
-    "curious": 0.85,
-    "amused": 0.88,
-    "serious": 0.82,
-    "reflective": 0.83,
-    "bored": 0.80,
-    "calm": 0.81,
+    # Lower sampling reduces accidental over-acting while leaving room for
+    # sentence-level variation. Stronger styles differ modestly, not radically.
+    "neutral": 0.72,
+    "thoughtful": 0.70,
+    "warm": 0.73,
+    "concerned": 0.73,
+    "excited": 0.76,
+    "soft": 0.70,
+    "sad": 0.71,
+    "angry": 0.75,
+    "tense": 0.74,
+    "curious": 0.73,
+    "amused": 0.74,
+    "serious": 0.70,
+    "reflective": 0.71,
+    "bored": 0.68,
+    "calm": 0.70,
+
 }
 
 _STYLE_ALIASES = {
@@ -334,16 +337,26 @@ def classify_expression(text: str) -> str:
                   r"(?:回想|回忆|回憶|沉思)|(?:회상|돌이켜|생각)", low) or re.search(_NON_ENGLISH_EXPRESSION_CUES["reflective"], low):
         return "reflective"
 
-    # Punctuation helps only after semantic/action cues. A single exclamation
-    # can convey a reaction, while urgent commands above take a tense path.
+    # Punctuation is a modifier, not an emotion on its own. A single
+    # affirmative exclamation is usually warm/confident, not automatically
+    # high excitement. Repeated emphasis or a clearly celebratory context can
+    # justify a brighter delivery; urgent/negative commands remain tense.
     if "?" in value and len(value.split()) <= 28:
         return "curious" if re.search(r"\b(what|why|how|really|who|where|when|which)\b", low) else "thoughtful"
     if "!" in value:
-        if re.search(r"\b(wow|amazing|incredible|unbelievable|yes|awesome|fantastic|wonderful|brilliant|can't believe|no way)\b", low):
-            return "excited"
-        if re.search(r"\b(no|stop|wait|never|impossible|look out)\b", low):
+        if re.search(r"\b(no|stop|wait|never|impossible|look out|help)\b", low):
             return "tense"
-        return "excited"
+        emphatic_context = re.search(
+            r"\b(?:we won|we did it|at last|finally|can't believe|unbelievable|"
+            r"amazing|incredible|fantastic|wonderful|brilliant|what a victory|"
+            r"this is incredible|i love it)\b",
+            low,
+        )
+        if emphatic_context or value.count("!") >= 2:
+            return "excited"
+        if re.search(r"\b(?:yes|yeah|yep|right|okay|ok|sure|of course)\b", low):
+            return "warm"
+        return "neutral"
 
     return "neutral"
 
@@ -408,12 +421,15 @@ def expression_instruction(base_voice_description: str, style: str) -> str:
     base = str(base_voice_description or "").strip()
     style_text = EXPRESSION_STYLES.get(style, EXPRESSION_STYLES["neutral"])
     natural_rules = (
-        " Preserve the source wording and punctuation. Keep one unchanged speaker identity "
-        "(same perceived age, gender presentation, timbre, accent, resonance and vocal placement); "
-        "only the delivery should move with the sentence's meaning. Honor ellipses as real, brief "
-        "hesitations and em dashes as interrupted-thought pauses. Questions should sound like "
-        "questions; unfinished sentences should remain unfinished. Do not read formatting or "
-        "stage directions aloud, add invented laughs, or over-act."
+        " Preserve the source wording and punctuation. Default to low-intensity, natural, "
+        "conversational audiobook delivery. Keep one unchanged speaker identity (same perceived "
+        "age, gender presentation, timbre, accent, resonance and vocal placement); only the "
+        "delivery should move with the sentence's meaning. A single exclamation may add a small "
+        "lift but is not a command to shout; reserve stronger emphasis for wording and story context "
+        "that clearly justify it. Treat ellipses as a brief hesitation only when the sentence reads "
+        "as uncertain or unfinished, and em dashes as interrupted-thought pauses. Questions should "
+        "sound like questions; unfinished sentences should remain unfinished. Do not read formatting "
+        "or stage directions aloud, add invented laughs, or over-act."
     )
     return f"{base}\n{style_text}{natural_rules}".strip()
 
