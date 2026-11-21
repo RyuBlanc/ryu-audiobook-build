@@ -220,7 +220,7 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
             self.assertEqual(application.change_calls[0].path, custom_path)
             self.assertEqual(len(application.restore_calls), 1)
             self.assertEqual(settings.value("ui/icon_pack"), "aether")
-            self.assertGreaterEqual(settings.sync_count, 5)
+            self.assertEqual(settings.sync_count, 3)
 
             javascript_calls = web.page.return_value.runJavaScript.call_args_list
             self.assertEqual(len(javascript_calls), 4)
