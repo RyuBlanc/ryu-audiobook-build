@@ -120,6 +120,7 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
                 self.current = None
                 self.set_calls = []
                 self.change_calls = []
+                self.restore_calls = []
 
             def overrideCursor(self):
                 return self.current
@@ -134,6 +135,7 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
 
             def restoreOverrideCursor(self):
                 self.current = None
+                self.restore_calls.append(True)
 
         application = FakeApplication()
         web = Mock()
@@ -185,6 +187,11 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
                 patch("app.ui.premium_v2_host.frontend_path", return_value=frontend),
                 patch("app.ui.premium_v2_host.settings_root", return_value=root / "settings"),
             ):
+                # Startup with the default Aether preference must not touch the
+                # WebEngine viewport's cursor before its first page is loaded.
+                PremiumV2Window._apply_icon_pack_cursor(window)
+                self.assertEqual(web.viewport.return_value.unsetCursor.call_count, 0)
+
                 PremiumV2Bridge._settings_save(bridge, {"icon_pack": "drake"})
                 self.assertEqual(application.current.path, drake_asset)
 
@@ -200,19 +207,28 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
                 self.assertTrue(custom_path.is_file())
                 self.assertEqual(application.current.path, custom_path)
 
+                # Choosing Aether again restores the original cursor on every
+                # surface, including the WebEngine viewport.
+                PremiumV2Bridge._settings_save(bridge, {"icon_pack": "aether"})
+                self.assertIsNone(application.current)
+                self.assertFalse(window._icon_pack_cursor_override_active)
+
             self.assertEqual(len(application.set_calls), 1)
-            self.assertEqual(len(application.change_calls), 1)
+            self.assertEqual(len(application.change_calls), 2)
             self.assertEqual(application.change_calls[0].path, custom_path)
-            self.assertEqual(settings.value("ui/icon_pack"), "custom")
-            self.assertGreaterEqual(settings.sync_count, 4)
+            self.assertEqual(application.change_calls[1].path if hasattr(application.change_calls[1], "path") else custom_path, custom_path)
+            self.assertEqual(len(application.restore_calls), 1)
+            self.assertEqual(settings.value("ui/icon_pack"), "aether")
+            self.assertGreaterEqual(settings.sync_count, 5)
 
             javascript_calls = web.page.return_value.runJavaScript.call_args_list
-            self.assertEqual(len(javascript_calls), 2)
+            self.assertEqual(len(javascript_calls), 4)
             custom_data_url = "data:image/png;base64," + base64.b64encode(custom_path.read_bytes()).decode("ascii")
-            self.assertIn(custom_data_url, javascript_calls[-1].args[0])
+            self.assertIn(custom_data_url, javascript_calls[2].args[0])
             self.assertEqual(window.setCursor.call_args.args[0].path, custom_path)
             self.assertEqual(web.setCursor.call_args.args[0].path, custom_path)
             self.assertEqual(web.viewport.return_value.setCursor.call_args.args[0].path, custom_path)
+            web.viewport.return_value.unsetCursor.assert_called_once_with()
 
     def test_icon_pack_cursor_uses_application_override_without_stacking_and_restores_on_aether(self):
         from app.ui.premium_v2_host import PremiumV2Window
