@@ -76,7 +76,9 @@ class QwenSpeechQualityRegressionTests(unittest.TestCase):
         soundfile = type("SoundFile", (), {"write": staticmethod(lambda *args, **kwargs: None)})()
         with tempfile.TemporaryDirectory() as temporary, patch.object(
             qwen_character_worker, "_worker_diagnostic"
-        ), patch.dict("sys.modules", {"soundfile": soundfile}):
+        ), patch.object(qwen_character_worker, "_set_seed"), patch.dict(
+            "sys.modules", {"soundfile": soundfile}
+        ):
             output = Path(temporary) / "custom.wav"
             qwen_character_worker._generate_custom(
                 model,
