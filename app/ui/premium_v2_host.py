@@ -12755,12 +12755,16 @@ class PremiumV2Window(QMainWindow):
                 pass
 
         if pack == "aether":
+            had_custom_cursor = bool(getattr(self, "_icon_pack_cursor_override_active", False))
             self._clear_application_icon_pack_cursor()
             clear_web_cursor()
             self.unsetCursor()
             self.web.unsetCursor()
+            # A clean Aether startup has no custom viewport cursor to remove.
+            # Avoid touching the WebEngine viewport before its first page load;
+            # still reset it when the user switches back from a custom pack.
             viewport = self.web.viewport()
-            if viewport is not None:
+            if had_custom_cursor and viewport is not None:
                 viewport.unsetCursor()
             return
 
@@ -12772,23 +12776,25 @@ class PremiumV2Window(QMainWindow):
         icon_path = Path(str(settings.value("ui/custom_icon_path", "") or "")) if pack == "custom" else built_in.get(pack, Path())
         if not icon_path.is_file():
             log.warning("Selected icon pack '%s' has no readable cursor image; restoring Aether.", pack)
+            had_custom_cursor = bool(getattr(self, "_icon_pack_cursor_override_active", False))
             self._clear_application_icon_pack_cursor()
             clear_web_cursor()
             self.unsetCursor()
             self.web.unsetCursor()
             viewport = self.web.viewport()
-            if viewport is not None:
+            if had_custom_cursor and viewport is not None:
                 viewport.unsetCursor()
             return
         pixmap = QPixmap(str(icon_path))
         if pixmap.isNull():
             log.warning("Selected icon pack '%s' could not be decoded; restoring Aether.", pack)
+            had_custom_cursor = bool(getattr(self, "_icon_pack_cursor_override_active", False))
             self._clear_application_icon_pack_cursor()
             clear_web_cursor()
             self.unsetCursor()
             self.web.unsetCursor()
             viewport = self.web.viewport()
-            if viewport is not None:
+            if had_custom_cursor and viewport is not None:
                 viewport.unsetCursor()
             return
 
