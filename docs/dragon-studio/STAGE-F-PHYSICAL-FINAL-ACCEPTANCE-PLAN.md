@@ -32,7 +32,7 @@ The original Build Windows App failures #3198, #3199 and #3200 have now been tra
 
 The historic 1,175-versus-1,196 figures cannot be reconciled from the repository alone because the original source book/export and the exact source revision used for both totals are not retained in the acceptance record. The implementation has two different measures: the legacy character analyzer's `dialogue_total` counts quote/dash spans, while the canonical passage index counts all non-narration source segments, including saved assignments and exact-source AI review spans. The new deterministic test demonstrates why those totals are not interchangeable. This is a metric-definition/source-evidence issue, not proof that either historical total is correct. Stage F must use the same source book/revision and report both metric definitions before comparing counts.
 
-## 3. Frozen hosted baseline — Build #3470
+## 3. Historical hosted baseline — Build #3470 (superseded)
 
 - Exact commit: fc3a0f8e1d64790b1a61024f8d883653b2dad51c.
 - Actions: [Build Windows App #3470](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/43714021829), run ID 43714021829.
@@ -154,6 +154,7 @@ The step-by-step user sequence is in [STAGE-F-USER-CHECKLIST.md](STAGE-F-USER-CH
 | Check | Status |
 |---|---|
 | Historical Build #3470 hosted baseline | SUPERSEDED |
+| Current Build #3497 exact-head Windows package | PASS — #3497 installer/portable artifacts; 1,718/1,718 regressions |
 | D6 PC-A → PC-B real transfer | NOT RUN |
 | Real NVIDIA CUDA inference/performance | NOT RUN |
 | Real AMD ROCm inference/performance, where supported | NOT RUN |
@@ -166,5 +167,5 @@ The step-by-step user sequence is in [STAGE-F-USER-CHECKLIST.md](STAGE-F-USER-CH
 | Installed shortcut/taskbar/logo transparency | NOT RUN |
 | Actual installer geometry and navigation | NOT RUN |
 | Installed-app Help & Guide walkthrough | NOT RUN |
-| Stage F non-physical tooling/docs/test contracts | PREPARED — exact-head checkpoint validation required |
+| Stage F non-physical tooling/docs/test contracts | PASS — #3497 hashes pinned; #3498 Windows PowerShell integration and 1,718/1,718 regressions passed |
 | Final owner release approval | NOT RUN |
