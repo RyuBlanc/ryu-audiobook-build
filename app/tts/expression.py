@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-EXPRESSION_PIPELINE_VERSION = "story-expression-v3"
+EXPRESSION_PIPELINE_VERSION = "story-expression-v4-context-aware"
 DEFAULT_VOICE_DESIGN_ANCHOR_TEXT = (
     "Hello. I thought I understood what was happening. "
     "Oh, really? That's actually wonderful. "
@@ -361,6 +361,50 @@ def classify_expression(text: str) -> str:
     return "neutral"
 
 
+
+def classify_expression_with_context(
+    text: str,
+    context_before: str = "",
+    context_after: str = "",
+) -> str:
+    """Classify delivery from the line plus bounded neighboring story text."""
+    value = str(text or "").strip()
+    direct = classify_expression(value)
+    before = str(context_before or "").strip()[-360:]
+    after = str(context_after or "").strip()[:360]
+    speaker = r"(?:he|she|they|I|[A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’-]{1,24}(?:\s+[A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’-]{1,24})?)"
+    tags = (
+        ("soft", r"(?:quietly\s+|softly\s+|in a low voice\s+)?(?:whispered|murmured|breathed|muttered|hushed)"),
+        ("sad", r"(?:through tears\s+|tearfully\s+)?(?:sobbed|wept|cried|sniffled)"),
+        ("amused", r"(?:while laughing\s+|with a chuckle\s+)?(?:laughed|chuckled|giggled)"),
+        ("angry", r"(?:angrily\s+|furiously\s+)?(?:snapped|spat|barked|growled)"),
+        ("tense", r"(?:shouted|yelled|screamed|gasped|called urgently)"),
+        ("thoughtful", r"(?:hesitantly\s+|uncertainly\s+)?(?:hesitated|paused|murmured uncertainly)"),
+        ("calm", r"(?:calmly\s+|gently\s+)(?:replied|answered|said)"),
+    )
+    for style, verb in tags:
+        trailing = re.search(r"(?i)" + speaker + r"\s+" + verb + r"\s*[,;:]?\s*$", before[-180:])
+        leading = re.match(r"(?i)^\s*[,—–-]?\s*" + speaker + r"\s+" + verb + r"\b", after[:180])
+        if trailing or leading:
+            return style
+
+    reaction = bool(re.fullmatch(
+        r"[\s\"'“”‘’「」『』,.;:!?…—–-]*(?:yes|yeah|yep|no|nope|really|okay|ok|right|sure|please|thank you|thanks|i see|of course|got it)[\s\"'“”‘’「」『』,.;:!?…—–-]*",
+        value, re.IGNORECASE,
+    )) or (len(value.split()) <= 5 and bool(re.search(r"[\"“「『]", value)))
+    if reaction and direct in {"neutral", "thoughtful", "serious"}:
+        story = (before + " " + after).casefold()
+        if re.search(r"\b(?:betray(?:ed|al)|traitor|revenge|furious|rage|snapped at)\b", story):
+            return "angry"
+        if re.search(r"\b(?:terrified|under attack|ambush|cornered|danger|monster lunged|weapon raised)\b", story):
+            return "tense"
+        if re.search(r"\b(?:died|death|funeral|lost him|lost her|farewell|grieving|heartbroken)\b", story):
+            return "sad"
+        if re.search(r"\b(?:finally won|we won|victory|reunited|safe at last|made it|succeeded)\b", story):
+            return "warm" if direct == "thoughtful" else "excited"
+    return direct
+
+
 def voice_design_anchor_instruction(
     base_voice_description: str,
     *,
@@ -417,7 +461,13 @@ def voice_design_anchor_instruction(
     return f"{base}\n{anchor_direction}".strip()
 
 
-def expression_instruction(base_voice_description: str, style: str) -> str:
+def expression_instruction(
+    base_voice_description: str,
+    style: str,
+    *,
+    context_before: str = "",
+    context_after: str = "",
+) -> str:
     base = str(base_voice_description or "").strip()
     style_text = EXPRESSION_STYLES.get(style, EXPRESSION_STYLES["neutral"])
     natural_rules = (
@@ -431,7 +481,19 @@ def expression_instruction(base_voice_description: str, style: str) -> str:
         "sound like questions; unfinished sentences should remain unfinished. Do not read formatting "
         "or stage directions aloud, add invented laughs, or over-act."
     )
-    return f"{base}\n{style_text}{natural_rules}".strip()
+    context_before = str(context_before or "").strip()[-360:]
+    context_after = str(context_after or "").strip()[:360]
+    context_rules = ""
+    if context_before or context_after:
+        context_rules = (
+            " Use adjacent story context only to infer this line's situation and subtext. "
+            "Do not speak context, merge its words into the line, or copy another "
+            "character's emotion unless the current speaker is clearly reacting. "
+            "When evidence is ambiguous, prefer restrained neutral delivery."
+            "\nPRECEDING STORY CONTEXT (not spoken): " + context_before
+            + "\nFOLLOWING STORY CONTEXT (not spoken): " + context_after
+        )
+    return f"{base}\n{style_text}{natural_rules}{context_rules}".strip()
 
 
 def reference_style(style: str) -> str:

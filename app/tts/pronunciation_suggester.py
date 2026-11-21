@@ -55,6 +55,53 @@ COMMON_ENGLISH_WORDS.update({
     "quick", "slow", "fast", "early", "late", "near", "far",
 })
 
+_NATIVE_SCRIPT_RE = re.compile(
+    r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uac00-\ud7af"
+    r"\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff"
+    r"\u0900-\u0dff\u0e00-\u0eff\u1000-\u109f\u1780-\u17ff]"
+)
+
+
+def contains_native_script(text: str) -> bool:
+    return bool(_NATIVE_SCRIPT_RE.search(str(text or "")))
+
+
+def is_pronunciation_term_candidate(
+    text: str,
+    *,
+    source_language: str | None = None,
+    script: str | None = None,
+    confidence: float = 0.0,
+    reason: str | None = None,
+    known_names: set[str] | list[str] | tuple[str, ...] = (),
+) -> bool:
+    """Accept high-confidence non-English terms while protecting common English."""
+    value = re.sub(r"\s+", " ", str(text or "").strip())
+    if not value:
+        return False
+    known = {
+        re.sub(r"\s+", " ", str(name or "").strip()).casefold()
+        for name in known_names if str(name or "").strip()
+    }
+    if is_common_english_phrase(value) and value.casefold() not in known:
+        return False
+    try:
+        score = float(confidence)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if not 0.0 <= score <= 1.0:
+        return False
+    if not is_pronunciation_override_candidate(value, source_language=source_language, script=script, known_names=known):
+        return False
+    if contains_native_script(value) or value.casefold() in known:
+        return score >= 0.80
+    language = re.sub(r"[^a-z]", "", str(source_language or "").casefold())
+    if language in {"", "en", "eng", "english", "americanenglish", "britishenglish",
+                    "auto", "autodetect", "unknown", "und", "undetermined", "none", "null"}:
+        return False
+    return score >= 0.90 and bool(str(script or "").strip() or str(reason or "").strip())
+
+
 _KNOWN = {
     "hyoudou issei": "Hee-doh Is-say",
     "issei hyoudou": "Is-say Hee-doh",
@@ -98,11 +145,7 @@ def is_pronunciation_override_candidate(
     }
     if is_common_english_phrase(value) and key not in known:
         return False
-    has_native_script = bool(re.search(
-        r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff"
-        r"\uac00-\ud7af\u0900-\u097f\u0b80-\u0bff]",
-        value,
-    ))
+    has_native_script = contains_native_script(value)
     if has_native_script:
         return True
     language = re.sub(r"[^a-z]", "", str(source_language or "").casefold())
@@ -142,7 +185,7 @@ def is_likely_character_name_candidate(
     # but do not let a mixed-script phrase smuggle ordinary English words through.
     if is_common_english_phrase(value):
         return False
-    has_native_script = bool(re.search(r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uac00-\ud7af]", value))
+    has_native_script = contains_native_script(value)
     if has_native_script:
         return len(value) >= 2 and not re.search(r"[。！？!?;:，,。…]", value) and len(value.split()) <= 3
 

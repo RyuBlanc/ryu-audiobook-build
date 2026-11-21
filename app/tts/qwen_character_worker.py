@@ -21,6 +21,7 @@ if str(_APPLICATION_ROOT) not in sys.path:
 from app.tts.expression import (
     EXPRESSION_STYLES,
     classify_expression,
+    classify_expression_with_context,
     default_voice_design_anchor_text,
     expression_instruction,
     expression_temperature,
@@ -380,10 +381,26 @@ def _actual_backend(device: str) -> str:
     return "other"
 
 
+def _request_expression_style(request: dict) -> str:
+    context = request.get("story_context")
+    if not isinstance(context, dict):
+        context = {"before": request.get("context_before", ""), "after": request.get("context_after", "")}
+    return str(request.get("expression_style") or classify_expression_with_context(
+        str(request.get("text") or ""), str(context.get("before") or ""), str(context.get("after") or "")
+    ))
+
+
 def _voice_design_instruct(request: dict, style: str | None = None) -> str:
     base = str(request.get("instruct") or "").strip()
-    selected = style or classify_expression(str(request.get("text") or ""))
-    return expression_instruction(base, selected)
+    selected = style or _request_expression_style(request)
+    context = request.get("story_context")
+    if not isinstance(context, dict):
+        context = {"before": request.get("context_before", ""), "after": request.get("context_after", "")}
+    return expression_instruction(
+        base, selected,
+        context_before=str(context.get("before") or ""),
+        context_after=str(context.get("after") or ""),
+    )
 def _recommended_max_new_tokens(text: str | None) -> int:
     chars = max(1, len(str(text or "")))
     estimated = int(chars * 1.10)
@@ -454,7 +471,7 @@ def _generate_custom(model, request: dict, output: Path) -> None:
     speaker = str(request.get("speaker") or "").strip()
     if not speaker:
         raise RuntimeError("A Qwen CustomVoice speaker is required.")
-    style = str(request.get("expression_style") or classify_expression(str(request.get("text") or "")))
+    style = _request_expression_style(request)
     request = {
         **request,
         "expression_style": style,
@@ -479,7 +496,7 @@ def _generate_design(model, request: dict, output: Path) -> None:
     """Generate narration with the same VoiceDesign engine used by the UI preview."""
     import soundfile as sf
 
-    style = str(request.get("expression_style") or classify_expression(str(request.get("text") or "")))
+    style = _request_expression_style(request)
     request = {
         **request,
         "expression_style": style,
@@ -501,7 +518,7 @@ def _generate_design(model, request: dict, output: Path) -> None:
 def _generate_design_preview(model, request: dict, output: Path) -> None:
     import soundfile as sf
 
-    style = str(request.get("expression_style") or classify_expression(str(request.get("text") or "")))
+    style = _request_expression_style(request)
     request = {
         **request,
         "expression_style": style,
@@ -682,7 +699,7 @@ def _prepare_design_clone(model, request: dict, args):
 def _generate_design_locked(model, prompts, request: dict, output: Path) -> None:
     import soundfile as sf
 
-    style = classify_expression(str(request.get("text") or ""))
+    style = _request_expression_style(request)
     prompt = prompts.get(reference_style(style)) or prompts.get("neutral")
     if prompt is None:
         raise RuntimeError("The canonical Qwen voice identity is not available.")
@@ -714,7 +731,7 @@ def _generate_clone(model, request: dict, output: Path) -> None:
         raise RuntimeError(f"Qwen reference audio was not found: {ref_audio}")
     ref_text = str(request.get("ref_text") or "").strip()
     x_vector_only = bool(request.get("x_vector_only_mode", not bool(ref_text)))
-    style = str(request.get("expression_style") or classify_expression(str(request.get("text") or "")))
+    style = _request_expression_style(request)
     request = {
         **request,
         "expression_style": style,
@@ -949,9 +966,17 @@ def server(args) -> int:
                     raise RuntimeError("Qwen batch contains empty narration text.")
 
                 requested_styles = request.get("styles") or [None] * len(texts)
+                raw_contexts = request.get("contexts")
+                contexts = (
+                    [row if isinstance(row, dict) else {} for row in raw_contexts]
+                    if isinstance(raw_contexts, list) and len(raw_contexts) == len(texts)
+                    else [{"before": "", "after": ""} for _ in texts]
+                )
                 styles = [
-                    str(style) if style else classify_expression(text)
-                    for text, style in zip(texts, requested_styles)
+                    str(style) if style else classify_expression_with_context(
+                        text, contexts[i].get("before"), contexts[i].get("after")
+                    )
+                    for i, (text, style) in enumerate(zip(texts, requested_styles))
                 ]
                 import soundfile as sf
                 if active_task == "design-preview":
@@ -974,7 +999,11 @@ def server(args) -> int:
                             "max_new_tokens": min(_recommended_max_new_tokens(longest_text), 1024),
                         }
                         design_instructions = [
-                            _voice_design_instruct({**request, "text": texts[index]}, style)
+                            _voice_design_instruct({
+                                **request, "text": texts[index],
+                                "context_before": contexts[index].get("before", ""),
+                                "context_after": contexts[index].get("after", ""),
+                            }, style)
                             for index in indexes
                         ]
                         _set_seed(request.get("seed"))

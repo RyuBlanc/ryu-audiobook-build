@@ -7413,6 +7413,7 @@ class PremiumV2Bridge(QObject):
             from app.ai.learning_context import load_project_learning_context
             from app.tts.pronunciation_suggester import (
                 is_pronunciation_override_candidate, is_likely_character_name_candidate,
+                is_pronunciation_term_candidate, contains_native_script,
             )
             from app.chapters.characters import (
                 is_likely_character_name, is_user_confirmed_character_record,
@@ -7482,7 +7483,7 @@ class PremiumV2Bridge(QObject):
                     spoken = _normalize_pronunciation_text(raw.get("spoken"), "Pronunciation", 1000)
                 except ValueError:
                     continue
-                native_script = bool(re.search(r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uac00-\ud7af]", written))
+                native_script = contains_native_script(written)
                 present = (
                     written.casefold() in source_text.casefold()
                     if native_script else
@@ -7506,7 +7507,15 @@ class PremiumV2Bridge(QObject):
                     script=raw.get("script"),
                     known_names=known_pronunciation_names,
                 )
-                if not present or not candidate_is_name or not pronunciation_evidence:
+                foreign_term_evidence = is_pronunciation_term_candidate(
+                    written,
+                    source_language=raw.get("source_language"),
+                    script=raw.get("script"),
+                    confidence=raw.get("confidence") or 0,
+                    reason=raw.get("reason"),
+                    known_names=known_pronunciation_names,
+                )
+                if not present or not (candidate_is_name or foreign_term_evidence) or not pronunciation_evidence:
                     continue
                 if key in seen:
                     continue
@@ -12688,6 +12697,21 @@ class PremiumV2Window(QMainWindow):
             self.web.load(QUrl.fromLocalFile(str(path.resolve())))
         self.apply_window_size(str(QSettings("RyuBlanc", "Ryu's Audiobook").value("ui/window_size", "auto")))
 
+
+    @staticmethod
+    def _cursor_webengine_script(cursor_url: str) -> str:
+        """Build a WebEngine cursor rule with valid CSS url() quoting."""
+        return (
+            "(function(){const id='ryuNativeCursorPackStyle';"
+            "let style=document.getElementById(id);"
+            "if(!style){style=document.createElement('style');style.id=id;(document.head||document.documentElement).appendChild(style);}"
+            "const url=" + json.dumps(str(cursor_url)) + ";"
+            "style.textContent='html,body,html *,body *,input,textarea,select,button,a,[role=button],[role=menuitem]{cursor:url(\"'+url+'\") 2 2,auto!important;}';"
+            "document.documentElement.style.setProperty('cursor','url(\"'+url+'\") 2 2,auto','important');"
+            "})();"
+        )
+
+
     def _apply_icon_pack_cursor(self) -> None:
         """Apply the selected pointer in both the native host and WebEngine DOM."""
         settings = QSettings("RyuBlanc", "Ryu's Audiobook")
@@ -12751,15 +12775,7 @@ class PremiumV2Window(QMainWindow):
         finally:
             image_buffer.close()
         cursor_url = "data:image/png;base64," + cursor_data
-        script = (
-            "(function(){const id='ryuNativeCursorPackStyle';"
-            "let style=document.getElementById(id);"
-            "if(!style){style=document.createElement('style');style.id=id;(document.head||document.documentElement).appendChild(style);}"
-            "const url=" + json.dumps(cursor_url) + ";"
-            "style.textContent='html,body,html *,body *,input,textarea,select,button,a,[role=button],[role=menuitem]{cursor:url(\\\"'+url+'\\\") 2 2,auto!important;}';"
-            "document.documentElement.style.setProperty('cursor','url(\\\"'+url+'\\\") 2 2,auto','important');"
-            "})();"
-        )
+        script = self._cursor_webengine_script(cursor_url)
         try:
             self.web.page().runJavaScript(script)
         except RuntimeError:

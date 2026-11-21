@@ -359,6 +359,20 @@ def prepare_chapter_plan(
     )
 
 
+
+def story_context_for_chunk(
+    chunks: list[str], index: int, *, context_chars: int = 420
+) -> dict[str, str]:
+    """Return bounded adjacent story text without modifying the words spoken."""
+    if not 0 <= int(index) < len(chunks):
+        raise IndexError("Chunk context index is outside the chapter.")
+    radius = max(1, min(3, int(context_chars) // 140))
+    before = " ".join(str(v or "").strip() for v in chunks[max(0, index-radius):index]).strip()
+    after = " ".join(str(v or "").strip() for v in chunks[index+1:index+1+radius]).strip()
+    limit = max(120, min(1200, int(context_chars)))
+    return {"before": before[-limit:], "after": after[:limit]}
+
+
 def generate_chapter(
     chapter: Chapter,
     provider: TTSProvider,
@@ -460,6 +474,9 @@ def generate_chapter(
                     )
                     for i in batch_indices
                 ]
+                batch_context_setter = getattr(provider, "set_batch_contexts", None)
+                if callable(batch_context_setter):
+                    batch_context_setter([story_context_for_chunk(chunks, i) for i in batch_indices])
                 batch_started = time.monotonic()
                 try:
                     try:
@@ -473,7 +490,10 @@ def generate_chapter(
                         batch_disabled = True
                     else:
                         raise
+                    single_context_setter = getattr(provider, "set_generation_context", None)
                     for i in batch_indices:
+                        if callable(single_context_setter):
+                            single_context_setter(story_context_for_chunk(chunks, i))
                         output = chunks_dir / f"{i + 1:05d}.wav"
                         provider.synthesize(chunks[i], output, chunks_with_voices[i][1])
                 # Stop the synthesis timer before disk validation, checkpoint
@@ -503,6 +523,9 @@ def generate_chapter(
             index += 1
             continue
 
+        context_setter = getattr(provider, "set_generation_context", None)
+        if callable(context_setter):
+            context_setter(story_context_for_chunk(chunks, index))
         synthesis_started = time.monotonic()
         if isinstance(chunk_voice, list):
             synthesize_voice_set(provider, chunks[index], chunk_voice, output)

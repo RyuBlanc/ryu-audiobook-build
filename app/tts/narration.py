@@ -132,7 +132,11 @@ def apply_pronunciation_dictionary_with_counts(
     # Latin-aware boundaries for Latin entries, so "ariax" remains protected
     # while "Rimuruが来た" can use a saved Rimuru pronunciation.
     latin_word_char = r"A-Za-zÀ-ÖØ-öø-ÿĀ-ž0-9_"
-    native_script = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uac00-\ud7af]")
+    native_script = re.compile(
+        r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uac00-\ud7af"
+        r"\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff"
+        r"\u0900-\u0dff\u0e00-\u0eff\u1000-\u109f\u1780-\u17ff]"
+    )
     for written, _spoken in entries:
         escaped = re.escape(written)
         if native_script.search(written):

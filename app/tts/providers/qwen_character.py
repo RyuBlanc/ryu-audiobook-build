@@ -31,6 +31,7 @@ from ..qwen_character_runtime import (
 from ..expression import (
     EXPRESSION_PIPELINE_VERSION,
     classify_expression,
+    classify_expression_with_context,
     default_voice_design_anchor_text,
 )
 from ..qwen_model_preference import normalize_qwen_backend_preference
@@ -59,23 +60,20 @@ def _qwen_audio_file_signature(raw_path: Path | None) -> str:
 
 
 def _request_language_for_text(language: str | None, text: str) -> str:
-    """Keep an explicitly selected Qwen language for native-script narration.
-
-    Auto-detection is a compatibility aid for English profiles that contain
-    occasional CJK names or phrases; it must not override a saved Japanese,
-    Korean, or Chinese language selection.
-    """
+    """Do not switch English narration to Auto for a single foreign name."""
     selected = str(language or "English").strip() or "English"
     key = selected.casefold()
-    has_cjk = any(
-        "\u3040" <= char <= "\u30ff"
-        or "\u4e00" <= char <= "\u9fff"
-        or "\uac00" <= char <= "\ud7af"
-        for char in str(text or "")
-    )
     is_english = key.startswith("english") or key in {"en", "eng"} or key.startswith(("en-", "en_"))
     is_automatic = key in {"auto", "auto-detect", "autodetect"}
-    return "Auto" if has_cjk and (is_english or is_automatic) else selected
+    cjk_count = sum(
+        1 for char in str(text or "")
+        if "\u3040" <= char <= "\u30ff" or "\u4e00" <= char <= "\u9fff" or "\uac00" <= char <= "\ud7af"
+    )
+    letter_count = max(1, sum(1 for char in str(text or "") if char.isalpha()))
+    substantial_cjk = cjk_count >= 7 or (cjk_count >= 4 and cjk_count / letter_count >= 0.18)
+    if is_automatic and cjk_count >= 3:
+        return "Auto"
+    return "Auto" if substantial_cjk and is_english else selected
 
 
 class QwenCharacterProvider(TTSProvider):
@@ -159,6 +157,22 @@ class QwenCharacterProvider(TTSProvider):
         self._stdout_queue: queue.Queue[str | None] | None = None
         self._stdout_thread: threading.Thread | None = None
         self._worker_log = None
+        self._generation_context: dict[str, str] = {"before": "", "after": ""}
+        self._batch_contexts: list[dict[str, str]] = []
+
+    def set_generation_context(self, context: dict | None = None) -> None:
+        context = context if isinstance(context, dict) else {}
+        self._generation_context = {
+            "before": str(context.get("before") or "")[-1200:],
+            "after": str(context.get("after") or "")[:1200],
+        }
+
+    def set_batch_contexts(self, contexts: list[dict] | None = None) -> None:
+        self._batch_contexts = [
+            {"before": str(row.get("before") or "")[-1200:],
+             "after": str(row.get("after") or "")[:1200]}
+            for row in (contexts or []) if isinstance(row, dict)
+        ]
 
     def _resolve_kind(self, requested: str) -> str:
         requested = (requested or "auto").lower()
@@ -237,11 +251,7 @@ class QwenCharacterProvider(TTSProvider):
                 self.voice_id,
                 self.language,
                 self.qwen_mode,
-                (
-                    EXPRESSION_PIPELINE_VERSION
-                    if self.qwen_mode in {"design", "design-preview"}
-                    else ""
-                ),
+                EXPRESSION_PIPELINE_VERSION,
                 self.model_kind,
                 str(self.backend or "automatic"),
                 str(self.low_memory),
@@ -586,6 +596,7 @@ class QwenCharacterProvider(TTSProvider):
         if not self._worker or not self._worker.stdin:
             raise RuntimeError("Offline character worker is unavailable.")
         request_language = _request_language_for_text(self.language, text)
+        story_context = dict(self._generation_context)
         request = {
             "text": text,
             "output": str(output_path.resolve()),
@@ -598,7 +609,9 @@ class QwenCharacterProvider(TTSProvider):
             "anchor_text": self.qwen_anchor_text,
             "profile_id": self.qwen_profile_id,
             "longform": self.qwen_mode != "design-preview",
-            "expression_style": classify_expression(text),
+            "expression_style": classify_expression_with_context(text, story_context.get("before"), story_context.get("after")),
+            "context_before": story_context.get("before", ""),
+            "context_after": story_context.get("after", ""),
         }
         if self.qwen_mode == "clone":
             assert reference_path is not None
@@ -662,10 +675,19 @@ class QwenCharacterProvider(TTSProvider):
             raise ValueError("Qwen batch contains empty narration text.")
 
         batch_language = _request_language_for_text(self.language, "\n".join(texts))
+        contexts = self._batch_contexts if len(self._batch_contexts) == len(texts) else [
+            {"before": "", "after": ""} for _ in texts
+        ]
+        self._batch_contexts = []
+        styles = [
+            classify_expression_with_context(text, context.get("before"), context.get("after"))
+            for text, context in zip(texts, contexts)
+        ]
         request = {
             "texts": texts,
             "outputs": outputs,
-            "styles": [classify_expression(text) for text in texts],
+            "styles": styles,
+            "contexts": contexts,
             "speaker": self.voice_id,
             "language": batch_language,
             "instruct": self.instruct,
@@ -673,7 +695,6 @@ class QwenCharacterProvider(TTSProvider):
             "anchor_path": str(self.qwen_anchor_path.resolve()) if self.qwen_anchor_path else "",
             "anchor_text": self.qwen_anchor_text,
             "profile_id": self.qwen_profile_id,
-            "styles": [classify_expression(text) for text in texts],
             "longform": True,
         }
         self._status(

@@ -12,6 +12,8 @@ from app.tts.expression import classify_expression, expression_temperature
 from app.tts import qwen_character_worker
 from app.tts.providers.qwen_character import _request_language_for_text
 from app.tts.narration import apply_pronunciation_dictionary_with_counts
+from app.tts.pronunciation_suggester import is_pronunciation_term_candidate
+from app.tts.generator import story_context_for_chunk
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -80,6 +82,72 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
         self.assertEqual(converted, "Rimuruが来た。Rimuru가 왔다。")
         self.assertEqual(counts, {"リムル":1,"리무루":1})
 
+    def test_webengine_cursor_builder_uses_valid_css_url_quoting_for_all_surfaces(self):
+        from app.ui.premium_v2_host import PremiumV2Window
+        script = PremiumV2Window._cursor_webengine_script("data:image/png;base64,AAAA")
+        self.assertIn("cursor:url(\"'+url+'\")", script)
+        self.assertIn("html *,body *", script)
+        self.assertIn("!important", script)
+        self.assertNotIn('url(\\\"', script)
+
+    def test_story_context_changes_short_reactions_without_overriding_full_sentences(self):
+        from app.tts.expression import classify_expression_with_context
+        self.assertEqual(classify_expression_with_context("Yes...", "They finally won the battle.", ""), "warm")
+        self.assertEqual(
+            classify_expression_with_context("Yes.", "She was terrified; the monster had cornered them.", ""),
+            "tense",
+        )
+        self.assertEqual(
+            classify_expression_with_context("The monster attacked.", "They finally won earlier.", ""),
+            "neutral",
+        )
+
+    def test_explicit_adjacent_speech_attribution_controls_delivery(self):
+        from app.tts.expression import classify_expression_with_context
+        self.assertEqual(classify_expression_with_context('"Come here."', "She whispered,", ""), "soft")
+        self.assertEqual(classify_expression_with_context('"Stop!"', "", "he shouted."), "tense")
+
+    def test_context_windows_are_bounded_and_preserve_story_order(self):
+        chunks = ["Opening scene.", "She was afraid.", "Yes...", "The door opened."]
+        context = story_context_for_chunk(chunks, 2, context_chars=300)
+        self.assertIn("She was afraid.", context["before"])
+        self.assertIn("The door opened.", context["after"])
+        self.assertNotIn("Yes...", context["before"] + context["after"])
+
+    def test_english_sentence_with_one_foreign_name_does_not_switch_qwen_language(self):
+        self.assertEqual(_request_language_for_text("English", "The story follows リムル."), "English")
+        self.assertEqual(_request_language_for_text("English", "リムルが来た。"), "Auto")
+
+    def test_reviewed_dictionary_matches_devanagari_tamil_telugu_and_arabic(self):
+        source = "राम आया।தமிழ் சொல். తెలుగు మాట. مرحبا بك."
+        rules = [
+            {"written_form":"राम","spoken_form":"Raam"},
+            {"written_form":"தமிழ்","spoken_form":"Thamizh"},
+            {"written_form":"తెలుగు","spoken_form":"Telugu"},
+            {"written_form":"مرحبا","spoken_form":"Marhaba"},
+        ]
+        converted, counts = apply_pronunciation_dictionary_with_counts(source, rules)
+        self.assertEqual(converted, "Raam आया।Thamizh சொல். Telugu మాట. Marhaba بك.")
+        self.assertEqual(len(counts), 4)
+
+    def test_foreign_romanized_vocabulary_needs_language_and_confidence_evidence(self):
+        self.assertTrue(is_pronunciation_term_candidate(
+            "Hyeon-woo", source_language="Korean", script="Latin",
+            confidence=0.94, reason="Romanized Korean name."
+        ))
+        self.assertTrue(is_pronunciation_term_candidate(
+            "Thirukkural", source_language="Tamil", script="Latin",
+            confidence=0.96, reason="Tamil cultural term."
+        ))
+        self.assertFalse(is_pronunciation_term_candidate(
+            "Beautiful", source_language="Japanese", script="Latin",
+            confidence=0.99, reason="Model guess."
+        ))
+        self.assertFalse(is_pronunciation_term_candidate(
+            "Randomword", source_language="Auto-detect", script="Latin",
+            confidence=0.99, reason="No source evidence."
+        ))
+
     def test_customvoice_receives_contextual_instruction_and_restrained_sampling(self):
         model = Mock()
         model.generate_custom_voice.return_value = ([object()], 24000)
@@ -88,12 +156,14 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
             output = Path(temp) / "custom.wav"
             qwen_character_worker._generate_custom(
                 model,
-                {"text": "Yes!", "speaker": "Ryan", "language": "English", "instruct": "Warm male voice"},
+                {"text": "Yes...", "speaker": "Ryan", "language": "English", "instruct": "Warm male voice", "context_before": "They finally won the battle.", "context_after": "The crowd cheered."},
                 output,
             )
         kwargs = model.generate_custom_voice.call_args.kwargs
         self.assertIn("Default to low-intensity", kwargs["instruct"])
         self.assertIn("same", kwargs["instruct"].lower())
+        self.assertIn("PRECEDING STORY CONTEXT", kwargs["instruct"])
+        self.assertIn("They finally won the battle.", kwargs["instruct"])
         self.assertLess(kwargs["temperature"], 0.8)
         self.assertLess(kwargs["subtalker_temperature"], 0.8)
 
@@ -105,12 +175,14 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
             output = Path(temp) / "design.wav"
             qwen_character_worker._generate_design_preview(
                 model,
-                {"text": "Yes...", "language": "Japanese", "instruct": "Calm character", "expression_style": "thoughtful"},
+                {"text": "Yes...", "language": "Japanese", "instruct": "Calm character", "expression_style": "thoughtful", "context_before": "The danger had passed.", "context_after": "She smiled."},
                 output,
             )
         kwargs = model.generate_voice_design.call_args.kwargs
         self.assertEqual(kwargs["language"], "Japanese")
         self.assertIn("brief hesitation", kwargs["instruct"])
+        self.assertIn("The danger had passed.", kwargs["instruct"])
+        self.assertIn("She smiled.", kwargs["instruct"])
         self.assertLess(kwargs["temperature"], 0.8)
 
     def test_qwen_clone_keeps_reference_audio_and_uses_lower_contextual_temperature(self):
@@ -123,7 +195,7 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
             output = Path(temp) / "clone.wav"
             qwen_character_worker._generate_clone(
                 model,
-                {"text": "No!", "reference": str(reference), "language": "Korean", "ref_text": "안녕하세요"},
+                {"text": "Yes...", "reference": str(reference), "language": "Korean", "ref_text": "안녕하세요", "context_before": "They finally won the battle."},
                 output,
             )
         kwargs = model.generate_voice_clone.call_args.kwargs
@@ -131,6 +203,7 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
         self.assertEqual(kwargs["ref_text"], "안녕하세요")
         self.assertLess(kwargs["temperature"], 0.8)
         self.assertLess(kwargs["subtalker_temperature"], 0.8)
+        self.assertAlmostEqual(kwargs["temperature"], expression_temperature("warm"))
 
 
 if __name__ == "__main__":
