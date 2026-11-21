@@ -60,8 +60,12 @@ class QwenSpeechQualityRegressionTests(unittest.TestCase):
 
     def test_classifier_recognizes_suspicion_without_mapping_it_to_anger(self):
         self.assertEqual(classify_expression("He looked at the sealed letter suspiciously."), "suspicious")
+        # Saved VoiceDesign/Base keeps one acoustic identity anchor; these
+        # related emotional families therefore share the cautious reference
+        # family but receive distinct generation sampling values.
         self.assertEqual(reference_style("suspicious"), "concerned")
-        self.assertNotEqual(reference_style("suspicious"), reference_style("angry"))
+        self.assertEqual(reference_style("angry"), "concerned")
+        self.assertNotEqual(expression_temperature("suspicious"), expression_temperature("angry"))
 
     def test_saved_voice_silent_output_retries_once_with_same_identity_and_style(self):
         audible = np.sin(np.linspace(0.0, 8.0 * math.pi, 4000, dtype=np.float32))
