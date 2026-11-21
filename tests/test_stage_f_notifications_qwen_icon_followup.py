@@ -305,7 +305,11 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
         from app.ui.premium_v2_host import PremiumV2Window
         script = PremiumV2Window._cursor_webengine_script("data:image/png;base64,AAAA")
         self.assertIn("cursor:url(\"'+url+'\")", script)
-        self.assertIn("html *,body *", script)
+        self.assertIn(":root:root *", script)
+        self.assertIn("::before", script)
+        self.assertIn("::after", script)
+        self.assertIn("document.documentElement.style.setProperty", script)
+        self.assertIn("document.body.style.setProperty", script)
         self.assertIn("!important", script)
         self.assertNotIn('url(\\\"', script)
 
