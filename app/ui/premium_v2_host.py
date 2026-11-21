@@ -12730,8 +12730,9 @@ class PremiumV2Window(QMainWindow):
             "let style=document.getElementById(id);"
             "if(!style){style=document.createElement('style');style.id=id;(document.head||document.documentElement).appendChild(style);}"
             "const url=" + json.dumps(str(cursor_url)) + ";"
-            "style.textContent='html,body,html *,body *,input,textarea,select,button,a,[role=button],[role=menuitem]{cursor:url(\"'+url+'\") 2 2,auto!important;}';"
+            "style.textContent=':root:root,:root:root *,:root:root *::before,:root:root *::after{cursor:url(\"'+url+'\") 2 2,auto!important;}';"
             "document.documentElement.style.setProperty('cursor','url(\"'+url+'\") 2 2,auto','important');"
+            "if(document.body)document.body.style.setProperty('cursor','url(\"'+url+'\") 2 2,auto','important');"
             "})();"
         )
 
@@ -12758,6 +12759,9 @@ class PremiumV2Window(QMainWindow):
             clear_web_cursor()
             self.unsetCursor()
             self.web.unsetCursor()
+            viewport = self.web.viewport()
+            if viewport is not None:
+                viewport.unsetCursor()
             return
 
         assets_directory = frontend_path().parent.parent
@@ -12772,6 +12776,9 @@ class PremiumV2Window(QMainWindow):
             clear_web_cursor()
             self.unsetCursor()
             self.web.unsetCursor()
+            viewport = self.web.viewport()
+            if viewport is not None:
+                viewport.unsetCursor()
             return
         pixmap = QPixmap(str(icon_path))
         if pixmap.isNull():
@@ -12780,6 +12787,9 @@ class PremiumV2Window(QMainWindow):
             clear_web_cursor()
             self.unsetCursor()
             self.web.unsetCursor()
+            viewport = self.web.viewport()
+            if viewport is not None:
+                viewport.unsetCursor()
             return
 
         # Use one small PNG for both Qt's native cursor and the WebEngine DOM.
@@ -12794,6 +12804,12 @@ class PremiumV2Window(QMainWindow):
         self._set_application_icon_pack_cursor(cursor)
         self.setCursor(cursor)
         self.web.setCursor(cursor)
+        # QWebEngineView is a QAbstractScrollArea: its viewport is the actual
+        # widget receiving pointer events over the rendered page. Set the cursor
+        # there too; otherwise the viewport's cursor can shadow the outer view.
+        viewport = self.web.viewport()
+        if viewport is not None:
+            viewport.setCursor(cursor)
 
         image_buffer = QBuffer()
         if not image_buffer.open(QIODevice.OpenModeFlag.WriteOnly):
