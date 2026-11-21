@@ -750,7 +750,7 @@ class RegressionTests(unittest.TestCase):
             workflow,
         )
         self.assertIn(
-            String.raw`$sourceAudioValidation = Join-Path (Get-Location) 'app\tts\audio_validation.py'`,
+            "$sourceAudioValidation = Join-Path (Get-Location) 'app\\tts\\audio_validation.py'",
             workflow,
         )
         self.assertIn(
