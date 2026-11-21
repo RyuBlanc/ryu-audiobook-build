@@ -52,6 +52,7 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
         self.assertIn("data:image/png;base64,", cursor)
         self.assertIn("self.web.page().runJavaScript(script)", cursor)
         self.assertIn("self.web.setCursor(cursor)", cursor)
+        self.assertNotIn(".viewport(", cursor)
 
     def test_icon_pack_selection_and_import_replace_the_live_cursor_immediately(self):
         import base64
@@ -138,7 +139,8 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
                 self.restore_calls.append(True)
 
         application = FakeApplication()
-        web = Mock()
+        # StableQWebEngineView is a QWidget and intentionally has no viewport().
+        web = Mock(spec_set=("page", "setCursor", "unsetCursor"))
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             frontend = root / "assets" / "frontend" / "index.html"
@@ -153,7 +155,6 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
                 image.fill(pixel)
                 self.assertTrue(image.save(str(path), "PNG"))
 
-            web.viewport.return_value = Mock()
             window = types.SimpleNamespace(
                 web=web,
                 _icon_pack_cursor_override_active=False,
@@ -188,17 +189,21 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
                 patch("app.ui.premium_v2_host.frontend_path", return_value=frontend),
                 patch("app.ui.premium_v2_host.settings_root", return_value=root / "settings"),
             ):
-                # A fresh Aether startup is a strict no-op: do not access
-                # the WebEngine viewport, mutate cursors, or run page JavaScript
-                # before the first document has loaded.
+                # A clean Aether launch remains a no-op before the first document.
                 PremiumV2Window._apply_icon_pack_cursor(window)
-                web.viewport.assert_not_called()
                 web.page.return_value.runJavaScript.assert_not_called()
                 window.unsetCursor.assert_not_called()
                 web.unsetCursor.assert_not_called()
                 self.assertEqual(application.restore_calls, [])
                 self.assertEqual(settings.sync_count, 0)
 
+                # A saved non-default preference is applied during construction.
+                # This path must work with StableQWebEngineView, which has no viewport().
+                settings.values["ui/icon_pack"] = "drake"
+                PremiumV2Window._apply_icon_pack_cursor(window)
+                self.assertEqual(application.current.path, drake_asset)
+
+                # The live settings path must still replace the selected pointer.
                 PremiumV2Bridge._settings_save(bridge, {"icon_pack": "drake"})
                 self.assertEqual(application.current.path, drake_asset)
 
@@ -214,29 +219,27 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
                 self.assertTrue(custom_path.is_file())
                 self.assertEqual(application.current.path, custom_path)
 
-                # Choosing Aether again restores the original cursor on every
-                # surface, including the WebEngine viewport.
+                # Choosing Aether again restores the native host and document cursor.
                 PremiumV2Bridge._settings_save(bridge, {"icon_pack": "aether"})
                 self.assertIsNone(application.current)
                 self.assertFalse(window._icon_pack_cursor_override_active)
 
             self.assertEqual(len(application.set_calls), 1)
-            self.assertEqual(len(application.change_calls), 1)
-            self.assertEqual(application.change_calls[0].path, custom_path)
+            self.assertEqual(len(application.change_calls), 2)
+            self.assertEqual(application.change_calls[0].path, drake_asset)
+            self.assertEqual(application.change_calls[1].path, custom_path)
             self.assertEqual(len(application.restore_calls), 1)
             self.assertEqual(settings.value("ui/icon_pack"), "aether")
             self.assertEqual(settings.sync_count, 3)
 
             javascript_calls = web.page.return_value.runJavaScript.call_args_list
-            # Drake selection, custom import, and return-to-Aether cleanup.
-            # There must be no fourth call from the initial Aether startup.
-            self.assertEqual(len(javascript_calls), 3)
+            # Persisted Drake startup, settings refresh, custom import, and Aether cleanup.
+            self.assertEqual(len(javascript_calls), 4)
             custom_data_url = "data:image/png;base64," + base64.b64encode(custom_path.read_bytes()).decode("ascii")
-            self.assertIn(custom_data_url, javascript_calls[1].args[0])
+            self.assertIn(custom_data_url, javascript_calls[2].args[0])
             self.assertEqual(window.setCursor.call_args.args[0].path, custom_path)
             self.assertEqual(web.setCursor.call_args.args[0].path, custom_path)
-            self.assertEqual(web.viewport.return_value.setCursor.call_args.args[0].path, custom_path)
-            web.viewport.return_value.unsetCursor.assert_called_once_with()
+            self.assertFalse(hasattr(web, "viewport"))
 
     def test_icon_pack_cursor_uses_application_override_without_stacking_and_restores_on_aether(self):
         from app.ui.premium_v2_host import PremiumV2Window

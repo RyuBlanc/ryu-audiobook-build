@@ -12769,9 +12769,6 @@ class PremiumV2Window(QMainWindow):
             clear_web_cursor()
             self.unsetCursor()
             self.web.unsetCursor()
-            viewport = self.web.viewport()
-            if viewport is not None:
-                viewport.unsetCursor()
             return
 
         assets_directory = frontend_path().parent.parent
@@ -12782,26 +12779,18 @@ class PremiumV2Window(QMainWindow):
         icon_path = Path(str(settings.value("ui/custom_icon_path", "") or "")) if pack == "custom" else built_in.get(pack, Path())
         if not icon_path.is_file():
             log.warning("Selected icon pack '%s' has no readable cursor image; restoring Aether.", pack)
-            had_custom_cursor = bool(getattr(self, "_icon_pack_cursor_override_active", False))
             self._clear_application_icon_pack_cursor()
             clear_web_cursor()
             self.unsetCursor()
             self.web.unsetCursor()
-            viewport = self.web.viewport()
-            if had_custom_cursor and viewport is not None:
-                viewport.unsetCursor()
             return
         pixmap = QPixmap(str(icon_path))
         if pixmap.isNull():
             log.warning("Selected icon pack '%s' could not be decoded; restoring Aether.", pack)
-            had_custom_cursor = bool(getattr(self, "_icon_pack_cursor_override_active", False))
             self._clear_application_icon_pack_cursor()
             clear_web_cursor()
             self.unsetCursor()
             self.web.unsetCursor()
-            viewport = self.web.viewport()
-            if had_custom_cursor and viewport is not None:
-                viewport.unsetCursor()
             return
 
         # Use one small PNG for both Qt's native cursor and the WebEngine DOM.
@@ -12816,12 +12805,9 @@ class PremiumV2Window(QMainWindow):
         self._set_application_icon_pack_cursor(cursor)
         self.setCursor(cursor)
         self.web.setCursor(cursor)
-        # QWebEngineView is a QAbstractScrollArea: its viewport is the actual
-        # widget receiving pointer events over the rendered page. Set the cursor
-        # there too; otherwise the viewport's cursor can shadow the outer view.
-        viewport = self.web.viewport()
-        if viewport is not None:
-            viewport.setCursor(cursor)
+        # StableQWebEngineView exposes QWidget's cursor API; unlike a scroll
+        # area, it has no viewport(). The application override, outer WebEngine
+        # widget and document CSS cover native and rendered-page pointer states.
 
         image_buffer = QBuffer()
         if not image_buffer.open(QIODevice.OpenModeFlag.WriteOnly):
