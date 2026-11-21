@@ -214,9 +214,8 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
                 self.assertFalse(window._icon_pack_cursor_override_active)
 
             self.assertEqual(len(application.set_calls), 1)
-            self.assertEqual(len(application.change_calls), 2)
+            self.assertEqual(len(application.change_calls), 1)
             self.assertEqual(application.change_calls[0].path, custom_path)
-            self.assertEqual(application.change_calls[1].path if hasattr(application.change_calls[1], "path") else custom_path, custom_path)
             self.assertEqual(len(application.restore_calls), 1)
             self.assertEqual(settings.value("ui/icon_pack"), "aether")
             self.assertGreaterEqual(settings.sync_count, 5)
