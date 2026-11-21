@@ -15,7 +15,10 @@ class FakeVoiceDesignModel:
         self.calls.append((text, language, instruct, kwargs))
         count = len(text) if isinstance(text, list) else 1
         import numpy as np
-        return [np.zeros(2400, dtype=np.float32) for _ in range(count)], 24000
+        # Return a non-silent synthetic waveform so the smoke covers the
+        # worker's real signal-integrity guard without pretending to run TTS.
+        signal = np.sin(np.linspace(0.0, 24.0 * np.pi, 2400, dtype=np.float32))
+        return [signal.copy() for _ in range(count)], 24000
 
 
 def main() -> None:
