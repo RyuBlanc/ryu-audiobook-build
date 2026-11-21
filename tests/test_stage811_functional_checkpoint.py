@@ -274,9 +274,16 @@ class FunctionalCheckpoint20261111Tests(unittest.TestCase):
         self.assertEqual(resolved.qwen_prompt, "Saved profile prompt")
         self.assertEqual(resolved.qwen_seed, 3471)
 
-    def test_profile_load_notification_does_not_create_plain_text_toast(self):
+    def test_profile_load_notification_is_retained_without_creating_plain_text_toast(self):
         adapter = (Path(__file__).resolve().parents[1] / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
-        self.assertIn("options.toast !== false", adapter)
+        start = adapter.index("const message = (text, error = false, options = {}) =>")
+        end = adapter.index("const act =", start)
+        helper = adapter[start:end]
+        self.assertIn("ryuNotificationHistory.push(entry)", helper)
+        self.assertIn("persistRyuNotifications()", helper)
+        self.assertIn("toasts.classList.remove('show')", helper)
+        self.assertNotIn("toasts.classList.add('show')", helper)
+        self.assertNotIn("options.toast !== false", helper)
         self.assertIn(
             "Generate a fresh preview before playback or assignment.', false, {toast:false}",
             adapter,

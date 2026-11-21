@@ -69,7 +69,7 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
         self.assertEqual(_request_language_for_text("English", "Rimuru arrived."), "English")
 
     def test_japanese_and_korean_character_terms_can_use_explicit_reviewed_pronunciation_rules(self):
-        source = "リムルが来た。リ무루가 왔다。"
+        source = "リムルが来た。리무루가 왔다。"
         converted, counts = apply_pronunciation_dictionary_with_counts(
             source,
             [
