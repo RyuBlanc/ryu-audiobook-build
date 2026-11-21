@@ -301,7 +301,6 @@
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const RYU_NOTIFICATION_STORAGE_KEY = 'ryu-audiobook-notification-history-v1';
   const RYU_NOTIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
-  const RYU_NOTIFICATION_LIMIT = 100;
   function loadRyuNotificationHistory() {
     try {
       const parsed = JSON.parse(window.localStorage.getItem(RYU_NOTIFICATION_STORAGE_KEY) || '[]');
@@ -315,7 +314,7 @@
         text:String(item.text),
         error:Boolean(item.error),
         at:Number(item.at)
-      })).slice(-RYU_NOTIFICATION_LIMIT);
+      }));
     } catch (error) {
       console.warn('[Ryu notifications] Could not read saved notification history:', error);
       return [];
@@ -327,7 +326,7 @@
     try {
       window.localStorage.setItem(
         RYU_NOTIFICATION_STORAGE_KEY,
-        JSON.stringify(ryuNotificationHistory.slice(-RYU_NOTIFICATION_LIMIT))
+        JSON.stringify(ryuNotificationHistory)
       );
       return true;
     } catch (error) {
@@ -466,7 +465,6 @@
         at:now
       };
       ryuNotificationHistory.push(entry);
-      while (ryuNotificationHistory.length > RYU_NOTIFICATION_LIMIT) ryuNotificationHistory.shift();
       persistRyuNotifications();
       scheduleRyuNotificationExpiry();
       if ($('ryuNotificationsPanel')?.style.display !== 'none') renderRyuNotificationsPanel();

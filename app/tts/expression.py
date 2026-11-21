@@ -355,7 +355,7 @@ def classify_expression(text: str) -> str:
         if emphatic_context or value.count("!") >= 2:
             return "excited"
         if re.search(r"\b(?:yes|yeah|yep|right|okay|ok|sure|of course)\b", low):
-            return "warm"
+            return "serious"
         return "neutral"
 
     return "neutral"

@@ -10,6 +10,8 @@ from unittest.mock import Mock, patch
 
 from app.tts.expression import classify_expression, expression_temperature
 from app.tts import qwen_character_worker
+from app.tts.providers.qwen_character import _request_language_for_text
+from app.tts.narration import apply_pronunciation_dictionary_with_counts
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,6 +31,7 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
         self.assertNotIn("item.at <= 30000", adapter)
         self.assertNotIn("ryuToastTimer", adapter)
         self.assertIn("do not cover", adapter)
+        self.assertNotIn("RYU_NOTIFICATION_LIMIT", adapter)
 
     def test_voice_design_default_preset_is_applied_and_synchronised_to_profile(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
@@ -51,13 +54,31 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
     def test_yes_ellipsis_and_yes_exclamation_have_different_low_intensity_delivery(self):
         self.assertEqual(classify_expression("Yes..."), "thoughtful")
         self.assertEqual(classify_expression("Yes…"), "thoughtful")
-        self.assertEqual(classify_expression("Yes!"), "warm")
+        self.assertEqual(classify_expression("Yes!"), "serious")
         self.assertEqual(classify_expression("Yes."), "neutral")
         self.assertEqual(classify_expression("Yes!! We did it!"), "excited")
         self.assertEqual(classify_expression("No!"), "tense")
         self.assertLess(expression_temperature("warm"), 0.8)
         self.assertLess(expression_temperature("thoughtful"), 0.8)
         self.assertLess(expression_temperature("excited"), 0.8)
+
+    def test_explicit_japanese_and_korean_language_choices_are_preserved_for_all_qwen_modes(self):
+        self.assertEqual(_request_language_for_text("Japanese", "リムルが来た。"), "Japanese")
+        self.assertEqual(_request_language_for_text("Korean", "리무루가 왔다."), "Korean")
+        self.assertEqual(_request_language_for_text("English", "リムルが来た。"), "Auto")
+        self.assertEqual(_request_language_for_text("English", "Rimuru arrived."), "English")
+
+    def test_japanese_and_korean_character_terms_can_use_explicit_reviewed_pronunciation_rules(self):
+        source = "リムルが来た。リ무루가 왔다。"
+        converted, counts = apply_pronunciation_dictionary_with_counts(
+            source,
+            [
+                {"written_form":"リムル","spoken_form":"Rimuru","enabled":True},
+                {"written_form":"리무루","spoken_form":"Rimuru","enabled":True},
+            ],
+        )
+        self.assertEqual(converted, "Rimuruが来た。Rimuru가 왔다。")
+        self.assertEqual(counts, {"リムル":1,"리무루":1})
 
     def test_customvoice_receives_contextual_instruction_and_restrained_sampling(self):
         model = Mock()
