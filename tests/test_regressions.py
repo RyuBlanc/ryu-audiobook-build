@@ -733,6 +733,27 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("_APPLICATION_ROOT = Path(__file__).resolve().parents[2]", source)
         self.assertIn("sys.path.insert(0, str(_APPLICATION_ROOT))", source)
 
+    def test_qwen_standalone_worker_bundles_audio_validation_helper(self):
+        build = Path("build.py").read_text(encoding="utf-8")
+        workflow = Path(".github/workflows/build-windows.yml").read_text(encoding="utf-8")
+        worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
+        self.assertIn(
+            '"app" / "tts" / "audio_validation.py"};app/tts',
+            build,
+        )
+        self.assertIn(
+            "$packagedAudioValidation = Join-Path $worker.DirectoryName 'audio_validation.py'",
+            workflow,
+        )
+        self.assertIn(
+            "Bundled Qwen audio validation helper is missing",
+            workflow,
+        )
+        self.assertIn(
+            "from app.tts.audio_validation import wav_has_audible_content",
+            worker,
+        )
+
     def test_qwen_repair_avoids_py_compile_and_program_files_pycache(self):
         runtime = Path("app/tts/qwen_character_runtime.py").read_text(encoding="utf-8")
         self.assertIn("PYTHONDONTWRITEBYTECODE", runtime)
