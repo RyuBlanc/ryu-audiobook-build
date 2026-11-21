@@ -6589,8 +6589,7 @@ function renderProductionMetadataGate(active) {
           : 'Incomplete metadata — complete: ' + (missing.join(', ') || 'required project details') + '.');
       status.style.color = complete && !unsaved ? 'var(--green)' : 'var(--amber)';
     }
-    const audioActive = productionJobIsActive(productionJobSnapshots.full) ||
-      productionJobIsActive(productionJobSnapshots.preview);
+    const audioActive = productionAudioOperationIsActiveForProject(active.folder);
     if (start) {
       start.disabled = Boolean(generationBlockReason) || audioActive;
       start.title = audioActive
@@ -7005,6 +7004,29 @@ function renderProductionMetadataGate(active) {
   function productionJobIsActive(job) {
     return Boolean(job && PRODUCTION_ACTIVE_JOB_STATES.has(String(job.state || '').toLowerCase()));
   }
+  function productionJobIsActiveForProject(job, projectFolder) {
+    const expectedFolder = normalizeProjectFolderIdentity(projectFolder);
+    const ownerFolder = normalizeProjectFolderIdentity(job?.project_folder);
+    return Boolean(expectedFolder && ownerFolder && ownerFolder === expectedFolder && productionJobIsActive(job));
+  }
+  function productionAudioOperationIsActiveForProject(projectFolder) {
+    const expectedFolder = normalizeProjectFolderIdentity(projectFolder);
+    if (!expectedFolder) return false;
+    // The latest bridge job list is authoritative. Do not let a Production
+    // snapshot retained from a previous project keep this project's Generate
+    // button locked after a project switch or a completed/cancelled job.
+    const latestJobs = window.__ryuBackendLastJobs;
+    if (Array.isArray(latestJobs)) {
+      return latestJobs.some(job => {
+        const type = String(job?.type || '').toLowerCase();
+        return (type === 'audiobook-generation' || type === 'production-preview') &&
+          normalizeProjectFolderIdentity(job?.project_folder) === expectedFolder &&
+          productionJobIsActive(job);
+      });
+    }
+    return productionJobIsActiveForProject(productionJobSnapshots.full, expectedFolder) ||
+      productionJobIsActiveForProject(productionJobSnapshots.preview, expectedFolder);
+  }
   function productionJobDate(job) {
     return Date.parse(job?.updated_at || job?.started_at || job?.queued_at || '') || 0;
   }
@@ -7142,8 +7164,7 @@ function renderProductionMetadataGate(active) {
     const selectedValue = productionPreviewSelectedChapter ? String(productionPreviewSelectedChapter) : '';
     if (select.value !== selectedValue) select.value = selectedValue;
     select.disabled = !rows.length ||
-      productionJobIsActive(productionJobSnapshots.full) ||
-      productionJobIsActive(productionJobSnapshots.preview);
+      productionAudioOperationIsActiveForProject(window.ryuPremiumActiveProject?.folder);
   }
 
   function ensureProductionPreviewMonitorUi() {
@@ -7345,7 +7366,7 @@ function renderProductionMetadataGate(active) {
       ? fullRows.find(row => String(row.job_id || '') === String(productionFullJobId))
       : null;
     const fullJob = pinnedFull || newestProductionJob(fullRows);
-    if (fullJob?.job_id) productionFullJobId = String(fullJob.job_id);
+    productionFullJobId = fullJob?.job_id ? String(fullJob.job_id) : null;
     productionJobSnapshots.full = fullJob || null;
 
     const previewRows = projectRows.filter(row =>
@@ -12281,18 +12302,19 @@ function renderProductionMetadataGate(active) {
       await narratorOnlySavePromise;
       const chapterNumber=Number(productionPreviewSelectedChapter||$('productionPreviewChapterSelect')?.value||0);
       if(!chapterNumber)throw new Error('Select a saved chapter in the Production preview chapter selector.');
-      if(productionJobIsActive(productionJobSnapshots.full))throw new Error('Finish or cancel the full audiobook generation before starting a preview.');
-      if(productionJobIsActive(productionJobSnapshots.preview))throw new Error('A Production preview is already running.');
+      const activeProject=await call('project.get_active');
+      if(!activeProject?.folder)throw new Error('Open a saved project before creating a Production preview.');
+      const knownFolder=String(window.ryuPremiumActiveProject?.folder||'');
+      if(knownFolder&&normalizeProjectFolderIdentity(knownFolder)!==normalizeProjectFolderIdentity(activeProject.folder))throw new Error('The active project changed while the Production preview was being prepared. Refresh the chapter list and try again.');
+      window.ryuPremiumActiveProject=activeProject;
+      await refreshJobs();
+      if(productionAudioOperationIsActiveForProject(activeProject.folder))throw new Error('Another Production audio operation is already running. Finish or cancel it before starting a preview.');
       const name=String(selectedVoice||$('profileName')?.value||'').trim();
       if(!name)throw new Error('Select and save a narrator voice profile before previewing this chapter.');
       const group=[...document.querySelectorAll('#generate .segmented')].find(el=>[...el.querySelectorAll('button')].some(b=>/10s|30s|60s|90s/i.test(b.textContent)));
       const duration=group?.querySelector('button.active')?.textContent.match(/\d+/)?.[0]||'30';
       if(![10,30,60,90].includes(Number(duration)))throw new Error('Preview duration must be 10, 30, 60, or 90 seconds.');
       await flushChapterDraftBeforeSwitch();
-      const activeProject=await call('project.get_active');
-      if(!activeProject?.folder)throw new Error('Open a saved project before creating a Production preview.');
-      const knownFolder=String(window.ryuPremiumActiveProject?.folder||'');
-      if(knownFolder&&knownFolder!==String(activeProject.folder))throw new Error('The active project changed while the Production preview was being prepared. Refresh the chapter list and try again.');
       const savedChapters=await call('chapter.list');
       chapters=Array.isArray(savedChapters)?savedChapters:[];
       window.ryuPremiumChapters=chapters;
@@ -12425,13 +12447,15 @@ function renderProductionMetadataGate(active) {
     });
     if ($('startGenerate')) $('startGenerate').onclick=act(async()=>{
       await narratorOnlySavePromise;
-      if(productionJobIsActive(productionJobSnapshots.full)||productionJobIsActive(productionJobSnapshots.preview))throw new Error('Another Production audio operation is already running. Finish or cancel it before starting full generation.');
-      await flushSoundDesignState();
       const [activeProject, savedSettings] = await Promise.all([
         call('project.get_active'),
         call('settings.get')
       ]);
-      window.ryuPremiumActiveProject = activeProject || null;
+      if(!activeProject?.folder)throw new Error('Open a saved project before starting audiobook generation.');
+      window.ryuPremiumActiveProject = activeProject;
+      await refreshJobs();
+      if(productionAudioOperationIsActiveForProject(activeProject.folder))throw new Error('Another Production audio operation is already running. Finish or cancel it before starting full generation.');
+      await flushSoundDesignState();
       window.ryuPremiumApplicationSettings = savedSettings || {};
       await refreshTerms();
       const bitrate = Number(activeProject?.audio_bitrate || savedSettings?.bitrate || 256);

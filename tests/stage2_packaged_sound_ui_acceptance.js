@@ -3852,6 +3852,17 @@
         invoke("project.get_active", {}).catch(error => ({error:String(error)})),
         invoke("job.list", {include_hidden:true}).catch(error => ({error:String(error)}))
       ]);
+      const latestBackendJobs = Array.isArray(window.__ryuBackendLastJobs)
+        ? window.__ryuBackendLastJobs : null;
+      const controlFolderKey = String(config.control_project_folder || "").trim().toLowerCase();
+      const latestActiveProductionJobs = (latestBackendJobs || []).filter(job => {
+        const type = String(job.type || "").toLowerCase();
+        const state = String(job.state || "").toLowerCase();
+        const folder = String(job.project_folder || "").trim().toLowerCase();
+        return (type === "audiobook-generation" || type === "production-preview") &&
+          folder === controlFolderKey &&
+          ["queued","running","pause_requested","paused","cancel_requested","cancelling","retrying"].includes(state);
+      }).map(job => ({job_id:job.job_id,type:job.type,state:job.state,project_folder:job.project_folder}));
       // project.get_active is the native, authoritative Production readiness
       // snapshot. Do not call prototype-only voice.select.get / production.readiness
       // commands that are not part of the desktop bridge.
@@ -3878,6 +3889,8 @@
         readiness:readinessGate,
         metadataStatus:document.querySelector("#productionMetadataStatus")?.textContent?.trim() || null,
         generationStatus:document.querySelector("#generateStatus")?.textContent?.trim() || null,
+        latestBackendJobCount:latestBackendJobs?.length ?? null,
+        latestActiveProductionJobs,
         button:gateButton ? {
           disabled:gateButton.disabled,
           title:gateButton.title,

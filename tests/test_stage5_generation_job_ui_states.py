@@ -136,6 +136,40 @@ class Stage54GenerationJobUiStateTests(unittest.TestCase):
         self.assertIn("const projectRows = jobs.filter(row =>", self.adapter)
         self.assertIn("renderProductionGeneration(allJobs)", jobs_refresh)
 
+    def test_production_generation_gate_uses_fresh_jobs_for_the_current_project(self):
+        helper_start = self.adapter.index("function productionJobIsActiveForProject(")
+        helper_end = self.adapter.index("function productionJobDate(", helper_start)
+        helper = self.adapter[helper_start:helper_end]
+        self.assertIn("window.__ryuBackendLastJobs", helper)
+        self.assertIn("normalizeProjectFolderIdentity(job?.project_folder)", helper)
+        self.assertIn("type === 'audiobook-generation' || type === 'production-preview'", helper)
+        self.assertIn("productionJobIsActive(job)", helper)
+
+        gate_start = self.adapter.index("function renderProductionMetadataGate(active)")
+        gate_end = self.adapter.index("function populateMetadataHistory", gate_start)
+        metadata_gate = self.adapter[gate_start:gate_end]
+        self.assertIn("productionAudioOperationIsActiveForProject(active.folder)", metadata_gate)
+        self.assertNotIn("productionJobSnapshots.full", metadata_gate)
+
+        selector_start = self.adapter.index("function syncProductionPreviewChapterSelector()")
+        selector_end = self.adapter.index("function ensureProductionPreviewMonitorUi()", selector_start)
+        selector = self.adapter[selector_start:selector_end]
+        self.assertIn("productionAudioOperationIsActiveForProject(window.ryuPremiumActiveProject?.folder)", selector)
+
+        preview_start = self.adapter.index("if ($('previewGenerate')) $('previewGenerate').onclick")
+        full_start = self.adapter.index("if ($('startGenerate')) $('startGenerate').onclick", preview_start)
+        preview_handler = self.adapter[preview_start:full_start]
+        self.assertIn("const activeProject=await call('project.get_active')", preview_handler)
+        self.assertIn("await refreshJobs()", preview_handler)
+        self.assertIn("productionAudioOperationIsActiveForProject(activeProject.folder)", preview_handler)
+
+        full_end = self.adapter.index("if ($('pauseGenerate')) $('pauseGenerate').onclick", full_start)
+        full_handler = self.adapter[full_start:full_end]
+        self.assertIn("const [activeProject, savedSettings]", full_handler)
+        self.assertIn("await refreshJobs()", full_handler)
+        self.assertIn("productionAudioOperationIsActiveForProject(activeProject.folder)", full_handler)
+        self.assertIn("productionFullJobId = fullJob?.job_id ? String(fullJob.job_id) : null", self.adapter)
+
     def test_packaged_production_gate_diagnostics_use_supported_project_readiness_fields(self):
         self.assertNotIn('invoke("voice.select.get"', self.packaged)
         self.assertNotIn('invoke("production.readiness"', self.packaged)
