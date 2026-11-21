@@ -70,7 +70,7 @@ def _request_language_for_text(language: str | None, text: str) -> str:
         if "\u3040" <= char <= "\u30ff" or "\u4e00" <= char <= "\u9fff" or "\uac00" <= char <= "\ud7af"
     )
     letter_count = max(1, sum(1 for char in str(text or "") if char.isalpha()))
-    substantial_cjk = cjk_count >= 7 or (cjk_count >= 4 and cjk_count / letter_count >= 0.18)
+    substantial_cjk = cjk_count >= 7 or (cjk_count >= 2 and cjk_count / letter_count >= 0.18)
     if is_automatic and cjk_count >= 3:
         return "Auto"
     return "Auto" if substantial_cjk and is_english else selected

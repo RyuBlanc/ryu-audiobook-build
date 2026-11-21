@@ -155,10 +155,9 @@ class CastAwareProvider(TTSProvider):
             "qwen_anchor_text": profile.qwen_anchor_text,
             "qwen_profile_id": profile.qwen_profile_id,
         }
-        if (
-            str(profile.provider or "").casefold() == "qwen-character"
-            and str(profile.qwen_mode or "").casefold() in {"design", "design-preview"}
-        ):
+        if str(profile.provider or "").casefold() == "qwen-character":
+            # Context-aware delivery/sampling now affects CustomVoice, VoiceDesign,
+            # and Clone. Invalidate every Qwen mode when its synthesis policy changes.
             data["expression_pipeline_version"] = EXPRESSION_PIPELINE_VERSION
         # A reference can be replaced in-place while its path stays the same.
         # Include content digests so resumed chunks cannot silently keep audio

@@ -182,7 +182,7 @@ class QwenMultilingualIdentityAnchorTests(unittest.TestCase):
                 self.assertEqual(_request_language_for_text(language, source), expected)
 
 
-    def test_qwen_design_resume_signature_tracks_expression_pipeline_version(self):
+    def test_qwen_context_aware_resume_signature_tracks_expression_pipeline_version(self):
         from app.tts.generator import _provider_signature
         from app.tts.providers.qwen_character import QwenCharacterProvider
 
@@ -218,13 +218,13 @@ class QwenMultilingualIdentityAnchorTests(unittest.TestCase):
             custom_previous = _provider_signature(custom, "Ryan", [("Hello.", "Ryan")])
         with patch("app.tts.providers.qwen_character.EXPRESSION_PIPELINE_VERSION", "story-expression-v3"):
             custom_updated = _provider_signature(custom, "Ryan", [("Hello.", "Ryan")])
-        self.assertEqual(
+        self.assertNotEqual(
             custom_previous,
             custom_updated,
-            "A classifier-only change must not invalidate unrelated CustomVoice audio.",
+            "Context-aware delivery changes must invalidate cached CustomVoice audio.",
         )
 
-    def test_casted_qwen_design_resume_signature_tracks_expression_pipeline_version(self):
+    def test_casted_qwen_context_aware_resume_signature_tracks_expression_pipeline_version(self):
         from app.tts.cast_provider import CastAwareProvider
         from app.tts.voice_profile import VoiceProfile
 
@@ -256,7 +256,23 @@ class QwenMultilingualIdentityAnchorTests(unittest.TestCase):
             custom_previous = CastAwareProvider._profile_signature(custom_profile)
         with patch("app.tts.cast_provider.EXPRESSION_PIPELINE_VERSION", "story-expression-v3"):
             custom_updated = CastAwareProvider._profile_signature(custom_profile)
-        self.assertEqual(custom_previous, custom_updated)
+        self.assertNotEqual(custom_previous, custom_updated)
+
+
+        clone_profile = VoiceProfile(
+            name="Saved Clone",
+            provider="qwen-character",
+            voice_id="Cloned voice",
+            model_id="base-1.7b",
+            language="English",
+            qwen_mode="clone",
+            qwen_profile_id="c4-cast-clone-cache",
+        )
+        with patch("app.tts.cast_provider.EXPRESSION_PIPELINE_VERSION", "story-expression-v2"):
+            clone_previous = CastAwareProvider._profile_signature(clone_profile)
+        with patch("app.tts.cast_provider.EXPRESSION_PIPELINE_VERSION", "story-expression-v3"):
+            clone_updated = CastAwareProvider._profile_signature(clone_profile)
+        self.assertNotEqual(clone_previous, clone_updated)
 
 
     def test_real_qwen_smoke_contains_saved_japanese_identity_and_reload_gate(self):
