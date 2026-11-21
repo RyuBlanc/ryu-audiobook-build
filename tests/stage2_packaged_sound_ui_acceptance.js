@@ -2955,11 +2955,17 @@
     const productionPreviewSaveButton = document.querySelector("#productionPreviewDownload");
     must(productionPreviewSaveButton && !productionPreviewSaveButton.disabled,
       "Save Production Preview remained disabled after the validated chapter audio completed.");
-    document.querySelector("#toasts")?.classList.remove("show");
     productionPreviewSaveButton.click();
-    await waitFor("Production Preview actual Save As copy", function () {
-      return String(document.querySelector("#toasts")?.textContent || "")
-        .includes("Production chapter preview saved to");
+    await waitFor("Production Preview actual Save As copy notification", function () {
+      try {
+        const history = JSON.parse(localStorage.getItem("ryu-audiobook-notification-history-v1") || "[]");
+        return Array.isArray(history) && history.some(item =>
+          item && item.error === false &&
+          String(item.text || "").includes("Production chapter preview saved to")
+        );
+      } catch (_) {
+        return false;
+      }
     }, 20000);
     record("stage5_production_preview_real_save_as", true,
       "The packaged Production Save button invoked the native validated-job save bridge and completed a real M4A copy into the isolated acceptance output folder.");
