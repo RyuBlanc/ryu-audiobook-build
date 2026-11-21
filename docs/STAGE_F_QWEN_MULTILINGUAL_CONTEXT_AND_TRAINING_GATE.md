@@ -28,3 +28,13 @@ Upstream references:
 - Fine-tuning workflow: https://github.com/QwenLM/Qwen3-TTS/blob/main/finetuning/README.md
 
 A hosted CPU preview or passing source-level test is not proof of acceptable real-GPU speed or natural audio. Those gates remain separate.
+
+## Hosted acceptance record — 21 November 2026
+
+- Candidate implementation head: `1ef3299a3e8b974b5bf4cd6ac79524ccc96c2819`.
+- GitHub Actions test run #3508 (run ID `44855091906`) completed successfully on that exact SHA.
+- Full regression suite: **1,735 tests passed**.
+- Focused gates on that same run: frontend JavaScript syntax, native Qt lifecycle, Stage B, Stage 6, Qwen C1–C4, Qwen Voice Library D/D3/D4/D5, and Stage E1–E4 all passed.
+- The workflow's Windows build job was skipped because the implementation commit did not contain the required `[artifact-checkpoint]` marker. This test run produced no new installer or portable package.
+- This acceptance-note checkpoint requests the Windows build workflow. The resulting package must be evaluated using its own exact-head test/build run, artifact hashes, installer verification, and physical acceptance. This record does not mark Stage F complete.
+
