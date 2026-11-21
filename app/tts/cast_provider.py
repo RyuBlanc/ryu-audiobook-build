@@ -524,6 +524,13 @@ class CastAwareProvider(TTSProvider):
             provider_voice = profile.voice_id
         return provider, provider_voice
 
+    def is_qwen_voice(self, voice: str | None = None) -> bool:
+        """Identify a Qwen-routed cast profile without starting the model."""
+        profile = self.profiles.get(str(voice or "").casefold())
+        if profile is not None:
+            return str(profile.provider or "").casefold() == "qwen-character"
+        return str(getattr(self.narrator_provider, "provider_id", "") or "").casefold() == "qwen-character"
+
     def set_generation_context(self, context: dict | None = None) -> None:
         """Retain the current story window until the selected child voice is resolved."""
         context = context if isinstance(context, dict) else {}

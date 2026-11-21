@@ -390,7 +390,47 @@ def _request_expression_style(request: dict) -> str:
     ))
 
 
-def _voice_design_instruct(request: dict, style: str | None = None) -> str:
+def _waveform_has_audible_content(waveform) -> bool:
+    """Reject empty, non-finite and near-zero Qwen waveforms; retain quiet speech."""
+    try:
+        import numpy as np
+        samples = np.asarray(waveform, dtype=np.float32).reshape(-1)
+        if samples.size == 0 or not bool(np.isfinite(samples).all()):
+            return False
+        return (
+            float(np.max(np.abs(samples))) >= 0.00005
+            and float(np.sqrt(np.mean(np.square(samples, dtype=np.float64)))) >= 0.00001
+        )
+    except Exception:
+        return False
+
+
+def _silent_retry_seed(request: dict, text: str) -> int:
+    try:
+        base = int(request.get("seed")) if request.get("seed") is not None else int(time.monotonic_ns() & 0x7FFFFFFF)
+    except (TypeError, ValueError):
+        base = int(time.monotonic_ns() & 0x7FFFFFFF)
+    digest = int(hashlib.sha256(str(text or "").encode("utf-8")).hexdigest()[:8], 16)
+    return (base + digest + 1) % 0x7FFFFFFF
+
+
+def _generate_with_silence_retry(generate, request: dict, text: str, task: str):
+    """Retry once with the same selected model, voice identity and style."""
+    wavs, sample_rate = generate(request)
+    if wavs and _waveform_has_audible_content(wavs[0]):
+        return wavs, sample_rate
+    retry_request = {**request, "seed": _silent_retry_seed(request, text)}
+    _worker_diagnostic("silent_output_retry", task=str(task), text_characters=len(str(text or "")), retry_attempt=1)
+    wavs, sample_rate = generate(retry_request)
+    if not wavs or not _waveform_has_audible_content(wavs[0]):
+        raise RuntimeError(
+            f"Qwen {task} returned silent audio for non-empty narration after one "
+            "profile-preserving retry. The segment was not accepted."
+        )
+    return wavs, sample_rate
+
+
+def _voice_design_instruct(request: dict, style: str | None = None)
     base = str(request.get("instruct") or "").strip()
     selected = style or _request_expression_style(request)
     context = request.get("story_context")
@@ -698,29 +738,30 @@ def _prepare_design_clone(model, request: dict, args):
 
 def _generate_design_locked(model, prompts, request: dict, output: Path) -> None:
     import soundfile as sf
-
     style = _request_expression_style(request)
     prompt = prompts.get(reference_style(style)) or prompts.get("neutral")
     if prompt is None:
         raise RuntimeError("The canonical Qwen voice identity is not available.")
     temperature = expression_temperature(style)
-    request = {
-        **request,
-        "temperature": temperature,
-        "subtalker_temperature": temperature,
-        "expression_style": style,
-    }
-    _set_seed(request.get("seed"))
-    wavs, sr = model.generate_voice_clone(
-        text=str(request.get("text") or ""),
-        language=str(request.get("language") or "English"),
-        voice_clone_prompt=prompt,
-        **_generation_kwargs(request),
+    request = {**request, "temperature": temperature,
+               "subtalker_temperature": temperature, "expression_style": style}
+
+    def render(current):
+        current_request = {**request, **current}
+        _set_seed(current_request.get("seed"))
+        return model.generate_voice_clone(
+            text=str(current_request.get("text") or ""),
+            language=str(current_request.get("language") or "English"),
+            voice_clone_prompt=prompt,
+            **_generation_kwargs(current_request),
+        )
+
+    wavs, sr = _generate_with_silence_retry(
+        render, request, str(request.get("text") or ""), "saved VoiceDesign"
     )
-    if not wavs:
-        raise RuntimeError("Qwen canonical VoiceDesign/Base generation returned no audio.")
     output.parent.mkdir(parents=True, exist_ok=True)
     sf.write(str(output), wavs[0], sr)
+
 
 
 def _generate_clone(model, request: dict, output: Path) -> None:

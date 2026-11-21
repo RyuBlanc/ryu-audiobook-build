@@ -13,6 +13,7 @@ from app.tts.narration import apply_pronunciation_dictionary_with_counts, prepar
 from app.tts.pacing import append_silence, pause_after_ms, split_for_pacing
 from app.tts.base import TTSProvider
 from app.tts.multivoice import synthesize_voice_set
+from app.tts.audio_validation import provider_uses_qwen_voice, wav_has_audible_content
 
 
 class _PreviewUnits(list):
@@ -349,6 +350,11 @@ def build_voice_preview(
             else:
                 provider.synthesize(unit, raw_path, unit_voice)
             check_cancelled()
+            if provider_uses_qwen_voice(provider, unit_voice) and not wav_has_audible_content(raw_path):
+                raise RuntimeError(
+                    f"Qwen returned a silent preview segment ({index + 1}/{total_units}). "
+                    "The preview was stopped rather than saving missing narration."
+                )
             if not provider_handles_controls:
                 _apply_speed(raw_path, narration_speed)
                 next_text = units[index + 1][0] if index + 1 < len(units) else None

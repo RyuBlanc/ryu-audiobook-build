@@ -17,6 +17,7 @@ from app.tts.chunker import split_text
 from app.tts.narration import apply_pronunciation_dictionary_with_counts, prepare_for_narration
 from app.tts.pacing import append_silence, pause_after_ms, split_for_pacing
 from app.tts.multivoice import synthesize_voice_set
+from app.tts.audio_validation import provider_uses_qwen_voice, wav_has_audible_content
 
 
 @dataclass
@@ -338,6 +339,8 @@ def prepare_chapter_plan(
         try:
             if not is_valid_wav_chunk(output):
                 raise ValueError("cached audio chunk is missing, truncated, or invalid")
+            if provider_uses_qwen_voice(provider, chunks_with_voices[index][1]) and not wav_has_audible_content(output):
+                raise ValueError("cached Qwen audio chunk contains silence")
         except (OSError, wave.Error, EOFError, ValueError):
             output.unlink(missing_ok=True)
             invalid_cached_chunk = True
@@ -429,6 +432,11 @@ def generate_chapter(
             raise RuntimeError(
                 f"Audio chunk {index + 1}/{len(chunks)} is missing, truncated, or not a valid PCM WAV: "
                 f"{output.name}"
+            )
+        if provider_uses_qwen_voice(provider, chunks_with_voices[index][1]) and not wav_has_audible_content(output):
+            raise RuntimeError(
+                f"Qwen audio chunk {index + 1}/{len(chunks)} contains silence instead of narration. "
+                "The chunk was not marked complete; retry it after checking the Qwen worker log."
             )
 
         completed.add(index)

@@ -59,6 +59,11 @@ def _starts_dialogue(text: str) -> bool:
     return value.startswith(_DIALOGUE_START) or bool(_SPEAKER_LINE.match(value))
 
 
+def _ends_with_hesitation(text: str) -> bool:
+    value = str(text or "").strip().rstrip(_CLOSERS).rstrip()
+    return value.endswith(("…", "...", ".."))
+
+
 def sentence_units(text: str) -> list[str]:
     units: list[str] = []
     current: list[str] = []
@@ -72,6 +77,18 @@ def sentence_units(text: str) -> list[str]:
     i = 0
     while i < len(text):
         char = text[i]
+        if char == "." and i + 1 < len(text) and text[i + 1] == ".":
+            # Treat consecutive periods as one intentional hesitation marker.
+            end = i + 2
+            while end < len(text) and text[end] == ".":
+                end += 1
+            current.extend(text[i:end])
+            while end < len(text) and text[end] in _CLOSERS:
+                current.append(text[end])
+                end += 1
+            flush()
+            i = end
+            continue
         current.append(char)
 
         if char == "\n":
@@ -79,14 +96,6 @@ def sentence_units(text: str) -> list[str]:
             # Any remaining newline is intentional; keep its segment boundary.
             flush()
             i += 1
-            continue
-
-        if char == "." and text[i:i + 3] == "...":
-            # Treat ASCII ellipses as one hesitation marker, not three full
-            # stops. This prevents a meaningful pause from being lost.
-            current.extend(text[i + 1:i + 3])
-            flush()
-            i += 2
             continue
 
         if char in ".!?…":
@@ -229,7 +238,7 @@ def split_for_pacing(
     for value, paragraph_id, ends_paragraph, heading, dialogue_line in tokens:
         # Keep a hesitation ending its own unit so the audio can carry the
         # pause before the continuation ("Instead of me... then?").
-        if current and current[-1][0].rstrip().endswith(("…", "...")):
+        if current and _ends_with_hesitation(current[-1][0]):
             flush(mark_paragraph_end=bool(current[-1][2]))
         if heading:
             # Headings get their own narration unit so they can receive a clear
@@ -246,6 +255,9 @@ def split_for_pacing(
             line_chunk: list[tuple[str, int, bool]] = []
             line_chars = 0
             for piece in parts or [value]:
+                if line_chunk and _ends_with_hesitation(line_chunk[-1][0]):
+                    chunks.append(joined(line_chunk))
+                    line_chunk, line_chars = [], 0
                 if line_chunk and (
                     line_chars + len(piece) + 1 > max_chars
                     or len(line_chunk) >= max_sentences
@@ -254,6 +266,9 @@ def split_for_pacing(
                     line_chunk, line_chars = [], 0
                 line_chunk.append((piece, paragraph_id, False))
                 line_chars += len(piece) + (1 if line_chars else 0)
+                if _ends_with_hesitation(piece):
+                    chunks.append(joined(line_chunk))
+                    line_chunk, line_chars = [], 0
             if line_chunk:
                 chunks.append(joined(
                     line_chunk,
@@ -282,7 +297,7 @@ def split_for_pacing(
             separator = " "
         current.append((value, paragraph_id, ends_paragraph))
         current_chars += len(value) + (len(separator) if current_chars else 0)
-        if value.rstrip().endswith(("…", "...")):
+        if _ends_with_hesitation(value):
             flush(mark_paragraph_end=ends_paragraph)
         elif force_paragraph_boundaries and ends_paragraph:
             # This is enabled only for chapters whose BGM start offset needs an
@@ -316,26 +331,25 @@ def pause_after_ms(
     if is_heading_line(stripped):
         base = 760
     else:
-        end = stripped[-1]
-        if end in "!?…":
-            base = 360
-        elif end == ".":
-            base = 290
-        elif end in ";:":
-            base = 210
-        elif end == ",":
-            base = 110
-        elif end in "—–-":
-            base = 170
-        else:
+        without_closer = stripped.rstrip(_CLOSERS).rstrip()
+        if without_closer.endswith(("…", "...", "..")):
+            base = 540
+        elif not without_closer:
             base = 90
-
-        if stripped.endswith(tuple(_CLOSERS)):
-            without_closer = stripped.rstrip(_CLOSERS).rstrip()
-            if without_closer.endswith(("?", "!", "…")):
+        else:
+            end = without_closer[-1]
+            if end in "!?":
                 base = 360
-            elif without_closer.endswith("."):
+            elif end == ".":
                 base = 290
+            elif end in ";:":
+                base = 210
+            elif end == ",":
+                base = 110
+            elif end in "—–-":
+                base = 170
+            else:
+                base = 90
 
     if paragraph_end:
         base = max(base, 520)

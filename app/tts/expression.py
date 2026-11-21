@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-EXPRESSION_PIPELINE_VERSION = "story-expression-v4-context-aware"
+EXPRESSION_PIPELINE_VERSION = "story-expression-v5-joy-suspicion-context"
 DEFAULT_VOICE_DESIGN_ANCHOR_TEXT = (
     "Hello. I thought I understood what was happening. "
     "Oh, really? That's actually wonderful. "
@@ -105,6 +105,12 @@ _NON_ENGLISH_EXPRESSION_CUES = {
         r"esitare)\b|(?:возможно|наверное|кажется|не уверен|не уверена|сомнева|колебал)|"
         r"(?:迷っ|ためら|考え込|かもしれない)"
     ),
+    "suspicious": (
+        r"\b(?:suspicious|suspiciously|suspicion|skeptical|skeptically|wary|warily|"
+        r"distrustful|mistrustful|guarded|untrustworthy|deceptive|deception)\b|"
+        r"(?:怪しい|不審|疑わ|疑念|不信)|(?:可疑|怀疑|懷疑|不信任)|"
+        r"(?:수상|의심|미심쩍|믿지\s*못)"
+    ),
     "curious": (
         r"\b(?:neugierig|wunderte sich|curieux|curieuse|se demanda|interessé|"
         r"interessée|curioso|curiosa|se preguntó|interesado|interessada|"
@@ -141,6 +147,18 @@ EXPRESSION_STYLES = {
         "Same exact speaker identity and timbre, with warmth, gentle amusement or contained "
         "excitement. Use a light smile in the voice and natural reactive lift on meaningful "
         "words. A faint chuckle is acceptable only when the text supports it."
+    ),
+    "joyful": (
+        "Keep the same exact speaker identity and vocal placement. Convey genuine joy with "
+        "a brighter, open smile in the voice, lively but natural pitch movement and more "
+        "buoyant rhythm on the words that carry happiness. Let the energy sound sincerely "
+        "pleased rather than merely polite; do not shout, sing or become cartoonishly excited."
+    ),
+    "suspicious": (
+        "Keep the same exact speaker identity and timbre. Sound wary, guarded and quietly "
+        "skeptical, as though testing whether something is true. Use restrained tension, "
+        "careful emphasis and a slightly searching or downward questioning contour. Do not "
+        "turn suspicion into anger, fear or theatrical whispering."
     ),
     "concerned": (
         "Same exact speaker identity and timbre, with quiet concern or tension. Tighten the "
@@ -203,6 +221,8 @@ EXPRESSION_TEMPERATURES = {
     "warm": 0.73,
     "concerned": 0.73,
     "excited": 0.76,
+    "joyful": 0.80,
+    "suspicious": 0.78,
     "soft": 0.70,
     "sad": 0.71,
     "angry": 0.75,
@@ -225,6 +245,8 @@ _STYLE_ALIASES = {
     "warm": "warm",
     "amused": "warm",
     "excited": "warm",
+    "joyful": "warm",
+    "suspicious": "concerned",
     "concerned": "concerned",
     "sad": "concerned",
     "angry": "concerned",
@@ -271,6 +293,12 @@ def classify_expression(text: str) -> str:
         low,
     ) or re.search(_NON_ENGLISH_EXPRESSION_CUES["anger"], low):
         return "angry"
+    if re.search(
+        r"\b(?:suspicious|suspiciously|skeptical|skeptically|wary|warily|"
+        r"distrustful|mistrustful|guarded|untrustworthy|something is off)\b",
+        low,
+    ) or re.search(_NON_ENGLISH_EXPRESSION_CUES["suspicious"], low):
+        return "suspicious"
     # Panic and peril are urgent-delivery cues in their own right; they
     # must not require an additional fear word in the same sentence.
     if re.search(_NON_ENGLISH_EXPRESSION_CUES["tense"], low):
@@ -304,8 +332,14 @@ def classify_expression(text: str) -> str:
     ) or re.search(_NON_ENGLISH_EXPRESSION_CUES["excited"], low):
         return "excited"
     if re.search(
-        r"\b(?:happy|happily|joyful|joyfully|glad|pleased|delighted|thrilled|"
-        r"cheerful|beamed)\b|幸せ|嬉|"
+        r"\b(?:joyful|joyfully|joyous|jubilant|elated|overjoyed|ecstatic|"
+        r"over the moon|bursting with joy|full of joy)\b|(?:狂喜|欢欣鼓舞|歡欣鼓舞)|"
+        r"(?:환희|너무나\s*기쁘)",
+        low,
+    ):
+        return "joyful"
+    if re.search(
+        r"\b(?:happy|happily|glad|pleased|delighted|thrilled|cheerful|beamed)\b|幸せ|嬉|"
         r"(?:开心|開心|快乐|快樂|高兴|高興|幸福|喜悦)|"
         r"(?:행복|기쁘|즐겁|신나)",
         low,
@@ -382,6 +416,11 @@ def classify_expression_with_context(
         ("thoughtful", r"(?:hesitantly\s+|uncertainly\s+)?(?:hesitated|paused|murmured uncertainly)"),
         ("calm", r"(?:calmly\s+|gently\s+)(?:replied|answered|said)"),
     )
+    tags = (
+        ("suspicious", r"(?:suspiciously\s+|warily\s+|skeptically\s+|guardedly\s+|with suspicion\s+)(?:asked|replied|answered|said|muttered)"),
+        ("joyful", r"(?:joyfully\s+|happily\s+|with delight\s+|beaming\s+)(?:replied|answered|said|laughed|exclaimed)"),
+        *tags,
+    )
     for style, verb in tags:
         trailing = re.search(r"(?i)" + speaker + r"\s+" + verb + r"\s*[,;:]?\s*$", before[-180:])
         leading = re.match(r"(?i)^\s*[,—–-]?\s*" + speaker + r"\s+" + verb + r"\b", after[:180])
@@ -392,8 +431,21 @@ def classify_expression_with_context(
         r"[\s\"'“”‘’「」『』,.;:!?…—–-]*(?:yes|yeah|yep|no|nope|really|okay|ok|right|sure|please|thank you|thanks|i see|of course|got it)[\s\"'“”‘’「」『』,.;:!?…—–-]*",
         value, re.IGNORECASE,
     )) or (len(value.split()) <= 5 and bool(re.search(r"[\"“「『]", value)))
-    if reaction and direct in {"neutral", "thoughtful", "serious"}:
+    if reaction and direct in {"neutral", "thoughtful", "serious", "curious"}:
         story = (before + " " + after).casefold()
+        if re.search(
+            r"\b(?:lie to me|lying|lied|deception|deceiv\w*|hiding something|secret|trap|"
+            r"motive|untrustworthy|suspicious|does not add up|doesn't add up)\b|"
+            r"(?:嘘|隠し事|罠|怪しい)|(?:거짓말|수상|함정|속이)",
+            story,
+        ):
+            return "suspicious"
+        if re.search(
+            r"\b(?:overjoyed|joyful|celebrat\w*|cheered|reunited|proud of you|"
+            r"so happy|wonderful news|at long last|finally succeeded)\b",
+            story,
+        ):
+            return "joyful"
         if re.search(r"\b(?:betray(?:ed|al)|traitor|revenge|furious|rage|snapped at)\b", story):
             return "angry"
         if re.search(r"\b(?:terrified|under attack|ambush|cornered|danger|monster lunged|weapon raised)\b", story):
