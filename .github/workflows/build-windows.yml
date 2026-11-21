@@ -956,6 +956,20 @@ jobs:
           # EXE or under _internal. Accept either layout and verify the actual
           # bundled assets that the frozen self-test already exercises.
           $roots = @($exeDir, (Join-Path $exeDir '_internal')) | Where-Object { Test-Path $_ }
+          foreach ($cursorName in @('drake_cursor_32.png', 'fang_cursor_32.png')) {
+            $cursorAsset = $roots |
+              ForEach-Object { Join-Path (Join-Path $_ 'assets') $cursorName } |
+              Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+              Select-Object -First 1
+            if (-not $cursorAsset) {
+              throw "Frozen package is missing the in-app cursor asset '$cursorName'."
+            }
+            $cursorFile = Get-Item -LiteralPath $cursorAsset
+            if ($cursorFile.Length -lt 512) {
+              throw "Frozen in-app cursor asset '$cursorName' is unexpectedly small ($($cursorFile.Length) bytes)."
+            }
+            Write-Host "Packaged in-app cursor verified: $cursorAsset ($($cursorFile.Length) bytes)"
+          }
           $piperModels = @()
           $kokoroVoices = $null
           foreach ($root in $roots) {
