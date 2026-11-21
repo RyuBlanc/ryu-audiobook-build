@@ -82,6 +82,41 @@ class StageFNotificationQwenIconFollowupTests(unittest.TestCase):
         self.assertEqual(converted, "Rimuruが来た。Rimuru가 왔다。")
         self.assertEqual(counts, {"リムル":1,"리무루":1})
 
+    def test_cast_aware_provider_forwards_context_to_narrator_and_qwen_batch_paths(self):
+        from app.tts.cast_provider import CastAwareProvider
+        context = {"before": "She had been worried.", "after": "The door opened."}
+
+        narrator = Mock()
+        narrator.synthesize.return_value = Path("narrator.wav")
+        cast = CastAwareProvider(
+            narrator_provider=narrator,
+            narrator_voice="Narrator",
+            profiles={},
+            assignments={},
+        )
+        cast.set_generation_context(context)
+        cast.synthesize("Yes...", Path("narration.wav"))
+        narrator.set_generation_context.assert_called_once_with(context)
+
+        qwen = Mock()
+        qwen.synthesize_batch.return_value = [Path("one.wav"), Path("two.wav")]
+        cast_with_qwen = CastAwareProvider(
+            narrator_provider=Mock(),
+            narrator_voice="Narrator",
+            profiles={},
+            assignments={},
+        )
+        cast_with_qwen._providers["shared:qwen:test"] = (qwen, "Ryan")
+        cast_with_qwen._provider_for_voice = Mock(return_value=(qwen, "Ryan"))
+        contexts = [context, {"before": "The crowd cheered.", "after": "She smiled."}]
+        cast_with_qwen.set_batch_contexts(contexts)
+        cast_with_qwen.synthesize_batch(
+            [("Yes...", Path("one.wav")), ("Wonderful.", Path("two.wav"))],
+            voice="Ryan",
+        )
+        qwen.set_batch_contexts.assert_called_once_with(contexts)
+        qwen.synthesize_batch.assert_called_once()
+
     def test_webengine_cursor_builder_uses_valid_css_url_quoting_for_all_surfaces(self):
         from app.ui.premium_v2_host import PremiumV2Window
         script = PremiumV2Window._cursor_webengine_script("data:image/png;base64,AAAA")

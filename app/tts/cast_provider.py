@@ -62,6 +62,8 @@ class CastAwareProvider(TTSProvider):
         self.backend_override = backend_override or "automatic"
         self._providers: dict[str, tuple[TTSProvider, str]] = {}
         self._status_callback = None
+        self._generation_context: dict[str, str] = {"before": "", "after": ""}
+        self._batch_contexts: list[dict[str, str]] = []
 
     @property
     def recommended_chunk_chars(self) -> int:
@@ -522,8 +524,29 @@ class CastAwareProvider(TTSProvider):
             provider_voice = profile.voice_id
         return provider, provider_voice
 
+    def set_generation_context(self, context: dict | None = None) -> None:
+        """Retain the current story window until the selected child voice is resolved."""
+        context = context if isinstance(context, dict) else {}
+        self._generation_context = {
+            "before": str(context.get("before") or "")[-1200:],
+            "after": str(context.get("after") or "")[:1200],
+        }
+
+    def set_batch_contexts(self, contexts: list[dict] | None = None) -> None:
+        """Retain a context pair per item until the child provider is resolved."""
+        self._batch_contexts = [
+            {
+                "before": str(row.get("before") or "")[-1200:],
+                "after": str(row.get("after") or "")[:1200],
+            }
+            for row in (contexts or []) if isinstance(row, dict)
+        ]
+
     def synthesize(self, text: str, output_path: Path, voice: str | None = None) -> Path:
         provider, provider_voice = self._provider_for_voice(voice)
+        context_setter = getattr(provider, "set_generation_context", None)
+        if callable(context_setter):
+            context_setter(dict(self._generation_context))
         return provider.synthesize(text, output_path, provider_voice)
 
     def synthesize_batch(
@@ -535,10 +558,22 @@ class CastAwareProvider(TTSProvider):
         if not items:
             return []
         provider, provider_voice = self._provider_for_voice(voice)
+        contexts = (
+            self._batch_contexts
+            if len(self._batch_contexts) == len(items)
+            else [dict(self._generation_context) for _ in items]
+        )
+        self._batch_contexts = []
         batch = getattr(provider, "synthesize_batch", None)
         if callable(batch):
+            batch_context_setter = getattr(provider, "set_batch_contexts", None)
+            if callable(batch_context_setter):
+                batch_context_setter(contexts)
             return batch(items)
-        return [
-            provider.synthesize(text, output, provider_voice)
-            for text, output in items
-        ]
+        outputs = []
+        for (text, output), context in zip(items, contexts):
+            context_setter = getattr(provider, "set_generation_context", None)
+            if callable(context_setter):
+                context_setter(context)
+            outputs.append(provider.synthesize(text, output, provider_voice))
+        return outputs
