@@ -18,11 +18,11 @@ $script:CaptureErrors = New-Object 'System.Collections.Generic.List[string]'
 $script:CaptureWarnings = New-Object 'System.Collections.Generic.List[string]'
 
 $baseline = [ordered]@{
-    build_number = 3497
-    source_commit = 'cee26183af700ad9bafb17c7fcaea887207d4a72'
-    application_exe_sha256 = 'c82a61fbf3927f334fcab0eb033aca5ce7c0fa7394a97a63994393259bcb574d'
-    html_installer_exe_sha256 = '5626423f680fc45a06a6c8ccbdc41867cd3758b59851b081c7738994a470c48a'
-    core_installer_exe_sha256 = '98f9adf51e24421561b741a85d2ea7c1aa7748bad04f2abf313db22e01f9ce66'
+    build_number = 3539
+    source_commit = '4b77e693f1f6799dabd41d52ad436319ce593604'
+    application_exe_sha256 = 'c6a4300cb36007cd1c9e5bc272e7ee5506accb1b1db4a268c328c08e4939492c'
+    html_installer_exe_sha256 = '1a28c25b75a86f21216c295126bfcf7ccfbcfdd6e18cf48983c07cdb0d975ea7'
+    core_installer_exe_sha256 = 'd7508b2ca3a02ec145530e799ff7985b30a15e041fe2a42a545f46ed2a3daf9f'
 }
 
 function Get-FileEvidence {
@@ -73,7 +73,7 @@ function Get-FileEvidence {
                 $record['status'] = 'hash_match'
             } else {
                 $record['status'] = 'hash_mismatch'
-                $script:CaptureErrors.Add("$Kind does not match the pinned Build #3497 SHA-256.")
+                $script:CaptureErrors.Add("$Kind does not match the pinned Build #3539 SHA-256.")
             }
         }
     } catch {

@@ -762,6 +762,15 @@ class RegressionTests(unittest.TestCase):
             worker,
         )
 
+    def test_stage_f_capture_script_pins_verified_build_3539_hashes(self):
+        source = Path("scripts/stage_f_capture_environment.ps1").read_text(encoding="utf-8")
+        self.assertIn("build_number = 3539", source)
+        self.assertIn("source_commit = '4b77e693f1f6799dabd41d52ad436319ce593604'", source)
+        self.assertIn("application_exe_sha256 = 'c6a4300cb36007cd1c9e5bc272e7ee5506accb1b1db4a268c328c08e4939492c'", source)
+        self.assertIn("html_installer_exe_sha256 = '1a28c25b75a86f21216c295126bfcf7ccfbcfdd6e18cf48983c07cdb0d975ea7'", source)
+        self.assertIn("core_installer_exe_sha256 = 'd7508b2ca3a02ec145530e799ff7985b30a15e041fe2a42a545f46ed2a3daf9f'", source)
+        self.assertIn("pinned Build #3539 SHA-256", source)
+
     def test_qwen_repair_avoids_py_compile_and_program_files_pycache(self):
         runtime = Path("app/tts/qwen_character_runtime.py").read_text(encoding="utf-8")
         self.assertIn("PYTHONDONTWRITEBYTECODE", runtime)

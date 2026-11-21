@@ -4,7 +4,7 @@
 **Repository:** RyuBlanc/ryu-audiobook-build  
 **Branch:** dragon-studio/stage-f-multilingual-context-aware-tts-2026-11-21  
 **Engineering baseline:** Stage A–E hosted/source engineering and Stage F UI-reliability follow-up package Build #3497 / [run 44795887496](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/44795887496), commit cee26183af700ad9bafb17c7fcaea887207d4a72.  
-**Status:** ACTIVE — Build #3537 exact-head regression passed (1,747/1,747); the standalone-worker packaging dependency and its packaging test are corrected. The next exact-head Windows artifact checkpoint is being requested. F1 is deferred by product decision, F2 is hardware-constrained, and F3–F5 include user-reported outcomes recorded separately from independently verified evidence.
+**Status:** ACTIVE — Build #3539 exact-head tests (1,747/1,747) and the Windows installer/portable package both passed. The bundled Qwen worker and its `audio_validation.py` helper were verified and launched without `PYTHONPATH`. Remaining Stage F items are physical/user evidence: F1 deferred, F2 actual-device constrained, F3 saved-profile/full-book listening, F4 complete physical display matrix, and F5 local target-PC confirmation.
 
 ## 1. Purpose and boundary
 
@@ -49,23 +49,28 @@ Build #3470 passed frozen-app verification, bundled voice assets/modules, real b
 
 This is hosted package evidence, not physical PC, GPU or acoustic sign-off.
 
-## 3B. Current speech-integrity and standalone-worker packaging checkpoint — Build #3537
+## 3B. Current speech-integrity and exact-head Windows package — Build #3539
 
-- **Exact source commit:** `24121c4348cef1706b2d42bdc54ad66d22bff081`.
+- **Exact source commit:** `4b77e693f1f6799dabd41d52ad436319ce593604`.
 - **Branch:** `dragon-studio/stage-f-multilingual-context-aware-tts-2026-11-21`.
-- **Actions:** [Build Windows App #3537](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/44905867762), run ID 44905867762; **tests SUCCESS**. The Windows `build` job was skipped because this was a test-only correction to the artifact-checkpoint commit.
-- **Regression result:** **1,747/1,747 passed** in 60.873 seconds; all 25 test-job workflow steps completed successfully. The isolated native Qt lifecycle regression, frontend JavaScript syntax validation, all focused Stage B–E checks and the full suite passed.
-- **Speech-integrity implementation:** Qwen CustomVoice, VoiceDesign, preview, Clone, saved VoiceDesign/Base production, anchors and silent batch members use one profile-preserving retry. The same model, speaker/profile identity, voice prompt and delivery style are retained; only the seed changes. A second silent response fails closed. Silent cached identity anchors and entirely silent preview/book chunks are rejected.
-- **Pacing and emotion:** the exact `yes.. then what` punctuation is preserved as a hesitation boundary with a 540 ms pause. Explicit joyful and suspicious/wary classifications are available without changing the saved profile's single acoustic identity anchor. Joyful sampling remains below the existing 0.80 CustomVoice safety bound.
-- **Hosted CPU acceptance:** [Stage 7 Qwen Real CPU Preview #54](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/44903985064) completed successfully on this source family. Actual Qwen 1.7B VoiceDesign produced a decoded **30.000-second** preview on CPU; the warm-preview operation took **321.939 seconds**, and cold-start-plus-warm-up was **50.594 seconds**. Worker reuse passed. Warm/angry expression audio passed, and Japanese `Rimuru` pronunciation matched `リムル` with the saved rule applied exactly once. The hosted CPU under-60-second target was explicitly **NOT MET**. This is CPU-only evidence and not NVIDIA/AMD/Intel accelerator proof.
+- **Actions:** [Build Windows App #3539](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/44906128357), run ID 44906128357; overall **SUCCESS**.
+- **Test job:** **SUCCESS**. All 21 focused Stage B–E checks and the full regression suite passed; **1,747/1,747** tests in 55.124 seconds. The isolated Qt lifecycle regression passed. This resolves the #3538 test-import failure.
+- **Build job:** **SUCCESS**. Frozen app verification, bundled voice-assets/critical-module checks, real bundled-Piper multi-chapter M4B acceptance and FFmpeg decode, packaged Sound Design/Production/Voice Library acceptance, functional HTML installer startup, install/launch/upgrade/uninstall, user-data preservation, logo/hash validation, package-size report, Microsoft Defender scans and all artifact uploads passed. The stable-release publication step was **SKIPPED** by design.
+- **Standalone Qwen worker packaging:** the build log confirms `audio_validation.py` exists beside `qwen_character_worker.py` in `_internal/app/tts`; the packaged helper SHA-256 matched the repository source. The exact bundled worker then launched with `PYTHONPATH` removed and returned valid argparse help. The external Qwen runtime bootstrap and application-core import smoke passed. The subsequent CUDA auto-selection probe used a synthetic CI device descriptor; it is **not** physical NVIDIA inference evidence.
+- **Packaged functional coverage:** the real Piper M4B fixture produced two chapters and decoded through FFmpeg. The packaged Sound Design/Voice Library acceptance reported 144 passing checks, including Voice Library profile/asset round-trip and fresh-process reload, Sound Design navigation/filters/import/playback, chapter BGM/cue persistence, actual 30/60/90-second Production previews, save-as/playback/cancel, narrator-only generation, M4B chapter markers/seek, background-job pause/resume/cancel/retry/recover, restart recovery, and History/Task Manager ownership.
+- **Reported production/UI regressions:** #3539's full suite passed tests for dropdown behavior; Production progress ring, clipped labels and hover/focus full-text access; Drake/Fang/Aether and imported cursor packaging/switching; Third Person and narrator fallback; repeated-quote simultaneous chorus; CR/LF, Windows-invalid and overlong chapter-folder names; retry of transient WinError 5 audio-file replacement locks; and Settings storage status avoiding recursive filesystem inventory on the UI thread. The user separately confirms the current UI and cursor are working.
+- **#3538 failure disposition:** #3538 (commit `53c3be9`) failed at the isolated Qt lifecycle step because `tests/test_regressions.py` contained JavaScript `String.raw` syntax. Python raised `SyntaxError` while importing the test file, before the Qt test ran. The assertion was corrected to a valid Python escaped string. #3539 then passed that Qt test and the complete suite. This was a test-harness defect, not a confirmed Qt runtime regression.
+- **Qwen speech-integrity implementation/tests:** CustomVoice, VoiceDesign, preview, Clone, saved VoiceDesign/Base production, anchors and silent batch members now retry a silent response once while keeping the selected model, speaker/profile identity, voice prompt and delivery style; only the seed changes. A second silent response fails closed. #3539 passed the CustomVoice retry, silent-batch retry and packaged worker dependency regressions. This is a signal-level silence gate, not word-level transcription verification.
+- **Separate hosted CPU speech run:** [Stage 7 Qwen Real CPU Preview #54](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/44903985064) passed on preceding source head `350ec3d9c91aa95220c7d1cce890fff7c97f6ec1` (not the #3539 package SHA). Real Qwen 1.7B VoiceDesign produced a decoded 30.000-second preview in 321.939 seconds warm-preview time; warm/angry expression samples and the Japanese `Rimuru` → `リムル` pronunciation rule passed. The CPU under-60-second goal was **NOT MET**. This is not actual GPU acceptance.
 - **CPU evidence artifact:** `Ryu-Stage7-Qwen-Real-CPU-Preview-54`, artifact ID `14707506367`, 1,462,460 bytes.
-- **Resolved #3534 packaging failure:** Build #3534 source tests passed (1,746/1,746), but its frozen application build failed when the Qwen worker was launched as a standalone script with `PYTHONPATH` removed: `ModuleNotFoundError: No module named 'app.tts.audio_validation'`. The worker helper was missing from the physical `_internal/app/tts` payload.
-- **Packaging fix in #3535:** `build.py` now explicitly copies `app/tts/audio_validation.py` as a physical data file beside the Qwen worker. The Windows packaging workflow requires that file and verifies its SHA-256 against the repository source before the standalone worker is launched. Regression `test_qwen_standalone_worker_bundles_audio_validation_helper` protects the copy rule, workflow gate, hash comparison and worker import.
-- **Resolved #3536 test-harness failure:** the first follow-up checkpoint inserted JavaScript `String.raw` syntax into the Python test file. Python failed importing `tests/test_regressions.py` before the Qt lifecycle test could execute. The assertion now uses a valid escaped Python string. Build #3537 confirms the Qt lifecycle test and the complete 1,747-test suite pass.
-- **Next exact-head package:** Build #3537 passed 1,747/1,747 tests on `24121c43`. This documentation update is the artifact-checkpoint push to request the exact-head Windows package. Verify that the workflow checks out this new commit. The Windows build must pass frozen app verification, the standalone Qwen worker launch with no `PYTHONPATH`, bundled voice/assets checks, real Piper M4B acceptance, packaged Sound Design/Production acceptance, functional installer UI startup, install/launch/upgrade/uninstall, logo/hash validation, Microsoft Defender scan and upload the installer, SHA-256 manifest, portable archive, M4B and benchmark evidence. No package artifact is accepted until the exact-head build job succeeds.
-- **Capture-script warning:** `scripts/stage_f_capture_environment.ps1` remains pinned to historical Build #3497 hashes. Do not use it against the new package until its exact application/installer hashes are read from the new release manifest and its baseline is updated.
+- **#3539 artifacts:** Installer `Ryu-Audiobook-Installer-3539` ID `14708683167` (Actions ZIP 847,427,435 bytes); portable `Ryu-Audiobook-Portable-3539` ID `14708428872` (ZIP 1,191,946,203 bytes); SHA-256 manifest `Ryu-Audiobook-Release-SHA256-3539` ID `14708473846` (3,053 bytes); real multi-chapter M4B ID `14708426119` (8,981,859 bytes); Piper benchmark ID `14708399076` (802 bytes).
+- **Manifest-pinned binaries:** application EXE 12,484,560 bytes SHA-256 `c6a4300cb36007cd1c9e5bc272e7ee5506accb1b1db4a268c328c08e4939492c`; HTML installer 847,427,271 bytes SHA-256 `1a28c25b75a86f21216c295126bfcf7ccfbcfdd6e18cf48983c07cdb0d975ea7`; core installer 620,596,713 bytes SHA-256 `d7508b2ca3a02ec145530e799ff7985b30a15e041fe2a42a545f46ed2a3daf9f`.
+- **Package-size observation:** the unpacked portable payload is 1,191,614,263 bytes. The report's historical 500,000,000-byte advisory target is not met (nor are the HTML/core installer 500 MB thresholds). Do not remove required offline Piper/Kokoro models or assets as an ad-hoc reduction. This remains a separate package-size concern, not a failed #3539 build gate.
+- **Capture tooling:** `scripts/stage_f_capture_environment.ps1` is updated from the obsolete #3497 pins to the exact #3539 source/app/HTML-installer/core-installer hashes above. A regression test protects these pins.
+- **Physical acceptance boundary:** CI's two-chapter Piper M4B and preview fixtures do not prove a 23-chapter, 15-hour Qwen book was listened to end-to-end. The user's saved VoiceDesign profile still needs acoustic audition for omissions within otherwise audible chunks, pronunciation, hesitation and emotion. Physical NVIDIA backend telemetry, full target-PC display/DPI testing, and installation of this exact #3539 artifact on the user's own PC are not proven by hosted CI.
+- **Product decisions:** D6 PC-A → PC-B transfer remains **DEFERRED** to the next Voice Studio version because the current version has no user-facing import option. AMD ROCm/Intel XPU tests remain unavailable where the physical hardware is absent.
 
-**Acceptance boundary:** the signal-level guard detects an entirely silent/near-silent Qwen segment or batch item. It does not prove that every word in an otherwise audible multi-sentence segment was spoken. The saved VoiceDesign audition and representative-book listening remain open for omissions inside voiced segments, pronunciation, hesitation timing and emotional delivery. No ASR/forced-alignment gate is claimed here.
+**Acceptance boundary:** #3539 proves automated regression and hosted packaged acceptance, not universal completion. A green Actions build cannot substitute for actual GPU worker telemetry, cross-PC transfer, target-PC display/install checks or listening to a representative full-length Qwen audiobook.
 
 ## 3A. Current exact-head follow-up package — Build #3497
 
@@ -82,7 +87,7 @@ This is hosted package evidence, not physical PC, GPU or acoustic sign-off.
 - Artifacts expire **20 December 2026** according to the Actions API. Download and preserve the installer, portable package, manifest and M4B evidence before expiry.
 - Binary SHA-256 values pinned by the PC capture tool: app `c82a61fbf3927f334fcab0eb033aca5ce7c0fa7394a97a63994393259bcb574d`; HTML installer `5626423f680fc45a06a6c8ccbdc41867cd3758b59851b081c7738994a470c48a`; core installer `98f9adf51e24421561b741a85d2ea7c1aa7748bad04f2abf313db22e01f9ce66`.
 
-Build #3497 replaced #3470 as the package baseline at the time of its checkpoint; it is now a historical package, not the current source head. The #3533 source regression checkpoint is newer, but it has not yet produced its own Windows package. User-reported F3/F4/F5 outcomes and the F1/F2 scope decisions are recorded in Sections 5–9 below. The public release publication step was skipped by design; Actions artifacts are not a published stable release.
+Build #3497 remains historical evidence only. Build #3539 is the current exact-head Windows package candidate. Its Actions artifacts are not a published stable release because the publish step was skipped by design.
 
 ## 4. Stage A–F status at handoff
 
@@ -90,10 +95,10 @@ Build #3497 replaced #3470 as the package baseline at the time of its checkpoint
 |---|---|---|
 | A — baseline/reconciliation | Complete | Relevant real-device checks consolidated into F |
 | B — truthful progress/ETA/duration | Hosted source, regression and package work complete | User reports current audiobook generation works; the long-book quality/listening check remains distinct |
-| C — Qwen identity/lifecycle/accelerator/multilingual | C1–C4 hosted engineering/provider gates complete; speech-integrity retry hardening passes #3533 regression | CPU comparison #54 running; other-vendor GPU hardware unavailable per user; current saved-profile acoustic audition remains open |
+| C — Qwen identity/lifecycle/accelerator/multilingual | C1–C4 hosted engineering/provider gates and #3539 package checks complete; silence retry covered by #3539 tests | Hosted CPU #54 passed functionally but 30s warm preview took 321.939s; actual NVIDIA worker telemetry and saved-profile audition remain open; AMD/Intel hardware unavailable |
 | D — Voice Library/profile portability | D0–D5 hosted engineering/package complete | D6 profile transfer deferred to the next Voice Studio version because the current version has no import option |
 | E — character intelligence/cast/Production/Help | E0–E5 hosted source/test gates complete | User reports the application UI is working; latest custom cursor is user-confirmed working |
-| F — physical/manual acceptance | Active; exact-head package checkpoint pending | F3 generation, F4 UI and F5 installation are user-reported outcomes; exact #3533 package installation and saved-profile listening remain outstanding |
+| F — physical/manual acceptance | #3539 exact-head test and Windows package PASS | F3 generation and F4 UI are user-reported working; F1 remains deferred; F2 hardware-constrained; representative Qwen listening, full physical display matrix and local #3539 target-PC confirmation remain open |
 
 ## 5. F1 — Real two-PC profile transfer (D6)
 
@@ -110,7 +115,7 @@ A same-PC second process or CI fixture cannot pass D6. A missing model on PC-B m
 
 ## 6. F2 — Qwen device selection, real inference and performance
 
-**Status: HARDWARE-CONSTRAINED — not passed in this checkpoint.** The user reports no AMD/Intel GPU hardware is available for those tests. Do not simulate or label hosted CPU as accelerator proof. The formal matrix remains in [STAGE-C3-QWEN-ACCELERATOR-ACCEPTANCE.md](STAGE-C3-QWEN-ACCELERATOR-ACCEPTANCE.md). The hosted CPU comparison #54 is running separately and only supplies CPU timing/functional evidence; any available NVIDIA saved-profile test must still record actual worker backend/device telemetry.
+**Status: HARDWARE-CONSTRAINED — no physical accelerator PASS recorded by #3539.** The user reports no AMD/Intel GPU hardware is available for those tests. Do not simulate or label hosted CPU as accelerator proof. The formal matrix remains in [STAGE-C3-QWEN-ACCELERATOR-ACCEPTANCE.md](STAGE-C3-QWEN-ACCELERATOR-ACCEPTANCE.md). CPU #54 passed functional synthesis at 321.939 seconds for a decoded 30-second preview; its under-60-second target was not met. The #3539 CI CUDA auto-selection probe uses a synthetic CI device and is not actual CUDA inference. Any available NVIDIA saved-profile test must still record real worker backend/device telemetry.
 
 | Device/workload | Required physical proof | Target/disposition |
 |---|---|---|
@@ -122,13 +127,13 @@ A same-PC second process or CI fixture cannot pass D6. A missing model on PC-B m
 
 For each available device test the 0.6B/1.7B selector and the applicable CustomVoice, VoiceDesign and Clone paths, including saved profile preview, save/reload, restart and production use. Record cold start and warmed inference separately, requested/decoded duration, elapsed synthesis time, model revision, driver/runtime versions, actual backend/device and memory use. User timing targets: approximately 10 seconds of preview within 20 seconds and 30 seconds of preview in under 60 seconds on supported accelerated hardware. A detection result or model download is not inference acceptance.
 
-The exact-head CPU evidence from Provider Runtime Smoke #448 produced 30-second VoiceDesign previews in 187.318 and 336.607 seconds. The log explicitly marked the CPU under-60-second goal NOT MET. These CPU timings must not be rewritten as GPU evidence or used to claim the target has passed.
+The latest hosted CPU Qwen evidence is run #54 on source `350ec3d9`: 30-second decoded VoiceDesign preview in 321.939 seconds warm-preview time. Functional synthesis and pronunciation/expression samples passed, but the CPU under-60-second goal was NOT MET. This result must not be rewritten as GPU evidence.
 
 ## 7. F3 — Installed-app voice identity and full-book production
 
 **Status: PARTIALLY USER-REPORTED — audiobook generation is working.** This records the user's report, not an independently measured full-book listening result. The saved VoiceDesign speech-quality follow-up remains open until the exact packaged candidate is auditioned with the user's existing profile and a representative book. In particular, listen for missing sentences inside otherwise audible chunks, pronunciation, hesitation pauses and emotional delivery. CI's silent-segment checks do not prove word-level coverage.
 
-- Install and launch the exact #3497 candidate; record version/SHA and target environment. Verify saved Qwen models/profile identity after restart and after model install/repair actions where applicable.
+- Install and launch the exact #3539 candidate; record version/SHA and target environment. Verify saved Qwen models/profile identity after restart and after model install/repair actions where applicable.
 - Exercise CustomVoice, VoiceDesign and authorized Clone previews and ensure the selected profile/model/voice reaches the actual synthesis worker. Record the actual backend; no silent CPU/model substitution during GPU acceptance.
 - Analyse a representative Japanese/Korean/Indian-language/English book as applicable. Review source-grounded character names, aliases and dialogue assignments across the full chapter set; check false positives and later-chapter coverage.
 - Verify narrator-only is a real explicit setting with default OFF when cast selection is available; verify the valid saved narrator fallback for a book with no valid character voice profiles; verify series-scoped same-name characters and global Unassigned Character routing.
@@ -146,7 +151,7 @@ Run the responsive matrix across these aspect ratios: 4:3, 5:4, 3:2, 16:10, 16:9
 
 ## 9. F5 — Windows installer, shell identity and Help & Guide
 
-**Status: USER-REPORTED INSTALLATION COMPLETED.** The user has completed an installation walkthrough on an earlier candidate. The #3533 exact-head source has not yet produced an installer; after the new artifact checkpoint, install and verify that exact package before marking the new package's F5 acceptance passed. #3497's previous installer/startup/install/upgrade/uninstall and Defender checks remain historical evidence only.
+**Status: HOSTED CI PASS; local #3539 confirmation pending.** Build #3539 produced the exact-head installer and passed HTML installer startup plus install/launch/upgrade/uninstall with user-data preservation and Microsoft Defender scans on the Windows CI runner. The user previously reported installation on an earlier candidate; this does not prove #3539 has been installed on the user's own PC. Confirm the exact #3539 package locally before closing the physical F5 row.
 
 - Install the exact candidate on a clean or controlled target Windows environment; verify first launch, app shortcut, taskbar identity, multi-size icon and transparent logo edges/corners.
 - Inspect the actual installer wizard at the target display size/scaling: full footer, Next/Back controls, details, progress, window centering, no cropped content and no unwanted black center bar/frame.
@@ -173,19 +178,19 @@ The step-by-step user sequence is in [STAGE-F-USER-CHECKLIST.md](STAGE-F-USER-CH
 |---|---|
 | Historical Build #3470 hosted baseline | SUPERSEDED |
 | Historical Build #3497 exact-head Windows package | PASS — historical installer/portable artifacts; 1,718/1,718 regressions |
-| Build #3533 exact-head source regression | PASS — 1,746/1,746; Windows package job skipped |
-| New #3533 exact-head Windows installer/portable package | CHECKPOINT REQUESTED — artifact IDs and hashes pending |
+| Build #3539 exact-head regression | PASS — 1,747/1,747; Qt lifecycle, focused Stage B–E and full suite |
+| Build #3539 exact-head Windows package | PASS — frozen app, standalone Qwen worker no-PYTHONPATH launch, M4B, packaged Sound Design/Voice Library, installer lifecycle, Defender and artifacts |
+| Build #3539 SHA-256 baseline in capture script | UPDATED from manifest; regression test added |
 | D6 PC-A → PC-B real transfer | DEFERRED — next Voice Studio version; current import option is unavailable |
 | Other-vendor AMD ROCm / Intel XPU physical testing | NOT AVAILABLE — user reports no corresponding hardware |
 | NVIDIA saved-profile inference/performance | NOT RE-VERIFIED in this checkpoint; require actual worker telemetry |
-| Hosted CPU 1.7B VoiceDesign comparison | IN PROGRESS — run #54; not GPU evidence |
+| Hosted CPU 1.7B VoiceDesign comparison | PASS functional; 30s audio took 321.939s; CPU under-60s target NOT MET, not GPU evidence |
 | User's saved VoiceDesign acoustic audition | OPEN — listen for omissions, pauses, pronunciation and emotion |
 | Representative full-book generation/listening | USER REPORT: generation works; acoustic/listening evidence still open |
 | Physical pause/resume/cancel/recovery | NOT independently evidenced in this checkpoint |
 | Real progress/ETA/duration observation | User reports current generation works; separate long-duration observation remains open |
 | Physical responsive/flicker/freeze/multi-monitor matrix | USER REPORT: UI working; full display matrix not independently captured |
-| Installed shortcut/taskbar/logo transparency on new package | PENDING new exact-head package install |
-| Actual installer geometry/navigation on new package | PENDING new exact-head package install |
-| Installed-app Help & Guide walkthrough on new package | PENDING new exact-head package install |
-| Stage F speech-integrity source/test contracts | PASS — Build #3533, 1,746/1,746 |
+| Installed shortcut/taskbar/logo transparency and installer geometry on the user's target PC | PENDING physical #3539 walkthrough (CI package/logo checks passed) |
+| Installed-app Help & Guide walkthrough on the user's target PC | PENDING physical #3539 walkthrough (packaged guide content acceptance passed) |
+| Stage F speech-integrity and packaged-worker contracts | PASS — #3539, 1,747/1,747; exact worker launched without PYTHONPATH |
 | Final owner release approval | NOT RUN |
