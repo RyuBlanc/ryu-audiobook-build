@@ -1651,14 +1651,46 @@
     must(importCues && !importCues.disabled, "Import effect clips control is missing or disabled.");
     config.reject_long_cue_import = true;
     importCues.click();
-    await waitFor("six-second cue rejection", function () {
-      return document.querySelector("#toasts")?.textContent.includes("5 seconds or shorter");
+    const notificationStorageKey = "ryu-audiobook-notification-history-v1";
+    const longCueName = String(config.long_cue_path || "").replace(/\\/g, "/").split("/").pop();
+    let rejectedCueNotification = null;
+    await waitFor("six-second cue rejection in persistent notification history", function () {
+      try {
+        const history = JSON.parse(localStorage.getItem(notificationStorageKey) || "[]");
+        rejectedCueNotification = Array.isArray(history) ? history.find(item =>
+          item && item.error === true &&
+          String(item.text || "").includes("5 seconds or shorter") &&
+          (!longCueName || String(item.text || "").includes(longCueName))
+        ) || null : null;
+        return Boolean(rejectedCueNotification);
+      } catch (_) {
+        return false;
+      }
     }, 10000);
+    const notificationButton = document.querySelector(
+      "#notifyBtn,button[title='Notifications'],button[aria-label='Notifications'],button[data-action='notifications']"
+    );
+    must(notificationButton, "The packaged Notifications control is missing.");
+    notificationButton.click();
+    let rejectedCueCard = null;
+    await waitFor("six-second cue rejection visible in Notifications panel", function () {
+      const panel = document.querySelector("#ryuNotificationsPanel");
+      if (!panel || panel.style.display === "none") return false;
+      rejectedCueCard = Array.from(panel.querySelectorAll("article")).find(card =>
+        card.textContent.includes("5 seconds or shorter") &&
+        (!longCueName || card.textContent.includes(longCueName))
+      ) || null;
+      return Boolean(rejectedCueCard);
+    }, 10000);
+    must(rejectedCueCard && getComputedStyle(rejectedCueCard).borderLeftColor === "rgb(216, 77, 105)",
+      "The rejected cue error is not visibly marked as an error in the persistent Notifications panel.");
+    must(rejectedCueNotification.error === true,
+      "The rejected cue notification was not persisted with its error status.");
     const afterLongCueAttempt = await invoke("sound.catalog", {});
     must(!afterLongCueAttempt.some(track => String(track.path || "").includes("CUE_TOO_LONG")),
       "A cue longer than five seconds was accepted into the native cue catalogue.");
     record("cue_import_rejects_over_five_seconds", true,
-      "The real cue-import action rejected a six-second audio fixture and did not add it to the catalogue.");
+      "The real cue-import action rejected a six-second audio fixture, persisted a red error notification in the Notifications panel, and did not add it to the native cue catalogue.");
     importCues.click();
     let cueCatalog = [];
     await waitFor("two imported cue fixtures", async function () {

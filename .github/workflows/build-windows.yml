@@ -777,6 +777,9 @@ jobs:
             $env:PYTHONPATH = (Get-Location).Path
             $env:RYU_AI_SERVER_URL = 'http://127.0.0.1:18765'
             & $pythonExe -B tests/smoke_audiobook_ai_live.py
+            if ($LASTEXITCODE -ne 0) {
+              throw "Live Audiobook AI character/dialogue/scene extraction smoke failed with exit code $LASTEXITCODE."
+            }
           } finally {
             if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
           }

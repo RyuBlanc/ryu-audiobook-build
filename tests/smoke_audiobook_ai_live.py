@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -81,11 +82,15 @@ def main() -> None:
     if not _health(endpoint):
         server, *streams = _start_local_server(endpoint)
 
+    # Keep this acceptance excerpt deliberately explicit: it contains two
+    # named human characters and two directly attributed spoken lines. This
+    # tests source-grounded extraction, not whether a small model can infer
+    # unspoken relationships from literary prose.
     sample = (
-        'Haruka looked at Rahul as rain struck the classroom windows. '
-        '"We should go now," Haruka said quietly. '
-        'Rahul stared at the dark corridor. "Wait for me," he replied. '
-        'The room felt cold and tense, and neither of them wanted to speak about Kyoto.'
+        'Haruka is a student. Rahul is her friend. '
+        'Haruka said, "We should go now." '
+        'Rahul replied, "Wait for me." '
+        'Haruka and Rahul walked together toward Kyoto.'
     )
     chapter = Chapter(1, 'AI Smoke Chapter', sample)
 
@@ -106,12 +111,20 @@ def main() -> None:
         warnings = chapter_result.get('warnings', [])
         if warnings:
             raise SystemExit('Audiobook AI used a fallback/warning path: ' + ' | '.join(warnings))
-        if not chapter_result.get('characters'):
-            raise SystemExit('Audiobook AI returned no characters in the live smoke test.')
-        if not chapter_result.get('dialogue'):
-            raise SystemExit('Audiobook AI returned no dialogue in the live smoke test.')
-        if not chapter_result.get('scenes'):
-            raise SystemExit('Audiobook AI returned no scene analysis in the live smoke test.')
+        if not chapter_result.get('characters') or not chapter_result.get('dialogue') or not chapter_result.get('scenes'):
+            diagnostic = {
+                'chapter': chapter_result.get('chapter'),
+                'title': chapter_result.get('title'),
+                'characters': chapter_result.get('characters'),
+                'dialogue': chapter_result.get('dialogue'),
+                'scenes': chapter_result.get('scenes'),
+                'warnings': warnings,
+                'chapter_summary': chapter_result.get('chapter_summary'),
+            }
+            raise SystemExit(
+                'Audiobook AI live extraction was incomplete: '
+                + json.dumps(diagnostic, ensure_ascii=False, default=str)
+            )
 
         print('LIVE_AUDIOBOOK_AI_BRAIN_SMOKE=PASS')
         print('characters=', len(chapter_result['characters']))
