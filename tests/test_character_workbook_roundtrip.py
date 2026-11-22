@@ -97,24 +97,36 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 relationship_items = rels_xml.findall(package_ns + "Relationship")
                 relationship_ids = [item.get("Id") for item in relationship_items]
                 self.assertEqual(len(relationship_ids), len(set(relationship_ids)))
+                sheet_nodes = book_xml.findall(".//" + document_ns + "sheet")
+                self.assertEqual(
+                    [sheet.get("name") for sheet in sheet_nodes],
+                    ["Dialogue Assignment", "Character Register", "Chapter Context", "Workbook Info"],
+                )
                 relationships = {item.get("Id"): item for item in relationship_items}
-                sheets = {
-                    sheet.get("name"): relationships.get(sheet.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"))
-                    for sheet in book_xml.findall(".//" + document_ns + "sheet")
-                }
-                reference_relationship = sheets["Series Character Reference"]
-                self.assertTrue(reference_relationship.get("Type", "").endswith("/worksheet"))
-                self.assertEqual(reference_relationship.get("Target"), "worksheets/sheet5.xml")
+                sheet_rel_ids = [
+                    sheet.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
+                    for sheet in sheet_nodes
+                ]
+                self.assertTrue(all(relationships[rid].get("Type", "").endswith("/worksheet") for rid in sheet_rel_ids))
+                info_relationship = relationships[sheet_rel_ids[3]]
+                self.assertEqual(info_relationship.get("Target"), "worksheets/sheet4.xml")
                 styles = [
                     item for item in relationship_items
                     if item.get("Type", "").endswith("/styles")
                 ]
                 self.assertEqual(len(styles), 1)
-                self.assertNotEqual(styles[0].get("Id"), next(
-                    sheet.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
-                    for sheet in book_xml.findall(".//" + document_ns + "sheet")
-                    if sheet.get("name") == "Series Character Reference"
-                ))
+                self.assertNotIn(styles[0].get("Id"), sheet_rel_ids)
+                info_xml = ET.fromstring(archive.read("xl/worksheets/sheet4.xml"))
+                protection = info_xml.find(document_ns + "sheetProtection")
+                self.assertIsNotNone(protection)
+                self.assertEqual(protection.get("sheet"), "1")
+                first_row = info_xml.find(".//" + document_ns + "sheetData/" + document_ns + "row")
+                header_cells = {
+                    cell.get("r"): "".join(node.text or "" for node in cell.iter(document_ns + "t"))
+                    for cell in first_row.findall(document_ns + "c")
+                }
+                self.assertEqual(header_cells["D1"], "Canonical Character")
+                self.assertEqual(header_cells["E1"], "Known Alias")
             parsed = read_character_workbook(path)
             self.assertEqual(len(parsed["series_character_reference"]), 2)
             adult, younger = parsed["series_character_reference"]
@@ -126,6 +138,14 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             self.assertEqual(younger["identity_variant"], "Younger Version")
             self.assertNotIn("voice_name", adult)
             self.assertEqual(parsed["characters"], [])
+            plan = plan_character_workbook_import(
+                parsed, series="Silver Archive", registry_rows=[],
+                project_characters=[], chapter_id="chapter-001",
+                chapter_revision="revision-abc", current_passages=passages,
+                current_assignments=[], book_title="The Silver Archive",
+            )
+            self.assertEqual(plan["characters"], [])
+            self.assertEqual(plan["assignments"], [])
 
     def test_series_reference_supports_large_alias_lists_without_multiline_cells(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -144,7 +164,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             }
             path.write_bytes(create_character_workbook_bytes(metadata, passages, chapter_text))
             with ZipFile(path, "r") as archive:
-                sheet = ET.fromstring(archive.read("xl/worksheets/sheet5.xml"))
+                sheet = ET.fromstring(archive.read("xl/worksheets/sheet4.xml"))
                 main_ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
                 rows = sheet.findall(".//" + main_ns + "sheetData/" + main_ns + "row")
                 self.assertEqual(len(rows), len(aliases) + 1)

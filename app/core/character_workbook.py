@@ -54,7 +54,7 @@ def _cell(ref, value, style):
         ref, style, escape(raw)
     )
 
-def _sheet(rows, widths, wrap):
+def _sheet(rows, widths, wrap, protect=False):
     cols = "".join('<col min="%d" max="%d" width="%.2f" customWidth="1"/>' % (
         i + 1, i + 1, widths[i] if i < len(widths) else 20
     ) for i in range(max([len(row) for row in rows] or [1])))
@@ -70,12 +70,13 @@ def _sheet(rows, widths, wrap):
         rendered.append('<row r="%d"%s>%s</row>' % (ri, height, cells))
     end_row = max(1, len(rows))
     filt = '<autoFilter ref="A1:%s%d"/>' % (last_col, end_row) if len(rows) > 1 else ""
+    protection = '<sheetProtection sheet="1" objects="1" scenarios="1"/>' if protect else ""
     return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<worksheet xmlns="%s"><dimension ref="A1:%s%d"/>'
         '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>'
         '</sheetView></sheetViews><sheetFormatPr defaultRowHeight="19"/><cols>%s</cols>'
-        '<sheetData>%s</sheetData>%s</worksheet>') % (
-            MAIN, last_col, end_row, cols, "".join(rendered), filt
+        '<sheetData>%s</sheetData>%s%s</worksheet>') % (
+            MAIN, last_col, end_row, cols, "".join(rendered), protection, filt
         )
 
 def _styles():
@@ -110,8 +111,8 @@ def create_character_workbook_bytes(metadata, passages, chapter_text):
             "Narration is protected as Narrator. Add canonical full names and all other names as aliases. "
             "A younger/older version needing a different voice must be a separate Character Register row. "
             "Use Version / Age Variant and assign it by its distinct name, for example Mira (Younger Version). "
-            "Use the read-only Series Character Reference sheet to reuse existing canonical names and known aliases. "
-            "Do not edit that reference sheet; add genuinely new identities in Character Register. "
+            "Use the read-only Series Character Reference table on the Workbook Info tab to reuse existing canonical names and known aliases. "
+            "Do not edit that reference table; add genuinely new identities in Character Register. "
             "For more than 30 aliases, add columns named Alias 31, Alias 32, and so on. "
             "Do not edit Passage ID, Dialogue Text, chapter identity, offsets, or revision columns.")
     }
@@ -148,11 +149,8 @@ def create_character_workbook_bytes(metadata, passages, chapter_text):
     ]
     characters = [char_headers] + [[""] * len(char_headers) for _ in range(30)]
     context = [["Context Part", "Chapter Number", "Chapter Title", "Chapter Text"]]
-    reference_rows = None
+    reference_rows = []
     if "series_character_reference" in metadata:
-        reference_rows = [[
-            "Canonical Character", "Known Alias", "Identity Base Name", "Version / Age Variant"
-        ]]
         for source in metadata.get("series_character_reference") or []:
             if not isinstance(source, dict):
                 continue
@@ -186,14 +184,26 @@ def create_character_workbook_bytes(metadata, passages, chapter_text):
     chunks = [text[i:i + CHUNK] for i in range(0, len(text), CHUNK)] or [""]
     for i, chunk in enumerate(chunks, 1):
         context.append([i, metadata.get("chapter_number", ""), info["Chapter Title"], chunk])
+    workbook_info_rows = [[
+        "Field", "Value", "", "Canonical Character", "Known Alias",
+        "Identity Base Name", "Version / Age Variant",
+    ]]
+    info_entries = [[key, value] for key, value in info.items()]
+    info_row_count = max(len(info_entries), len(reference_rows))
+    if len(reference_rows) > MAX_ROWS:
+        raise ValueError("The Series Character Reference exceeds the 50,000 row limit.")
+    for index in range(info_row_count):
+        metadata_row = info_entries[index] if index < len(info_entries) else ["", ""]
+        reference_row = reference_rows[index] if index < len(reference_rows) else ["", "", "", ""]
+        workbook_info_rows.append([
+            metadata_row[0], metadata_row[1], "", *reference_row,
+        ])
     sheets = [
         ("Dialogue Assignment", dialogue, [38,38,14,32,16,72,34,18,34,22,18,14,14,42,46], {6,8,9,14,15}),
         ("Character Register", characters, [34] + [24] * ALIAS_COLUMNS + [26,48], set(range(1, ALIAS_COLUMNS + 4))),
         ("Chapter Context", context, [14,14,32,100], {4}),
-        ("Workbook Info", [["Field","Value"]] + [[k,v] for k,v in info.items()], [28,110], {2}),
+        ("Workbook Info", workbook_info_rows, [28,110,4,36,32,36,28], {2,4,5,6,7}),
     ]
-    if reference_rows is not None:
-        sheets.append(("Series Character Reference", reference_rows, [36, 76, 36, 28], {2}))
     import io
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as z:
@@ -219,7 +229,10 @@ def create_character_workbook_bytes(metadata, passages, chapter_text):
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="%s">%s</Relationships>' % (PKG, rels))
         z.writestr("xl/styles.xml", _styles())
         for n, (name, rows, widths, wrap) in enumerate(sheets, 1):
-            z.writestr("xl/worksheets/sheet%d.xml" % n, _sheet(rows, widths, wrap))
+            z.writestr(
+                "xl/worksheets/sheet%d.xml" % n,
+                _sheet(rows, widths, wrap, protect=(name == "Workbook Info")),
+            )
     return output.getvalue()
 
 def _read_sheet(archive, target, shared):
@@ -311,7 +324,10 @@ def read_character_workbook(path):
     except (zipfile.BadZipFile, ET.ParseError, KeyError) as exc:
         raise ValueError("The .xlsx workbook is damaged or unsupported.") from exc
     info_rows = _records(sheets["Workbook Info"])
-    info = {r.get("Field",""): _clean(r.get("Value","")) for r in info_rows}
+    info = {
+        _clean(row.get("Field")): _clean(row.get("Value", ""))
+        for row in info_rows if _clean(row.get("Field"))
+    }
     if info.get("Workbook Schema") != "ryu.character-studio-workbook":
         raise ValueError("This workbook was not exported by Character Studio.")
     try: version = int(float(info.get("Workbook Version", "0")))
@@ -345,7 +361,25 @@ def read_character_workbook(path):
             raise ValueError("Each dialogue row must retain its Passage ID and original text.")
         if passage in seen: raise ValueError("The workbook contains a duplicate Passage ID.")
         seen.add(passage)
-    reference_rows = _records(sheets.get("Series Character Reference", []))
+    # New exports store the reference table beside Workbook Info in the original four-tab layout.
+    # The optional fifth sheet is accepted only for compatibility with earlier experimental exports.
+    reference_rows = [
+        row for row in info_rows if _clean(row.get("Canonical Character"))
+    ]
+    legacy_reference_rows = _records(sheets.get("Series Character Reference", []))
+    for legacy_row in legacy_reference_rows:
+        if "Known Alias" not in legacy_row and _clean(legacy_row.get("Known Aliases")):
+            legacy_values = [
+                _clean(value) for value in str(legacy_row.get("Known Aliases") or "").splitlines()
+                if _clean(value)
+            ]
+            for alias_value in (legacy_values or [""]):
+                reference_rows.append({
+                    **legacy_row,
+                    "Known Alias": alias_value,
+                })
+        else:
+            reference_rows.append(legacy_row)
     if len(reference_rows) > MAX_ROWS:
         raise ValueError("The Series Character Reference exceeds the 50,000 row limit.")
     reference_by_identity = {}
@@ -355,12 +389,18 @@ def read_character_workbook(path):
             continue
         base_name = _clean(row.get("Identity Base Name") or primary)
         variant = _clean(row.get("Version / Age Variant"))
+        if len(primary) > MAX_CHARACTER_NAME_LENGTH or len(base_name) > MAX_CHARACTER_NAME_LENGTH:
+            raise ValueError("Series Character Reference names must be 160 characters or fewer.")
+        if len(variant) > MAX_IDENTITY_VARIANT_LENGTH:
+            raise ValueError("Series Character Reference age/version labels must be 120 characters or fewer.")
         identity = (_key(primary), _key(base_name), _key(variant))
         record = reference_by_identity.setdefault(identity, {
             "canonical_name": primary, "aliases": [],
             "identity_base_name": base_name, "identity_variant": variant,
         })
         alias = _clean(row.get("Known Alias"))
+        if alias and len(alias) > MAX_CHARACTER_ALIAS_LENGTH:
+            raise ValueError("Series Character Reference aliases must be 160 characters or fewer.")
         if alias and _key(alias) != _key(primary) and _key(alias) not in {_key(value) for value in record["aliases"]}:
             record["aliases"].append(alias)
     series_character_reference = list(reference_by_identity.values())
