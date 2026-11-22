@@ -193,14 +193,17 @@ def assign_dialogue_to_chapters(chapters, dialogue_text: str, speakers: list[str
         raise ValueError("The selected dialogue passage is too long to assign safely.")
     source_value = str(source or "manual").strip().casefold()
     if source_value not in {"manual", "ai", "outsourced"}:
-        raise ValueError("Dialogue assignment source must be manual, ai or outsourced.")
+        raise ValueError(
+            "Dialogue assignment source must be manual or ai; outsourced is also accepted."
+        )
     if source_value in {"ai", "outsourced"}:
+        confidence_label = "AI confidence" if source_value == "ai" else "Outsourced confidence"
         try:
             confidence_value = float(confidence)
         except (TypeError, ValueError, OverflowError) as exc:
-            raise ValueError("Assignment confidence must be a finite value between 0 and 1.") from exc
+            raise ValueError(f"{confidence_label} must be a finite value between 0 and 1.") from exc
         if not math.isfinite(confidence_value) or not 0.0 <= confidence_value <= 1.0:
-            raise ValueError("Assignment confidence must be a finite value between 0 and 1.")
+            raise ValueError(f"{confidence_label} must be a finite value between 0 and 1.")
     else:
         confidence_value = 1.0
     candidates = []
