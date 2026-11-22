@@ -64,6 +64,12 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertNotIn("if len(result) >= 5:", self.registry)
         self.assertIn('"imported_from_workbook": bool(record.get("imported_from_workbook"))', self.host)
 
+    def test_failed_workbook_import_restores_live_project_and_file_snapshots(self):
+        self.assertIn("chapter_memory_backup", self.host)
+        self.assertIn("item.dialogue_assignments = assignments", self.host)
+        self.assertIn("rollback_errors", self.host)
+        self.assertIn("Could not restore Character Studio workbook import snapshot", self.host)
+
     def test_workbook_uses_standard_library_ooxml_and_revision_scoped_passages(self):
         self.assertIn("zipfile.ZipFile", self.workbook)
         self.assertIn("ryu.character-studio-workbook", self.workbook)

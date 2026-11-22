@@ -5281,6 +5281,11 @@ class PremiumV2Bridge(QObject):
             Path(project.folder) / "chapters.json", Path(project.folder) / "state.json",
         ]
         backups = {path: (path.read_bytes() if path.is_file() else None) for path in backup_paths}
+        from copy import deepcopy
+        chapter_memory_backup = [
+            (item, int(item.number), deepcopy(list(getattr(item, "dialogue_assignments", []) or [])))
+            for item in project.chapters
+        ]
 
         def restore_snapshot(path: Path, content: bytes | None) -> None:
             if content is None:
@@ -5381,8 +5386,24 @@ class PremiumV2Bridge(QObject):
             project.save()
             save_state(project.folder, state)
         except Exception:
+            # Restore the live Project object as well as its files. A failed
+            # save_state after project.save() must not leave uncommitted dialogue
+            # assignments in memory for a later refresh/save to persist.
+            for item, chapter_number, assignments in chapter_memory_backup:
+                item.number = chapter_number
+                item.dialogue_assignments = assignments
+            rollback_errors = []
             for backup_path, content in backups.items():
-                restore_snapshot(backup_path, content)
+                try:
+                    restore_snapshot(backup_path, content)
+                except Exception as rollback_error:
+                    log.exception("Could not restore Character Studio workbook import snapshot %s", backup_path)
+                    rollback_errors.append(rollback_error)
+            if rollback_errors:
+                raise RuntimeError(
+                    "Character workbook import failed and rollback was incomplete. "
+                    "Close the project without saving and inspect the project and Character Library backups."
+                ) from rollback_errors[0]
             raise
 
         if isinstance(sessions, dict):
