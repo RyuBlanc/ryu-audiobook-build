@@ -22,7 +22,7 @@ from app.core.state import save_state
 
 
 class CharacterLibraryRegistryTests(unittest.TestCase):
-    def test_series_registry_limits_aliases_keeps_manual_samples_and_recovers_deleted_entries(self):
+    def test_series_registry_preserves_all_aliases_and_recovers_deleted_entries(self):
         with tempfile.TemporaryDirectory(prefix="ryu-character-registry-") as tmp:
             store = Path(tmp) / "character-library.json"
             sync_characters(
@@ -42,7 +42,8 @@ class CharacterLibraryRegistryTests(unittest.TestCase):
             record = records[0]
             self.assertEqual(record["series"], "Star Volume Series")
             self.assertEqual(record["short"], "Ari")
-            self.assertEqual(len(record["aliases"]), 5)
+            self.assertEqual(len(record["aliases"]), 6)
+            self.assertIn("Sixth Alias", record["aliases"])
             self.assertEqual(record["voice_name"], "Voice A")
             self.assertEqual(record["dialogue_sample"], "I will protect the city.")
 

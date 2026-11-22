@@ -1766,14 +1766,17 @@ class PremiumV2Bridge(QObject):
         import math
         assignment_source = str(payload.get("source") or "manual").strip().casefold()
         if assignment_source not in {"manual", "ai", "outsourced"}:
-            raise ValueError("Dialogue assignment source must be manual, ai or outsourced.")
+            raise ValueError(
+                "Dialogue assignment source must be manual or ai; outsourced is also accepted."
+            )
         if assignment_source in {"ai", "outsourced"}:
+            confidence_label = "AI confidence" if assignment_source == "ai" else "Outsourced confidence"
             try:
                 assignment_confidence = float(payload.get("confidence", 0.0))
             except (TypeError, ValueError, OverflowError) as exc:
-                raise ValueError("Assignment confidence must be a finite value between 0 and 1.") from exc
+                raise ValueError(f"{confidence_label} must be a finite value between 0 and 1.") from exc
             if not math.isfinite(assignment_confidence) or not 0.0 <= assignment_confidence <= 1.0:
-                raise ValueError("Assignment confidence must be a finite value between 0 and 1.")
+                raise ValueError(f"{confidence_label} must be a finite value between 0 and 1.")
         else:
             assignment_confidence = 1.0
         has_offsets = "start" in payload or "end" in payload
