@@ -461,6 +461,10 @@ class AudiobookBrain:
             # speakers/dialogue. Do not silently accept an empty core extraction:
             # make one compact, evidence-seeded AI repair attempt before using the
             # deterministic parser as a visible last-resort recovery.
+            def _core_quote_key(value):
+                cleaned = str(value or "").strip().strip('“”"')
+                return re.sub(r"\s+", " ", cleaned).casefold()
+
             actual_characters = core_data.get("characters")
             actual_dialogue = core_data.get("dialogue")
             if not isinstance(actual_characters, list):
@@ -530,10 +534,6 @@ class AudiobookBrain:
                         if key:
                             keys.add(key)
                 return keys
-
-            def _core_quote_key(value):
-                cleaned = str(value or "").strip().strip('“”"')
-                return re.sub(r"\s+", " ", cleaned).casefold()
 
             actual_character_keys = _core_name_keys(actual_characters)
             actual_dialogue_keys = {
