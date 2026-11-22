@@ -170,7 +170,7 @@ def create_character_workbook_bytes(metadata, passages, chapter_text):
                     seen_aliases.add(_key(alias))
                     cleaned_aliases.append(alias)
             reference_rows.append([
-                primary, "\\n".join(cleaned_aliases),
+                primary, "\n".join(cleaned_aliases),
                 _clean(source.get("identity_base_name") or primary),
                 _clean(source.get("identity_variant") or source.get("version")),
             ])
