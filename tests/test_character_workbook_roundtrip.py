@@ -100,7 +100,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             path, _text, passages = self._export(Path(tmp))
             document = read_character_workbook(path)
             document["characters"] = [{
-                "full_name": "Captain Mira", "aliases": ["The Captain"],
+                "full_name": "Captain Mira", "aliases": ["Mira", "The Captain"],
                 "version": "", "notes": "",
             }]
             document["dialogue_rows"][1]["GPT Assigned Character"] = "Captain Mira"
