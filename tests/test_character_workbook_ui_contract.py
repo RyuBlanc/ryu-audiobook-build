@@ -1,5 +1,16 @@
-from pathlib import Path
+import json
+import os
+import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PySide6.QtWidgets import QApplication, QMainWindow
+
+from app.ui import premium_v2_host as host
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,6 +29,7 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         cls.registry = REGISTRY.read_text(encoding="utf-8")
         cls.workbook = WORKBOOK.read_text(encoding="utf-8")
         cls.html = HTML.read_text(encoding="utf-8")
+        cls.qt_app = QApplication.instance() or QApplication([])
 
     def test_workbook_commands_are_registered_and_advertised(self):
         for command, handler in {
@@ -225,9 +237,104 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
 
 
 
+
+
+
+    def test_workbook_export_dispatch_uses_window_parent_and_writes_selected_file(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-workbook-export-dialog-") as temp:
+            destination = Path(temp) / "GPT_Completed_Book.xlsx"
+            window = QMainWindow()
+            self.addCleanup(window.close)
+            bridge = host.PremiumV2Bridge(window)
+            self.addCleanup(bridge.deleteLater)
+            project = SimpleNamespace(title="GPT Workbook Test")
+            book_chapters = [{
+                "chapter_id": "chapter-001",
+                "chapter_number": 1,
+                "chapter_title": "Chapter 1",
+                "chapter_revision": "revision-1",
+                "current_passages": [],
+                "current_assignments": [],
+            }]
+            bridge._active_project = lambda: project
+            bridge._character_workbook_book_snapshot = lambda _project: ({}, "Test Series", book_chapters)
+            bridge._character_library_bootstrap = lambda: None
+            with (
+                patch.object(host, "list_reusable_characters", return_value=[]),
+                patch.object(host, "create_complete_book_character_workbook_bytes", return_value=b"workbook-fixture"),
+                patch.object(
+                    host.QFileDialog, "getSaveFileName",
+                    return_value=(str(destination), "Excel Workbook (*.xlsx)"),
+                ) as save_dialog,
+            ):
+                response = json.loads(bridge.dispatch("character.workbook.export", '{"scope":"book"}'))
+
+            self.assertTrue(response.get("success"), response)
+            self.assertEqual(Path(response["data"]["path"]), destination.resolve())
+            self.assertEqual(destination.read_bytes(), b"workbook-fixture")
+            self.assertIs(save_dialog.call_args.args[0], window)
+            self.assertIsInstance(save_dialog.call_args.args[0], QMainWindow)
+
+    def test_workbook_import_preview_dispatch_uses_window_parent_and_returns_review_plan(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-workbook-import-dialog-") as temp:
+            source = Path(temp) / "GPT_Completed_Book.xlsx"
+            source.write_bytes(b"workbook-fixture")
+            window = QMainWindow()
+            self.addCleanup(window.close)
+            bridge = host.PremiumV2Bridge(window)
+            self.addCleanup(bridge.deleteLater)
+            project = SimpleNamespace(folder=Path(temp), title="GPT Workbook Test")
+            chapter = SimpleNamespace(number=1, title="Chapter 1")
+            document = {
+                "sha256": "fixture-sha256",
+                "info": {"Export ID": "fixture-export-id"},
+                "dialogue_rows": [],
+            }
+            plan = {
+                "ready": True,
+                "issues": [],
+                "summary": {"matched_characters": 1, "dialogue_assignments": 1},
+                "assignments": [{"speaker": "Mira", "chapter_number": 1}],
+                "characters": [{
+                    "canonical_name": "Mira",
+                    "identity_variant": "",
+                    "action": "merge",
+                    "aliases_to_add": ["Captain Mira"],
+                    "existing_voice_name": "Mira Voice",
+                }],
+                "scope": "book",
+                "book_revision": "book-revision-1",
+                "chapters": [{"chapter_id": "chapter-001"}],
+                "chapter_assignments": [],
+            }
+            bridge._active_project = lambda: project
+            bridge._character_workbook_import_plan = lambda _project, _document: ({}, "Test Series", chapter, plan)
+            with (
+                patch.object(
+                    host.QFileDialog, "getOpenFileName",
+                    return_value=(str(source), "Excel Workbook (*.xlsx)"),
+                ) as open_dialog,
+                patch.object(host, "read_character_workbook", return_value=document),
+            ):
+                response = json.loads(bridge.dispatch("character.workbook.import.preview", "{}"))
+
+            self.assertTrue(response.get("success"), response)
+            self.assertTrue(response["data"]["ready"])
+            self.assertEqual(response["data"]["scope"], "book")
+            self.assertEqual(response["data"]["assignment_summary"][0]["canonical_name"], "Mira")
+            self.assertIs(open_dialog.call_args.args[0], window)
+            self.assertIsInstance(open_dialog.call_args.args[0], QMainWindow)
+
     def test_complete_book_workbook_uses_reliable_qt_file_dialogs_and_routes_by_button_id(self):
         self.assertIn("options=QFileDialog.Option.DontUseNativeDialog", self.host)
+        self.assertIn("def _character_workbook_dialog_parent(self) -> QWidget | None:", self.host)
+        self.assertEqual(self.host.count("self._character_workbook_dialog_parent()"), 2)
+        self.assertNotIn('QFileDialog.getSaveFileName(\n            self, "Export Complete-Book', self.host)
+        self.assertNotIn('QFileDialog.getOpenFileName(\n            self, "Import GPT Character', self.host)
         self.assertIn("#exportCharacterWorkbook, #importCharacterWorkbook", self.adapter)
+        self.assertIn("Workbook export failed.", self.adapter)
+        self.assertIn("Workbook import failed.", self.adapter)
+        self.assertIn("window.alert(confirmation)", self.adapter)
         self.assertIn("Complete-book workbook saved", self.adapter)
         self.assertIn("character.workbook.import.preview", self.adapter)
         self.assertIn("character.workbook.import.commit", self.adapter)
