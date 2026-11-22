@@ -714,8 +714,8 @@ class AudiobookBrain:
         # token supports initials, but can greedily absorb "prose. Name" when
         # used at an anchored speech-tag boundary.
         fallback_speaker_name_token = (
-            r"([\\p{L}][\\p{L}\\p{M}\\p{N}'’\\u200c\\u200d\\u30fb-]*"
-            r"(?:\\s+[\\p{L}][\\p{L}\\p{M}\\p{N}'’\\u200c\\u200d\\u30fb-]*){0,2})"
+            r"([\p{L}][\p{L}\p{M}\p{N}'’\u200c\u200d\u30fb-]*"
+            r"(?:\s+[\p{L}][\p{L}\p{M}\p{N}'’\u200c\u200d\u30fb-]*){0,2})"
         )
         existing_character_keys = {
             unicodedata.normalize("NFC", str(row.get("name") or "")).strip().casefold()
