@@ -612,10 +612,10 @@ def read_character_workbook(path):
     }
     if info.get("Workbook Schema") != "ryu.character-studio-workbook":
         raise ValueError("This workbook was not exported by Character Studio.")
-    try: version = int(float(info.get("Workbook Version", "0")))
-    except (TypeError, ValueError, OverflowError): version = 0
-    if version not in {1, 2}: raise ValueError("This Character Studio workbook version is not supported.")
-    if version == 2:
+    try: workbook_version = int(float(info.get("Workbook Version", "0")))
+    except (TypeError, ValueError, OverflowError): workbook_version = 0
+    if workbook_version not in {1, 2}: raise ValueError("This Character Studio workbook version is not supported.")
+    if workbook_version == 2:
         if info.get("Export Scope") != "complete_book":
             raise ValueError("Version 2 Character Studio workbooks must use the complete-book export scope.")
         if not {"Chapter Register", "Series Character Reference"}.issubset(sheets):
@@ -637,7 +637,7 @@ def read_character_workbook(path):
     character_headers = {_clean(value) for value in (sheets["Character Register"][0] if sheets["Character Register"] else [])}
     if not {"Full Name", "Version / Age Variant"}.issubset(character_headers):
         raise ValueError("The Character Register sheet is missing its Full Name or Version / Age Variant column.")
-    if version == 2 and "Included in This Book?" not in character_headers:
+    if workbook_version == 2 and "Included in This Book?" not in character_headers:
         raise ValueError("The complete-book Character Register is missing the Included in This Book? column.")
     dialogue = _records(sheets["Dialogue Assignment"])
     try:
@@ -707,8 +707,8 @@ def read_character_workbook(path):
             continue
         if len(name) > MAX_CHARACTER_NAME_LENGTH:
             raise ValueError("Character Register names must be 160 characters or fewer.")
-        version = _clean(row.get("Version / Age Variant"))
-        if len(version) > MAX_IDENTITY_VARIANT_LENGTH:
+        identity_variant = _clean(row.get("Version / Age Variant"))
+        if len(identity_variant) > MAX_IDENTITY_VARIANT_LENGTH:
             raise ValueError("Character age/version labels must be 120 characters or fewer.")
         notes = _clean(row.get("Character Notes"))
         if len(notes) > MAX_CHARACTER_NOTES_LENGTH:
@@ -721,18 +721,18 @@ def read_character_workbook(path):
                     raise ValueError("Character aliases must be 160 characters or fewer.")
                 aliases.append(alias)
         included_raw = _clean(row.get("Included in This Book?")).casefold()
-        included = (included_raw in {"yes", "y", "true", "1", "x"}) if version == 2 else True
+        included = (included_raw in {"yes", "y", "true", "1", "x"}) if workbook_version == 2 else True
         characters.append({
             "full_name": name,
             "aliases": list(dict.fromkeys(a for a in aliases if _key(a) != _key(name))),
-            "version": version,
+            "version": identity_variant,
             "notes": notes,
             "included_in_book": included,
             "row_number": n,
         })
 
     chapter_references = []
-    if version == 2:
+    if workbook_version == 2:
         chapter_rows = _records(sheets["Chapter Register"])
         chapter_headers = {_clean(value) for value in (sheets["Chapter Register"][0] if sheets["Chapter Register"] else [])}
         required_chapter_headers = {
@@ -837,7 +837,7 @@ def read_character_workbook(path):
         "characters": characters,
         "series_character_reference": series_character_reference,
         "chapter_references": chapter_references,
-        "schema_version": version,
+        "schema_version": workbook_version,
         "path": str(source.resolve()),
         "sha256": sha256(source.read_bytes()).hexdigest(),
     }
