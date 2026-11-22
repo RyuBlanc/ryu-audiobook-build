@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 import re
+import regex as unicode_regex
 import unicodedata
 from typing import Any, Callable
 
@@ -11,9 +12,10 @@ from app.chapters.detector import Chapter
 from app.chapters.characters import (
     analyze_chapter as deterministic_character_analysis,
     _all_dialogue_spans,
-    _discover_candidates,
-    _discover_explicit_speakers,
-    _speaker_near_quote,
+    _clean_name,
+    _is_plausible_name,
+    SPEAKER_NAME_TOKEN,
+    SPEAKER_VERBS,
 )
 from app.tts.pronunciation_suggester import COMMON_ENGLISH_WORDS, is_common_english_phrase, nativeish_pronunciation
 from .model_runtime import LocalLLM, BrainRuntimeError
@@ -677,7 +679,6 @@ class AudiobookBrain:
     def _fallback_core(self, chapter: Chapter) -> dict[str, Any]:
         analysis = deterministic_character_analysis(chapter)
         characters = []
-        candidates = []
         canonical_by_key: dict[str, str] = {}
         for item in analysis.characters[:12]:
             canonical = unicodedata.normalize("NFC", str(item.name or "")).strip()
@@ -696,46 +697,61 @@ class AudiobookBrain:
                 key = unicodedata.normalize("NFC", value).strip().casefold()
                 if key:
                     canonical_by_key[key] = canonical
-                    if value not in candidates:
-                        candidates.append(value)
+
+        def _tag_name(pattern: str, context: str) -> str | None:
+            match = unicode_regex.search(pattern, context, flags=unicode_regex.IGNORECASE)
+            if not match:
+                return None
+            name = _clean_name(match.group(1))
+            return name if _is_plausible_name(name) else None
+
+        def _canonical_tag(name: str) -> str:
+            key = unicodedata.normalize("NFC", name).strip().casefold()
+            return canonical_by_key.get(key, name)
 
         dialogue = []
         source = str(chapter.text or "")
-        # The primary deterministic cast scan can miss a name in a short
-        # chapter even when it appears in an explicit "Name said" tag. Add
-        # only names discovered by the source-tag/proper-name recognizers;
-        # they become actual character records only when a quoted line is
-        # directly attributed to them below.
-        source_names = set(_discover_candidates(source))
-        source_names.update(_discover_explicit_speakers(source))
-        for name in sorted(source_names, key=str.casefold):
-            key = unicodedata.normalize("NFC", str(name)).strip().casefold()
-            if key:
-                canonical_by_key.setdefault(key, str(name).strip())
-                if name not in candidates:
-                    candidates.append(name)
         existing_character_keys = {
             unicodedata.normalize("NFC", str(row.get("name") or "")).strip().casefold()
             for row in characters if isinstance(row, dict)
         }
-        last_speaker = None
         seen_spans: set[tuple[int, int]] = set()
         for start, end, raw_quote in _all_dialogue_spans(source):
             span = (int(start), int(end))
             if span in seen_spans:
                 continue
             seen_spans.add(span)
-            speaker, confidence = _speaker_near_quote(
-                source, span[0], span[1], candidates, None, last_speaker
+            before = source[max(0, span[0] - 180):span[0]]
+            after = source[span[1]:min(len(source), span[1] + 120)]
+            inside = str(raw_quote or "")
+
+            # These expressions are anchored to the quote boundary. They do
+            # not scan a broad neighborhood, so a future character's speech
+            # tag cannot be borrowed by the current line.
+            tag_patterns = (
+                (rf"{SPEAKER_NAME_TOKEN}\s+(?:{SPEAKER_VERBS})\b\s*[,;:]?\s*$", before),
+                (rf"(?:{SPEAKER_VERBS})\s+{SPEAKER_NAME_TOKEN}\s*$", before),
+                (rf"{SPEAKER_NAME_TOKEN}\s*[:：—–-]\s*$", before),
+                (rf"^\s*[,;:]\s*{SPEAKER_NAME_TOKEN}\s+(?:{SPEAKER_VERBS})\b", after),
+                (rf"^\s*[,;:]\s*(?:{SPEAKER_VERBS})\s+{SPEAKER_NAME_TOKEN}\b", after),
+                (rf"\bmy name is\s+({SPEAKER_NAME_TOKEN})", inside),
+                (rf"\b(?:I['’]m|I am|this is)\s+({SPEAKER_NAME_TOKEN})", inside),
             )
-            # The fallback is deliberately stricter than ordinary Character
-            # Studio suggestions. Only use an identity attached by an exact
-            # speaker tag or a direct in-quote self-identification; nearby
-            # names and future dialogue tags are not sufficient evidence.
-            if not speaker or float(confidence) < 0.98:
+            speaker = None
+            for pattern, context in tag_patterns:
+                speaker = _tag_name(pattern, context)
+                if speaker:
+                    break
+            if not speaker:
+                # A standalone light-novel speaker label applies only when it
+                # is the complete preceding non-empty line.
+                preceding_line = source[:span[0]].rstrip(" \t\r\n").rsplit("\n", 1)[-1].rstrip("\r").strip()
+                if _is_plausible_name(preceding_line):
+                    speaker = _clean_name(preceding_line)
+            if not speaker:
                 continue
-            speaker_key = unicodedata.normalize("NFC", str(speaker)).strip().casefold()
-            canonical = canonical_by_key.get(speaker_key, str(speaker).strip())
+
+            canonical = _canonical_tag(speaker)
             quote = str(raw_quote or "").strip()
             if not quote:
                 continue
@@ -747,16 +763,16 @@ class AudiobookBrain:
                     'role': 'Possible Character',
                     'traits': [],
                     'voice_direction': {'age_impression': '', 'gender': '', 'tone': '', 'energy': ''},
-                    'confidence': float(confidence),
+                    'confidence': 0.99,
                 })
                 existing_character_keys.add(canonical_key)
+                canonical_by_key[canonical_key] = canonical
             dialogue.append({
                 'quote': quote,
                 'speaker': canonical,
-                'confidence': float(confidence),
+                'confidence': 0.99,
                 'evidence': 'Exact source-adjacent speaker tag or in-quote self-identification.',
             })
-            last_speaker = canonical
         return {'characters': characters, 'dialogue': dialogue, 'pronunciation': []}
 
     def analyze_book(
