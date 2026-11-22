@@ -5416,9 +5416,11 @@ class PremiumV2Bridge(QObject):
             ai_report: dict[str, Any] = {}
             ai_method = "source_grounded_fallback"
             ai_warnings: list[str] = []
+            ai_runtime: dict[str, Any] = {}
+            ai_performance: dict[str, Any] = {}
             brain = None
             try:
-                from app.ai.brain import AudiobookBrain
+                from app.ai.character_cast import CharacterCastAnalyzer
                 initial_cast = [
                     {
                         "name": str(row.get("name") or row.get("primary_name") or "").strip(),
@@ -5428,7 +5430,7 @@ class PremiumV2Bridge(QObject):
                     for row in trusted_rows
                     if str(row.get("name") or row.get("primary_name") or "").strip()
                 ]
-                brain = AudiobookBrain(Path(project.folder))
+                brain = CharacterCastAnalyzer(Path(project.folder))
 
                 def update_ai_progress(fraction: float, message: str) -> None:
                     # The brain reports progress between local inference passes.
@@ -5440,22 +5442,40 @@ class PremiumV2Bridge(QObject):
                         progress=percent, message=str(message or "Analyzing the complete book"),
                     )
 
+                metadata_titles = list(dict.fromkeys(
+                    str(value).strip()
+                    for value in [
+                        project.title,
+                        state.get("book_title"),
+                        state.get("novel_title"),
+                        state.get("title"),
+                        series_name,
+                        *(getattr(chapter, "title", "") for chapter in project.chapters),
+                    ]
+                    if str(value or "").strip()
+                ))
                 ai_report = brain.analyze_book(
                     project.chapters,
                     progress=update_ai_progress,
-                    learning_context={"learning_scope": series_name, "characters": initial_cast},
+                    metadata_titles=metadata_titles,
+                    known_characters=initial_cast,
                 )
-                ai_method = "local_llm"
-                for chapter_report in ai_report.get("chapters", []) if isinstance(ai_report, dict) else []:
-                    if not isinstance(chapter_report, dict):
-                        continue
-                    chapter_number = int(chapter_report.get("chapter") or 0)
-                    for warning in chapter_report.get("warnings", []) or []:
-                        warning_text = str(warning or "").strip()
-                        if warning_text:
-                            ai_warnings.append(f"Chapter {chapter_number}: {warning_text}")
+                ai_method = "local_llm_character_only"
+                ai_warnings = [
+                    str(warning).strip()
+                    for warning in (ai_report.get("warnings") or [])
+                    if str(warning or "").strip()
+                ]
+                ai_runtime = (
+                    dict(ai_report.get("runtime") or {})
+                    if isinstance(ai_report.get("runtime"), dict) else {}
+                )
+                ai_performance = (
+                    dict(ai_report.get("performance") or {})
+                    if isinstance(ai_report.get("performance"), dict) else {}
+                )
                 if ai_warnings:
-                    ai_method = "local_llm_with_fallback_or_warnings"
+                    ai_method = "local_llm_character_only_with_warnings"
             except Exception as exc:
                 if cancel_event is not None and cancel_event.is_set():
                     raise InterruptedError("Character analysis cancelled during local AI inference.") from exc
@@ -5472,66 +5492,62 @@ class PremiumV2Bridge(QObject):
                     except Exception:
                         log.exception("Could not close the Local Audiobook Brain runtime")
 
+            # The AI model is deliberately restricted to character-cast extraction.
+            # Dialogue passage suggestions remain a separate deterministic/user-learning
+            # process; no AI-generated dialogue mapping is injected into the cast scan.
             ai_dialogue_by_chapter: dict[int, list[dict[str, Any]]] = {}
             ai_candidate_confidence: dict[str, float] = {}
             ai_character_aliases: dict[str, list[str]] = {}
-            ai_chapter_reports = ai_report.get("chapters", []) if isinstance(ai_report, dict) else []
-            for chapter_report in ai_chapter_reports:
-                if not isinstance(chapter_report, dict):
+            ai_character_names: dict[str, str] = {}
+            ai_character_evidence: dict[str, list[str]] = {}
+            normalized_book_text = unicodedata.normalize("NFC", raw_text).casefold()
+            for ai_character in ai_report.get("characters", []) if isinstance(ai_report, dict) else []:
+                if not isinstance(ai_character, dict):
                     continue
-                chapter_number = int(chapter_report.get("chapter") or 0)
-                ai_dialogue_by_chapter.setdefault(chapter_number, []).extend(
-                    row for row in (chapter_report.get("dialogue") or []) if isinstance(row, dict)
-                )
-                for ai_character in chapter_report.get("characters", []) or []:
-                    if not isinstance(ai_character, dict):
-                        continue
-                    name = str(ai_character.get("name") or "").strip()
-                    key = name.casefold()
-                    if not name or key in excluded_detection_keys or not is_likely_character_name(
-                        name, trusted=key in trusted_keys, explicit=key in explicit_names
-                    ):
-                        continue
-                    occurrence_count = raw_text.casefold().count(key)
-                    if occurrence_count < 1:
-                        continue
-                    try:
-                        confidence = max(0.0, min(1.0, float(ai_character.get("confidence") or 0.0)))
-                    except (TypeError, ValueError, OverflowError):
-                        confidence = 0.0
-                    if occurrence_count < 2 and key not in trusted_keys and key not in explicit_names and confidence < 0.90:
-                        continue
-                    ai_candidate_confidence[key] = max(ai_candidate_confidence.get(key, 0.0), confidence)
-                    aliases = ai_character.get("aliases") or []
-                    if isinstance(aliases, (list, tuple)):
-                        clean_aliases = [
-                            str(alias).strip() for alias in aliases
-                            if str(alias).strip()
-                            and is_likely_character_name(
-                                str(alias),
-                                explicit=str(alias).strip().casefold() in explicit_names,
-                            )
-                            and str(alias).strip().casefold() in raw_text.casefold()
-                        ]
-                        ai_character_aliases[key] = list(dict.fromkeys([
-                            *(ai_character_aliases.get(key) or []), *clean_aliases
-                        ]))
-
+                name = str(ai_character.get("name") or "").strip()
+                key = unicodedata.normalize("NFC", name).casefold()
+                if not name or not is_likely_character_name(
+                    name, explicit=key in explicit_names
+                ):
+                    continue
+                if key not in normalized_book_text:
+                    continue
+                try:
+                    confidence = max(0.0, min(1.0, float(ai_character.get("confidence") or 0.0)))
+                except (TypeError, ValueError, OverflowError):
+                    confidence = 0.0
+                ai_candidate_confidence[key] = max(ai_candidate_confidence.get(key, 0.0), confidence)
+                ai_character_names[key] = name
+                evidence_rows = ai_character.get("evidence") or []
+                ai_character_evidence[key] = list(dict.fromkeys(
+                    str(row.get("quote") or "").strip()
+                    for row in evidence_rows
+                    if isinstance(row, dict) and str(row.get("quote") or "").strip()
+                ))[:5]
+                aliases = ai_character.get("aliases") or []
+                if isinstance(aliases, (list, tuple)):
+                    clean_aliases = [
+                        str(alias).strip() for alias in aliases
+                        if str(alias).strip()
+                        and is_likely_character_name(
+                            str(alias),
+                            explicit=unicodedata.normalize("NFC", str(alias).strip()).casefold() in explicit_names,
+                        )
+                        and unicodedata.normalize("NFC", str(alias).strip()).casefold() in normalized_book_text
+                    ]
+                    ai_character_aliases[key] = list(dict.fromkeys(clean_aliases))
             existing_candidates = {str(row.name).casefold(): row for row in analysis.characters}
             for key, confidence in ai_candidate_confidence.items():
                 candidate = existing_candidates.get(key)
                 if candidate is None:
-                    ai_name = next((
-                        str(item.get("name") or "").strip()
-                        for chapter_report in ai_chapter_reports if isinstance(chapter_report, dict)
-                        for item in (chapter_report.get("characters") or [])
-                        if isinstance(item, dict) and str(item.get("name") or "").strip().casefold() == key
-                    ), "")
+                    ai_name = ai_character_names.get(key, "")
                     if not ai_name:
                         continue
                     candidate = Character(
                         name=ai_name, role="AI Identified Character",
-                        confidence=confidence, aliases=ai_character_aliases.get(key, []),
+                        confidence=confidence,
+                        aliases=ai_character_aliases.get(key, []),
+                        examples=ai_character_evidence.get(key, []),
                     )
                     analysis.characters.append(candidate)
                     existing_candidates[key] = candidate
@@ -5553,9 +5569,9 @@ class PremiumV2Bridge(QObject):
                 if trusted or explicit:
                     return True
                 count = raw_text.casefold().count(key)
-                if ai_candidate_confidence.get(key, 0.0) >= 0.90 and count >= 1:
-                    return True
-                return count >= (3 if len(name.split()) > 1 else 4)
+                # Non-user-confirmed suggestions must have passed the dedicated
+                # analyzer's exact source-evidence validation.
+                return key in ai_candidate_confidence
 
             analysis.characters = [candidate for candidate in analysis.characters if credible_candidate(candidate)]
             old = {str(c.get("name", "")).casefold(): c for c in saved_rows}
@@ -5861,6 +5877,11 @@ class PremiumV2Bridge(QObject):
                     "coverage_complete": processed_chapters == total_chapters and invalid_dialogue_segments == 0 and len(suggestions) == total_dialogue_segments,
                     "truncated": False,
                     "analysis_method": ai_method,
+                    "analysis_mode": str(ai_report.get("analysis_mode") or "source_grounded_fallback"),
+                    "analysis_runtime": ai_runtime,
+                    "analysis_performance": ai_performance,
+                    "analysis_candidate_count": int((ai_report.get("coverage") or {}).get("candidate_count") or 0),
+                    "analysis_validated_character_count": int((ai_report.get("coverage") or {}).get("validated_character_count") or 0),
                     "analysis_warnings": ai_warnings[:20],
                     "updated_at": self._now(),
                 }
@@ -5875,10 +5896,25 @@ class PremiumV2Bridge(QObject):
                 if ai_method.startswith("local_llm")
                 else "Source-grounded fallback; local AI runtime/model unavailable"
             )
+            if ai_runtime.get("model_identity_verified"):
+                model_label = str(ai_runtime.get("model_id") or ai_runtime.get("model_file") or "verified local model")
+            elif ai_runtime.get("server_reported_model_id"):
+                model_label = "server-reported " + str(ai_runtime["server_reported_model_id"]) + " (unverified)"
+            elif ai_runtime.get("provider") == "external_openai_compatible":
+                model_label = "external model identity unknown"
+            elif ai_runtime.get("model_file"):
+                model_label = "configured " + str(ai_runtime["model_file"]) + " (not verified)"
+            else:
+                model_label = "model identity unavailable"
             unresolved_count = sum(1 for row in suggestions if not row.get("assigned"))
             self._job_update(
                 job_id, state="completed", stage="Analysis complete", progress=100,
-                message=f"Analyzed {processed_chapters}/{total_chapters} chapters; indexed {len(suggestions)} dialogue passages • {method_label}",
+                message=(
+                    f"Analyzed {processed_chapters}/{total_chapters} chapters; indexed {len(suggestions)} dialogue passages "
+                    f"• {method_label} • model: {model_label} "
+                    f"• character-AI requests: {int(ai_performance.get('model_request_count') or 0)} "
+                    f"• character-AI time: {float(ai_performance.get('elapsed_seconds') or 0.0):.1f}s"
+                ),
                 result={
                     "characters": items,
                     "dialogue_total": total_dialogue_segments,
@@ -5888,6 +5924,11 @@ class PremiumV2Bridge(QObject):
                     "coverage_complete": processed_chapters == total_chapters and invalid_dialogue_segments == 0 and len(suggestions) == total_dialogue_segments,
                     "truncated": False,
                     "analysis_method": ai_method,
+                    "analysis_mode": str(ai_report.get("analysis_mode") or "source_grounded_fallback"),
+                    "analysis_runtime": ai_runtime,
+                    "analysis_performance": ai_performance,
+                    "analysis_candidate_count": int((ai_report.get("coverage") or {}).get("candidate_count") or 0),
+                    "analysis_validated_character_count": int((ai_report.get("coverage") or {}).get("validated_character_count") or 0),
                     "analysis_warnings": ai_warnings[:20],
                 },
             )

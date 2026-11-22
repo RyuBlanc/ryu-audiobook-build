@@ -254,6 +254,48 @@ class LocalLLM:
         self.process: subprocess.Popen | None = None
         self.port: int | None = None
         self.log_path = brain_runtime_root() / "llama-server.log"
+        self.last_response_model: str | None = None
+
+    def runtime_info(self) -> dict:
+        """Return safe model/provider identity diagnostics without exposing server URLs."""
+        if self.external_url:
+            reported = self.last_response_model
+            return {
+                "provider": "external_openai_compatible",
+                "model_id": reported or "unknown_external_model",
+                "model_file": None,
+                "server_reported_model_id": reported,
+                "model_identity_source": "chat_completion_response" if reported else "not_reported_by_server",
+                "model_identity_verified": False,
+                "gpu_offload_requested": None,
+                "execution_backend_verified": False,
+            }
+
+        filename = self.model.name
+        if filename == "Qwen3-4B-Q4_K_M.gguf":
+            model_id = "qwen3-4b-q4"
+        elif filename == "Qwen3-1.7B-Q5_K_M.gguf":
+            model_id = "qwen3-1.7b-q5"
+        else:
+            model_id = self.model.stem
+        try:
+            vram_gb = detect_nvidia_vram_gb()
+        except Exception:
+            vram_gb = 0.0
+        process_running = bool(self.process is not None and self.process.poll() is None)
+        file_present = bool(self.model.is_file())
+        return {
+            "provider": "llama.cpp",
+            "model_id": model_id,
+            "model_file": filename,
+            "server_reported_model_id": self.last_response_model,
+            "model_identity_source": "local_llama_server_-m_model_argument",
+            "model_identity_verified": process_running and file_present,
+            "gpu_vram_detected_gb": round(float(vram_gb), 2),
+            "gpu_offload_requested": vram_gb >= 4.0,
+            "execution_backend_verified": False,
+        }
+
 
     def start(self) -> None:
         if self.external_url:
@@ -340,6 +382,7 @@ class LocalLLM:
                 f"Local Audiobook AI request failed: {exc}"
                 + (f"\n\nllama-server log:\n{log_tail}" if log_tail else "")
             ) from exc
+        self.last_response_model = str(data.get("model") or "").strip() or None
         try:
             return str(data["choices"][0]["message"]["content"])
         except (KeyError, TypeError, IndexError) as exc:

@@ -10,7 +10,7 @@ class CharacterAIAnalysisContracts(unittest.TestCase):
         start = host.index("    def _character_worker(self, job_id: str, project) -> None:")
         end = host.index("\n    def _character_assign(", start)
         worker = host[start:end]
-        self.assertIn("from app.ai.brain import AudiobookBrain", worker)
+        self.assertIn("from app.ai.character_cast import CharacterCastAnalyzer", worker)
         self.assertIn("brain.analyze_book(", worker)
         self.assertIn("progress=update_ai_progress", worker)
         self.assertIn("brain.close()", worker)
@@ -61,6 +61,22 @@ class CharacterAIAnalysisContracts(unittest.TestCase):
         self.assertIn("character_detection_exclusion_keys(", worker)
         self.assertIn("character_detection_exclusions", worker)
         self.assertIn("protected_names", worker)
+
+
+    def test_character_only_mode_rejects_old_story_analysis_and_records_model_identity(self):
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        start = host.index("    def _character_worker(self, job_id: str, project) -> None:")
+        end = host.index("\n    def _character_assign(", start)
+        worker = host[start:end]
+        self.assertIn("from app.ai.character_cast import CharacterCastAnalyzer", worker)
+        self.assertIn('ai_report.get("characters", [])', worker)
+        self.assertIn('ai_dialogue_by_chapter: dict[int, list[dict[str, Any]]] = {}', worker)
+        self.assertIn('metadata_titles=metadata_titles', worker)
+        self.assertIn('known_characters=initial_cast', worker)
+        self.assertIn('"analysis_runtime": ai_runtime', worker)
+        self.assertIn('"analysis_mode": str(ai_report.get("analysis_mode")', worker)
+        self.assertIn("model_identity_verified", worker)
+        self.assertNotIn("from app.ai.brain import AudiobookBrain", worker)
 
 
 if __name__ == "__main__":

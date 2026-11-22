@@ -274,11 +274,20 @@ def _discover_candidates(text: str) -> set[str]:
     # explicit "Name said" tag. The previous detector missed these characters,
     # which made speaker deduction look as if it was not trying.
     quote_spans = _all_dialogue_spans(text)
+    # Both NAME_TOKEN matches and dialogue spans are ordered by source offset.
+    # Walk the dialogue spans once instead of rescanning every span for every
+    # capitalised token; large light novels can contain thousands of both.
+    span_cursor = 0
     for match in re.finditer(NAME_TOKEN, text):
         token = _clean_name(match.group(0))
         if not _is_plausible_name(token):
             continue
-        if any(start <= match.start() < end for start, end, _ in quote_spans):
+        while span_cursor < len(quote_spans) and quote_spans[span_cursor][1] <= match.start():
+            span_cursor += 1
+        if (
+            span_cursor < len(quote_spans)
+            and quote_spans[span_cursor][0] <= match.start() < quote_spans[span_cursor][1]
+        ):
             continue
         counts[token] += 1
         prefix = text[max(0, match.start() - 2):match.start()]
