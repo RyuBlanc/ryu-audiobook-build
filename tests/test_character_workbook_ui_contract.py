@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QApplication, QMainWindow
 
 from app.ui import premium_v2_host as host
@@ -324,6 +325,14 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
             self.assertEqual(response["data"]["assignment_summary"][0]["canonical_name"], "Mira")
             self.assertIs(open_dialog.call_args.args[0], window)
             self.assertIsInstance(open_dialog.call_args.args[0], QMainWindow)
+
+    def test_workbook_dialog_parent_falls_back_to_none_for_non_widget_qobject_parent(self):
+        owner = QObject()
+        bridge = host.PremiumV2Bridge(owner)
+        self.addCleanup(bridge.deleteLater)
+
+        self.assertIs(bridge.parent(), owner)
+        self.assertIsNone(bridge._character_workbook_dialog_parent())
 
     def test_complete_book_workbook_uses_reliable_qt_file_dialogs_and_routes_by_button_id(self):
         self.assertIn("options=QFileDialog.Option.DontUseNativeDialog", self.host)
