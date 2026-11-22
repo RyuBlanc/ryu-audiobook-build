@@ -41,6 +41,8 @@ from app.core.project import Project, create_project, list_projects, resolve_lib
 from app.core.character_identity import character_identity_key, parse_character_identity_key
 from app.core.character_library import (
     character_library_path as reusable_character_library_path,
+    character_library_exclusion_keys,
+    reconcile_project_character_cast,
     list_characters as list_reusable_characters,
     list_deleted_characters as list_reusable_deleted_characters,
     prune_invalid_character_records,
@@ -4997,12 +4999,13 @@ class PremiumV2Bridge(QObject):
                         getattr(self, "_preview_providers", {}).pop(job_id, None)
 
     def _character_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
-        """Return a clean saved cast and remove legacy false detections on first review."""
+        """Return only active series-library identities in both Character Studio panels."""
+        self._character_library_bootstrap()
         project = self._active_project()
         state = load_state(project.folder)
         rows = state.get("characters") or []
         if not isinstance(rows, list):
-            return []
+            rows = []
         default_series = self._project_series_name(project, state)
         assignment_names: dict[str, set[str]] = {}
         series_to_prune = {default_series} if default_series else set()
@@ -5053,14 +5056,11 @@ class PremiumV2Bridge(QObject):
             )) if isinstance(aliases, (list, tuple)) else []
             if clean_aliases != (aliases if isinstance(aliases, list) else list(aliases or [])):
                 row["aliases"] = clean_aliases
+            row["series"] = series
             cleaned.append(row)
 
-        if cleaned != rows:
-            state["characters"] = cleaned
-            state["modified_at"] = self._now()
-            save_state(project.folder, state)
-
-        # Shared Library false detections are moved into its Recovery Bin.
+        # Keep existing name-quality cleanup, then enforce the active shared
+        # Character Library as the single source of selectable character identity.
         for series in sorted(series_to_prune, key=str.casefold):
             try:
                 prune_invalid_character_records(
@@ -5069,7 +5069,52 @@ class PremiumV2Bridge(QObject):
                 )
             except Exception:
                 log.exception("Could not clean legacy Character Library rows for %s", series)
-        return cleaned
+
+        active_registry_rows = list_reusable_characters()
+        reconciled, orphaned = reconcile_project_character_cast(
+            cleaned, active_registry_rows, default_series=default_series
+        )
+        exclusions = [
+            dict(row) for row in (state.get("character_library_exclusions") or [])
+            if isinstance(row, dict)
+        ]
+        exclusion_keys = {
+            (
+                str(row.get("series") or "").strip().casefold(),
+                str(row.get("name") or row.get("primary_name") or "").strip().casefold(),
+                str(row.get("identity_variant") or "").strip().casefold(),
+            )
+            for row in exclusions
+        }
+        for stale in orphaned:
+            if stale.get("_orphan_reason") == "ambiguous":
+                continue
+            name = str(stale.get("name") or stale.get("primary_name") or "").strip()
+            series = str(stale.get("series") or default_series).strip()
+            if not name or not series or name.casefold() == "narrator":
+                continue
+            key = (
+                series.casefold(), name.casefold(),
+                str(stale.get("identity_variant") or "").strip().casefold(),
+            )
+            if key in exclusion_keys:
+                continue
+            exclusions.append({
+                "name": name,
+                "aliases": list(stale.get("aliases") or []) if isinstance(stale.get("aliases") or [], (list, tuple)) else [],
+                "series": series,
+                "identity_variant": str(stale.get("identity_variant") or ""),
+                "character_library_id": str(stale.get("character_library_id") or ""),
+                "reason": "character-library-record-no-longer-active",
+            })
+            exclusion_keys.add(key)
+
+        if reconciled != rows or exclusions != (state.get("character_library_exclusions") or []):
+            state["characters"] = reconciled
+            state["character_library_exclusions"] = exclusions
+            state["modified_at"] = self._now()
+            save_state(project.folder, state)
+        return reconciled
 
     def _character_dialogue_index_get(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Return the persisted passage index, revision and reconciled chapter counts."""
@@ -5342,6 +5387,7 @@ class PremiumV2Bridge(QObject):
         selected_path, _ = QFileDialog.getSaveFileName(
             self, "Export Complete-Book Character Studio GPT Workbook",
             str(Path.home() / default_name), "Excel Workbook (*.xlsx)",
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
         if not selected_path:
             return {"cancelled": True}
@@ -5434,6 +5480,7 @@ class PremiumV2Bridge(QObject):
         selected_path, _ = QFileDialog.getSaveFileName(
             self, "Export Character Studio GPT Workbook",
             str(Path.home() / default_name), "Excel Workbook (*.xlsx)",
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
         if not selected_path:
             return {"cancelled": True}
@@ -5504,7 +5551,8 @@ class PremiumV2Bridge(QObject):
     def _character_workbook_import_preview(self, _payload: dict[str, Any]) -> dict[str, Any]:
         """Select a GPT-completed workbook and reconcile it without changing saved data."""
         selected_path, _ = QFileDialog.getOpenFileName(
-            self, "Import GPT Character Workbook", str(Path.home()), "Excel Workbook (*.xlsx)"
+            self, "Import GPT Character Workbook", str(Path.home()), "Excel Workbook (*.xlsx)",
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
         if not selected_path:
             return {"cancelled": True}
@@ -5822,11 +5870,33 @@ class PremiumV2Bridge(QObject):
         }
 
     def _character_dialogue_suggestions_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
-        """Return source-backed AI review suggestions with canonical passage identities."""
+        """Return revision-safe dialogue suggestions without deleted Library identities."""
         from app.chapters.passage_index import load_or_build_passage_index
 
         project = self._active_project()
         state = load_state(project.folder)
+        series = self._project_series_name(project, state)
+        excluded_library_names = character_library_exclusion_keys(
+            state.get("character_library_exclusions") or [],
+            series,
+            list_reusable_characters(),
+        )
+
+        def candidate_is_excluded(candidate: Any) -> bool:
+            if not isinstance(candidate, dict):
+                return False
+            candidate_series = str(candidate.get("series") or series).strip()
+            if candidate_series and candidate_series.casefold() != series.casefold():
+                return False
+            names = {str(candidate.get("name") or "").strip().casefold()}
+            aliases = candidate.get("aliases") or []
+            if isinstance(aliases, str):
+                aliases = [aliases]
+            if isinstance(aliases, (list, tuple, set)):
+                names.update(str(alias or "").strip().casefold() for alias in aliases if str(alias or "").strip())
+            names.discard("")
+            return bool(names.intersection(excluded_library_names))
+
         stored = state.get("character_dialogue_suggestions") or []
         if not isinstance(stored, list):
             return []
@@ -5874,6 +5944,16 @@ class PremiumV2Bridge(QObject):
             row["assigned"] = row["assignment_state"] == "assigned"
             row["conflict"] = row["assignment_state"] == "conflict"
             row["ai_suggestions"] = list(canonical.get("ai_suggestions") or row.get("suggestions") or [])
+            row["suggestions"] = [
+                candidate for candidate in (row.get("suggestions") or [])
+                if not candidate_is_excluded(candidate)
+            ]
+            row["ai_suggestions"] = [
+                candidate for candidate in (row.get("ai_suggestions") or [])
+                if not candidate_is_excluded(candidate)
+            ]
+            if str(row.get("suggested_speaker") or "").strip().casefold() in excluded_library_names:
+                row["suggested_speaker"] = ""
             assignment = next((item for item in (chapter.dialogue_assignments or [])
                                if isinstance(item, dict) and item.get("start") == start
                                and item.get("end") == end and source_text[start:end] == str(item.get("text") or "")), None)
@@ -6026,6 +6106,9 @@ class PremiumV2Bridge(QObject):
         project = self._active_project()
         if not project.chapters:
             raise ValueError("Import a book with chapters before analysing characters.")
+        self._character_library_bootstrap()
+        self._character_list({})
+        project = self._active_project()
         job_id = self._new_job("character-analysis", "Analyze story characters",
                                "Analyze saved chapters and dialogue evidence", project)
         self._analysis_cancel_events[job_id] = threading.Event()
@@ -6087,6 +6170,11 @@ class PremiumV2Bridge(QObject):
                 series_name,
                 protected_names=protected_assignment_names,
             )
+            excluded_detection_keys.update(character_library_exclusion_keys(
+                state.get("character_library_exclusions") or [],
+                series_name,
+                list_reusable_characters(),
+            ))
             trusted_rows = []
             trusted_keys = set()
             for row in [*saved_rows, *library_rows]:
@@ -6551,6 +6639,11 @@ class PremiumV2Bridge(QObject):
                     series_name,
                     protected_names=latest_protected_names,
                 )
+                latest_excluded_keys.update(character_library_exclusion_keys(
+                    latest_state.get("character_library_exclusions") or [],
+                    series_name,
+                    list_reusable_characters(),
+                ))
                 def excluded_row(row: dict[str, Any]) -> bool:
                     names = {
                         str(row.get("name") or row.get("primary_name") or "").strip().casefold(),
@@ -6680,6 +6773,9 @@ class PremiumV2Bridge(QObject):
 
     @_serialize_character_identity_state
     def _character_assign(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._character_library_bootstrap()
+        project = self._active_project()
+        self._character_list({})
         project = self._active_project()
         name = str(payload.get("name") or "").strip()
         profile_name = str(payload.get("profile_name") or "").strip()
@@ -6749,6 +6845,8 @@ class PremiumV2Bridge(QObject):
         ]
         if recovery_matches:
             raise ValueError("The selected character or one of its aliases is in Character Library Recovery Bin. Restore or resolve that identity before assigning a voice.")
+        if matched_registry is None:
+            raise ValueError("This character is no longer active in the Character Library. Restore it or create a new character before assigning a voice.")
 
         # Resolve identity conflicts before writing either project or series-level data.
         item["voice_profile"] = profile_name or None
@@ -7366,6 +7464,7 @@ class PremiumV2Bridge(QObject):
         registry_path = path
         migration_path: Path | None = None
         legacy_rows: list[dict[str, Any]] = []
+        hydrate_existing_projects = not path.is_file()
         if path.is_file():
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
@@ -7386,6 +7485,7 @@ class PremiumV2Bridge(QObject):
                 migration_path = path.with_suffix(path.suffix + ".migration")
                 migration_path.unlink(missing_ok=True)
                 registry_path = migration_path
+                hydrate_existing_projects = True
 
         for row in legacy_rows:
             name = str(row.get("name") or row.get("primary_name") or "").strip()
@@ -7426,16 +7526,18 @@ class PremiumV2Bridge(QObject):
                 update_names=True, update_voice=True, path=registry_path,
             )
 
-        # Existing projects can already have saved analysis even if the global
-        # registry was never hydrated. Reuse it once on first Character Library load.
-        for project in list_projects():
-            try:
-                state = load_state(project.folder)
-                rows = state.get("characters") or []
-                if isinstance(rows, list) and rows:
-                    self._sync_saved_cast(project, rows, state, registry_path=registry_path)
-            except (OSError, ValueError, TypeError):
-                log.warning("Could not import the saved cast for %s into Character Library", project.title, exc_info=True)
+        # Hydrate legacy project casts only when no canonical registry exists.
+        # An existing empty registry is intentional; rebuilding it from project
+        # snapshots would resurrect characters the user previously deleted.
+        if hydrate_existing_projects:
+            for project in list_projects():
+                try:
+                    state = load_state(project.folder)
+                    rows = state.get("characters") or []
+                    if isinstance(rows, list) and rows:
+                        self._sync_saved_cast(project, rows, state, registry_path=registry_path)
+                except (OSError, ValueError, TypeError):
+                    log.warning("Could not import the saved cast for %s into Character Library", project.title, exc_info=True)
 
         if migration_path is not None:
             if not migration_path.is_file():

@@ -4327,9 +4327,11 @@
   async function exportSelectedCharacterWorkbook() {
     const result = await call('character.workbook.export', {scope:'book'});
     if (result?.cancelled) return;
-    message('Exported complete-book workbook · ' + Number(result.chapter_count || 0) + ' chapters · ' +
-      Number(result.passage_count || 0) + ' total passages (' + Number(result.dialogue_count || 0) +
-      ' dialogue, ' + Number(result.narration_count || 0) + ' Narrator passages).');
+    const destination = String(result.path || '').trim();
+    message('Complete-book workbook saved' + (destination ? ' to ' + destination : '') + ' · ' +
+      Number(result.chapter_count || 0) + ' chapters · ' + Number(result.passage_count || 0) +
+      ' total passages (' + Number(result.dialogue_count || 0) + ' dialogue, ' +
+      Number(result.narration_count || 0) + ' Narrator passages).');
   }
 
   async function importCompletedCharacterWorkbook() {
@@ -5188,7 +5190,7 @@
       try {
         const record = libraryDeletedCharacters.find(item => String(item.id) === restore.dataset.restoreCharacter);
         await call('character_library.restore', {id:restore.dataset.restoreCharacter});
-        await refreshCharacterLibrary();
+        await refreshCharacterIdentityViews();
         message('Restored ' + (record?.name || 'character') + ' to the reusable Character Library.');
         await openCharacterRecoveryBin();
       } catch (error) {
@@ -5254,6 +5256,7 @@
         ? await call('character_library.deleted.clear_all')
         : await call('character_library.deleted.purge_many', {ids});
       characterRecoverySelection.clear();
+      await refreshCharacterIdentityViews();
       await openCharacterRecoveryBin();
       message('Permanently cleared ' + Number(result?.purged || ids.length) + ' character record(s) from Recovery.');
     } finally {
@@ -5361,7 +5364,7 @@
     try {
       const result = await call('character_library.delete_many', {ids});
       characterLibrarySelection.clear();
-      await refreshCharacterLibrary();
+      await refreshCharacterIdentityViews();
       message('Moved ' + Number(result?.deleted || ids.length) + ' character(s) to the Recovery Bin. Their saved voice profiles were left untouched.');
     } finally {
       updateCharacterLibraryBulkControls();
@@ -5524,6 +5527,14 @@
     renderCharacterStudioLive();
     return libraryCharacters;
   }
+  async function refreshCharacterIdentityViews() {
+    await refreshCharacterLibrary();
+    await refreshCharacters();
+    await refreshCharacterDialogueSuggestions();
+    renderCharacterStudioLive();
+    renderDialogueReview();
+  }
+
   function openLibraryEditor(c) {
     ensureCharacterEditorModalHost();
     libraryEditorActive = true; libraryEditorId = c?.id || null;
@@ -5574,7 +5585,7 @@
     const scope = 'Series · ' + requestedSeries;
     const series = requestedSeries;
     const result = await call('character_library.save', {id:libraryEditorId||'',name,short:$('editCharacterShort')?.value||'',aliases:$('editCharacterAliases')?.value||'',scope,series,notes:$('editCharacterNotes')?.value||'',dialogue_sample:$('editCharacterDialogueSample')?.value||''});
-    libraryEditorId = result.character.id; libraryEditorActive = false; $('characterEditorModal')?.classList.remove('show'); await refreshCharacterLibrary(); message('Character saved to the reusable local Character Library.');
+    libraryEditorId = result.character.id; libraryEditorActive = false; $('characterEditorModal')?.classList.remove('show'); await refreshCharacterIdentityViews(); message('Character saved to the reusable local Character Library.');
   }
   async function exportCharacterLibraryFile() {
     const selected = String($('characterSeriesFilter')?.value || 'All series').trim();
@@ -5588,7 +5599,7 @@
   }
   function importCharacterLibraryFile() {
     const picker=document.createElement('input'); picker.type='file'; picker.accept='.json,application/json';
-    picker.onchange=async()=>{const file=picker.files?.[0];if(!file)return;if(file.size>10*1024*1024){message('Character Library imports are limited to 10 MB.',true);return;}try{const data=JSON.parse(await file.text()), rows=Array.isArray(data)?data:data?.characters;if(!Array.isArray(rows))throw new Error('JSON must be an array or contain a characters array.');const payload=Array.isArray(data)?{characters:data}:data;const result=await call('character_library.import',payload);await refreshCharacterLibrary();message('Imported '+result.imported+' character(s) into the local Character Library. Existing local voice assignments were kept when no portable voice reference was supplied.');}catch(error){message(error?.message||String(error),true);}}; picker.click();
+    picker.onchange=async()=>{const file=picker.files?.[0];if(!file)return;if(file.size>10*1024*1024){message('Character Library imports are limited to 10 MB.',true);return;}try{const data=JSON.parse(await file.text()), rows=Array.isArray(data)?data:data?.characters;if(!Array.isArray(rows))throw new Error('JSON must be an array or contain a characters array.');const payload=Array.isArray(data)?{characters:data}:data;const result=await call('character_library.import',payload);await refreshCharacterIdentityViews();message('Imported '+result.imported+' character(s) into the local Character Library. Existing local voice assignments were kept when no portable voice reference was supplied.');}catch(error){message(error?.message||String(error),true);}}; picker.click();
   }
   function pronunciationScopeKey(term) {
     return String(term.scope_type || 'current_book') + ':' + String(term.scope_id || '');
@@ -9612,9 +9623,12 @@ function renderProductionMetadataGate(active) {
         handle(() => { libraryEditorActive = false; $('characterEditorModal')?.classList.remove('show'); });
         return;
       }
-      const workbookAction = button.closest('#characters [data-character-workbook-action]');
+      const workbookAction = button.closest('#exportCharacterWorkbook, #importCharacterWorkbook') ||
+        button.closest('#characters [data-character-workbook-action]');
       if (workbookAction) {
-        const action = workbookAction.dataset.characterWorkbookAction;
+        const action = workbookAction.dataset.characterWorkbookAction ||
+          (button.id === 'exportCharacterWorkbook' ? 'export' :
+            button.id === 'importCharacterWorkbook' ? 'import' : '');
         if (action === 'export') { handle(() => exportSelectedCharacterWorkbook()); return; }
         if (action === 'import') { handle(() => importCompletedCharacterWorkbook()); return; }
       }
@@ -12235,9 +12249,9 @@ function renderProductionMetadataGate(active) {
       if(add){e.preventDefault();e.stopImmediatePropagation();openLibraryEditor(null);return;}
       if(imp){e.preventDefault();e.stopImmediatePropagation();importCharacterLibraryFile();return;}
       if(edit){e.preventDefault();e.stopImmediatePropagation();openLibraryEditor(libraryCharacters.find(c=>String(c.id)===edit.dataset.editLibrary));return;}
-      if(remove){e.preventDefault();e.stopImmediatePropagation();const c=libraryCharacters.find(x=>String(x.id)===remove.dataset.deleteLibrary);if(!c||!window.confirm('Move '+c.name+' to the Character Recovery Bin? You can restore it later.'))return;call('character_library.delete',{id:c.id}).then(refreshCharacterLibrary).then(()=>message('Character moved to the Recovery Bin.')).catch(err=>message(err?.message||String(err),true));return;}
+      if(remove){e.preventDefault();e.stopImmediatePropagation();const c=libraryCharacters.find(x=>String(x.id)===remove.dataset.deleteLibrary);if(!c||!window.confirm('Move '+c.name+' to the Character Recovery Bin? You can restore it later.'))return;call('character_library.delete',{id:c.id}).then(()=>refreshCharacterIdentityViews()).then(()=>message('Character moved to the Recovery Bin.')).catch(err=>message(err?.message||String(err),true));return;}
       if(save&&libraryEditorActive){e.preventDefault();e.stopImmediatePropagation();saveLibraryEditor().catch(err=>message(err?.message||String(err),true));return;}
-      if(del&&libraryEditorActive){e.preventDefault();e.stopImmediatePropagation();if(!libraryEditorId){libraryEditorActive=false;$('characterEditorModal')?.classList.remove('show');if($('editCharacterVoice'))$('editCharacterVoice').disabled=false;return;}const c=libraryCharacters.find(x=>String(x.id)===String(libraryEditorId));if(!c||!window.confirm('Move '+c.name+' to the Character Recovery Bin? You can restore it later.'))return;call('character_library.delete',{id:libraryEditorId}).then(()=>{libraryEditorActive=false;$('characterEditorModal')?.classList.remove('show');if($('editCharacterVoice'))$('editCharacterVoice').disabled=false;return refreshCharacterLibrary();}).then(()=>message('Character moved to the Recovery Bin.')).catch(err=>message(err?.message||String(err),true));return;}
+      if(del&&libraryEditorActive){e.preventDefault();e.stopImmediatePropagation();if(!libraryEditorId){libraryEditorActive=false;$('characterEditorModal')?.classList.remove('show');if($('editCharacterVoice'))$('editCharacterVoice').disabled=false;return;}const c=libraryCharacters.find(x=>String(x.id)===String(libraryEditorId));if(!c||!window.confirm('Move '+c.name+' to the Character Recovery Bin? You can restore it later.'))return;call('character_library.delete',{id:libraryEditorId}).then(()=>{libraryEditorActive=false;$('characterEditorModal')?.classList.remove('show');if($('editCharacterVoice'))$('editCharacterVoice').disabled=false;return refreshCharacterIdentityViews();}).then(()=>message('Character moved to the Recovery Bin.')).catch(err=>message(err?.message||String(err),true));return;}
       if(e.target.closest('#characterLibrarySearch, #characterSeriesFilter'))setTimeout(()=>refreshCharacterLibrary().catch(err=>message(err?.message||String(err),true)),0);
       if(studio){e.preventDefault();e.stopImmediatePropagation();const c=libraryCharacters.find(x=>String(x.id)===studio.dataset.characterStudio);if(!c){message('Choose a saved character first.',true);return;}if(!c.source_project_folder){window.ryuPremiumSelectedCharacter=c.name;window.go?.('characters');message('Opened Character Studio. Open a project from this series to assign a voice.');return;}void (async()=>{try{await openProjectWithPreservedDraft(c.source_project_folder);window.ryuPremiumSelectedCharacter=c.name;window.go?.('characters');const castItem=[...document.querySelectorAll('[data-character-name]')].find(node=>node.dataset.characterName===c.name);castItem?.click();message('Opened Character Studio for '+c.name+'. Manage its voice assignment here.');}catch(err){message(err?.message||String(err),true);}})();return;}
       if(test){e.preventDefault();e.stopImmediatePropagation();const c=libraryCharacters.find(x=>String(x.id)===test.dataset.testLibrary);const profile=voices.find(v=>String(v.name).toLowerCase()===String(c?.voice||'').toLowerCase());if(!c||!profile){message('No matching saved voice profile exists for this character. Choose a saved profile in Voice Studio first.',true);return;}call('voice.preview',{profile_name:profile.name,text:'Hello, my name is '+c.name+'.',duration_seconds:10}).then(data=>monitorJob(data.job_id,async job=>{const url=job?.result?.file_url;if(!url)throw new Error('The character preview finished without a playable audio file.');if(previewAudio)previewAudio.pause();previewAudio=new Audio(url);await previewAudio.play();message('Playing character voice preview.');})).catch(err=>message(err?.message||String(err),true));return;}

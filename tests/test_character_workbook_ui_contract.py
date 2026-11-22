@@ -52,7 +52,8 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn('data-character-workbook-action="import"', header)
         self.assertIn("function exportSelectedCharacterWorkbook()", self.adapter)
         self.assertIn("function importCompletedCharacterWorkbook()", self.adapter)
-        self.assertIn("const workbookAction = button.closest('#characters [data-character-workbook-action]')", self.adapter)
+        self.assertIn("button.closest('#characters [data-character-workbook-action]')", self.adapter)
+        self.assertIn("button.closest('#exportCharacterWorkbook, #importCharacterWorkbook')", self.adapter)
         self.assertNotIn("ensureCharacterWorkbookControls", self.adapter)
         self.assertLess(
             self.adapter.index("installCharacterStudioHandlers();"),
@@ -220,6 +221,26 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn("Passage ID", self.workbook)
         self.assertIn("Alias 31, Alias 32", self.workbook)
         self.assertIn("plan_character_workbook_import", self.host)
+
+
+
+
+    def test_complete_book_workbook_uses_reliable_qt_file_dialogs_and_routes_by_button_id(self):
+        self.assertIn("options=QFileDialog.Option.DontUseNativeDialog", self.host)
+        self.assertIn("#exportCharacterWorkbook, #importCharacterWorkbook", self.adapter)
+        self.assertIn("Complete-book workbook saved", self.adapter)
+        self.assertIn("character.workbook.import.preview", self.adapter)
+        self.assertIn("character.workbook.import.commit", self.adapter)
+
+    def test_character_studio_and_analyze_book_ai_refresh_from_active_library_only(self):
+        self.assertIn("reconcile_project_character_cast", self.host)
+        self.assertIn("character_library_exclusion_keys", self.host)
+        self.assertIn('state["character_library_exclusions"] = exclusions', self.host)
+        self.assertIn("hydrate_existing_projects = not path.is_file()", self.host)
+        self.assertIn("if hydrate_existing_projects:", self.host)
+        self.assertIn("async function refreshCharacterIdentityViews()", self.adapter)
+        self.assertIn("await refreshCharacterIdentityViews()", self.adapter)
+        self.assertIn("character_library_exclusions", self.host)
 
 
 if __name__ == "__main__":

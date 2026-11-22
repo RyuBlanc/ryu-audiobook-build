@@ -9,6 +9,8 @@ from app.core.character_library import (
     list_characters,
     soft_delete_character,
     sync_characters,
+    character_library_exclusion_keys,
+    reconcile_project_character_cast,
 )
 from app.ui.premium_v2_host import _character_library_export_document
 
@@ -206,6 +208,70 @@ class CharacterLibraryExportDocumentTests(unittest.TestCase):
             self.assertEqual(list_characters(series="Series Two", include_deleted=True, path=store)[0]["primary_name"], "Deleted Hero")
 
 
+
+
+
+    def test_project_cast_reconciles_to_active_series_library_and_removes_deleted_rows(self):
+        project_rows = [
+            {
+                "name": "Captain Mira",
+                "series": "Silver Archive",
+                "aliases": ["Mira-sama"],
+                "voice_profile": "This PC's Qwen Mira voice",
+            },
+            {
+                "name": "Deleted Hero",
+                "series": "Silver Archive",
+                "aliases": ["Old Hero"],
+                "character_library_id": "deleted-id",
+            },
+        ]
+        registry_rows = [
+            {
+                "id": "mira-active", "primary_name": "Mira", "series": "Silver Archive",
+                "aliases": ["Captain Mira", "Mira-sama"], "identity_variant": "",
+                "voice_name": "Other PC's voice label",
+            },
+            {
+                "id": "ren-active", "primary_name": "Ren", "series": "Silver Archive",
+                "aliases": ["Ren-kun"], "identity_variant": "",
+            },
+        ]
+        reconciled, orphaned = reconcile_project_character_cast(
+            project_rows, registry_rows, default_series="Silver Archive"
+        )
+        by_name = {row["name"]: row for row in reconciled}
+        self.assertEqual(set(by_name), {"Mira", "Ren"})
+        self.assertEqual(by_name["Mira"]["character_library_id"], "mira-active")
+        self.assertEqual(by_name["Mira"]["voice_profile"], "This PC's Qwen Mira voice")
+        self.assertEqual(by_name["Mira"]["aliases"], ["Captain Mira", "Mira-sama"])
+        self.assertEqual(by_name["Ren"]["character_library_id"], "ren-active")
+        self.assertEqual([row["name"] for row in orphaned], ["Deleted Hero"])
+        exclusions = character_library_exclusion_keys(orphaned, "Silver Archive", registry_rows)
+        self.assertEqual(exclusions, {"deleted hero", "old hero"})
+        self.assertNotIn("captain mira", exclusions)
+
+    def test_project_cast_reconciliation_keeps_age_versions_distinct(self):
+        registry_rows = [
+            {"id": "mira-adult", "primary_name": "Mira", "series": "Silver Archive",
+             "aliases": ["Captain Mira"], "identity_variant": "Adult"},
+            {"id": "mira-young", "primary_name": "Mira", "series": "Silver Archive",
+             "aliases": ["Young Mira"], "identity_variant": "Younger"},
+        ]
+        project_rows = [
+            {"name": "Mira", "series": "Silver Archive", "identity_variant": "Adult",
+             "character_library_id": "mira-adult", "voice_profile": "Adult profile"},
+            {"name": "Mira", "series": "Silver Archive", "identity_variant": "Younger",
+             "character_library_id": "mira-young", "voice_profile": "Young profile"},
+        ]
+        reconciled, orphaned = reconcile_project_character_cast(
+            project_rows, registry_rows, default_series="Silver Archive"
+        )
+        self.assertEqual(orphaned, [])
+        self.assertEqual(
+            {(row["character_library_id"], row["identity_variant"], row["voice_profile"]) for row in reconciled},
+            {("mira-adult", "Adult", "Adult profile"), ("mira-young", "Younger", "Young profile")},
+        )
 
 if __name__ == "__main__":
     unittest.main()

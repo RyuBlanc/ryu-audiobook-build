@@ -836,3 +836,198 @@ def purge_deleted_characters_many(
     ]
     _write_store(store, target)
     return purged
+
+
+def _character_record_tokens(record: dict) -> set[str]:
+    name = str(record.get("primary_name") or record.get("name") or "").strip()
+    aliases = record.get("aliases") or []
+    if isinstance(aliases, str):
+        aliases = [aliases]
+    values = [name, *(aliases if isinstance(aliases, (list, tuple, set)) else [])]
+    return {_identity_key(value) for value in values if str(value or "").strip()}
+
+
+def reconcile_project_character_cast(
+    project_rows: list[dict] | tuple[dict, ...] | None,
+    registry_rows: list[dict] | tuple[dict, ...] | None,
+    default_series: str = "",
+) -> tuple[list[dict], list[dict]]:
+    """Make active Character Library identities authoritative for a project's cast.
+
+    Project-specific fields such as voice_profile and dialogue statistics survive,
+    but stale project rows are removed. Missing active identities from the current
+    series are added so one series library can be reused across volumes.
+    """
+    registry = [dict(row) for row in (registry_rows or []) if isinstance(row, dict)]
+    registry_by_id = {
+        str(row.get("id") or "").strip(): row
+        for row in registry if str(row.get("id") or "").strip()
+    }
+
+    def row_series(row: dict) -> str:
+        value = str(row.get("series") or "").strip()
+        if not value:
+            scope = str(row.get("scope") or "").strip()
+            if scope.casefold().startswith("series"):
+                value = scope[6:].strip()
+                if value[:1] in {"·", ":", "-", "–", "—"}:
+                    value = value[1:].strip()
+        return value or str(default_series or "").strip()
+
+    def row_variant(row: dict) -> str:
+        return _identity_key(row.get("identity_variant") or row.get("version") or "")
+
+    active_by_series: dict[str, list[dict]] = {}
+    for record in registry:
+        series_key = _identity_key(record.get("series"))
+        if series_key:
+            active_by_series.setdefault(series_key, []).append(record)
+
+    reconciled: list[dict] = []
+    orphaned: list[dict] = []
+    used_ids: set[str] = set()
+    used_identities: set[tuple[str, str, str]] = set()
+
+    for source in project_rows or []:
+        if not isinstance(source, dict):
+            continue
+        row = dict(source)
+        name = str(row.get("name") or row.get("primary_name") or "").strip()
+        if not name:
+            continue
+        if _identity_key(name) == "narrator":
+            reconciled.append(row)
+            continue
+
+        series = row_series(row)
+        series_key = _identity_key(series)
+        variant = row_variant(row)
+        requested_id = str(row.get("character_library_id") or "").strip()
+        exact = registry_by_id.get(requested_id) if requested_id else None
+        if exact and _identity_key(exact.get("series")) == series_key and row_variant(exact) == variant:
+            candidates = [exact]
+        else:
+            tokens = _character_record_tokens(row)
+            candidates = [
+                record for record in active_by_series.get(series_key, [])
+                if row_variant(record) == variant and tokens.intersection(_character_record_tokens(record))
+            ]
+
+        candidates = list({
+            str(record.get("id") or id(record)): record for record in candidates
+        }.values())
+        if len(candidates) != 1:
+            orphaned.append({
+                **row,
+                "_orphan_reason": "ambiguous" if candidates else "missing-active-library-record",
+            })
+            continue
+
+        record = candidates[0]
+        record_id = str(record.get("id") or "").strip()
+        canonical = str(record.get("primary_name") or record.get("name") or "").strip()
+        if not canonical:
+            orphaned.append({**row, "_orphan_reason": "missing-canonical-name"})
+            continue
+        record_series = str(record.get("series") or series).strip()
+        identity = (_identity_key(record_series), _identity_key(canonical), row_variant(record))
+        if (record_id and record_id in used_ids) or identity in used_identities:
+            continue
+
+        resolved = dict(row)
+        resolved.update({
+            "name": canonical,
+            "series": record_series,
+            "scope": "Series · " + record_series,
+            "aliases": list(record.get("aliases") or []),
+            "character_library_id": record_id,
+            "identity_base_name": str(record.get("identity_base_name") or canonical).strip(),
+            "identity_variant": str(record.get("identity_variant") or ""),
+        })
+        if not str(resolved.get("voice_profile") or "").strip() and str(record.get("voice_name") or "").strip():
+            resolved["voice_profile"] = str(record.get("voice_name") or "").strip()
+        if not str(resolved.get("notes") or "").strip() and str(record.get("notes") or "").strip():
+            resolved["notes"] = str(record.get("notes") or "").strip()
+        if not resolved.get("examples") and str(record.get("dialogue_sample") or "").strip():
+            resolved["examples"] = [str(record.get("dialogue_sample") or "").strip()]
+        if record.get("user_created"):
+            resolved["user_created"] = True
+        if record.get("manual"):
+            resolved["manual"] = True
+        if record.get("imported_from_workbook"):
+            resolved["imported_from_workbook"] = True
+        if str(record.get("character_origin") or "").strip():
+            resolved["character_origin"] = str(record.get("character_origin") or "").strip()
+        reconciled.append(resolved)
+        if record_id:
+            used_ids.add(record_id)
+        used_identities.add(identity)
+
+    # Add active characters in the current series even when they originated in
+    # another volume. This keeps all assignment surfaces on the same series cast.
+    default_key = _identity_key(default_series)
+    if default_key:
+        for record in active_by_series.get(default_key, []):
+            record_id = str(record.get("id") or "").strip()
+            canonical = str(record.get("primary_name") or record.get("name") or "").strip()
+            identity = (_identity_key(record.get("series")), _identity_key(canonical), row_variant(record))
+            if not canonical or (record_id and record_id in used_ids) or identity in used_identities:
+                continue
+            sample = str(record.get("dialogue_sample") or "").strip()
+            try:
+                confidence = float(record.get("confidence", 100) or 0)
+            except (TypeError, ValueError, OverflowError):
+                confidence = 100.0
+            if confidence > 1.0:
+                confidence /= 100.0
+            row = {
+                "name": canonical,
+                "role": "Character",
+                "dialogue_count": _safe_count(record.get("line_count")),
+                "examples": [sample] if sample else [],
+                "confidence": max(0.0, min(1.0, confidence)),
+                "aliases": list(record.get("aliases") or []),
+                "voice_profile": str(record.get("voice_name") or "").strip() or None,
+                "notes": str(record.get("notes") or "").strip(),
+                "series": str(record.get("series") or default_series).strip(),
+                "scope": "Series · " + str(record.get("series") or default_series).strip(),
+                "character_library_id": record_id,
+                "identity_base_name": str(record.get("identity_base_name") or canonical).strip(),
+                "identity_variant": str(record.get("identity_variant") or ""),
+                "user_created": bool(record.get("user_created")),
+                "manual": bool(record.get("manual")),
+                "imported_from_workbook": bool(record.get("imported_from_workbook")),
+                "character_origin": str(record.get("character_origin") or ""),
+            }
+            reconciled.append(row)
+            if record_id:
+                used_ids.add(record_id)
+            used_identities.add(identity)
+
+    reconciled.sort(key=lambda row: (
+        _identity_key(row.get("series")),
+        _identity_key(row.get("name")),
+        _identity_key(row.get("identity_variant")),
+    ))
+    return reconciled, orphaned
+
+
+def character_library_exclusion_keys(
+    exclusions: list[dict] | tuple[dict, ...] | None,
+    series: str,
+    active_registry_rows: list[dict] | tuple[dict, ...] | None = None,
+) -> set[str]:
+    """Return deleted-library names for one series, except identities active again."""
+    wanted_series = _identity_key(series)
+    if not wanted_series:
+        return set()
+    active_tokens: set[str] = set()
+    for record in active_registry_rows or []:
+        if isinstance(record, dict) and _identity_key(record.get("series")) == wanted_series:
+            active_tokens.update(_character_record_tokens(record))
+
+    excluded: set[str] = set()
+    for record in exclusions or []:
+        if isinstance(record, dict) and _identity_key(record.get("series")) == wanted_series:
+            excluded.update(_character_record_tokens(record))
+    return excluded - active_tokens
