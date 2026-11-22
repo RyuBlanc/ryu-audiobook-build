@@ -196,7 +196,7 @@ SCENE_SCHEMA = {
     "required": ["scenes", "continuity_notes"]
 }
 PROMPT = '''You are Ryu's Audiobook Director. Analyze the supplied novel excerpt only.
-Return JSON. Do not invent facts. Identify canonical characters and aliases, exact dialogue and likely speaker with confidence and evidence, scene boundaries, location, time, mood, narrator delivery, character delivery, pacing, pronunciation hints, ambience, music, SFX, and continuity notes.
+Return JSON. Do not invent facts. Identify canonical characters and aliases, exact dialogue and likely speaker with confidence and evidence. Every dialogue quote must be copied verbatim from an explicit dialogue span in the source excerpt; never convert narration, action, description or summaries into dialogue. Scene boundaries, location, time, mood, narrator delivery, character delivery, pacing, pronunciation hints, ambience, music, SFX, and continuity notes.
 
 Pronunciation is critical. Detect unusual names, fictional names, place names, honorifics, food, cultural terms, spells, titles, organizations and borrowed words from Japanese, Korean, Hindi, Tamil, Telugu, Malayalam, Kannada, Bengali, Marathi, Gujarati, Punjabi, Urdu, Nepali, Sinhala, Chinese, Arabic, Thai, Vietnamese and other languages when the evidence supports it. Also detect romanized/transliterated words such as Japanese or Korean names and foreign cultural terms written with Latin letters. Do not guess a Latin reading from spelling alone; use source-language evidence, native-script forms, saved project context or clearly supported pronunciation. Where several readings remain plausible, return alternatives and reduce confidence.
 
@@ -400,10 +400,12 @@ class AudiobookBrain:
                         'Return chapter_summary, chapter_purpose, themes, emotional_beats, key_events, '
                         'character_observations and relationships as well as the existing fields. '
                         'Every story observation must have evidence_quote copied exactly from this excerpt. '
+                        'Dialogue.quote must be copied verbatim from inside an explicit dialogue delimiter. '
+                        'Never use narration, action, description or summaries as dialogue. '
                         'Do not invent events, motives or dialogue. Omit unsupported observations. JSON only.'
                     ),
                     '/no_think ' + common_context + (
-                        '\nDo not guess a speaker. Keep dialogue.quote exact. Only include pronunciation '
+                        '\nDo not guess a speaker. Keep dialogue.quote exact and copy it only from text inside an explicit dialogue delimiter in this excerpt. Never use narration or prose as a dialogue quote. Only include pronunciation '
                         'terms that truly occur in this excerpt. For each theme, emotional beat, key event, '
                         'character observation and relationship, include a short exact evidence_quote from '
                         'this excerpt. Omit any item without direct textual evidence.'
@@ -557,6 +559,7 @@ class AudiobookBrain:
                     "Each character needs name, aliases, role, confidence. "
                     "Each dialogue item needs quote, speaker, confidence, evidence. "
                     "Include only people and spoken lines verified in the supplied excerpt. "
+                    "Dialogue quotes must be exact text inside an explicit source dialogue span; never quote narration, actions or summaries. "
                     "Keep dialogue quote text exact. Never guess a speaker."
                 )
                 repair_candidates = {
@@ -577,7 +580,7 @@ class AudiobookBrain:
                     "/no_think The first core pass omitted source-supported items or returned text that "
                     "was not an exact dialogue span from this excerpt. Re-read the excerpt and recover "
                     "the missing items below. These candidates come from exact local speaker-tag/quote "
-                    "matching; verify each one against the excerpt before returning it. Do not return "
+                    "matching; verify each one against the excerpt before returning it. Every dialogue quote must match an explicit dialogue span verbatim. Do not return "
                     "narration or paraphrase as dialogue. Do not add other names or dialogue.\n"
                     "Missing source candidates:\n"
                     + json.dumps(repair_candidates, ensure_ascii=False)

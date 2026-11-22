@@ -178,6 +178,12 @@ class AudiobookBrainTests(unittest.TestCase):
         )
 
 
+    def test_core_prompt_forbids_narration_as_dialogue_and_requires_verbatim_spans(self):
+        from app.ai.brain import PROMPT
+
+        self.assertIn("explicit dialogue span", PROMPT)
+        self.assertIn("never convert narration", PROMPT)
+
     def test_nonempty_core_response_with_unsupported_prose_is_repaired_from_exact_dialogue_spans(self):
         from app.ai.brain import AudiobookBrain, BrainConfig
         from app.chapters.detector import Chapter
