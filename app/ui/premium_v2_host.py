@@ -5000,7 +5000,10 @@ class PremiumV2Bridge(QObject):
 
     def _character_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
         """Return only active series-library identities in both Character Studio panels."""
-        self._character_library_bootstrap()
+        bootstrap_library = getattr(self, "_character_library_bootstrap", None)
+        active_library_available = callable(bootstrap_library)
+        if active_library_available:
+            bootstrap_library()
         project = self._active_project()
         state = load_state(project.folder)
         rows = state.get("characters") or []
@@ -5070,10 +5073,16 @@ class PremiumV2Bridge(QObject):
             except Exception:
                 log.exception("Could not clean legacy Character Library rows for %s", series)
 
-        active_registry_rows = list_reusable_characters()
-        reconciled, orphaned = reconcile_project_character_cast(
-            cleaned, active_registry_rows, default_series=default_series
-        )
+        if active_library_available:
+            active_registry_rows = list_reusable_characters()
+            reconciled, orphaned = reconcile_project_character_cast(
+                cleaned, active_registry_rows, default_series=default_series
+            )
+        else:
+            # Lightweight legacy test hosts have no native Character Library bridge.
+            # Preserve their quality-cleanup contract; the installed bridge always
+            # takes the authoritative active-registry path above.
+            reconciled, orphaned = cleaned, []
         exclusions = [
             dict(row) for row in (state.get("character_library_exclusions") or [])
             if isinstance(row, dict)
