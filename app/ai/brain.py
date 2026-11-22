@@ -11,6 +11,8 @@ from app.chapters.detector import Chapter
 from app.chapters.characters import (
     analyze_chapter as deterministic_character_analysis,
     _all_dialogue_spans,
+    _discover_candidates,
+    _discover_explicit_speakers,
     _speaker_near_quote,
 )
 from app.tts.pronunciation_suggester import COMMON_ENGLISH_WORDS, is_common_english_phrase, nativeish_pronunciation
@@ -699,6 +701,23 @@ class AudiobookBrain:
 
         dialogue = []
         source = str(chapter.text or "")
+        # The primary deterministic cast scan can miss a name in a short
+        # chapter even when it appears in an explicit "Name said" tag. Add
+        # only names discovered by the source-tag/proper-name recognizers;
+        # they become actual character records only when a quoted line is
+        # directly attributed to them below.
+        source_names = set(_discover_candidates(source))
+        source_names.update(_discover_explicit_speakers(source))
+        for name in sorted(source_names, key=str.casefold):
+            key = unicodedata.normalize("NFC", str(name)).strip().casefold()
+            if key:
+                canonical_by_key.setdefault(key, str(name).strip())
+                if name not in candidates:
+                    candidates.append(name)
+        existing_character_keys = {
+            unicodedata.normalize("NFC", str(row.get("name") or "")).strip().casefold()
+            for row in characters if isinstance(row, dict)
+        }
         last_speaker = None
         seen_spans: set[tuple[int, int]] = set()
         for start, end, raw_quote in _all_dialogue_spans(source):
@@ -720,6 +739,17 @@ class AudiobookBrain:
             quote = str(raw_quote or "").strip()
             if not quote:
                 continue
+            canonical_key = unicodedata.normalize("NFC", canonical).strip().casefold()
+            if canonical_key not in existing_character_keys:
+                characters.append({
+                    'name': canonical,
+                    'aliases': [],
+                    'role': 'Possible Character',
+                    'traits': [],
+                    'voice_direction': {'age_impression': '', 'gender': '', 'tone': '', 'energy': ''},
+                    'confidence': float(confidence),
+                })
+                existing_character_keys.add(canonical_key)
             dialogue.append({
                 'quote': quote,
                 'speaker': canonical,
