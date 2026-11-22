@@ -14,7 +14,6 @@ from app.chapters.characters import (
     _all_dialogue_spans,
     _clean_name,
     _is_plausible_name,
-    SPEAKER_NAME_TOKEN,
     SPEAKER_VERBS,
 )
 from app.tts.pronunciation_suggester import COMMON_ENGLISH_WORDS, is_common_english_phrase, nativeish_pronunciation
@@ -711,6 +710,13 @@ class AudiobookBrain:
 
         dialogue = []
         source = str(chapter.text or "")
+        # Deliberately exclude sentence periods from names. The shared broad
+        # token supports initials, but can greedily absorb "prose. Name" when
+        # used at an anchored speech-tag boundary.
+        fallback_speaker_name_token = (
+            r"([\\p{L}][\\p{L}\\p{M}\\p{N}'’\\u200c\\u200d\\u30fb-]*"
+            r"(?:\\s+[\\p{L}][\\p{L}\\p{M}\\p{N}'’\\u200c\\u200d\\u30fb-]*){0,2})"
+        )
         existing_character_keys = {
             unicodedata.normalize("NFC", str(row.get("name") or "")).strip().casefold()
             for row in characters if isinstance(row, dict)
@@ -729,13 +735,13 @@ class AudiobookBrain:
             # not scan a broad neighborhood, so a future character's speech
             # tag cannot be borrowed by the current line.
             tag_patterns = (
-                (rf"{SPEAKER_NAME_TOKEN}\s+(?:{SPEAKER_VERBS})\b\s*[,;:]?\s*$", before),
-                (rf"(?:{SPEAKER_VERBS})\s+{SPEAKER_NAME_TOKEN}\s*$", before),
-                (rf"{SPEAKER_NAME_TOKEN}\s*[:：—–-]\s*$", before),
-                (rf"^\s*[,;:]\s*{SPEAKER_NAME_TOKEN}\s+(?:{SPEAKER_VERBS})\b", after),
-                (rf"^\s*[,;:]\s*(?:{SPEAKER_VERBS})\s+{SPEAKER_NAME_TOKEN}\b", after),
-                (rf"\bmy name is\s+({SPEAKER_NAME_TOKEN})", inside),
-                (rf"\b(?:I['’]m|I am|this is)\s+({SPEAKER_NAME_TOKEN})", inside),
+                (rf"{fallback_speaker_name_token}\s+(?:{SPEAKER_VERBS})\b\s*[,;:]?\s*$", before),
+                (rf"(?:{SPEAKER_VERBS})\s+{fallback_speaker_name_token}\s*$", before),
+                (rf"{fallback_speaker_name_token}\s*[:：—–-]\s*$", before),
+                (rf"^\s*[,;:]\s*{fallback_speaker_name_token}\s+(?:{SPEAKER_VERBS})\b", after),
+                (rf"^\s*[,;:]\s*(?:{SPEAKER_VERBS})\s+{fallback_speaker_name_token}\b", after),
+                (rf"\bmy name is\s+({fallback_speaker_name_token})", inside),
+                (rf"\b(?:I['’]m|I am|this is)\s+({fallback_speaker_name_token})", inside),
             )
             speaker = None
             for pattern, context in tag_patterns:
