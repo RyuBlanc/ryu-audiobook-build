@@ -74,20 +74,31 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 "series_name": "Silver Archive",
                 "chapter_id": "chapter-001", "chapter_number": 1,
                 "chapter_title": "The Arrival", "chapter_revision": "revision-abc",
-                "series_character_reference": [{
-                    "primary_name": "Mira",
-                    "aliases": ["Captain Mira", "Mira-sama"],
-                    "identity_base_name": "Mira", "identity_variant": "",
-                    "voice_name": "This must not be exported",
-                }],
+                "series_character_reference": [
+                    {
+                        "primary_name": "Mira",
+                        "aliases": ["Captain Mira", "Mira-sama", "Captain Mira"],
+                        "identity_base_name": "Mira", "identity_variant": "",
+                        "voice_name": "This must not be exported",
+                    },
+                    {
+                        "primary_name": "Mira (Younger Version)",
+                        "aliases": ["Young Mira", "Childhood Mira"],
+                        "identity_base_name": "Mira", "identity_variant": "Younger Version",
+                    },
+                ],
             }
             path.write_bytes(create_character_workbook_bytes(metadata, passages, chapter_text))
             parsed = read_character_workbook(path)
-            self.assertEqual(len(parsed["series_character_reference"]), 1)
-            self.assertEqual(parsed["series_character_reference"][0]["canonical_name"], "Mira")
-            self.assertEqual(parsed["series_character_reference"][0]["aliases"], ["Captain Mira", "Mira-sama"])
-            self.assertEqual(parsed["series_character_reference"][0]["identity_base_name"], "Mira")
-            self.assertNotIn("voice_name", parsed["series_character_reference"][0])
+            self.assertEqual(len(parsed["series_character_reference"]), 2)
+            adult, younger = parsed["series_character_reference"]
+            self.assertEqual(adult["canonical_name"], "Mira")
+            self.assertEqual(adult["aliases"], ["Captain Mira", "Mira-sama"])
+            self.assertEqual(adult["identity_base_name"], "Mira")
+            self.assertEqual(younger["canonical_name"], "Mira (Younger Version)")
+            self.assertEqual(younger["aliases"], ["Young Mira", "Childhood Mira"])
+            self.assertEqual(younger["identity_variant"], "Younger Version")
+            self.assertNotIn("voice_name", adult)
             self.assertEqual(parsed["characters"], [])
 
     def test_edited_xlsx_file_is_reopened_and_planned_from_real_sheet_cells(self):

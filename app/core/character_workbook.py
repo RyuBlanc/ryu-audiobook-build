@@ -151,7 +151,7 @@ def create_character_workbook_bytes(metadata, passages, chapter_text):
     reference_rows = None
     if "series_character_reference" in metadata:
         reference_rows = [[
-            "Canonical Character", "Known Aliases", "Identity Base Name", "Version / Age Variant"
+            "Canonical Character", "Known Alias", "Identity Base Name", "Version / Age Variant"
         ]]
         for source in metadata.get("series_character_reference") or []:
             if not isinstance(source, dict):
@@ -169,11 +169,19 @@ def create_character_workbook_bytes(metadata, passages, chapter_text):
                 if alias and _key(alias) not in seen_aliases:
                     seen_aliases.add(_key(alias))
                     cleaned_aliases.append(alias)
-            reference_rows.append([
-                primary, "\n".join(cleaned_aliases),
-                _clean(source.get("identity_base_name") or primary),
-                _clean(source.get("identity_variant") or source.get("version")),
-            ])
+            base_name = _clean(source.get("identity_base_name") or primary)
+            variant = _clean(source.get("identity_variant") or source.get("version"))
+            if len(primary) > MAX_CHARACTER_NAME_LENGTH or len(base_name) > MAX_CHARACTER_NAME_LENGTH:
+                raise ValueError("Series Character Reference names must be 160 characters or fewer.")
+            if len(variant) > MAX_IDENTITY_VARIANT_LENGTH:
+                raise ValueError("Series Character Reference age/version labels must be 120 characters or fewer.")
+            if any(len(alias) > MAX_CHARACTER_ALIAS_LENGTH for alias in cleaned_aliases):
+                raise ValueError("Series Character Reference aliases must be 160 characters or fewer.")
+            # One alias per row keeps every Excel cell bounded, regardless of alias count.
+            for alias in (cleaned_aliases or [""]):
+                reference_rows.append([primary, alias, base_name, variant])
+                if len(reference_rows) - 1 > MAX_ROWS:
+                    raise ValueError("The Series Character Reference exceeds the 50,000 row limit.")
     text = str(chapter_text or "")
     chunks = [text[i:i + CHUNK] for i in range(0, len(text), CHUNK)] or [""]
     for i, chunk in enumerate(chunks, 1):
@@ -324,21 +332,24 @@ def read_character_workbook(path):
         if passage in seen: raise ValueError("The workbook contains a duplicate Passage ID.")
         seen.add(passage)
     reference_rows = _records(sheets.get("Series Character Reference", []))
-    series_character_reference = []
+    if len(reference_rows) > MAX_ROWS:
+        raise ValueError("The Series Character Reference exceeds the 50,000 row limit.")
+    reference_by_identity = {}
     for row in reference_rows:
         primary = _clean(row.get("Canonical Character"))
         if not primary:
             continue
-        aliases = [
-            _clean(value) for value in str(row.get("Known Aliases") or "").splitlines()
-            if _clean(value)
-        ]
-        series_character_reference.append({
-            "canonical_name": primary,
-            "aliases": aliases,
-            "identity_base_name": _clean(row.get("Identity Base Name") or primary),
-            "identity_variant": _clean(row.get("Version / Age Variant")),
+        base_name = _clean(row.get("Identity Base Name") or primary)
+        variant = _clean(row.get("Version / Age Variant"))
+        identity = (_key(primary), _key(base_name), _key(variant))
+        record = reference_by_identity.setdefault(identity, {
+            "canonical_name": primary, "aliases": [],
+            "identity_base_name": base_name, "identity_variant": variant,
         })
+        alias = _clean(row.get("Known Alias"))
+        if alias and _key(alias) != _key(primary) and _key(alias) not in {_key(value) for value in record["aliases"]}:
+            record["aliases"].append(alias)
+    series_character_reference = list(reference_by_identity.values())
 
     characters = []
     for n, row in enumerate(char_rows, 2):

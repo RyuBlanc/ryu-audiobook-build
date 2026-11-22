@@ -28,6 +28,8 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
 
     def test_export_import_controls_use_preview_then_explicit_commit(self):
         self.assertIn("Series Character Reference", self.workbook)
+        self.assertIn("Known Alias", self.workbook)
+        self.assertIn("reference_by_identity", self.workbook)
         self.assertIn("series_character_reference", self.host)
         self.assertIn("self._character_library_bootstrap()", self.host)
         self.assertIn("Export Chapter Workbook", self.adapter)
