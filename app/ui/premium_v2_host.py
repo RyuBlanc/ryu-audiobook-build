@@ -5218,6 +5218,8 @@ class PremiumV2Bridge(QObject):
             chapter_revision=str(chapter_row.get("chapter_revision") or ""),
             current_passages=passages,
             current_assignments=assignments,
+            deleted_registry_rows=list_reusable_deleted_characters(),
+            book_title=str(getattr(project, "title", "") or ""),
         )
         return state, series, chapter, plan
 
@@ -5256,6 +5258,19 @@ class PremiumV2Bridge(QObject):
             "book_title": str(getattr(project, "title", "") or ""),
             "series": series, "chapter_number": int(chapter.number),
             "summary": plan["summary"],
+            "character_plan_total": len(plan.get("characters") or []),
+            "character_plan_truncated": len(plan.get("characters") or []) > 40,
+            "characters": [
+                {
+                    "canonical_name": str(row.get("canonical_name") or ""),
+                    "identity_variant": str(row.get("identity_variant") or ""),
+                    "action": str(row.get("action") or ""),
+                    "aliases_to_add": list(row.get("aliases_to_add") or [])[:12],
+                    "aliases_to_add_total": len(row.get("aliases_to_add") or []),
+                    "existing_voice_name": str(row.get("existing_voice_name") or ""),
+                }
+                for row in plan.get("characters", [])[:40]
+            ],
         }
 
     def _character_workbook_import_commit(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -6308,37 +6323,78 @@ class PremiumV2Bridge(QObject):
         state = load_state(project.folder)
         characters = list(state.get("characters") or [])
         requested_series = str(payload.get("series") or "").strip()
-        matches = [
-            c for c in characters
-            if isinstance(c, dict)
-            and str(c.get("name", "")).strip().casefold() == name.casefold()
+        active_series = self._project_series_name(project, state)
+
+        def identity_text(value: Any) -> str:
+            return unicodedata.normalize("NFC", str(value or "")).strip().casefold()
+
+        name_matches = [
+            item for item in characters
+            if isinstance(item, dict)
+            and identity_text(item.get("name")) == identity_text(name)
             and (
                 not requested_series
-                or str(c.get("series") or self._project_series_name(project, state)).strip().casefold()
-                   == requested_series.casefold()
+                or identity_text(item.get("series") or active_series) == identity_text(requested_series)
             )
+        ]
+        requested_variant = identity_text(payload.get("identity_variant"))
+        matches = [
+            item for item in name_matches
+            if not requested_variant or identity_text(item.get("identity_variant")) == requested_variant
         ]
         if not matches:
             raise ValueError("That character is not in the selected series of the saved project cast. Refresh the list and try again.")
         if len(matches) > 1:
-            raise ValueError("This character name exists in more than one series. Select the series before assigning a voice.")
+            raise ValueError("This character name matches multiple identities in the selected series. Select its exact age/version before assigning a voice.")
+
         item = matches[0]
+        series = str(item.get("series") or active_series).strip()
+        variant = identity_text(item.get("identity_variant"))
+        item_tokens = {identity_text(item.get("name")), *(
+            identity_text(alias) for alias in (item.get("aliases") or [])
+        )}
+        item_tokens.discard("")
+        registry_matches = [
+            row for row in list_reusable_characters()
+            if identity_text(row.get("series")) == identity_text(series)
+            and item_tokens.intersection({
+                identity_text(row.get("primary_name") or row.get("name")),
+                *(identity_text(alias) for alias in (row.get("aliases") or [])),
+            })
+        ]
+        if len(registry_matches) > 1:
+            raise ValueError("The selected character's names or aliases match multiple Character Library identities. Resolve the series identity before assigning a voice.")
+        matched_registry = registry_matches[0] if registry_matches else None
+        if matched_registry and identity_text(matched_registry.get("identity_variant")) != variant:
+            raise ValueError("The Character Library identity has a different age/version. Select the matching character before assigning a voice.")
+        recovery_matches = [
+            row for row in list_reusable_deleted_characters()
+            if identity_text(row.get("series")) == identity_text(series)
+            and item_tokens.intersection({
+                identity_text(row.get("primary_name") or row.get("name")),
+                *(identity_text(alias) for alias in (row.get("aliases") or [])),
+            })
+        ]
+        if recovery_matches:
+            raise ValueError("The selected character or one of its aliases is in Character Library Recovery Bin. Restore or resolve that identity before assigning a voice.")
+
+        # Resolve identity conflicts before writing either project or series-level data.
         item["voice_profile"] = profile_name or None
         state["characters"] = characters
         state["modified_at"] = self._now()
         save_state(project.folder, state)
-        series = str(item.get("series") or self._project_series_name(project, state)).strip()
-        registry_rows = list_reusable_characters()
-        matched_registry = next((row for row in registry_rows
-            if str(row.get("series") or "").casefold() == series.casefold()
-            and (str(row.get("primary_name") or row.get("name") or "").casefold() == name.casefold()
-                 or name.casefold() in {str(alias).casefold() for alias in (row.get("aliases") or [])})), None)
         self._character_library_save({
             "id": str((matched_registry or {}).get("id") or ""),
             "name": name, "series": series, "scope": "Series · " + series,
             "short": str(item.get("short_description") or name.split()[0]),
-            "aliases": list(item.get("aliases") or []), "notes": str(item.get("notes") or ""),
+            "aliases": list(item.get("aliases") or []),
+            "notes": str(item.get("notes") or ""),
             "dialogue_sample": str((item.get("examples") or [""])[0] if item.get("examples") else ""),
+            "identity_base_name": str(item.get("identity_base_name") or item.get("name") or name),
+            "identity_variant": str(item.get("identity_variant") or ""),
+            "imported_from_workbook": bool(item.get("imported_from_workbook")),
+            "character_origin": str(item.get("character_origin") or ""),
+            "character_library_id": str(item.get("character_library_id") or ""),
             "voice_profile": profile_name,
         })
         return {"name": name, "voice_profile": item["voice_profile"], "saved": True}
@@ -6888,6 +6944,11 @@ class PremiumV2Bridge(QObject):
                 "user_created": bool(row.get("user_created")),
                 "manual": bool(row.get("manual")),
                 "manual_aliases": bool(row.get("manual_aliases")),
+                "identity_base_name": row.get("identity_base_name") or "",
+                "identity_variant": row.get("identity_variant") or "",
+                "imported_from_workbook": bool(row.get("imported_from_workbook")),
+                "character_origin": row.get("character_origin") or "",
+                "character_library_id": row.get("character_library_id") or "",
             }
             grouped.setdefault(series, []).append(normalized)
         for series, rows in grouped.items():
@@ -7022,7 +7083,7 @@ class PremiumV2Bridge(QObject):
 
     def _character_library_save(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._character_library_bootstrap()
-        name = str(payload.get("name") or "").strip()
+        name = unicodedata.normalize("NFC", str(payload.get("name") or "")).strip()
         if not name:
             raise ValueError("Enter a character name before saving it to the Character Library.")
         aliases = payload.get("aliases") or []
@@ -7030,7 +7091,10 @@ class PremiumV2Bridge(QObject):
             aliases = [part.strip() for part in aliases.replace("\n", ",").split(",") if part.strip()]
         if not isinstance(aliases, list):
             raise ValueError("Character aliases must be a list or comma-separated text.")
-        aliases = list(dict.fromkeys(str(item).strip()[:160] for item in aliases if str(item).strip()))
+        aliases = list(dict.fromkeys(
+            unicodedata.normalize("NFC", str(item)).strip()[:160]
+            for item in aliases if str(item).strip()
+        ))
         voice_profile = str(payload.get("voice_profile") or "").strip()
         if voice_profile and self._find_profile(voice_profile) is None:
             raise ValueError("Choose a saved voice profile before assigning it to a character.")
@@ -7057,6 +7121,39 @@ class PremiumV2Bridge(QObject):
              if str(row.get("id") or "") == str(payload.get("id") or "").strip()),
             None,
         )
+        def identity_text(value: Any) -> str:
+            return unicodedata.normalize("NFC", str(value or "")).strip().casefold()
+        incoming_tokens = {identity_text(name), *(identity_text(alias) for alias in aliases)}
+        incoming_tokens.discard("")
+        requested_variant = identity_text(
+            payload.get("identity_variant") if "identity_variant" in payload
+            else (existing or {}).get("identity_variant")
+        )
+        recovery_conflicts = [
+            row for row in list_reusable_deleted_characters()
+            if identity_text(row.get("series")) == identity_text(series)
+            and incoming_tokens.intersection({
+                identity_text(row.get("primary_name") or row.get("name")),
+                *(identity_text(alias) for alias in (row.get("aliases") or [])),
+            })
+        ]
+        if recovery_conflicts:
+            raise ValueError("This character name or alias matches Character Library Recovery Bin. Restore or resolve it before saving.")
+        active_conflicts = [
+            row for row in list_reusable_characters()
+            if identity_text(row.get("series")) == identity_text(series)
+            and (not existing or str(row.get("id") or "") != str(existing.get("id") or ""))
+            and incoming_tokens.intersection({
+                identity_text(row.get("primary_name") or row.get("name")),
+                *(identity_text(alias) for alias in (row.get("aliases") or [])),
+            })
+        ]
+        if len(active_conflicts) > 1:
+            raise ValueError("These names or aliases match multiple characters in this series. Resolve the identity conflict before saving.")
+        if active_conflicts and identity_text(active_conflicts[0].get("identity_variant")) != requested_variant:
+            raise ValueError("This name or alias belongs to a different age/version identity. Select the exact character before saving.")
+        if existing and active_conflicts:
+            raise ValueError("One or more names or aliases already belong to another character in this series. Resolve the identity collision before saving.")
         if existing:
             changes = {
                 "series": series,
@@ -7066,6 +7163,15 @@ class PremiumV2Bridge(QObject):
                 "dialogue_sample": sample,
                 "notes": notes,
             }
+            if "identity_base_name" in payload:
+                changes["identity_base_name"] = str(payload.get("identity_base_name") or "").strip()
+            if "identity_variant" in payload:
+                changes["identity_variant"] = str(payload.get("identity_variant") or "").strip()
+            if "imported_from_workbook" in payload:
+                changes["imported_from_workbook"] = bool(payload.get("imported_from_workbook"))
+                changes["character_origin"] = "outsourced" if payload.get("imported_from_workbook") else ""
+            if "character_library_id" in payload:
+                changes["character_library_id"] = str(payload.get("character_library_id") or "").strip()
             if "voice_profile" in payload:
                 changes["voice_name"] = voice_profile
             record = update_reusable_character(existing["id"], changes)
@@ -7086,21 +7192,30 @@ class PremiumV2Bridge(QObject):
                     "user_created": True,
                     "manual": True,
                     "manual_aliases": True,
+                    "identity_base_name": payload.get("identity_base_name") or name[:300],
+                    "identity_variant": payload.get("identity_variant") or "",
+                    "imported_from_workbook": bool(payload.get("imported_from_workbook")),
+                    "character_origin": payload.get("character_origin") or "",
+                    "character_library_id": payload.get("character_library_id") or "",
                 }],
                 source_project_folder=str(active_project.folder) if active_project else "",
                 source_project_title=str(active_project.title) if active_project else "",
                 update_names=True,
                 update_voice=bool(voice_profile),
             )
-            record = next(
-                (row for row in list_reusable_characters()
-                 if str(row.get("series") or "").casefold() == series.casefold()
-                 and (
-                     str(row.get("primary_name") or "").casefold() == name.casefold()
-                     or name.casefold() in {str(alias).casefold() for alias in (row.get("aliases") or [])}
-                 )),
-                None,
-            )
+            record_matches = [
+                row for row in list_reusable_characters()
+                if identity_text(row.get("series")) == identity_text(series)
+                and incoming_tokens.intersection({
+                    identity_text(row.get("primary_name") or row.get("name")),
+                    *(identity_text(alias) for alias in (row.get("aliases") or [])),
+                })
+            ]
+            if len(record_matches) > 1:
+                raise ValueError("This name or alias matches multiple Character Library identities in this series. Resolve the conflict before saving.")
+            if record_matches and identity_text(record_matches[0].get("identity_variant")) != requested_variant:
+                raise ValueError("The matching Character Library identity has a different age/version. Select the correct character before saving.")
+            record = record_matches[0] if record_matches else None
             if record is None:
                 raise RuntimeError("The character could not be saved to the reusable registry.")
         project_updated = False
@@ -7117,14 +7232,22 @@ class PremiumV2Bridge(QObject):
                     record_series = str(record.get("series") or "").strip()
                     # A same-named character from another series must never inherit
                     # this profile by accident. Resolve project targets by series too.
-                    target = next((item for item in cast if isinstance(item, dict) and (
-                        str(item.get("name") or "").casefold() == primary_key
-                        or str(item.get("name") or "").casefold() in aliases_key
-                    ) and (
-                        str(item.get("series") or "").casefold() == record_series.casefold()
-                        or (not str(item.get("series") or "").strip()
-                            and active_series.casefold() == record_series.casefold())
-                    )), None)
+                    record_variant = unicodedata.normalize("NFC", str(record.get("identity_variant") or "")).strip().casefold()
+                    targets = [
+                        item for item in cast if isinstance(item, dict) and (
+                            str(item.get("name") or "").casefold() == primary_key
+                            or str(item.get("name") or "").casefold() in aliases_key
+                        ) and (
+                            str(item.get("series") or "").casefold() == record_series.casefold()
+                            or (not str(item.get("series") or "").strip()
+                                and active_series.casefold() == record_series.casefold())
+                        ) and unicodedata.normalize(
+                            "NFC", str(item.get("identity_variant") or "")
+                        ).strip().casefold() == record_variant
+                    ]
+                    if len(targets) > 1:
+                        raise ValueError("The project cast contains multiple matching age/version identities. Resolve the duplicate before assigning a voice.")
+                    target = targets[0] if targets else None
                     # A primary character newly created from Voice Studio should also
                     # appear in Character Studio when its series is the active book's
                     # series. Do not insert characters from unrelated series into this cast.
@@ -7136,6 +7259,11 @@ class PremiumV2Bridge(QObject):
                             "aliases": list(record.get("aliases") or []),
                             "voice_profile": voice_profile,
                             "notes": str(record.get("notes") or "").strip(),
+                            "identity_base_name": str(record.get("identity_base_name") or record.get("primary_name") or name),
+                            "identity_variant": str(record.get("identity_variant") or ""),
+                            "character_library_id": str(record.get("id") or ""),
+                            "imported_from_workbook": bool(record.get("imported_from_workbook")),
+                            "character_origin": str(record.get("character_origin") or ""),
                         }
                         cast.append(target)
                     if target is not None:
@@ -7246,6 +7374,11 @@ class PremiumV2Bridge(QObject):
                     "line_count": candidate.get("line_count", candidate.get("lines", 0)),
                     "chapter_count": candidate.get("chapter_count", candidate.get("chapters", 0)),
                     "confidence": candidate.get("confidence", 100),
+                    "identity_base_name": candidate.get("identity_base_name") or candidate.get("name") or candidate.get("primary_name") or "",
+                    "identity_variant": candidate.get("identity_variant") or candidate.get("version") or "",
+                    "imported_from_workbook": bool(candidate.get("imported_from_workbook")),
+                    "character_origin": candidate.get("character_origin") or "",
+                    "character_library_id": candidate.get("character_library_id") or "",
                 }],
                 source_project_folder=str(candidate.get("source_project_folder") or ""),
                 source_project_title=str(candidate.get("source_project_title") or ""),

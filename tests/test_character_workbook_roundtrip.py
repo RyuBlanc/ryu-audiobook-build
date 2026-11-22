@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 import tempfile
 import unittest
+from zipfile import ZIP_DEFLATED, ZipFile
+from xml.etree import ElementTree as ET
 
 from app.core.character_library import (
     list_characters,
@@ -62,6 +64,65 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             self.assertEqual(document["info"]["Series Name"], "Silver Archive")
             self.assertEqual(document["info"]["Chapter Revision"], "revision-abc")
             self.assertEqual(document["info"]["Passage Count"], "2")
+
+    def test_edited_xlsx_file_is_reopened_and_planned_from_real_sheet_cells(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, _text, passages = self._export(Path(tmp))
+            edited = Path(tmp) / "gpt-completed.xlsx"
+            ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+
+            def set_inline_cell(root, row_number, reference, value):
+                row = root.find(".//%srow[@r='%s']" % (ns, row_number))
+                self.assertIsNotNone(row)
+                cell = next((item for item in row.findall("%sc" % ns)
+                             if item.get("r") == reference), None)
+                if cell is None:
+                    cell = ET.SubElement(row, ns + "c", {"r": reference})
+                else:
+                    cell.clear()
+                    cell.set("r", reference)
+                cell.set("t", "inlineStr")
+                inline = ET.SubElement(cell, ns + "is")
+                text_node = ET.SubElement(inline, ns + "t")
+                text_node.text = value
+
+            with ZipFile(path, "r") as source, ZipFile(edited, "w", ZIP_DEFLATED) as target:
+                for item in source.infolist():
+                    data = source.read(item.filename)
+                    if item.filename == "xl/worksheets/sheet1.xml":
+                        root = ET.fromstring(data)
+                        set_inline_cell(root, 3, "G3", "Captain Mira")
+                        set_inline_cell(root, 3, "O3", "The narration identifies Captain Mira.")
+                        row = root.find(".//%srow[@r='3']" % ns)
+                        confidence = ET.SubElement(row, ns + "c", {"r": "H3"})
+                        ET.SubElement(confidence, ns + "v").text = "0.93"
+                        data = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+                    elif item.filename == "xl/worksheets/sheet2.xml":
+                        root = ET.fromstring(data)
+                        set_inline_cell(root, 2, "A2", "Captain Mira")
+                        set_inline_cell(root, 2, "B2", "Mira-sama")
+                        data = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+                    target.writestr(item, data)
+
+            document = read_character_workbook(edited)
+            self.assertEqual(document["characters"][0]["full_name"], "Captain Mira")
+            self.assertEqual(document["characters"][0]["aliases"], ["Mira-sama"])
+            self.assertEqual(document["dialogue_rows"][1]["GPT Assigned Character"], "Captain Mira")
+            self.assertEqual(document["dialogue_rows"][1]["GPT Confidence (0–1)"], "0.93")
+            plan = plan_character_workbook_import(
+                document, series="Silver Archive", book_title="The Silver Archive",
+                registry_rows=[{
+                    "id": "library-mira", "series": "Silver Archive",
+                    "primary_name": "Mira", "aliases": ["Captain Mira"],
+                    "voice_name": "Mira Voice", "identity_variant": "",
+                }],
+                project_characters=[], chapter_id="chapter-001",
+                chapter_revision="revision-abc", current_passages=passages,
+                current_assignments=[],
+            )
+            self.assertTrue(plan["ready"], plan["issues"])
+            self.assertEqual(plan["assignments"][0]["speaker"], "Mira")
+            self.assertEqual(plan["characters"][0]["action"], "merge")
 
     def test_import_plan_merges_existing_alias_into_series_canonical_character(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -250,6 +311,62 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             )
             self.assertTrue(plan["ready"], plan["issues"])
             self.assertEqual(plan["assignments"], [])
+
+    def test_import_plan_blocks_recovery_bin_identity_collisions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, _text, passages = self._export(Path(tmp))
+            document = read_character_workbook(path)
+            document["characters"] = [{
+                "full_name": "Captain Mira", "aliases": ["Mira-sama"], "version": "", "notes": "",
+            }]
+            plan = plan_character_workbook_import(
+                document, series="Silver Archive", book_title="The Silver Archive",
+                registry_rows=[{
+                    "id": "library-mira", "series": "Silver Archive",
+                    "primary_name": "Mira", "aliases": ["Captain Mira"], "identity_variant": "",
+                }],
+                deleted_registry_rows=[{
+                    "id": "deleted-old", "series": "Silver Archive",
+                    "primary_name": "Old Mira", "aliases": ["Mira-sama"],
+                }],
+                project_characters=[], chapter_id="chapter-001",
+                chapter_revision="revision-abc", current_passages=passages,
+                current_assignments=[],
+            )
+            self.assertFalse(plan["ready"])
+            self.assertTrue(any("Recovery Bin" in issue for issue in plan["issues"]))
+
+    def test_import_plan_blocks_duplicate_project_cast_identity_before_commit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, _text, passages = self._export(Path(tmp))
+            document = read_character_workbook(path)
+            document["characters"] = [{
+                "full_name": "Mira", "aliases": [], "version": "", "notes": "",
+            }]
+            duplicate_cast = [
+                {"name": "Mira", "series": "Silver Archive", "aliases": []},
+                {"name": "Mira", "series": "Silver Archive", "aliases": []},
+            ]
+            plan = plan_character_workbook_import(
+                document, series="Silver Archive", registry_rows=[],
+                project_characters=duplicate_cast, chapter_id="chapter-001",
+                chapter_revision="revision-abc", current_passages=passages,
+                current_assignments=[],
+            )
+            self.assertFalse(plan["ready"])
+            self.assertTrue(any("Duplicate project Character Studio cast" in issue for issue in plan["issues"]))
+
+    def test_import_plan_rejects_workbook_from_different_book(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, _text, passages = self._export(Path(tmp))
+            document = read_character_workbook(path)
+            with self.assertRaisesRegex(ValueError, "different book"):
+                plan_character_workbook_import(
+                    document, series="Silver Archive", book_title="Another Book",
+                    registry_rows=[], project_characters=[], chapter_id="chapter-001",
+                    chapter_revision="revision-abc", current_passages=passages,
+                    current_assignments=[],
+                )
 
     def test_registry_merge_accepts_more_than_five_aliases_and_preserves_voice(self):
         with tempfile.TemporaryDirectory() as tmp:

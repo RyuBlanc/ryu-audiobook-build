@@ -86,6 +86,89 @@ class CharacterLibraryRegistryTests(unittest.TestCase):
             self.assertEqual(recovered["primary_name"], "Aria the Star")
             self.assertEqual(len(list_characters(path=store)), 1)
 
+    def test_sync_skips_ambiguous_alias_collision_without_mutating_either_identity(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-character-ambiguous-sync-") as tmp:
+            store = Path(tmp) / "character-library.json"
+            store.write_text(json.dumps({
+                "version": 1,
+                "active": [
+                    {"id": "mira", "series": "Series", "primary_name": "Mira",
+                     "aliases": ["Captain"], "voice_name": "Voice A", "notes": "Mira notes"},
+                    {"id": "ren", "series": "Series", "primary_name": "Ren",
+                     "aliases": ["Captain"], "voice_name": "Voice B", "notes": "Ren notes"},
+                ],
+                "deleted": [],
+            }, ensure_ascii=False), encoding="utf-8")
+            before = list_characters(series="Series", path=store)
+            sync_characters("Series", [{
+                "name": "Captain", "aliases": ["New Alias"],
+                "voice": "Wrong Voice", "notes": "Wrong identity",
+            }], update_names=True, update_voice=True, path=store)
+            after = list_characters(series="Series", path=store)
+            self.assertEqual(after, before)
+            self.assertEqual({row["primary_name"] for row in after}, {"Mira", "Ren"})
+            self.assertEqual({row["voice_name"] for row in after}, {"Voice A", "Voice B"})
+            self.assertFalse(any("New Alias" in row["aliases"] for row in after))
+
+    def test_sync_blocks_alias_collision_with_recovery_bin(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-character-recovery-collision-") as tmp:
+            store = Path(tmp) / "character-library.json"
+            store.write_text(json.dumps({
+                "version": 1,
+                "active": [{"id": "mira", "series": "Series", "primary_name": "Mira",
+                            "aliases": ["Captain"], "voice_name": "Voice A"}],
+                "deleted": [{"id": "old-ren", "series": "Series", "primary_name": "Ren",
+                             "aliases": ["Captain"], "voice_name": "Voice B"}],
+            }, ensure_ascii=False), encoding="utf-8")
+            before = list_characters(series="Series", path=store)
+            sync_characters("Series", [{"name": "Captain", "aliases": ["New Alias"],
+                                        "voice": "Wrong Voice"}], update_voice=True, path=store)
+            self.assertEqual(list_characters(series="Series", path=store), before)
+            self.assertEqual(before[0]["voice_name"], "Voice A")
+
+    def test_sync_normalizes_unicode_equivalent_names_and_aliases(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-character-unicode-sync-") as tmp:
+            store = Path(tmp) / "character-library.json"
+            sync_characters("Series", [{"name": "Café"}], path=store)
+            sync_characters("Series", [{"name": "Cafe\u0301",
+                                        "aliases": ["Café", "Cafe\u0301", "Coffee"]}], path=store)
+            saved = list_characters(series="Series", path=store)
+            self.assertEqual(len(saved), 1)
+            self.assertEqual(saved[0]["primary_name"], "Café")
+            self.assertEqual(saved[0]["aliases"], ["Coffee"])
+
+    def test_sync_preserves_age_variant_and_never_cross_merges_variant_aliases(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-character-variant-sync-") as tmp:
+            store = Path(tmp) / "character-library.json"
+            sync_characters("Series", [
+                {"name": "Mira", "aliases": ["Captain Mira"], "voice": "Adult Voice"},
+                {"name": "Mira (Younger Version)", "identity_base_name": "Mira",
+                 "identity_variant": "Younger Version", "aliases": ["Young Mira"],
+                 "voice": "Young Voice"},
+            ], path=store)
+            before = list_characters(series="Series", path=store)
+            self.assertEqual(len(before), 2)
+            sync_characters("Series", [{
+                "name": "Young Mira", "identity_base_name": "Mira",
+                "identity_variant": "Younger Version", "aliases": ["Captain Mira"],
+                "voice": "Wrong Voice",
+            }], update_names=True, update_voice=True, path=store)
+            self.assertEqual(list_characters(series="Series", path=store), before)
+            sync_characters("Series", [{
+                "name": "Mira (Younger Version)", "identity_base_name": "Mira",
+                "identity_variant": "Younger Version", "aliases": ["Childhood Mira"],
+                "voice": "Young Voice",
+            }], update_voice=True, path=store)
+            after = list_characters(series="Series", path=store)
+            adult = next(row for row in after if row["primary_name"] == "Mira")
+            younger = next(row for row in after if row["primary_name"] == "Mira (Younger Version)")
+            self.assertEqual(len(after), 2)
+            self.assertEqual(adult["voice_name"], "Adult Voice")
+            self.assertEqual(younger["voice_name"], "Young Voice")
+            self.assertIn("Childhood Mira", younger["aliases"])
+            self.assertEqual(younger["identity_base_name"], "Mira")
+            self.assertEqual(younger["identity_variant"], "Younger Version")
+
     def test_same_character_name_in_different_series_is_a_separate_identity(self):
         with tempfile.TemporaryDirectory(prefix="ryu-character-series-") as tmp:
             store = Path(tmp) / "character-library.json"

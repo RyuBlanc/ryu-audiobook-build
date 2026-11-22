@@ -55,6 +55,18 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn("item.item?.character_origin === 'outsourced'", self.adapter)
         self.assertIn("c.character_origin === 'outsourced'", self.adapter)
 
+    def test_import_preview_lists_canonical_merge_and_create_changes(self):
+        self.assertIn('"character_plan_total": len(plan.get("characters") or [])', self.host)
+        self.assertIn("deleted_registry_rows=list_reusable_deleted_characters()", self.host)
+        self.assertIn('book_title=str(getattr(project, "title", "") or "")', self.host)
+        self.assertIn("Character identity plan", self.adapter)
+        self.assertIn("remainingChanges", self.adapter)
+
+    def test_identity_variant_survives_cross_volume_sync_and_voice_assignment(self):
+        self.assertIn('"identity_variant": row.get("identity_variant") or ""', self.host)
+        self.assertIn("registry_matches", self.host)
+        self.assertIn("variant_conflicts", self.registry)
+
     def test_series_library_merge_and_aliases_are_not_limited_to_five(self):
         self.assertIn("def merge_imported_character_records(", self.registry)
         self.assertIn("merge_imported_character_records(series, plan[\"characters\"]", self.host)
@@ -80,6 +92,7 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn("not listed in Character Register", self.workbook)
         self.assertIn("protected Narrator assignment", self.workbook)
         self.assertIn("Passage ID", self.workbook)
+        self.assertIn("Alias 31, Alias 32", self.workbook)
         self.assertIn("plan_character_workbook_import", self.host)
 
 

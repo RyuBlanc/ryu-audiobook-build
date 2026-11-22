@@ -2,13 +2,23 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any
 import tempfile
+import unicodedata
 import uuid
 
 from app.core.paths import settings_root
+
+
+log = logging.getLogger(__name__)
+
+
+def _identity_key(value: Any) -> str:
+    """Use one Unicode-normalized comparison key across every book in a series."""
+    return unicodedata.normalize("NFC", str(value or "")).strip().casefold()
 
 
 def character_library_path() -> Path:
@@ -82,11 +92,12 @@ def _safe_confidence(value: Any, *, default: int = 0) -> int:
 
 def _clean_names(values, primary: str = "") -> list[str]:
     result: list[str] = []
-    seen = {str(primary or "").strip().casefold()} if str(primary or "").strip() else set()
+    primary_key = _identity_key(primary)
+    seen = {primary_key} if primary_key else set()
     if isinstance(values, (list, tuple)):
         for value in values:
-            name = str(value or "").strip()
-            key = name.casefold()
+            name = unicodedata.normalize("NFC", str(value or "")).strip()
+            key = _identity_key(name)
             if not name or key in seen:
                 continue
             seen.add(key)
@@ -100,8 +111,8 @@ def list_characters(series: str | None = None, include_deleted: bool = False, pa
     if include_deleted:
         rows.extend(store["deleted"])
     if series and series.strip():
-        wanted = series.strip().casefold()
-        rows = [row for row in rows if str(row.get("series") or "").strip().casefold() == wanted]
+        wanted = _identity_key(series)
+        rows = [row for row in rows if _identity_key(row.get("series")) == wanted]
     return sorted(rows, key=lambda row: (str(row.get("series") or "").casefold(), str(row.get("primary_name") or "").casefold()))
 
 
@@ -209,30 +220,60 @@ def sync_characters(
     target = path or character_library_path()
     store = _read_store(target)
     active = store["active"]
-    series_key = series_name.casefold()
+    series_key = _identity_key(series_name)
 
     for source in rows or []:
         if not isinstance(source, dict):
             continue
-        name = str(source.get("name") or source.get("primary_name") or "").strip()
-        if not name or name.casefold() == "narrator":
+        name = unicodedata.normalize("NFC", str(source.get("name") or source.get("primary_name") or "")).strip()
+        if not name or _identity_key(name) == "narrator":
             continue
         incoming_aliases = _clean_names(source.get("aliases") or [], name)
-        incoming_keys = {name.casefold(), *(alias.casefold() for alias in incoming_aliases)}
-        match = None
+        incoming_keys = {_identity_key(name), *(_identity_key(alias) for alias in incoming_aliases)}
+        incoming_keys.discard("")
+        incoming_variant = _identity_key(source.get("identity_variant") or source.get("version") or "")
+        active_matches = []
+        variant_conflicts = []
         for item in active:
-            if str(item.get("series") or "").strip().casefold() != series_key:
+            if _identity_key(item.get("series")) != series_key:
                 continue
             existing_keys = {
-                str(item.get("primary_name") or "").strip().casefold(),
-                *(str(alias).strip().casefold() for alias in (item.get("aliases") or [])),
+                _identity_key(item.get("primary_name") or item.get("name")),
+                *(_identity_key(alias) for alias in (item.get("aliases") or [])),
             }
             existing_keys.discard("")
             if incoming_keys & existing_keys:
-                match = item
-                break
+                if _identity_key(item.get("identity_variant")) == incoming_variant:
+                    active_matches.append(item)
+                else:
+                    variant_conflicts.append(item)
+        deleted_matches = []
+        for item in store["deleted"]:
+            if _identity_key(item.get("series")) != series_key:
+                continue
+            deleted_keys = {
+                _identity_key(item.get("primary_name") or item.get("name")),
+                *(_identity_key(alias) for alias in (item.get("aliases") or [])),
+            }
+            deleted_keys.discard("")
+            if incoming_keys & deleted_keys:
+                deleted_matches.append(item)
+        if variant_conflicts or len(active_matches) > 1 or deleted_matches:
+            reason = (
+                "different age/version identity" if variant_conflicts
+                else "multiple active Character Library identities" if len(active_matches) > 1
+                else "matching identity in Recovery Bin"
+            )
+            log.warning(
+                "Skipped Character Library sync for %r in series %r: %s. Resolve the identity before syncing.",
+                name, series_name, reason,
+            )
+            continue
+        match = active_matches[0] if active_matches else None
 
         examples = source.get("examples") or []
+        if not isinstance(examples, (list, tuple)):
+            examples = [str(examples)] if str(examples or "").strip() else []
         sample = str(source.get("dialogue_sample") or (examples[0] if examples else "") or "").strip()
         voice = str(source.get("voice") or source.get("voice_name") or "").strip() or None
         if match is None:
@@ -240,7 +281,7 @@ def sync_characters(
             # must not silently recreate it as a new active duplicate.
             deleted_match = False
             for item in store["deleted"]:
-                if str(item.get("series") or "").strip().casefold() != series_key:
+                if _identity_key(item.get("series")) != series_key:
                     continue
                 existing_keys = {
                     str(item.get("primary_name") or "").strip().casefold(),
@@ -269,18 +310,32 @@ def sync_characters(
                 "user_created": bool(source.get("user_created")),
                 "manual": bool(source.get("manual")),
                 "manual_aliases": bool(source.get("manual_aliases")),
+                "imported_from_workbook": bool(source.get("imported_from_workbook")),
+                "character_origin": str(source.get("character_origin") or ""),
+                "character_library_id": str(source.get("character_library_id") or ""),
                 "source_project_folder": str(source_project_folder or ""),
                 "source_project_title": str(source_project_title or ""),
                 "created_at": _timestamp(),
                 "updated_at": _timestamp(),
             }
+            identity_variant = str(source.get("identity_variant") or source.get("version") or "").strip()
+            if identity_variant:
+                record["identity_base_name"] = str(source.get("identity_base_name") or source.get("base_name") or name).strip()
+                record["identity_variant"] = identity_variant
             active.append(record)
             continue
 
         match["series"] = series_name
-        for flag in ("user_created", "manual", "manual_aliases"):
+        identity_variant = str(source.get("identity_variant") or source.get("version") or "").strip()
+        if identity_variant:
+            match["identity_base_name"] = str(source.get("identity_base_name") or source.get("base_name") or match.get("identity_base_name") or name).strip()
+            match["identity_variant"] = identity_variant
+        for flag in ("user_created", "manual", "manual_aliases", "imported_from_workbook"):
             if source.get(flag):
                 match[flag] = True
+        for flag in ("character_origin", "character_library_id"):
+            if str(source.get(flag) or "").strip():
+                match[flag] = str(source.get(flag) or "").strip()
         source_short = str(source.get("short") or "").strip()
         if source_short and (update_names or not str(match.get("short") or "").strip()):
             match["short"] = source_short[:120]
@@ -288,7 +343,7 @@ def sync_characters(
             match["short"] = str(match.get("primary_name") or name).split()[0][:120]
         old_primary = str(match.get("primary_name") or "").strip()
         aliases = _clean_names(match.get("aliases") or [], old_primary)
-        if update_names and name.casefold() != old_primary.casefold():
+        if update_names and _identity_key(name) != _identity_key(old_primary):
             aliases = _clean_names([*aliases, old_primary], name)
             match["primary_name"] = name
         for alias in incoming_aliases:
@@ -342,7 +397,7 @@ def merge_imported_character_records(
     results: list[dict] = []
 
     def _variant(record: dict) -> str:
-        return str(record.get("identity_variant") or "").strip().casefold()
+        return _identity_key(record.get("identity_variant"))
 
     def _tokens(record: dict) -> set[str]:
         primary = str(record.get("primary_name") or record.get("name") or "").strip()
@@ -350,24 +405,24 @@ def merge_imported_character_records(
         if isinstance(aliases, str):
             aliases = [aliases]
         return {
-            value.strip().casefold()
+            _identity_key(value)
             for value in [primary, *(aliases if isinstance(aliases, (list, tuple)) else [])]
-            if str(value or "").strip()
+            if _identity_key(value)
         }
 
     for incoming in rows or []:
         if not isinstance(incoming, dict):
             raise ValueError("Every imported Character Register entry must be an object.")
-        primary = str(incoming.get("canonical_name") or incoming.get("primary_name") or "").strip()
-        if not primary or primary.casefold() == "narrator":
+        primary = unicodedata.normalize("NFC", str(incoming.get("canonical_name") or incoming.get("primary_name") or "")).strip()
+        if not primary or _identity_key(primary) == "narrator":
             raise ValueError("Imported characters need a non-empty name; Narrator is reserved.")
-        variant = str(incoming.get("identity_variant") or "").strip()
-        base_name = str(incoming.get("identity_base_name") or primary).strip()
+        variant = unicodedata.normalize("NFC", str(incoming.get("identity_variant") or "")).strip()
+        base_name = unicodedata.normalize("NFC", str(incoming.get("identity_base_name") or primary)).strip()
         raw_aliases = incoming.get("aliases") or []
         if isinstance(raw_aliases, str):
             raw_aliases = [raw_aliases]
         aliases = _clean_names(raw_aliases, primary)
-        incoming_tokens = {primary.casefold(), *(value.casefold() for value in aliases)}
+        incoming_tokens = {_identity_key(primary), *(_identity_key(value) for value in aliases)}
         if any(not value for value in incoming_tokens):
             raise ValueError("Imported character names and aliases cannot be empty.")
 
@@ -377,7 +432,7 @@ def merge_imported_character_records(
             matches = [
                 item for item in active
                 if str(item.get("id") or "") == wanted_id
-                and str(item.get("series") or "").strip().casefold() == series_name.casefold()
+                and _identity_key(item.get("series")) == _identity_key(series_name)
             ]
             if len(matches) != 1:
                 raise KeyError("A matched Character Library identity changed before import. Review the workbook again.")
@@ -385,7 +440,7 @@ def merge_imported_character_records(
                 raise ValueError("The matched character version changed before import. Review the workbook again.")
         else:
             for item in active:
-                if str(item.get("series") or "").strip().casefold() != series_name.casefold():
+                if _identity_key(item.get("series")) != _identity_key(series_name):
                     continue
                 if _variant(item) != variant.casefold():
                     continue
@@ -396,18 +451,18 @@ def merge_imported_character_records(
 
         deleted_matches = [
             item for item in deleted
-            if str(item.get("series") or "").strip().casefold() == series_name.casefold()
-            and _variant(item) == variant.casefold()
+            if _identity_key(item.get("series")) == _identity_key(series_name)
             and incoming_tokens & _tokens(item)
         ]
-        if not matches and deleted_matches:
+        if deleted_matches:
             raise ValueError(
-                "This identity is in the Character Library Recovery Bin. Restore it before importing; a duplicate will not be created."
+                "This name or alias matches an identity in the Character Library Recovery Bin. "
+                "Restore or resolve that identity before importing; a duplicate will not be created."
             )
 
         match = matches[0] if matches else None
         for item in active:
-            if item is match or str(item.get("series") or "").strip().casefold() != series_name.casefold():
+            if item is match or _identity_key(item.get("series")) != _identity_key(series_name):
                 continue
             if incoming_tokens & _tokens(item):
                 raise ValueError(

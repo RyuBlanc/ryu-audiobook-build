@@ -105,6 +105,7 @@ def create_character_workbook_bytes(metadata, passages, chapter_text):
             "Narration is protected as Narrator. Add canonical full names and all other names as aliases. "
             "A younger/older version needing a different voice must be a separate Character Register row. "
             "Use Version / Age Variant and assign it by its distinct name, for example Mira (Younger Version). "
+            "For more than 30 aliases, add columns named Alias 31, Alias 32, and so on. "
             "Do not edit Passage ID, Dialogue Text, chapter identity, offsets, or revision columns.")
     }
     dialogue_headers = [
@@ -304,7 +305,8 @@ def read_character_workbook(path):
             "path": str(source.resolve()), "sha256": sha256(source.read_bytes()).hexdigest()}
 
 def plan_character_workbook_import(document, *, series, registry_rows, project_characters,
-                                   chapter_id, chapter_revision, current_passages, current_assignments):
+                                   chapter_id, chapter_revision, current_passages, current_assignments,
+                                   deleted_registry_rows=None, book_title=""):
     """Preflight name/alias merges and exact source-passage assignments without writing."""
     info = document.get("info") or {}
     active_series = _clean(series)
@@ -315,8 +317,22 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
         raise ValueError("This workbook belongs to a different chapter. Export the active chapter again.")
     if _clean(info.get("Chapter Revision")) != _clean(chapter_revision):
         raise ValueError("The chapter changed after export. Export it again before importing.")
+    if _clean(book_title) and _key(info.get("Book Title")) != _key(book_title):
+        raise ValueError("This workbook belongs to a different book. Select the correct project or export the active book again.")
 
     issues, existing = [], {}
+    deleted_tokens = {}
+    for row in (deleted_registry_rows or []):
+        if not isinstance(row, dict) or _key(row.get("series") or active_series) != _key(active_series):
+            continue
+        deleted_name = _clean(row.get("primary_name") or row.get("name"))
+        deleted_aliases = row.get("aliases") or []
+        if isinstance(deleted_aliases, str):
+            deleted_aliases = [deleted_aliases]
+        for token in [deleted_name, *(deleted_aliases if isinstance(deleted_aliases, (list, tuple)) else [])]:
+            if _clean(token):
+                deleted_tokens.setdefault(_key(token), set()).add(deleted_name or _clean(token))
+
     sources = [(r, True) for r in (registry_rows or []) if isinstance(r, dict)]
     sources += [(r, False) for r in (project_characters or []) if isinstance(r, dict)]
     for row, is_library in sources:
@@ -327,7 +343,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
         key = _key(name) + "|" + _key(version)
         entry = existing.setdefault(key, {"canonical_name":name, "identity_variant":version,
             "identity_base_name":_clean(row.get("identity_base_name")) or name, "aliases":[],
-            "library_id":"","voice_name":"","project_voice_profile":""})
+            "library_id":"","voice_name":"","project_voice_profile":"","project_cast_count":0})
         aliases = row.get("aliases") or []
         if isinstance(aliases, str): aliases = [aliases]
         for alias in aliases if isinstance(aliases,(list,tuple)) else []:
@@ -341,6 +357,9 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             entry["library_id"] = incoming_id or entry["library_id"]
             entry["voice_name"] = _clean(row.get("voice_name") or row.get("voice"))
         else:
+            entry["project_cast_count"] = int(entry.get("project_cast_count") or 0) + 1
+            if entry["project_cast_count"] > 1:
+                issues.append("Duplicate project Character Studio cast records exist for '%s'. Resolve the duplicate before importing." % name)
             entry["project_voice_profile"] = _clean(row.get("voice_profile"))
 
     existing_tokens = {}
@@ -371,6 +390,16 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             continue
         imported_keys.add(ikey)
         tokens = [canonical, *aliases]
+        recovery_matches = set()
+        for token in tokens:
+            recovery_matches.update(deleted_tokens.get(_key(token), set()))
+        if recovery_matches:
+            issues.append(
+                "'%s' matches a deleted Character Library identity in Recovery Bin (%s). "
+                "Restore or resolve that identity before importing." %
+                (canonical, ", ".join(sorted(recovery_matches)[:4]))
+            )
+            continue
         for token in tokens:
             prior = owners.get(_key(token))
             if prior and prior != ikey: issues.append("Imported name or alias '%s' belongs to more than one character." % token)

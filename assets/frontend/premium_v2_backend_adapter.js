@@ -4356,12 +4356,29 @@
           return;
         }
         const summary = preview.summary || {};
+        const characterPlan = Array.isArray(preview.characters) ? preview.characters : [];
+        const identityLines = characterPlan.slice(0, 24).map(row => {
+          const action = row.action === 'merge' ? 'MERGE' : 'CREATE';
+          const variant = String(row.identity_variant || '').trim();
+          const aliases = (Array.isArray(row.aliases_to_add) ? row.aliases_to_add : [])
+            .map(value => String(value || '').trim()).filter(Boolean);
+          const extraAliases = Math.max(0, Number(row.aliases_to_add_total || aliases.length) - aliases.length);
+          return action + ': ' + String(row.canonical_name || 'Unnamed identity') +
+            (variant ? ' [' + variant + ']' : '') +
+            (aliases.length ? ' · add aliases: ' + aliases.join(', ') : '') +
+            (extraAliases ? ' · +' + extraAliases + ' more aliases' : '');
+        });
+        const totalChanges = Number(preview.character_plan_total || characterPlan.length);
+        const remainingChanges = Math.max(0, totalChanges - identityLines.length);
+        if (remainingChanges) identityLines.push('…and ' + remainingChanges + ' more character identity changes.');
+        if (preview.character_plan_truncated) identityLines.push('Only the first 40 identity changes are listed above.');
         const prompt = 'Import the completed GPT workbook into Series "' + preview.series +
           '" · Chapter ' + preview.chapter_number + '?\n\n' +
           'Existing characters to merge: ' + Number(summary.matched_characters || 0) + '\n' +
           'New series characters: ' + Number(summary.new_characters || 0) + '\n' +
           'Aliases to reconcile: ' + Number(summary.aliases_to_merge || 0) + '\n' +
           'Dialogue assignments to add: ' + Number(summary.dialogue_assignments || 0) +
+          '\n\nCharacter identity plan:\n' + (identityLines.join('\n') || 'No character changes.') +
           '\n\nExisting character voice profiles will be preserved. Continue?';
         if (!window.confirm(prompt)) return;
         const result = await call('character.workbook.import.commit', {token:preview.token});
