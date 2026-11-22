@@ -651,7 +651,13 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             })
         metadata = {
             "project_title": "The Silver Archive",
+            "author": "A. Writer",
+            "publisher": "North Star Press",
+            "language": "English",
+            "genre": "Fantasy",
+            "year": "2024",
             "series_name": "Silver Archive",
+            "series_volume": "Volume 2",
             "series_character_reference": [{
                 "primary_name": "Mira",
                 "aliases": ["Captain Mira", "Mira-sama"],
@@ -680,6 +686,12 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 self.assertGreater(archive.getinfo("xl/worksheets/sheet5.xml").file_size, 0)
             self.assertEqual(document["schema_version"], 2)
             self.assertEqual(document["info"]["Export Scope"], "complete_book")
+            self.assertEqual(document["info"]["Author"], "A. Writer")
+            self.assertEqual(document["info"]["Publisher"], "North Star Press")
+            self.assertEqual(document["info"]["Language"], "English")
+            self.assertEqual(document["info"]["Genre"], "Fantasy")
+            self.assertEqual(document["info"]["Publication Year"], "2024")
+            self.assertEqual(document["info"]["Series Volume"], "Volume 2")
             self.assertEqual(len(document["chapter_references"]), 2)
             self.assertEqual(len(document["dialogue_rows"]), len(passages))
             self.assertEqual(document["chapter_references"][0]["chapter_number"], 1)

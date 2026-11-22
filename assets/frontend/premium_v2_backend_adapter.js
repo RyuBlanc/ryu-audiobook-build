@@ -5520,20 +5520,41 @@
     if ($('editCharacterName')) $('editCharacterName').value = c?.name || ''; if ($('editCharacterShort')) $('editCharacterShort').value = c?.short || '';
     if ($('editCharacterAliases')) $('editCharacterAliases').value = (c?.aliases||[]).join(', ');
     if ($('editCharacterVoice')) { $('editCharacterVoice').value = c?.voice || 'Unassigned'; $('editCharacterVoice').disabled = true; $('editCharacterVoice').title = 'Voice assignment is managed in Character Studio.'; }
-    const activeSeries = $('characterSeriesFilter')?.value || 'All series';
-    const defaultScope = activeSeries !== 'All series' ? 'Series · ' + activeSeries : 'Global character library';
+    const activeFilter = String($('characterSeriesFilter')?.value || 'All series').trim();
+    const reservedFilters = new Set(['all series','global characters','global character library','unassigned series']);
+    const filterSeries = reservedFilters.has(activeFilter.toLowerCase()) ? '' : activeFilter;
+    const projectSeries = activeCharacterProjectSeries();
+    const selectedSeries = String(c?.series || filterSeries || projectSeries || '').trim();
+    const defaultScope = selectedSeries ? 'Series · ' + selectedSeries : 'Global character library';
     if ($('editCharacterScope')) $('editCharacterScope').value = c?.scope || defaultScope;
     if ($('editCharacterNotes')) $('editCharacterNotes').value = c?.notes || '';
     ensureCharacterSeriesField();
-    const selectedSeries = c?.series || (activeSeries !== 'All series' ? activeSeries : activeCharacterProjectSeries());
     populateEditCharacterSeriesOptions(selectedSeries);
-    if ($('editCharacterSeries')) $('editCharacterSeries').value = selectedSeries || '';
-    if ($('editCharacterNewSeriesLabel')) $('editCharacterNewSeriesLabel').hidden = $('editCharacterSeries')?.value !== '__new_series__';
+    const seriesSelect = $('editCharacterSeries');
+    if (seriesSelect) {
+      seriesSelect.value = selectedSeries || (c?.series ? '' : '__new_series__');
+      if (!seriesSelect.value && !c?.series) seriesSelect.value = '__new_series__';
+    }
+    const creatingSeries = seriesSelect?.value === '__new_series__';
+    if ($('editCharacterNewSeriesLabel')) $('editCharacterNewSeriesLabel').hidden = !creatingSeries;
+    if (creatingSeries && $('editCharacterNewSeries')) $('editCharacterNewSeries').value = '';
+    if ($('editCharacterNewSeries')) $('editCharacterNewSeries').required = creatingSeries;
     ensureCharacterDialogueSampleField();
     if ($('editCharacterDialogueSample')) $('editCharacterDialogueSample').value = c?.dialogue_sample || '';
     if ($('deleteCharacter')) $('deleteCharacter').style.visibility = c ? 'visible' : 'hidden';
-    $('characterEditorModal')?.classList.add('show');
+    const modal = $('characterEditorModal');
+    if (!modal) {
+      libraryEditorActive = false;
+      libraryEditorId = null;
+      throw new Error('Character Library editor could not be opened because its dialog is missing. Refresh the Library page and try again.');
+    }
+    modal.classList.add('show');
     if ($('editCharacterVoice')) $('editCharacterVoice').disabled = true;
+    if (!c && !selectedSeries && $('editCharacterNewSeries')) {
+      $('editCharacterNewSeries').focus();
+    } else {
+      $('editCharacterName')?.focus();
+    }
   }
   async function saveLibraryEditor() {
     const name = $('editCharacterName')?.value.trim() || ''; if (!name) throw new Error('Enter a character name before saving it to the Character Library.');
@@ -5544,9 +5565,19 @@
     const result = await call('character_library.save', {id:libraryEditorId||'',name,short:$('editCharacterShort')?.value||'',aliases:$('editCharacterAliases')?.value||'',scope,series,notes:$('editCharacterNotes')?.value||'',dialogue_sample:$('editCharacterDialogueSample')?.value||''});
     libraryEditorId = result.character.id; libraryEditorActive = false; $('characterEditorModal')?.classList.remove('show'); await refreshCharacterLibrary(); message('Character saved to the reusable local Character Library.');
   }
+  async function exportCharacterLibraryFile() {
+    const selected = String($('characterSeriesFilter')?.value || 'All series').trim();
+    const allSeries = new Set(['all series','global characters','global character library','unassigned series']);
+    const series = allSeries.has(selected.toLowerCase()) ? '' : selected;
+    const result = await call('character_library.export', {series});
+    if (result?.cancelled) return;
+    message('Exported ' + Number(result.count || 0) + ' portable Character Library record(s)' +
+      (result.series ? ' from ' + result.series : ' across all series') +
+      '. Names, aliases and notes are included; saved voice assets stay on this PC.');
+  }
   function importCharacterLibraryFile() {
     const picker=document.createElement('input'); picker.type='file'; picker.accept='.json,application/json';
-    picker.onchange=async()=>{const file=picker.files?.[0];if(!file)return;if(file.size>10*1024*1024){message('Character Library imports are limited to 10 MB.',true);return;}try{const data=JSON.parse(await file.text()), rows=Array.isArray(data)?data:data?.characters;if(!Array.isArray(rows))throw new Error('JSON must be an array or contain a characters array.');const result=await call('character_library.import',{characters:rows});await refreshCharacterLibrary();message('Imported '+result.imported+' character(s) into the local Character Library.');}catch(error){message(error?.message||String(error),true);}}; picker.click();
+    picker.onchange=async()=>{const file=picker.files?.[0];if(!file)return;if(file.size>10*1024*1024){message('Character Library imports are limited to 10 MB.',true);return;}try{const data=JSON.parse(await file.text()), rows=Array.isArray(data)?data:data?.characters;if(!Array.isArray(rows))throw new Error('JSON must be an array or contain a characters array.');const payload=Array.isArray(data)?{characters:data}:data;const result=await call('character_library.import',payload);await refreshCharacterLibrary();message('Imported '+result.imported+' character(s) into the local Character Library. Existing local voice assignments were kept when no portable voice reference was supplied.');}catch(error){message(error?.message||String(error),true);}}; picker.click();
   }
   function pronunciationScopeKey(term) {
     return String(term.scope_type || 'current_book') + ':' + String(term.scope_id || '');
@@ -9562,6 +9593,14 @@ function renderProductionMetadataGate(active) {
       const button = event.target?.closest?.('button');
       if (!button) return;
       const handle = fn => { event.preventDefault(); event.stopImmediatePropagation(); void Promise.resolve().then(fn).catch(error => message(error?.message || String(error), true)); };
+      if (button.id === 'addLibraryCharacter') { handle(() => openLibraryEditor(null)); return; }
+      if (button.id === 'exportCharacterLibrary') { handle(() => exportCharacterLibraryFile()); return; }
+      if (button.id === 'importCharacterLibrary') { handle(() => importCharacterLibraryFile()); return; }
+      if (button.id === 'saveCharacterProfile' && libraryEditorActive) { handle(() => saveLibraryEditor()); return; }
+      if (button.hasAttribute('data-close-character-editor') && libraryEditorActive) {
+        handle(() => { libraryEditorActive = false; $('characterEditorModal')?.classList.remove('show'); });
+        return;
+      }
       const workbookAction = button.closest('#characters [data-character-workbook-action]');
       if (workbookAction) {
         const action = workbookAction.dataset.characterWorkbookAction;

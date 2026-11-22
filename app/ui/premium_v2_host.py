@@ -96,6 +96,84 @@ def _serialize_character_identity_state(method):
     return serialized
 
 
+
+def _character_library_export_document(records: list[dict[str, Any]], series: str = "") -> dict[str, Any]:
+    """Build a portable, versioned series-cast document with no local voice/model references."""
+    def safe_count(value, default=0, maximum=None):
+        try:
+            number = int(value if value is not None else default)
+        except (TypeError, ValueError, OverflowError):
+            number = default
+        number = max(0, number)
+        return min(number, maximum) if maximum is not None else number
+
+    exported = []
+    seen = set()
+    for source in records or []:
+        if not isinstance(source, dict):
+            continue
+        name = unicodedata.normalize(
+            "NFC", str(source.get("primary_name") or source.get("name") or "")
+        ).strip()
+        source_series = unicodedata.normalize("NFC", str(source.get("series") or "")).strip()
+        if not name or not source_series:
+            continue
+        if series and source_series.casefold() != series.casefold():
+            continue
+        identity_variant = str(source.get("identity_variant") or "").strip()
+        key = (source_series.casefold(), name.casefold(), identity_variant.casefold())
+        if key in seen:
+            raise ValueError("The Character Library contains duplicate canonical identities; resolve them before export.")
+        seen.add(key)
+        aliases = source.get("aliases") or []
+        if isinstance(aliases, str):
+            aliases = [part.strip() for part in aliases.replace("\n", ",").split(",")]
+        aliases_out = []
+        alias_seen = {name.casefold()}
+        for raw in aliases if isinstance(aliases, (list, tuple)) else []:
+            alias = unicodedata.normalize("NFC", str(raw or "")).strip()
+            if alias and alias.casefold() not in alias_seen:
+                if len(alias) > 160:
+                    raise ValueError("Character aliases must be 160 characters or fewer before export.")
+                alias_seen.add(alias.casefold())
+                aliases_out.append(alias)
+        exported.append({
+            "name": name,
+            "primary_name": name,
+            "series": source_series,
+            "short": str(source.get("short") or "").strip()[:120],
+            "aliases": aliases_out,
+            "identity_base_name": str(source.get("identity_base_name") or name).strip()[:160],
+            "identity_variant": identity_variant[:120],
+            "notes": str(source.get("notes") or "").strip()[:4000],
+            "dialogue_sample": str(source.get("dialogue_sample") or "").strip()[:4000],
+            "pronunciation": str(source.get("pronunciation") or "").strip()[:500],
+            "line_count": safe_count(source.get("line_count", source.get("lines", 0))),
+            "chapter_count": safe_count(source.get("chapter_count", source.get("chapters", 0))),
+            "confidence": safe_count(source.get("confidence", 100), default=100, maximum=100),
+            "imported_from_workbook": bool(source.get("imported_from_workbook")),
+            "user_created": bool(source.get("user_created")),
+            "manual_aliases": bool(source.get("manual_aliases")),
+        })
+    exported.sort(key=lambda row: (row["series"].casefold(), row["name"].casefold(), row["identity_variant"].casefold()))
+    if len(exported) > 50000:
+        raise ValueError("The Character Library export exceeds the 50,000-character portability limit.")
+    return {
+        "schema": "ryu.character-library",
+        "version": 1,
+        "source_app": "Ryu Audiobook",
+        "exported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "scope": "series" if series else "all_series",
+        "series": series or None,
+        "voice_assets_included": False,
+        "voice_asset_note": (
+            "Saved voice models, profile IDs, model paths and device-specific settings are not portable in this character file. "
+            "Character identities, aliases and notes are retained; assign a compatible local saved Voice Studio profile after import."
+        ),
+        "characters": exported,
+    }
+
+
 def _preview_requires_paragraph_boundary(state: dict[str, Any]) -> bool:
     """Keep the selected Production preview paragraph-aligned only when its saved BGM needs it."""
     if not isinstance(state, dict) or not state.get("_include_sound_design_preview"):
@@ -517,6 +595,7 @@ class PremiumV2Bridge(QObject):
                 "character_library.delete_many": self._character_library_delete_many,
                 "character_library.deleted.purge_many": self._character_library_deleted_purge_many,
                 "character_library.deleted.clear_all": self._character_library_deleted_clear_all,
+                "character_library.export": self._character_library_export,
                 "character_library.import": self._character_library_import,
                 "character.analyze": self._character_analyze,
                 "character.assign": self._character_assign,
@@ -696,6 +775,7 @@ class PremiumV2Bridge(QObject):
             "character_library.delete_many": True,
             "character_library.deleted.purge_many": True,
             "character_library.deleted.clear_all": True,
+            "character_library.export": True,
             "character_library.import": True,
             "character.analyze": True,
             "character.assign": True,
@@ -5208,6 +5288,9 @@ class PremiumV2Bridge(QObject):
                 "aliases": list(row.get("aliases") or []),
                 "identity_base_name": str(row.get("identity_base_name") or row.get("primary_name") or row.get("name") or ""),
                 "identity_variant": str(row.get("identity_variant") or ""),
+                "notes": str(row.get("notes") or ""),
+                "dialogue_sample": str(row.get("dialogue_sample") or ""),
+                "pronunciation": str(row.get("pronunciation") or ""),
             }
             for row in list_reusable_characters(series)
             if isinstance(row, dict)
@@ -5241,7 +5324,13 @@ class PremiumV2Bridge(QObject):
 
         metadata = {
             "project_title": str(getattr(project, "title", "") or ""),
+            "author": str(state.get("author") or ""),
+            "publisher": str(state.get("publisher") or ""),
+            "language": str(state.get("language") or ""),
+            "genre": str(state.get("genre") or ""),
+            "year": str(state.get("year") or ""),
             "series_name": series,
+            "series_volume": str(state.get("series_volume") or ""),
             "series_character_reference": series_character_reference,
         }
         workbook_bytes = create_complete_book_character_workbook_bytes(
@@ -7626,8 +7715,72 @@ class PremiumV2Bridge(QObject):
                 "count": len(list_reusable_characters())}
 
     @_serialize_character_identity_state
+    def _character_library_export(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Export a portable Character Library snapshot without machine-local voice assets or paths."""
+        self._character_library_bootstrap()
+        requested_series = str(payload.get("series") or "").strip()
+        if requested_series.casefold() in {
+            "all series", "global characters", "global character library", "unassigned series",
+        }:
+            requested_series = ""
+        records = list_reusable_characters(series=requested_series or None)
+        if not records:
+            raise ValueError(
+                "There are no saved characters to export for the selected series. Choose another series or add characters first."
+            )
+        document = _character_library_export_document(records, requested_series)
+        default_stem = (
+            re.sub(r'[<>:"/\\|?*]+', "_", requested_series).strip(" .")
+            if requested_series else "All_Series"
+        ) or "Character_Library"
+        default_name = "Ryu_Character_Library_%s.json" % default_stem
+        selected_path, _ = QFileDialog.getSaveFileName(
+            self, "Export Portable Character Library",
+            str(Path.home() / default_name), "JSON Character Library (*.json)",
+        )
+        if not selected_path:
+            return {"cancelled": True}
+        destination = Path(selected_path).expanduser()
+        if destination.suffix.casefold() != ".json":
+            destination = destination.with_suffix(".json")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(
+            prefix="." + destination.name + ".", suffix=".tmp", dir=str(destination.parent)
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(document, handle, ensure_ascii=False, indent=2)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, destination)
+        except Exception:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            Path(temporary).unlink(missing_ok=True)
+            raise
+        return {
+            "cancelled": False,
+            "path": str(destination.resolve()),
+            "count": len(document["characters"]),
+            "series": requested_series or None,
+            "voice_assets_included": False,
+        }
+
+    @_serialize_character_identity_state
     def _character_library_import(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._character_library_bootstrap()
+        schema = str(payload.get("schema") or "").strip()
+        if schema and schema != "ryu.character-library":
+            raise ValueError("This JSON file is not a supported Ryu Character Library export.")
+        if schema == "ryu.character-library":
+            try:
+                version = int(payload.get("version") or 0)
+            except (TypeError, ValueError, OverflowError):
+                version = 0
+            if version != 1:
+                raise ValueError("This Ryu Character Library export version is not supported.")
         incoming = payload.get("characters")
         if isinstance(incoming, dict):
             incoming = incoming.get("characters")
@@ -7676,7 +7829,9 @@ class PremiumV2Bridge(QObject):
                 source_project_folder=str(candidate.get("source_project_folder") or ""),
                 source_project_title=str(candidate.get("source_project_title") or ""),
                 update_names=True,
-                update_voice=True,
+                # A portable library export intentionally omits machine-local
+                # voice bindings. Preserve an existing local voice in that case.
+                update_voice=bool(str(candidate.get("voice") or candidate.get("voice_name") or "").strip()),
             )
             imported += 1
         if not imported:

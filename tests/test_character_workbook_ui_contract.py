@@ -77,13 +77,41 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn("target_chapter.dialogue_assignments = sorted(", self.host)
         self.assertIn("scope:'book'", self.adapter)
         self.assertIn("Complete book · ", self.adapter)
-        self.assertIn("Existing voice profiles will be preserved.", self.adapter)
+        self.assertIn("Existing character voice profiles will be preserved.", self.adapter)
         self.assertIn("voice needs assignment after import", self.adapter)
         self.assertIn("Chapter coverage:", self.adapter)
         self.assertIn("Speaker assignment summary:", self.adapter)
         self.assertIn('"assignment_summary": assignment_summary', self.host)
         self.assertIn('"chapters": chapter_preview', self.host)
         self.assertIn("Export Complete-Book GPT Workbook", self.html)
+
+
+
+    def test_character_library_has_portable_export_and_add_character_uses_a_valid_series(self):
+        library_start = self.html.index('<section class="character-library-zone" id="characterLibraryZone">')
+        library_end = self.html.index('<section class="page" id="import">', library_start)
+        library_header = self.html[library_start:library_end]
+        self.assertIn('id="exportCharacterLibrary"', library_header)
+        self.assertIn('id="importCharacterLibrary"', library_header)
+        self.assertIn('id="addLibraryCharacter"', library_header)
+        self.assertIn("voice model files, local profile IDs and hardware-specific settings stay on this PC", library_header.lower())
+        self.assertIn('"character_library.export": self._character_library_export', self.host)
+        self.assertIn('"character_library.export": True', self.host)
+        self.assertIn("def _character_library_export_document(", self.host)
+        self.assertIn("voice_assets_included", self.host)
+        self.assertIn("update_voice=bool(str(candidate.get", self.host)
+        self.assertIn("function exportCharacterLibraryFile()", self.adapter)
+        self.assertIn("character_library.export", self.adapter)
+        self.assertIn("reservedFilters", self.adapter)
+        self.assertIn("seriesSelect.value = '__new_series__'", self.adapter)
+        self.assertIn("Character Library editor could not be opened", self.adapter)
+        self.assertIn("button.id === 'addLibraryCharacter'", self.adapter)
+        self.assertIn("button.id === 'exportCharacterLibrary'", self.adapter)
+        self.assertIn("button.id === 'importCharacterLibrary'", self.adapter)
+        self.assertIn("button.id === 'saveCharacterProfile' && libraryEditorActive", self.adapter)
+        self.assertIn("const payload=Array.isArray(data)?{characters:data}:data", self.adapter)
+        self.assertIn("This Ryu Character Library export version is not supported.", self.host)
+        self.assertIn("update_voice=bool(str(candidate.get", self.host)
 
 
     def test_outsourced_origin_is_supported_as_a_third_assignment_source(self):

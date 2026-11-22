@@ -378,6 +378,7 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
 
     reference_headers = [
         "Canonical Character", "Known Alias", "Identity Base Name", "Version / Age Variant",
+        "Character Notes (Reference)", "Dialogue Sample (Reference)", "Pronunciation (Reference)",
     ]
     reference_rows = [reference_headers]
     for source in metadata.get("series_character_reference") or []:
@@ -404,8 +405,11 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
             raise ValueError("Series Character Reference age/version labels must be 120 characters or fewer.")
         if any(len(alias) > MAX_CHARACTER_ALIAS_LENGTH for alias in cleaned_aliases):
             raise ValueError("Series Character Reference aliases must be 160 characters or fewer.")
+        notes = str(source.get("notes") or "").strip()[:4000]
+        sample = str(source.get("dialogue_sample") or "").strip()[:4000]
+        pronunciation = str(source.get("pronunciation") or "").strip()[:500]
         for alias in (cleaned_aliases or [""]):
-            reference_rows.append([primary, alias, base_name, variant])
+            reference_rows.append([primary, alias, base_name, variant, notes, sample, pronunciation])
             if len(reference_rows) - 1 > MAX_ROWS:
                 raise ValueError("The Series Character Reference exceeds the 50,000-row workbook limit.")
 
@@ -418,7 +422,13 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
         ["Passage Count", len(dialogue) - 1],
         ["Chapter Count", len(chapter_rows)],
         ["Book Title", _clean(metadata.get("project_title"))],
+        ["Author", _clean(metadata.get("author"))],
+        ["Publisher", _clean(metadata.get("publisher"))],
+        ["Language", _clean(metadata.get("language"))],
+        ["Genre", _clean(metadata.get("genre"))],
+        ["Publication Year", _clean(metadata.get("year"))],
         ["Series Name", _clean(metadata.get("series_name"))],
+        ["Series Volume", _clean(metadata.get("series_volume"))],
         ["Book Revision", book_revision],
         ["Exported At (UTC)", datetime.now(timezone.utc).isoformat(timespec="seconds")],
         ["Instructions",
@@ -442,7 +452,7 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
         ("Character Register", characters, [34] + [24] * ALIAS_COLUMNS + [26,48,24], set(range(1, ALIAS_COLUMNS + 5))),
         ("Chapter Register", chapter_register, [38,14,32,42,22,20,66], set(range(1,8))),
         ("Chapter Context", context, [38,14,32,14,14,100], {6}),
-        ("Series Character Reference", reference_rows, [38,34,38,26], {1,2,3,4}),
+        ("Series Character Reference", reference_rows, [38,34,38,26,56,64,32], {1,2,3,4,5,6,7}),
         ("Workbook Info", info, [30,120], {2}),
     ]
     import io
