@@ -66,6 +66,30 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             self.assertEqual(document["info"]["Chapter Revision"], "revision-abc")
             self.assertEqual(document["info"]["Passage Count"], "2")
 
+    def test_export_includes_read_only_series_character_reference_without_voice_data(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, chapter_text, passages = self._export(Path(tmp))
+            metadata = {
+                "project_title": "The Silver Archive",
+                "series_name": "Silver Archive",
+                "chapter_id": "chapter-001", "chapter_number": 1,
+                "chapter_title": "The Arrival", "chapter_revision": "revision-abc",
+                "series_character_reference": [{
+                    "primary_name": "Mira",
+                    "aliases": ["Captain Mira", "Mira-sama"],
+                    "identity_base_name": "Mira", "identity_variant": "",
+                    "voice_name": "This must not be exported",
+                }],
+            }
+            path.write_bytes(create_character_workbook_bytes(metadata, passages, chapter_text))
+            parsed = read_character_workbook(path)
+            self.assertEqual(len(parsed["series_character_reference"]), 1)
+            self.assertEqual(parsed["series_character_reference"][0]["canonical_name"], "Mira")
+            self.assertEqual(parsed["series_character_reference"][0]["aliases"], ["Captain Mira", "Mira-sama"])
+            self.assertEqual(parsed["series_character_reference"][0]["identity_base_name"], "Mira")
+            self.assertNotIn("voice_name", parsed["series_character_reference"][0])
+            self.assertEqual(parsed["characters"], [])
+
     def test_edited_xlsx_file_is_reopened_and_planned_from_real_sheet_cells(self):
         with tempfile.TemporaryDirectory() as tmp:
             path, _text, passages = self._export(Path(tmp))

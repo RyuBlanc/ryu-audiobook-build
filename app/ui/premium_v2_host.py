@@ -5153,6 +5153,17 @@ class PremiumV2Bridge(QObject):
         except (TypeError, ValueError, IndexError, AttributeError):
             raise ValueError("Select a chapter before exporting the Character Studio workbook.")
         state, series, chapter, chapter_row, passages, assignments = self._character_workbook_snapshot(project, number)
+        self._character_library_bootstrap()
+        series_character_reference = [
+            {
+                "primary_name": str(row.get("primary_name") or row.get("name") or ""),
+                "aliases": list(row.get("aliases") or []),
+                "identity_base_name": str(row.get("identity_base_name") or row.get("primary_name") or row.get("name") or ""),
+                "identity_variant": str(row.get("identity_variant") or ""),
+            }
+            for row in list_reusable_characters(series)
+            if isinstance(row, dict)
+        ]
         export_rows = []
         for row in passages:
             item = dict(row)
@@ -5178,6 +5189,7 @@ class PremiumV2Bridge(QObject):
             "chapter_number": int(chapter.number),
             "chapter_title": str(chapter.title or ""),
             "chapter_revision": str(chapter_row.get("chapter_revision") or ""),
+            "series_character_reference": series_character_reference,
         }
         workbook_bytes = create_character_workbook_bytes(metadata, export_rows, str(chapter.text or ""))
         default_name = "%s_Chapter_%s_Character_Workbook.xlsx" % (

@@ -27,6 +27,9 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
             self.assertIn(f'"{command}": True', self.host)
 
     def test_export_import_controls_use_preview_then_explicit_commit(self):
+        self.assertIn("Series Character Reference", self.workbook)
+        self.assertIn("series_character_reference", self.host)
+        self.assertIn("self._character_library_bootstrap()", self.host)
         self.assertIn("Export Chapter Workbook", self.adapter)
         self.assertIn("Import Completed Workbook", self.adapter)
         self.assertIn("character.workbook.import.preview", self.adapter)

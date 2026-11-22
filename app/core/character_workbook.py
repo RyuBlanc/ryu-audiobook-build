@@ -110,6 +110,8 @@ def create_character_workbook_bytes(metadata, passages, chapter_text):
             "Narration is protected as Narrator. Add canonical full names and all other names as aliases. "
             "A younger/older version needing a different voice must be a separate Character Register row. "
             "Use Version / Age Variant and assign it by its distinct name, for example Mira (Younger Version). "
+            "Use the read-only Series Character Reference sheet to reuse existing canonical names and known aliases. "
+            "Do not edit that reference sheet; add genuinely new identities in Character Register. "
             "For more than 30 aliases, add columns named Alias 31, Alias 32, and so on. "
             "Do not edit Passage ID, Dialogue Text, chapter identity, offsets, or revision columns.")
     }
@@ -146,6 +148,32 @@ def create_character_workbook_bytes(metadata, passages, chapter_text):
     ]
     characters = [char_headers] + [[""] * len(char_headers) for _ in range(30)]
     context = [["Context Part", "Chapter Number", "Chapter Title", "Chapter Text"]]
+    reference_rows = None
+    if "series_character_reference" in metadata:
+        reference_rows = [[
+            "Canonical Character", "Known Aliases", "Identity Base Name", "Version / Age Variant"
+        ]]
+        for source in metadata.get("series_character_reference") or []:
+            if not isinstance(source, dict):
+                continue
+            primary = _clean(source.get("primary_name") or source.get("name"))
+            if not primary:
+                continue
+            aliases = source.get("aliases") or []
+            if isinstance(aliases, str):
+                aliases = [aliases]
+            cleaned_aliases = []
+            seen_aliases = {_key(primary)}
+            for raw_alias in aliases:
+                alias = _clean(raw_alias)
+                if alias and _key(alias) not in seen_aliases:
+                    seen_aliases.add(_key(alias))
+                    cleaned_aliases.append(alias)
+            reference_rows.append([
+                primary, "\\n".join(cleaned_aliases),
+                _clean(source.get("identity_base_name") or primary),
+                _clean(source.get("identity_variant") or source.get("version")),
+            ])
     text = str(chapter_text or "")
     chunks = [text[i:i + CHUNK] for i in range(0, len(text), CHUNK)] or [""]
     for i, chunk in enumerate(chunks, 1):
@@ -156,6 +184,8 @@ def create_character_workbook_bytes(metadata, passages, chapter_text):
         ("Chapter Context", context, [14,14,32,100], {4}),
         ("Workbook Info", [["Field","Value"]] + [[k,v] for k,v in info.items()], [28,110], {2}),
     ]
+    if reference_rows is not None:
+        sheets.append(("Series Character Reference", reference_rows, [36, 76, 36, 28], {2}))
     import io
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as z:
@@ -165,7 +195,7 @@ def create_character_workbook_bytes(metadata, passages, chapter_text):
             '<Default Extension="xml" ContentType="application/xml"/>'
             '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
             '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>%s</Types>' %
-            (CONTENT, "".join('<Override PartName="/xl/worksheets/sheet%d.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' % n for n in range(1,5))))
+            (CONTENT, "".join('<Override PartName="/xl/worksheets/sheet%d.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' % n for n in range(1,len(sheets) + 1))))
         z.writestr("_rels/.rels",
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             '<Relationships xmlns="%s"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' % PKG)
@@ -175,7 +205,7 @@ def create_character_workbook_bytes(metadata, passages, chapter_text):
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             '<workbook xmlns="%s" xmlns:r="%s"><bookViews><workbookView activeTab="0"/></bookViews>'
             '<sheets>%s</sheets><calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>' % (MAIN, REL, sheet_nodes))
-        rels = "".join('<Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet%d.xml"/>' % (n,n) for n in range(1,5))
+        rels = "".join('<Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet%d.xml"/>' % (n,n) for n in range(1,len(sheets) + 1))
         rels += '<Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
         z.writestr("xl/_rels/workbook.xml.rels",
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="%s">%s</Relationships>' % (PKG, rels))
@@ -254,6 +284,8 @@ def read_character_workbook(path):
                 ss = ET.fromstring(z.read("xl/sharedStrings.xml"))
                 shared = ["".join(n.text or "" for n in x.iter(_t("t"))) for x in ss.findall(_t("si"))]
             sheets = {name: _read_sheet(z, targets[name], shared) for name in required}
+            if "Series Character Reference" in targets:
+                sheets["Series Character Reference"] = _read_sheet(z, targets["Series Character Reference"], shared)
     except (zipfile.BadZipFile, ET.ParseError, KeyError) as exc:
         raise ValueError("The .xlsx workbook is damaged or unsupported.") from exc
     info_rows = _records(sheets["Workbook Info"])
@@ -291,6 +323,23 @@ def read_character_workbook(path):
             raise ValueError("Each dialogue row must retain its Passage ID and original text.")
         if passage in seen: raise ValueError("The workbook contains a duplicate Passage ID.")
         seen.add(passage)
+    reference_rows = _records(sheets.get("Series Character Reference", []))
+    series_character_reference = []
+    for row in reference_rows:
+        primary = _clean(row.get("Canonical Character"))
+        if not primary:
+            continue
+        aliases = [
+            _clean(value) for value in str(row.get("Known Aliases") or "").splitlines()
+            if _clean(value)
+        ]
+        series_character_reference.append({
+            "canonical_name": primary,
+            "aliases": aliases,
+            "identity_base_name": _clean(row.get("Identity Base Name") or primary),
+            "identity_variant": _clean(row.get("Version / Age Variant")),
+        })
+
     characters = []
     for n, row in enumerate(char_rows, 2):
         name = _clean(row.get("Full Name"))
@@ -318,8 +367,14 @@ def read_character_workbook(path):
             "notes": notes,
             "row_number": n,
         })
-    return {"info": info, "dialogue_rows": dialogue, "characters": characters,
-            "path": str(source.resolve()), "sha256": sha256(source.read_bytes()).hexdigest()}
+    return {
+        "info": info,
+        "dialogue_rows": dialogue,
+        "characters": characters,
+        "series_character_reference": series_character_reference,
+        "path": str(source.resolve()),
+        "sha256": sha256(source.read_bytes()).hexdigest(),
+    }
 
 def plan_character_workbook_import(document, *, series, registry_rows, project_characters,
                                    chapter_id, chapter_revision, current_passages, current_assignments,
