@@ -7,6 +7,7 @@ HOST = ROOT / "app" / "ui" / "premium_v2_host.py"
 ADAPTER = ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
 REGISTRY = ROOT / "app" / "core" / "character_library.py"
 WORKBOOK = ROOT / "app" / "core" / "character_workbook.py"
+HTML = ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html"
 
 
 class CharacterWorkbookUiContractTests(unittest.TestCase):
@@ -16,6 +17,7 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         cls.adapter = ADAPTER.read_text(encoding="utf-8")
         cls.registry = REGISTRY.read_text(encoding="utf-8")
         cls.workbook = WORKBOOK.read_text(encoding="utf-8")
+        cls.html = HTML.read_text(encoding="utf-8")
 
     def test_workbook_commands_are_registered_and_advertised(self):
         for command, handler in {
@@ -32,13 +34,30 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn("reference_by_identity", self.workbook)
         self.assertIn("series_character_reference", self.host)
         self.assertIn("self._character_library_bootstrap()", self.host)
-        self.assertIn("Export Chapter Workbook", self.adapter)
-        self.assertIn("Import Completed Workbook", self.adapter)
+        self.assertIn("Export Chapter Workbook", self.html)
+        self.assertIn("Import Completed Workbook", self.html)
         self.assertIn("character.workbook.import.preview", self.adapter)
         self.assertIn("character.workbook.import.commit", self.adapter)
         self.assertIn("window.confirm(prompt)", self.adapter)
         self.assertIn("await openAiCharacterReview(item)", self.adapter)
         self.assertIn("source:'ai', confidence:topConfidence", self.adapter)
+
+    def test_workbook_actions_are_static_in_character_studio_header_and_delegated(self):
+        page_start = self.html.index('<section class="page" id="characters">')
+        metrics_start = self.html.index('<div class="grid metrics char-metrics">', page_start)
+        header = self.html[page_start:metrics_start]
+        self.assertIn('id="exportCharacterWorkbook"', header)
+        self.assertIn('data-character-workbook-action="export"', header)
+        self.assertIn('id="importCharacterWorkbook"', header)
+        self.assertIn('data-character-workbook-action="import"', header)
+        self.assertIn("function exportSelectedCharacterWorkbook()", self.adapter)
+        self.assertIn("function importCompletedCharacterWorkbook()", self.adapter)
+        self.assertIn("const workbookAction = button.closest('#characters [data-character-workbook-action]')", self.adapter)
+        self.assertNotIn("ensureCharacterWorkbookControls", self.adapter)
+        self.assertLess(
+            self.adapter.index("installCharacterStudioHandlers();"),
+            self.adapter.index("await call('app.get_info')"),
+        )
 
     def test_outsourced_origin_is_supported_as_a_third_assignment_source(self):
         self.assertIn('{"manual", "ai", "outsourced"}', self.host)
