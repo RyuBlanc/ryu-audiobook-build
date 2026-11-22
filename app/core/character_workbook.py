@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
+import json
 import posixpath, re, unicodedata, uuid, zipfile
 from xml.etree import ElementTree as ET
 from xml.sax.saxutils import escape
@@ -14,6 +15,10 @@ CONTENT = "http://schemas.openxmlformats.org/package/2006/content-types"
 MAX_BYTES = 25 * 1024 * 1024
 MAX_EXPANDED = 100 * 1024 * 1024
 MAX_ROWS = 50000
+MAX_CHARACTER_NAME_LENGTH = 160
+MAX_CHARACTER_ALIAS_LENGTH = 160
+MAX_IDENTITY_VARIANT_LENGTH = 120
+MAX_CHARACTER_NOTES_LENGTH = 4000
 ALIAS_COLUMNS = 30
 CHUNK = 15000
 ET.register_namespace("", MAIN)
@@ -289,16 +294,28 @@ def read_character_workbook(path):
     characters = []
     for n, row in enumerate(char_rows, 2):
         name = _clean(row.get("Full Name"))
-        if not name: continue
+        if not name:
+            continue
+        if len(name) > MAX_CHARACTER_NAME_LENGTH:
+            raise ValueError("Character Register names must be 160 characters or fewer.")
+        version = _clean(row.get("Version / Age Variant"))
+        if len(version) > MAX_IDENTITY_VARIANT_LENGTH:
+            raise ValueError("Character age/version labels must be 120 characters or fewer.")
+        notes = _clean(row.get("Character Notes"))
+        if len(notes) > MAX_CHARACTER_NOTES_LENGTH:
+            raise ValueError("Character Register notes must be 4,000 characters or fewer.")
         aliases = []
         for column, value in row.items():
             if re.fullmatch(r"Alias\s+\d+", column, re.I) and _clean(value):
-                aliases.append(_clean(value))
+                alias = _clean(value)
+                if len(alias) > MAX_CHARACTER_ALIAS_LENGTH:
+                    raise ValueError("Character aliases must be 160 characters or fewer.")
+                aliases.append(alias)
         characters.append({
             "full_name": name,
             "aliases": list(dict.fromkeys(a for a in aliases if _key(a) != _key(name))),
-            "version": _clean(row.get("Version / Age Variant")),
-            "notes": _clean(row.get("Character Notes")),
+            "version": version,
+            "notes": notes,
             "row_number": n,
         })
     return {"info": info, "dialogue_rows": dialogue, "characters": characters,
@@ -370,20 +387,38 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
     planned, imported_keys, owners = [], set(), {}
     for source in document.get("characters") or []:
         name = _clean(source.get("full_name"))
-        if not name: continue
+        if not name:
+            continue
+        if len(name) > MAX_CHARACTER_NAME_LENGTH:
+            issues.append("Character Register names must be 160 characters or fewer.")
+            continue
+        version = _clean(source.get("version"))
+        if len(version) > MAX_IDENTITY_VARIANT_LENGTH:
+            issues.append("Character age/version labels must be 120 characters or fewer.")
+            continue
+        notes = _clean(source.get("notes"))
+        if len(notes) > MAX_CHARACTER_NOTES_LENGTH:
+            issues.append("Character Register notes must be 4,000 characters or fewer.")
+            continue
         if _key(name) == "narrator":
             issues.append("Narrator is a protected automatic narration role and cannot be added to Character Register.")
             continue
-        version = _clean(source.get("version"))
         canonical = name if not version or name.casefold().endswith((" (" + version + ")").casefold()) else "%s (%s)" % (name, version)
         aliases = []
+        alias_too_long = False
         for raw in source.get("aliases") or []:
             alias = _clean(raw)
+            if len(alias) > MAX_CHARACTER_ALIAS_LENGTH:
+                issues.append("Character aliases must be 160 characters or fewer.")
+                alias_too_long = True
+                continue
             if _key(alias) == "narrator":
                 issues.append("Narrator is a protected role and cannot be used as a character alias.")
                 continue
             if alias and _key(alias) not in {_key(name),_key(canonical)} and _key(alias) not in {_key(x) for x in aliases}:
                 aliases.append(alias)
+        if alias_too_long:
+            continue
         ikey = _key(canonical) + "|" + _key(version)
         if ikey in imported_keys:
             issues.append("Character Register repeats '%s'." % canonical)
@@ -431,7 +466,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                 added_aliases.append(alias)
         planned.append({
             "canonical_name":final_name, "identity_base_name":name, "identity_variant":version,
-            "aliases":merged_aliases, "aliases_to_add":added_aliases, "notes":_clean(source.get("notes")),
+            "aliases":merged_aliases, "aliases_to_add":added_aliases, "notes":notes,
             "library_id":_clean(match.get("library_id")) if match else "",
             "existing_voice_name":_clean((match or {}).get("voice_name") or (match or {}).get("project_voice_profile")),
             "action":"merge" if match else "create", "series":active_series,
@@ -518,8 +553,11 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             issues.append("Passage %s overlaps another saved assignment." % pid); continue
         if old_names: continue
         raw_confidence = _clean(row.get("GPT Confidence (0–1)"))
+        if not raw_confidence:
+            issues.append("Passage %s requires an explicit GPT Confidence value from 0.0 to 1.0; blank confidence is not accepted." % pid)
+            continue
         try:
-            confidence = float(raw_confidence) if raw_confidence else 1.0
+            confidence = float(raw_confidence)
         except (TypeError, ValueError, OverflowError):
             issues.append("Passage %s has an invalid GPT Confidence value; use a number from 0.0 to 1.0." % pid)
             continue
@@ -533,3 +571,21 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
         "new_characters":sum(x["action"]=="create" for x in planned),
         "aliases_to_merge":sum(len(x.get("aliases_to_add", [])) for x in planned),
         "dialogue_assignments":len(assignments),"characters_in_register":len(planned)}}
+
+
+
+def character_workbook_plan_fingerprint(plan: dict) -> str:
+    """Digest every identity and assignment decision the user reviewed before commit."""
+    if not isinstance(plan, dict):
+        raise ValueError("A valid character workbook plan is required.")
+    reviewed = {
+        key: plan.get(key)
+        for key in ("ready", "issues", "characters", "assignments", "summary")
+    }
+    try:
+        encoded = json.dumps(
+            reviewed, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("The character workbook plan contains unsupported values.") from exc
+    return sha256(encoded).hexdigest()

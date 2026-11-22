@@ -416,12 +416,23 @@ def merge_imported_character_records(
         primary = unicodedata.normalize("NFC", str(incoming.get("canonical_name") or incoming.get("primary_name") or "")).strip()
         if not primary or _identity_key(primary) == "narrator":
             raise ValueError("Imported characters need a non-empty name; Narrator is reserved.")
+        if len(primary) > 160:
+            raise ValueError("Imported character names must be 160 characters or fewer.")
         variant = unicodedata.normalize("NFC", str(incoming.get("identity_variant") or "")).strip()
+        if len(variant) > 120:
+            raise ValueError("Imported age/version labels must be 120 characters or fewer.")
         base_name = unicodedata.normalize("NFC", str(incoming.get("identity_base_name") or primary)).strip()
+        if len(base_name) > 160:
+            raise ValueError("Imported identity base names must be 160 characters or fewer.")
         raw_aliases = incoming.get("aliases") or []
         if isinstance(raw_aliases, str):
             raw_aliases = [raw_aliases]
         aliases = _clean_names(raw_aliases, primary)
+        if any(len(alias) > 160 for alias in aliases):
+            raise ValueError("Imported character aliases must be 160 characters or fewer.")
+        incoming_notes = str(incoming.get("notes") or "").strip()
+        if len(incoming_notes) > 4000:
+            raise ValueError("Imported character notes must be 4,000 characters or fewer.")
         incoming_tokens = {_identity_key(primary), *(_identity_key(value) for value in aliases)}
         if any(not value for value in incoming_tokens):
             raise ValueError("Imported character names and aliases cannot be empty.")
@@ -481,7 +492,7 @@ def merge_imported_character_records(
                 "dialogue_sample": "",
                 "dialogue_sample_source": "character-workbook",
                 "pronunciation": "",
-                "notes": str(incoming.get("notes") or "").strip()[:4000],
+                "notes": incoming_notes,
                 "line_count": 0,
                 "chapter_count": 0,
                 "confidence": 100,
@@ -508,8 +519,8 @@ def merge_imported_character_records(
             if variant:
                 record["identity_variant"] = variant
                 record["identity_base_name"] = base_name
-            if str(incoming.get("notes") or "").strip() and not str(record.get("notes") or "").strip():
-                record["notes"] = str(incoming.get("notes") or "").strip()[:4000]
+            if incoming_notes and not str(record.get("notes") or "").strip():
+                record["notes"] = incoming_notes
             record["updated_at"] = _timestamp()
 
         results.append(dict(record))

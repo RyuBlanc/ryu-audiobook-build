@@ -14,6 +14,7 @@ from app.core.character_workbook import (
     create_character_workbook_bytes,
     plan_character_workbook_import,
     read_character_workbook,
+    character_workbook_plan_fingerprint,
 )
 
 
@@ -135,6 +136,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 "notes": "The same adult character.",
             }]
             document["dialogue_rows"][1]["GPT Assigned Character"] = "Captain Mira"
+            document["dialogue_rows"][1]["GPT Confidence (0–1)"] = "0.93"
             plan = plan_character_workbook_import(
                 document,
                 series="Silver Archive",
@@ -165,6 +167,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 "version": "", "notes": "",
             }]
             document["dialogue_rows"][1]["GPT Assigned Character"] = "Captain Mira"
+            document["dialogue_rows"][1]["GPT Confidence (0–1)"] = "0.93"
             plan = plan_character_workbook_import(
                 document, series="Silver Archive",
                 registry_rows=[{
@@ -193,6 +196,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 "notes": "",
             }]
             document["dialogue_rows"][1]["GPT Assigned Character"] = "Mira (Younger Version)"
+            document["dialogue_rows"][1]["GPT Confidence (0–1)"] = "0.93"
             plan = plan_character_workbook_import(
                 document,
                 series="Silver Archive",
@@ -213,11 +217,70 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             self.assertEqual(plan["assignments"][0]["speaker"], "Mira (Younger Version)")
 
 
+    def test_import_plan_requires_explicit_gpt_confidence_for_new_assignments(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, _text, passages = self._export(Path(tmp))
+            document = read_character_workbook(path)
+            document["characters"] = [{
+                "full_name": "Mira", "aliases": [], "version": "", "notes": "",
+            }]
+            document["dialogue_rows"][1]["GPT Assigned Character"] = "Mira"
+            document["dialogue_rows"][1]["GPT Confidence (0–1)"] = ""
+            plan = plan_character_workbook_import(
+                document, series="Silver Archive", registry_rows=[],
+                project_characters=[], chapter_id="chapter-001",
+                chapter_revision="revision-abc", current_passages=passages,
+                current_assignments=[],
+            )
+            self.assertFalse(plan["ready"])
+            self.assertEqual(plan["assignments"], [])
+            self.assertTrue(any("blank confidence is not accepted" in issue for issue in plan["issues"]))
+
+    def test_import_plan_rejects_overlong_character_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, _text, passages = self._export(Path(tmp))
+            document = read_character_workbook(path)
+            document["characters"] = [{
+                "full_name": "M" * 161, "aliases": [], "version": "", "notes": "",
+            }]
+            plan = plan_character_workbook_import(
+                document, series="Silver Archive", registry_rows=[],
+                project_characters=[], chapter_id="chapter-001",
+                chapter_revision="revision-abc", current_passages=passages,
+                current_assignments=[],
+            )
+            self.assertFalse(plan["ready"])
+            self.assertTrue(any("160 characters or fewer" in issue for issue in plan["issues"]))
+
+    def test_workbook_plan_fingerprint_is_stable_and_changes_with_identity_decisions(self):
+        plan = {
+            "ready": True, "issues": [],
+            "characters": [{
+                "canonical_name": "Mira", "identity_variant": "",
+                "aliases": ["Captain Mira"], "action": "merge", "library_id": "mira-id",
+            }],
+            "assignments": [{"passage_id": "p1", "speaker": "Mira", "confidence": 0.93}],
+            "summary": {"matched_characters": 1, "dialogue_assignments": 1},
+        }
+        fingerprint = character_workbook_plan_fingerprint(plan)
+        self.assertEqual(fingerprint, character_workbook_plan_fingerprint(dict(plan)))
+        changed = {
+            **plan,
+            "characters": [{**plan["characters"][0], "library_id": "different-id"}],
+        }
+        self.assertNotEqual(fingerprint, character_workbook_plan_fingerprint(changed))
+        changed_assignment = {
+            **plan,
+            "assignments": [{**plan["assignments"][0], "speaker": "Ren"}],
+        }
+        self.assertNotEqual(fingerprint, character_workbook_plan_fingerprint(changed_assignment))
+
     def test_dialogue_speaker_must_appear_in_character_register(self):
         with tempfile.TemporaryDirectory() as tmp:
             path, _text, passages = self._export(Path(tmp))
             document = read_character_workbook(path)
             document["dialogue_rows"][1]["GPT Assigned Character"] = "Mira"
+            document["dialogue_rows"][1]["GPT Confidence (0–1)"] = "0.93"
             plan = plan_character_workbook_import(
                 document, series="Silver Archive",
                 registry_rows=[{
@@ -293,6 +356,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 "version": "", "notes": "",
             }]
             document["dialogue_rows"][1]["GPT Assigned Character"] = "Captain Mira"
+            document["dialogue_rows"][1]["GPT Confidence (0–1)"] = "0.93"
             current_assignment = {
                 "start": passages[1]["start"], "end": passages[1]["end"],
                 "text": passages[1]["text"], "speakers": ["Mira-sama"],

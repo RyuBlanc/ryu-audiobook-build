@@ -19,6 +19,7 @@ import unicodedata
 import uuid
 import wave
 from datetime import datetime, timezone
+from functools import wraps
 from typing import Any
 
 from PySide6.QtCore import QBuffer, QIODevice, QObject, QSettings, QTimer, QUrl, Slot, Qt
@@ -73,11 +74,25 @@ from app.core.character_workbook import (
     create_character_workbook_bytes,
     read_character_workbook,
     plan_character_workbook_import,
+    character_workbook_plan_fingerprint,
 )
 from app.production_metadata import missing_required_metadata_fields, normalize_metadata_text
 from app.version import APP_NAME, full_version
 
 log = logging.getLogger(__name__)
+
+
+def _serialize_character_identity_state(method):
+    """Serialize shared Character Studio/Library writes with analyzer reconciliation."""
+    @wraps(method)
+    def serialized(self, *args, **kwargs):
+        lock = getattr(self, "_character_review_state_lock", None)
+        if lock is None:
+            return method(self, *args, **kwargs)
+        with lock:
+            return method(self, *args, **kwargs)
+    return serialized
+
 
 def _preview_requires_paragraph_boundary(state: dict[str, Any]) -> bool:
     """Keep the selected Production preview paragraph-aligned only when its saved BGM needs it."""
@@ -1709,6 +1724,7 @@ class PremiumV2Bridge(QObject):
                 "character_count": len(chapter.text or ""),
                 "empty": not bool((chapter.text or "").strip()), "saved": True}
 
+    @_serialize_character_identity_state
     def _chapter_dialogue_assign(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Persist an explicit speaker choice only when its text uniquely matches source."""
         from app.chapters.assignment_utils import assign_dialogue_to_chapters
@@ -1919,6 +1935,7 @@ class PremiumV2Bridge(QObject):
                 log.exception("Could not persist confirmed dialogue-learning feedback")
         return result
 
+    @_serialize_character_identity_state
     def _chapter_dialogue_unassign(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Remove one assignment only when the original chapter span still matches exactly."""
         from app.chapters.assignment_utils import unassign_dialogue_from_chapters
@@ -5252,6 +5269,7 @@ class PremiumV2Bridge(QObject):
             "project_folder": str(Path(project.folder).resolve()),
             "export_id": str(document["info"].get("Export ID") or ""),
             "chapter_number": int(chapter.number),
+            "plan_sha256": character_workbook_plan_fingerprint(plan),
         }
         return {
             "cancelled": False, "ready": True, "token": token,
@@ -5273,182 +5291,189 @@ class PremiumV2Bridge(QObject):
             ],
         }
 
+    @_serialize_character_identity_state
     def _character_workbook_import_commit(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Commit the previewed workbook into the series registry, project cast and passage assignments."""
-        token = str(payload.get("token") or "").strip()
-        sessions = getattr(self, "_character_workbook_import_sessions", {})
-        session = sessions.pop(token, None) if isinstance(sessions, dict) else None
-        if not isinstance(session, dict):
-            raise ValueError("The workbook import preview expired. Select the workbook and review it again.")
-        project = self._active_project()
-        if str(Path(project.folder).resolve()) != session.get("project_folder"):
-            raise ValueError("The active book changed after preview. Reopen the workbook in the correct project.")
-        path = Path(session.get("path") or "")
-        document = read_character_workbook(path)
-        if document["sha256"] != session.get("sha256"):
-            raise ValueError("The workbook changed after preview. Import it again to review the latest contents.")
-        state, series, chapter, plan = self._character_workbook_import_plan(project, document)
-        if not plan["ready"]:
-            raise ValueError("Import preflight no longer passes: " + " ".join(plan["issues"][:5]))
-        if str(document["info"].get("Export ID") or "") != session.get("export_id"):
-            raise ValueError("The workbook identity changed after preview. Import it again.")
+        with self._character_review_state_lock:
+            token = str(payload.get("token") or "").strip()
+            sessions = getattr(self, "_character_workbook_import_sessions", {})
+            session = sessions.pop(token, None) if isinstance(sessions, dict) else None
+            if not isinstance(session, dict):
+                raise ValueError("The workbook import preview expired. Select the workbook and review it again.")
+            project = self._active_project()
+            if str(Path(project.folder).resolve()) != session.get("project_folder"):
+                raise ValueError("The active book changed after preview. Reopen the workbook in the correct project.")
+            path = Path(session.get("path") or "")
+            document = read_character_workbook(path)
+            if document["sha256"] != session.get("sha256"):
+                raise ValueError("The workbook changed after preview. Import it again to review the latest contents.")
+            state, series, chapter, plan = self._character_workbook_import_plan(project, document)
+            if not plan["ready"]:
+                raise ValueError("Import preflight no longer passes: " + " ".join(plan["issues"][:5]))
+            if str(document["info"].get("Export ID") or "") != session.get("export_id"):
+                raise ValueError("The workbook identity changed after preview. Import it again.")
+            if not session.get("plan_sha256") or character_workbook_plan_fingerprint(plan) != session.get("plan_sha256"):
+                raise ValueError(
+                    "The Character Library, Character Studio cast, voice identity or dialogue assignments changed after preview. "
+                    "Review the updated merge plan before importing."
+                )
 
-        library_path = Path(reusable_character_library_path())
-        backup_paths = [
-            library_path, Path(project.folder) / "project.json",
-            Path(project.folder) / "chapters.json", Path(project.folder) / "state.json",
-        ]
-        backups = {path: (path.read_bytes() if path.is_file() else None) for path in backup_paths}
-        from copy import deepcopy
-        chapter_memory_backup = [
-            (item, int(item.number), deepcopy(list(getattr(item, "dialogue_assignments", []) or [])))
-            for item in project.chapters
-        ]
+            library_path = Path(reusable_character_library_path())
+            backup_paths = [
+                library_path, Path(project.folder) / "project.json",
+                Path(project.folder) / "chapters.json", Path(project.folder) / "state.json",
+            ]
+            backups = {path: (path.read_bytes() if path.is_file() else None) for path in backup_paths}
+            from copy import deepcopy
+            chapter_memory_backup = [
+                (item, int(item.number), deepcopy(list(getattr(item, "dialogue_assignments", []) or [])))
+                for item in project.chapters
+            ]
 
-        def restore_snapshot(path: Path, content: bytes | None) -> None:
-            if content is None:
-                path.unlink(missing_ok=True)
-                return
-            path.parent.mkdir(parents=True, exist_ok=True)
-            fd, temporary = tempfile.mkstemp(prefix="." + path.name + ".", suffix=".rollback", dir=str(path.parent))
-            try:
-                with os.fdopen(fd, "wb") as handle:
-                    handle.write(content)
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                os.replace(temporary, path)
-            except Exception:
+            def restore_snapshot(path: Path, content: bytes | None) -> None:
+                if content is None:
+                    path.unlink(missing_ok=True)
+                    return
+                path.parent.mkdir(parents=True, exist_ok=True)
+                fd, temporary = tempfile.mkstemp(prefix="." + path.name + ".", suffix=".rollback", dir=str(path.parent))
                 try:
-                    os.close(fd)
-                except OSError:
-                    pass
-                Path(temporary).unlink(missing_ok=True)
+                    with os.fdopen(fd, "wb") as handle:
+                        handle.write(content)
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                    os.replace(temporary, path)
+                except Exception:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+                    Path(temporary).unlink(missing_ok=True)
+                    raise
+
+            try:
+                merged_library = merge_imported_character_records(series, plan["characters"], path=library_path)
+                cast = [dict(row) for row in (state.get("characters") or []) if isinstance(row, dict)]
+                default_series = self._project_series_name(project, state)
+                for planned, library_record in zip(plan["characters"], merged_library):
+                    primary = str(library_record.get("primary_name") or planned["canonical_name"]).strip()
+                    aliases = [str(value).strip() for value in (library_record.get("aliases") or []) if str(value or "").strip()]
+                    def identity_text(value: Any) -> str:
+                        return unicodedata.normalize("NFC", str(value or "")).strip().casefold()
+                    identity_tokens = {identity_text(primary), *(identity_text(value) for value in aliases)}
+                    identity_tokens.discard("")
+                    library_variant = identity_text(library_record.get("identity_variant"))
+                    cast_identity_candidates = [
+                        item for item in cast
+                        if identity_text(item.get("series") or default_series) == identity_text(series)
+                        and identity_tokens.intersection({
+                            identity_text(value)
+                            for value in [item.get("name"), *(item.get("aliases") or [])]
+                            if identity_text(value)
+                        })
+                    ]
+                    wrong_variant_matches = [
+                        item for item in cast_identity_candidates
+                        if identity_text(item.get("identity_variant")) != library_variant
+                    ]
+                    if wrong_variant_matches:
+                        raise ValueError(
+                            "The project cast already contains a matching name or alias for a different age/version of '%s'. "
+                            "Resolve the identity before importing." % primary
+                        )
+                    matches = cast_identity_candidates
+                    if len(matches) > 1:
+                        raise ValueError("The project cast contains duplicate records for '%s'. Resolve them before import." % primary)
+                    item = matches[0] if matches else None
+                    if item is None:
+                        item = {
+                            "name": primary, "role": "Character", "dialogue_count": 0, "examples": [],
+                            "confidence": 1.0, "aliases": aliases,
+                            "voice_profile": str(library_record.get("voice_name") or "") or None,
+                            "notes": str(planned.get("notes") or ""),
+                            "series": series, "scope": "Series · " + series,
+                        }
+                        cast.append(item)
+                    else:
+                        prior = [str(value).strip() for value in (item.get("aliases") or []) if str(value or "").strip()]
+                        item["aliases"] = list(dict.fromkeys(
+                            value for value in [*prior, *aliases]
+                            if value.casefold() != primary.casefold()
+                        ))
+                        item["series"] = series
+                        item["scope"] = "Series · " + series
+                        if not item.get("voice_profile") and library_record.get("voice_name"):
+                            item["voice_profile"] = library_record.get("voice_name")
+                        if not item.get("notes") and planned.get("notes"):
+                            item["notes"] = str(planned.get("notes") or "")
+                    item.update({
+                        "name": primary,
+                        "user_created": True, "manual": True, "manual_aliases": True,
+                        "imported_from_workbook": True, "character_origin": "outsourced",
+                        "character_library_id": str(library_record.get("id") or ""),
+                        "identity_base_name": str(library_record.get("identity_base_name") or planned.get("identity_base_name") or primary),
+                        "identity_variant": str(library_record.get("identity_variant") or planned.get("identity_variant") or ""),
+                    })
+
+                from app.chapters.assignment_utils import normalize_assignment
+                existing_assignments = list(getattr(chapter, "dialogue_assignments", []) or [])
+                for imported in plan["assignments"]:
+                    start, end = int(imported["start"]), int(imported["end"])
+                    exact = str(chapter.text or "")[start:end]
+                    if exact != str(imported["text"]):
+                        raise ValueError("A dialogue passage changed during import. No changes were retained.")
+                    base = {"start": start, "end": end, "text": exact, "source": "outsourced"}
+                    normalized = normalize_assignment(base, [str(imported["speaker"])], "single")
+                    normalized.update({
+                        "source": "outsourced", "confidence": float(imported["confidence"]),
+                        "series": series,
+                    })
+                    existing_assignments = [
+                        row for row in existing_assignments
+                        if not (isinstance(row, dict)
+                                and int(row.get("start", -1)) == start
+                                and int(row.get("end", -1)) == end)
+                    ]
+                    existing_assignments.append(normalized)
+                chapter.dialogue_assignments = sorted(
+                    existing_assignments,
+                    key=lambda row: (int(row.get("start", 0)), int(row.get("end", 0))),
+                )
+                state["characters"] = cast
+                state["modified_at"] = self._now()
+                project.save()
+                save_state(project.folder, state)
+            except Exception:
+                # Restore the live Project object as well as its files. A failed
+                # save_state after project.save() must not leave uncommitted dialogue
+                # assignments in memory for a later refresh/save to persist.
+                for item, chapter_number, assignments in chapter_memory_backup:
+                    item.number = chapter_number
+                    item.dialogue_assignments = assignments
+                rollback_errors = []
+                for backup_path, content in backups.items():
+                    try:
+                        restore_snapshot(backup_path, content)
+                    except Exception as rollback_error:
+                        log.exception("Could not restore Character Studio workbook import snapshot %s", backup_path)
+                        rollback_errors.append(rollback_error)
+                if rollback_errors:
+                    raise RuntimeError(
+                        "Character workbook import failed and rollback was incomplete. "
+                        "Close the project without saving and inspect the project and Character Library backups."
+                    ) from rollback_errors[0]
                 raise
 
-        try:
-            merged_library = merge_imported_character_records(series, plan["characters"], path=library_path)
-            cast = [dict(row) for row in (state.get("characters") or []) if isinstance(row, dict)]
-            default_series = self._project_series_name(project, state)
-            for planned, library_record in zip(plan["characters"], merged_library):
-                primary = str(library_record.get("primary_name") or planned["canonical_name"]).strip()
-                aliases = [str(value).strip() for value in (library_record.get("aliases") or []) if str(value or "").strip()]
-                def identity_text(value: Any) -> str:
-                    return unicodedata.normalize("NFC", str(value or "")).strip().casefold()
-                identity_tokens = {identity_text(primary), *(identity_text(value) for value in aliases)}
-                identity_tokens.discard("")
-                library_variant = identity_text(library_record.get("identity_variant"))
-                cast_identity_candidates = [
-                    item for item in cast
-                    if identity_text(item.get("series") or default_series) == identity_text(series)
-                    and identity_tokens.intersection({
-                        identity_text(value)
-                        for value in [item.get("name"), *(item.get("aliases") or [])]
-                        if identity_text(value)
-                    })
-                ]
-                wrong_variant_matches = [
-                    item for item in cast_identity_candidates
-                    if identity_text(item.get("identity_variant")) != library_variant
-                ]
-                if wrong_variant_matches:
-                    raise ValueError(
-                        "The project cast already contains a matching name or alias for a different age/version of '%s'. "
-                        "Resolve the identity before importing." % primary
-                    )
-                matches = cast_identity_candidates
-                if len(matches) > 1:
-                    raise ValueError("The project cast contains duplicate records for '%s'. Resolve them before import." % primary)
-                item = matches[0] if matches else None
-                if item is None:
-                    item = {
-                        "name": primary, "role": "Character", "dialogue_count": 0, "examples": [],
-                        "confidence": 1.0, "aliases": aliases,
-                        "voice_profile": str(library_record.get("voice_name") or "") or None,
-                        "notes": str(planned.get("notes") or ""),
-                        "series": series, "scope": "Series · " + series,
-                    }
-                    cast.append(item)
-                else:
-                    prior = [str(value).strip() for value in (item.get("aliases") or []) if str(value or "").strip()]
-                    item["aliases"] = list(dict.fromkeys(
-                        value for value in [*prior, *aliases]
-                        if value.casefold() != primary.casefold()
-                    ))
-                    item["series"] = series
-                    item["scope"] = "Series · " + series
-                    if not item.get("voice_profile") and library_record.get("voice_name"):
-                        item["voice_profile"] = library_record.get("voice_name")
-                    if not item.get("notes") and planned.get("notes"):
-                        item["notes"] = str(planned.get("notes") or "")
-                item.update({
-                    "name": primary,
-                    "user_created": True, "manual": True, "manual_aliases": True,
-                    "imported_from_workbook": True, "character_origin": "outsourced",
-                    "character_library_id": str(library_record.get("id") or ""),
-                    "identity_base_name": str(library_record.get("identity_base_name") or planned.get("identity_base_name") or primary),
-                    "identity_variant": str(library_record.get("identity_variant") or planned.get("identity_variant") or ""),
-                })
-
-            from app.chapters.assignment_utils import normalize_assignment
-            existing_assignments = list(getattr(chapter, "dialogue_assignments", []) or [])
-            for imported in plan["assignments"]:
-                start, end = int(imported["start"]), int(imported["end"])
-                exact = str(chapter.text or "")[start:end]
-                if exact != str(imported["text"]):
-                    raise ValueError("A dialogue passage changed during import. No changes were retained.")
-                base = {"start": start, "end": end, "text": exact, "source": "outsourced"}
-                normalized = normalize_assignment(base, [str(imported["speaker"])], "single")
-                normalized.update({
-                    "source": "outsourced", "confidence": float(imported["confidence"]),
-                    "series": series,
-                })
-                existing_assignments = [
-                    row for row in existing_assignments
-                    if not (isinstance(row, dict)
-                            and int(row.get("start", -1)) == start
-                            and int(row.get("end", -1)) == end)
-                ]
-                existing_assignments.append(normalized)
-            chapter.dialogue_assignments = sorted(
-                existing_assignments,
-                key=lambda row: (int(row.get("start", 0)), int(row.get("end", 0))),
-            )
-            state["characters"] = cast
-            state["modified_at"] = self._now()
-            project.save()
-            save_state(project.folder, state)
-        except Exception:
-            # Restore the live Project object as well as its files. A failed
-            # save_state after project.save() must not leave uncommitted dialogue
-            # assignments in memory for a later refresh/save to persist.
-            for item, chapter_number, assignments in chapter_memory_backup:
-                item.number = chapter_number
-                item.dialogue_assignments = assignments
-            rollback_errors = []
-            for backup_path, content in backups.items():
-                try:
-                    restore_snapshot(backup_path, content)
-                except Exception as rollback_error:
-                    log.exception("Could not restore Character Studio workbook import snapshot %s", backup_path)
-                    rollback_errors.append(rollback_error)
-            if rollback_errors:
-                raise RuntimeError(
-                    "Character workbook import failed and rollback was incomplete. "
-                    "Close the project without saving and inspect the project and Character Library backups."
-                ) from rollback_errors[0]
-            raise
-
-        if isinstance(sessions, dict):
-            sessions.clear()
-        return {
-            "imported": True,
-            "series": series,
-            "chapter_number": int(chapter.number),
-            "characters_merged": int(plan["summary"]["matched_characters"]),
-            "characters_created": int(plan["summary"]["new_characters"]),
-            "dialogue_assignments": len(plan["assignments"]),
-            "aliases_merged": int(plan["summary"]["aliases_to_merge"]),
-        }
+            if isinstance(sessions, dict):
+                sessions.clear()
+            return {
+                "imported": True,
+                "series": series,
+                "chapter_number": int(chapter.number),
+                "characters_merged": int(plan["summary"]["matched_characters"]),
+                "characters_created": int(plan["summary"]["new_characters"]),
+                "dialogue_assignments": len(plan["assignments"]),
+                "aliases_merged": int(plan["summary"]["aliases_to_merge"]),
+            }
 
     def _character_analysis_status(self, _payload: dict[str, Any]) -> dict[str, Any]:
         """Return only analysis status persisted for the active project."""
@@ -5558,6 +5583,7 @@ class PremiumV2Bridge(QObject):
             save_state(project.folder, state)
         return {"id": suggestion_id, "skipped": True}
 
+    @_serialize_character_identity_state
     def _character_create(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Create/update a real project cast member and synchronize its reusable series record."""
         project = self._active_project()
@@ -6269,7 +6295,7 @@ class PremiumV2Bridge(QObject):
                 save_state(project.folder, latest_state)
                 analysis_committed = True
                 state = latest_state
-            self._sync_saved_cast(project, items, state, update_names=False, update_voice=False)
+                self._sync_saved_cast(project, items, state, update_names=False, update_voice=False)
             method_label = (
                 "Local AI book-context analysis"
                 if ai_method.startswith("local_llm")
@@ -6326,6 +6352,7 @@ class PremiumV2Bridge(QObject):
         finally:
             self._analysis_cancel_events.pop(str(job_id), None)
 
+    @_serialize_character_identity_state
     def _character_assign(self, payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
         name = str(payload.get("name") or "").strip()
@@ -6418,6 +6445,7 @@ class PremiumV2Bridge(QObject):
         })
         return {"name": name, "voice_profile": item["voice_profile"], "saved": True}
 
+    @_serialize_character_identity_state
     def _character_update(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Persist edits to one character, selected by name and series identity."""
         project = self._active_project()
@@ -6597,6 +6625,7 @@ class PremiumV2Bridge(QObject):
                 raise
         return {"character": item, "saved": True}
 
+    @_serialize_character_identity_state
     def _character_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Dismiss one unreferenced project cast row and persist its re-detection exclusion."""
         project = self._active_project()
@@ -6913,6 +6942,7 @@ class PremiumV2Bridge(QObject):
             )
         return self._narrator_project_reset({"series": series})
 
+    @_serialize_character_identity_state
     def _sync_saved_cast(
         self,
         project,
@@ -7001,6 +7031,7 @@ class PremiumV2Bridge(QObject):
                 protected_names=assignment_names.get(series.casefold(), set()),
             )
 
+    @_serialize_character_identity_state
     def _character_library_bootstrap(self) -> None:
         """Migrate the old flat file transactionally and import already-saved project casts."""
         if getattr(self, "_character_library_bootstrapped", False):
@@ -7100,6 +7131,7 @@ class PremiumV2Bridge(QObject):
         self._character_library_bootstrap()
         return [self._character_library_ui_record(row) for row in list_reusable_deleted_characters()]
 
+    @_serialize_character_identity_state
     def _character_library_save(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._character_library_bootstrap()
         name = unicodedata.normalize("NFC", str(payload.get("name") or "")).strip()
@@ -7302,6 +7334,7 @@ class PremiumV2Bridge(QObject):
         return {"character": public, "count": len(list_reusable_characters()), "saved": True,
                 "project_updated": project_updated}
 
+    @_serialize_character_identity_state
     def _character_library_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._character_library_bootstrap()
         row_id = str(payload.get("id") or "").strip()
@@ -7315,6 +7348,7 @@ class PremiumV2Bridge(QObject):
         record = soft_delete_reusable_character(row_id)
         return {"deleted": 1, "count": len(list_reusable_characters()), "character": self._character_library_ui_record(record)}
 
+    @_serialize_character_identity_state
     def _character_library_delete_many(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._character_library_bootstrap()
         records = soft_delete_reusable_characters_many(payload.get("ids"))
@@ -7324,6 +7358,7 @@ class PremiumV2Bridge(QObject):
             "characters": [self._character_library_ui_record(row) for row in records],
         }
 
+    @_serialize_character_identity_state
     def _character_library_deleted_purge_many(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._character_library_bootstrap()
         if "ids" not in payload:
@@ -7335,6 +7370,7 @@ class PremiumV2Bridge(QObject):
             "characters": [self._character_library_ui_record(row) for row in records],
         }
 
+    @_serialize_character_identity_state
     def _character_library_deleted_clear_all(self, _payload: dict[str, Any]) -> dict[str, Any]:
         self._character_library_bootstrap()
         records = purge_deleted_reusable_characters_many(None)
@@ -7343,6 +7379,7 @@ class PremiumV2Bridge(QObject):
             "count": len(list_reusable_deleted_characters()),
         }
 
+    @_serialize_character_identity_state
     def _character_library_restore(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._character_library_bootstrap()
         row_id = str(payload.get("id") or "").strip()
@@ -7352,6 +7389,7 @@ class PremiumV2Bridge(QObject):
         return {"restored": True, "character": self._character_library_ui_record(record),
                 "count": len(list_reusable_characters())}
 
+    @_serialize_character_identity_state
     def _character_library_import(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._character_library_bootstrap()
         incoming = payload.get("characters")

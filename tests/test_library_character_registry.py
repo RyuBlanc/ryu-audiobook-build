@@ -227,13 +227,13 @@ class CharacterLibraryRegistryTests(unittest.TestCase):
             }, ensure_ascii=False), encoding="utf-8")
 
             before_active = list_characters(series="Star Series", path=store)
-            before_deleted = list_deleted_characters(series="Star Series", path=store)
+            before_deleted = list_deleted_characters(path=store)
 
             with self.assertRaisesRegex(ValueError, "already in use"):
                 restore_character("deleted-ren", path=store)
 
             self.assertEqual(list_characters(series="Star Series", path=store), before_active)
-            self.assertEqual(list_deleted_characters(series="Star Series", path=store), before_deleted)
+            self.assertEqual(list_deleted_characters(path=store), before_deleted)
             saved = json.loads(store.read_text(encoding="utf-8"))
             self.assertEqual([row["id"] for row in saved["active"]], ["active-mira"])
             self.assertEqual([row["id"] for row in saved["deleted"]], ["deleted-ren"])
