@@ -145,7 +145,10 @@ class LiveCharacterStudioContracts(unittest.TestCase):
     def test_ai_and_manual_assignments_keep_distinct_full_row_styles_in_both_chapter_views(self):
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("assignmentSource:assignment", adapter)
-        self.assertIn("row.assignmentSource === 'ai' ? ' is-assigned-ai' : ' is-assigned-manual'", adapter)
+        self.assertIn("row.assignmentSource === 'ai' ? ' is-assigned-ai' : (row.assignmentSource === 'outsourced' ? ' is-assigned-outsourced' : ' is-assigned-manual')", adapter)
+        self.assertIn(".ryu-live-passage.is-assigned-outsourced", adapter)
+        self.assertIn(".ai-sentence.confirmed-outsourced", adapter)
+        self.assertIn("Outsourced: ", adapter)
         self.assertIn("klass += ' confirmed confirmed-' + sourceKind", adapter)
         self.assertIn("AI-assigned: ", adapter)
         self.assertIn("Manually assigned: ", adapter)
