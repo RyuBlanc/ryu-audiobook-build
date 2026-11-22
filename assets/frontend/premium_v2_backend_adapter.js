@@ -4328,10 +4328,12 @@
     const result = await call('character.workbook.export', {scope:'book'});
     if (result?.cancelled) return;
     const destination = String(result.path || '').trim();
-    message('Complete-book workbook saved' + (destination ? ' to ' + destination : '') + ' · ' +
+    const confirmation = 'Complete-book workbook saved' + (destination ? ' to ' + destination : '') + ' · ' +
       Number(result.chapter_count || 0) + ' chapters · ' + Number(result.passage_count || 0) +
       ' total passages (' + Number(result.dialogue_count || 0) + ' dialogue, ' +
-      Number(result.narration_count || 0) + ' Narrator passages).');
+      Number(result.narration_count || 0) + ' Narrator passages).';
+    message(confirmation);
+    window.alert(confirmation);
   }
 
   async function importCompletedCharacterWorkbook() {
@@ -4398,10 +4400,12 @@
       ? ' across ' + Number(result.chapter_count || 0) + ' chapters (' +
         Number(result.chapters_updated || 0) + ' chapters received assignments)'
       : ' into Chapter ' + Number(result.chapter_number || 0);
-    message('Workbook imported into the Series Character Library' + importedScope + ' · ' +
+    const confirmation = 'Workbook imported into the Series Character Library' + importedScope + ' · ' +
       result.characters_merged + ' identities merged · ' + result.characters_created +
       ' new identities · ' + result.aliases_merged + ' aliases reconciled · ' +
-      result.dialogue_assignments + ' dialogue assignments added. Existing voice profiles were preserved.');
+      result.dialogue_assignments + ' dialogue assignments added. Existing voice profiles were preserved.';
+    message(confirmation);
+    window.alert(confirmation);
   }
 
   function renderCharacterStudioLive() {
@@ -9614,7 +9618,15 @@ function renderProductionMetadataGate(active) {
     document.addEventListener('click', event => {
       const button = event.target?.closest?.('button');
       if (!button) return;
-      const handle = fn => { event.preventDefault(); event.stopImmediatePropagation(); void Promise.resolve().then(fn).catch(error => message(error?.message || String(error), true)); };
+      const handle = (fn, errorTitle = '') => {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        void Promise.resolve().then(fn).catch(error => {
+          const detail = error?.message || String(error);
+          message(detail, true);
+          if (errorTitle) window.alert(errorTitle + '\n\n' + detail);
+        });
+      };
       if (button.id === 'addLibraryCharacter') { handle(() => openLibraryEditor(null)); return; }
       if (button.id === 'exportCharacterLibrary') { handle(() => exportCharacterLibraryFile()); return; }
       if (button.id === 'importCharacterLibrary') { handle(() => importCharacterLibraryFile()); return; }
@@ -9629,8 +9641,8 @@ function renderProductionMetadataGate(active) {
         const action = workbookAction.dataset.characterWorkbookAction ||
           (button.id === 'exportCharacterWorkbook' ? 'export' :
             button.id === 'importCharacterWorkbook' ? 'import' : '');
-        if (action === 'export') { handle(() => exportSelectedCharacterWorkbook()); return; }
-        if (action === 'import') { handle(() => importCompletedCharacterWorkbook()); return; }
+        if (action === 'export') { handle(() => exportSelectedCharacterWorkbook(), 'Workbook export failed.'); return; }
+        if (action === 'import') { handle(() => importCompletedCharacterWorkbook(), 'Workbook import failed.'); return; }
       }
       const mode = button.closest('#characters [data-char-mode]');
       if (mode) { handle(() => setCharacterStudioMode(mode.dataset.charMode)); return; }
