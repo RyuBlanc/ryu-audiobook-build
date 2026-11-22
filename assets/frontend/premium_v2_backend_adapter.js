@@ -622,6 +622,10 @@
   const chapterUndoStacks = new Map(), chapterRedoStacks = new Map();
   let chapterLastText = '', chapterHistoryGroupOpen = false, chapterHistoryGroupTimer = null, chapterHistoryApplying = false;
   let libraryCharacters = [], libraryEditorId = null, libraryEditorActive = false;
+  const characterLibrarySelection = window.__ryuCharacterLibrarySelection instanceof Set
+    ? window.__ryuCharacterLibrarySelection : (window.__ryuCharacterLibrarySelection = new Set());
+  const characterRecoverySelection = window.__ryuCharacterRecoverySelection instanceof Set
+    ? window.__ryuCharacterRecoverySelection : (window.__ryuCharacterRecoverySelection = new Set());
   let characterDialogueSuggestions = [], characterSuggestionsEpoch = 0;
   let characterNarrationSegments = [];
   let characterAnalysisStatus = {analyzed:false, updated_at:null, dialogue_total:0, unassigned_dialogue:0, suggestion_count:0};
@@ -5054,10 +5058,33 @@
     modal = document.createElement('div');
     modal.id = 'characterRecoveryModal';
     modal.style.cssText = 'display:none;position:fixed;inset:0;z-index:100000;background:rgba(4,7,12,.82);backdrop-filter:blur(7px);align-items:center;justify-content:center;padding:22px;box-sizing:border-box;';
-    modal.innerHTML = '<div role="dialog" aria-modal="true" aria-labelledby="characterRecoveryTitle" style="width:min(720px,96vw);max-height:84vh;overflow:auto;background:#10141d;border:1px solid #343b49;border-radius:16px;padding:22px;box-shadow:0 24px 80px rgba(0,0,0,.5);color:#f4f5f8"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><h2 id="characterRecoveryTitle" style="margin:0">Character Recovery Bin</h2><p class="muted" style="margin:6px 0 0">Deleted reusable characters remain here until restored.</p></div><button type="button" class="btn small secondary" data-close-character-recovery>Close</button></div><div id="characterRecoveryItems" style="display:grid;gap:10px;margin-top:18px"></div></div>';
+    modal.innerHTML = '<div role="dialog" aria-modal="true" aria-labelledby="characterRecoveryTitle" style="width:min(820px,96vw);max-height:84vh;overflow:auto;background:#10141d;border:1px solid #343b49;border-radius:16px;padding:22px;box-shadow:0 24px 80px rgba(0,0,0,.5);color:#f4f5f8"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><h2 id="characterRecoveryTitle" style="margin:0">Character Recovery Bin</h2><p class="muted" style="margin:6px 0 0">Restore deleted reusable characters or permanently clear unwanted entries. Clearing cannot be undone.</p></div><button type="button" class="btn small secondary" data-close-character-recovery>Close</button></div><div id="characterRecoveryToolbar"><span id="characterRecoverySelectedCount" class="muted">0 selected</span><button type="button" class="btn small secondary" data-select-all-deleted-characters>Select All</button><button type="button" class="btn small ghost" data-clear-deleted-selection>Clear Selection</button><button type="button" class="btn small danger" data-purge-selected-characters disabled>Clear Selected</button><button type="button" class="btn small danger" data-purge-all-characters disabled>Clear All</button></div><div id="characterRecoveryItems" style="display:grid;gap:10px;margin-top:12px"></div></div>';
     modal.addEventListener('click', async event => {
       if (event.target === modal || event.target.closest('[data-close-character-recovery]')) {
         modal.style.display = 'none';
+        return;
+      }
+      const selectAllDeleted = event.target.closest('[data-select-all-deleted-characters]');
+      if (selectAllDeleted) {
+        for (const row of libraryDeletedCharacters) characterRecoverySelection.add(String(row.id || ''));
+        updateCharacterRecoverySelectionControls();
+        await openCharacterRecoveryBin();
+        return;
+      }
+      const clearDeletedSelection = event.target.closest('[data-clear-deleted-selection]');
+      if (clearDeletedSelection) {
+        characterRecoverySelection.clear();
+        await openCharacterRecoveryBin();
+        return;
+      }
+      const purgeSelected = event.target.closest('[data-purge-selected-characters]');
+      if (purgeSelected) {
+        await purgeCharacterRecoveryRecords(false);
+        return;
+      }
+      const purgeAll = event.target.closest('[data-purge-all-characters]');
+      if (purgeAll) {
+        await purgeCharacterRecoveryRecords(true);
         return;
       }
       const restore = event.target.closest('[data-restore-character]');
@@ -5075,19 +5102,173 @@
         restore.disabled = false;
       }
     });
+    modal.addEventListener('change', event => {
+      const checkbox = event.target.closest('[data-select-deleted-character]');
+      if (!checkbox) return;
+      const id = String(checkbox.dataset.selectDeletedCharacter || '');
+      if (checkbox.checked) characterRecoverySelection.add(id);
+      else characterRecoverySelection.delete(id);
+      updateCharacterRecoverySelectionControls();
+    });
     document.body.appendChild(modal);
     return modal;
   }
   let libraryDeletedCharacters = [];
+
+  function updateCharacterRecoverySelectionControls() {
+    const count = characterRecoverySelection.size;
+    const label = $('characterRecoverySelectedCount');
+    const clearSelected = document.querySelector('[data-purge-selected-characters]');
+    const clearAll = document.querySelector('[data-purge-all-characters]');
+    if (label) label.textContent = count + ' selected';
+    if (clearSelected) {
+      clearSelected.textContent = 'Clear Selected (' + count + ')';
+      clearSelected.disabled = count === 0;
+    }
+    if (clearAll) {
+      clearAll.textContent = 'Clear All (' + libraryDeletedCharacters.length + ')';
+      clearAll.disabled = libraryDeletedCharacters.length === 0;
+    }
+    for (const checkbox of document.querySelectorAll('[data-select-deleted-character]')) {
+      checkbox.checked = characterRecoverySelection.has(String(checkbox.dataset.selectDeletedCharacter || ''));
+    }
+  }
+
+  async function purgeCharacterRecoveryRecords(clearAll) {
+    const ids = clearAll
+      ? libraryDeletedCharacters.map(row => String(row.id || '')).filter(Boolean)
+      : [...characterRecoverySelection];
+    if (!ids.length) {
+      updateCharacterRecoverySelectionControls();
+      return;
+    }
+    const names = libraryDeletedCharacters
+      .filter(row => ids.includes(String(row.id || '')))
+      .slice(0, 8)
+      .map(row => '• ' + String(row.name || 'Unnamed character'))
+      .join('\\n');
+    const remaining = ids.length > 8 ? '\\n• … and ' + (ids.length - 8) + ' more' : '';
+    const action = clearAll ? 'Clear the entire Recovery Bin' : 'Permanently clear the selected characters';
+    if (!window.confirm(action + ' (' + ids.length + ' record(s))? This cannot be undone.\\n\\n' + names + remaining)) return;
+    const selectedButton = document.querySelector('[data-purge-selected-characters]');
+    const allButton = document.querySelector('[data-purge-all-characters]');
+    if (selectedButton) selectedButton.disabled = true;
+    if (allButton) allButton.disabled = true;
+    try {
+      const result = clearAll
+        ? await call('character_library.deleted.clear_all')
+        : await call('character_library.deleted.purge_many', {ids});
+      characterRecoverySelection.clear();
+      await openCharacterRecoveryBin();
+      message('Permanently cleared ' + Number(result?.purged || ids.length) + ' character record(s) from Recovery.');
+    } finally {
+      updateCharacterRecoverySelectionControls();
+    }
+  }
+
   async function openCharacterRecoveryBin() {
     const modal = ensureCharacterRecoveryModal();
     libraryDeletedCharacters = await call('character_library.deleted.list');
+    const validDeletedIds = new Set(libraryDeletedCharacters.map(row => String(row.id || '')));
+    for (const selectedId of [...characterRecoverySelection]) {
+      if (!validDeletedIds.has(selectedId)) characterRecoverySelection.delete(selectedId);
+    }
     const list = $('characterRecoveryItems');
     if (list) list.innerHTML = libraryDeletedCharacters.map(c =>
-      '<article class="card" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:14px"><div><b>' + esc(c.name) + '</b><div class="muted" style="margin-top:4px">' + esc(librarySeriesName(c) || 'Unassigned series') + ' · ' + esc(c.voice || 'Unassigned') + '</div><div class="muted" style="margin-top:4px">' + esc((c.aliases || []).join(', ') || 'No aliases') + '</div></div><button type="button" class="btn small secondary" data-restore-character="' + esc(c.id) + '">Restore</button></article>'
+      '<article class="character-recovery-row">' +
+        '<input type="checkbox" data-select-deleted-character="' + esc(c.id) + '" aria-label="Select ' + esc(c.name) + '" ' +
+          (characterRecoverySelection.has(String(c.id)) ? 'checked' : '') + '>' +
+        '<div class="character-recovery-copy"><b title="' + esc(c.name) + '">' + esc(c.name) + '</b>' +
+          '<div class="muted" title="' + esc(librarySeriesName(c) || 'Unassigned series') + '">' + esc(librarySeriesName(c) || 'Unassigned series') + ' · ' + esc(c.voice || 'Unassigned') + '</div>' +
+          '<div class="muted" title="' + esc((c.aliases || []).join(', ') || 'No aliases') + '">' + esc((c.aliases || []).join(', ') || 'No aliases') + '</div></div>' +
+        '<button type="button" class="btn small secondary" data-restore-character="' + esc(c.id) + '">Restore</button>' +
+      '</article>'
     ).join('') || '<div class="card" style="padding:18px"><b>The Recovery Bin is empty</b><p class="muted">Characters you delete from the reusable library will appear here.</p></div>';
+    updateCharacterRecoverySelectionControls();
     modal.style.display = 'flex';
   }
+  function updateCharacterLibraryBulkControls() {
+    const toolbar = $('characterLibraryBulkActions');
+    if (!toolbar) return;
+    const count = characterLibrarySelection.size;
+    const countLabel = $('characterLibrarySelectedCount');
+    const moveButton = $('moveSelectedLibraryCharacters');
+    if (countLabel) countLabel.textContent = count + ' selected';
+    if (moveButton) {
+      moveButton.textContent = 'Move Selected to Recovery (' + count + ')';
+      moveButton.disabled = count === 0;
+      moveButton.title = count ? 'Move the selected character records to the Recovery Bin' : 'Select one or more characters first';
+    }
+    const grid = $('characterLibraryGrid');
+    for (const checkbox of grid?.querySelectorAll('[data-select-library]') || []) {
+      checkbox.checked = characterLibrarySelection.has(String(checkbox.dataset.selectLibrary || ''));
+    }
+  }
+
+  function ensureCharacterLibraryBulkControls() {
+    const grid = $('characterLibraryGrid');
+    if (!grid?.parentElement) return;
+    let toolbar = $('characterLibraryBulkActions');
+    if (!toolbar) {
+      toolbar = document.createElement('div');
+      toolbar.id = 'characterLibraryBulkActions';
+      toolbar.className = 'character-library-bulk-actions';
+      toolbar.innerHTML = '<span id="characterLibrarySelectedCount" class="muted">0 selected</span>' +
+        '<button type="button" class="btn small secondary" id="selectVisibleLibraryCharacters">Select All Visible</button>' +
+        '<button type="button" class="btn small ghost" id="clearLibraryCharacterSelection">Clear Selection</button>' +
+        '<button type="button" class="btn small danger" id="moveSelectedLibraryCharacters" disabled>Move Selected to Recovery (0)</button>';
+      grid.parentElement.insertBefore(toolbar, grid);
+      $('selectVisibleLibraryCharacters')?.addEventListener('click', () => {
+        for (const card of grid.querySelectorAll('.library-character-card[data-library-id]')) {
+          characterLibrarySelection.add(String(card.dataset.libraryId || ''));
+        }
+        updateCharacterLibraryBulkControls();
+      });
+      $('clearLibraryCharacterSelection')?.addEventListener('click', () => {
+        characterLibrarySelection.clear();
+        updateCharacterLibraryBulkControls();
+      });
+      $('moveSelectedLibraryCharacters')?.addEventListener('click', () => {
+        moveSelectedLibraryCharacters().catch(error => message(error?.message || String(error), true));
+      });
+    }
+    if (grid.dataset.ryuCharacterSelectionBound !== 'true') {
+      grid.addEventListener('change', event => {
+        const checkbox = event.target.closest('[data-select-library]');
+        if (!checkbox) return;
+        const id = String(checkbox.dataset.selectLibrary || '');
+        if (!id) return;
+        if (checkbox.checked) characterLibrarySelection.add(id);
+        else characterLibrarySelection.delete(id);
+        updateCharacterLibraryBulkControls();
+      });
+      grid.dataset.ryuCharacterSelectionBound = 'true';
+    }
+    updateCharacterLibraryBulkControls();
+  }
+
+  async function moveSelectedLibraryCharacters() {
+    const ids = [...characterLibrarySelection];
+    if (!ids.length) {
+      updateCharacterLibraryBulkControls();
+      return;
+    }
+    const selected = libraryCharacters.filter(row => ids.includes(String(row.id)));
+    const names = selected.slice(0, 8).map(row => '• ' + String(row.name || 'Unnamed character')).join('\\n');
+    const remaining = selected.length > 8 ? '\\n• … and ' + (selected.length - 8) + ' more' : '';
+    if (!window.confirm('Move ' + ids.length + ' selected character(s) to the Recovery Bin? Their aliases, assigned voice, dialogue samples and pronunciation details will be retained. Voice Studio profile files will not be deleted.\\n\\n' + names + remaining)) return;
+    const button = $('moveSelectedLibraryCharacters');
+    if (button) button.disabled = true;
+    try {
+      const result = await call('character_library.delete_many', {ids});
+      characterLibrarySelection.clear();
+      await refreshCharacterLibrary();
+      message('Moved ' + Number(result?.deleted || ids.length) + ' character(s) to the Recovery Bin. Their saved voice profiles were left untouched.');
+    } finally {
+      updateCharacterLibraryBulkControls();
+    }
+  }
+
   function ensureCharacterLibraryViewControls() {
     const grid = $('characterLibraryGrid');
     if (!grid) return;
@@ -5116,13 +5297,53 @@
     if (!document.getElementById('ryuCharacterLibraryViewStyles')) {
       const style = document.createElement('style');
       style.id = 'ryuCharacterLibraryViewStyles';
-      style.textContent = '#characterLibraryGrid.character-library-compact{display:flex!important;flex-direction:column!important;gap:8px!important}#characterLibraryGrid.character-library-compact>.library-character-card{display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:16px;padding:14px 16px;flex-wrap:wrap}#characterLibraryGrid.character-library-compact .library-character-top{min-width:190px}#characterLibraryGrid.character-library-compact .alias-row{max-width:320px}#characterLibraryGrid.character-library-compact .library-character-meta{display:flex;gap:10px;flex-wrap:wrap}';
+      style.textContent = `
+        #characterLibraryBulkActions{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:0 0 12px;padding:10px 12px;border:1px solid rgba(174,184,202,.14);border-radius:12px;background:rgba(255,255,255,.025)}
+        #characterLibraryBulkActions .muted{margin-right:auto;font-size:12px}
+        #characterLibraryBulkActions button:disabled,#characterRecoveryToolbar button:disabled{opacity:.45;cursor:not-allowed}
+        #characterLibraryGrid:not(.character-library-compact){display:grid!important;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));align-items:stretch;gap:14px}
+        #characterLibraryGrid .library-character-card{box-sizing:border-box;min-width:0;min-height:344px;height:344px;max-height:344px;overflow:hidden;display:grid;grid-template-rows:48px 42px 58px 48px 42px 34px;align-content:space-between;gap:6px;padding:14px 15px}
+        #characterLibraryGrid .library-character-top{display:grid;grid-template-columns:22px 38px minmax(0,1fr);align-items:center;gap:9px;min-width:0;overflow:hidden}
+        #characterLibraryGrid .library-character-select{width:16px;height:16px;margin:0;accent-color:#8e9db7;cursor:pointer}
+        #characterLibraryGrid .library-character-top .avatar{width:36px;height:36px;display:grid;place-items:center;flex:0 0 36px}
+        #characterLibraryGrid .library-character-name-block{min-width:0;overflow:hidden}
+        #characterLibraryGrid .library-character-top h3{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0 0 3px}
+        #characterLibraryGrid .library-character-top p{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0}
+        #characterLibraryGrid .alias-row{display:flex;align-items:center;align-content:center;gap:5px;flex-wrap:nowrap;min-width:0;max-height:42px;overflow:hidden}
+        #characterLibraryGrid .alias-row .alias-tag{display:block;min-width:0;max-width:112px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto}
+        #characterLibraryGrid .library-character-assignment{box-sizing:border-box;min-width:0;min-height:58px;height:58px;display:grid;grid-template-rows:13px minmax(0,1fr);align-content:center;gap:4px;padding:8px 10px;border:1px solid rgba(177,190,211,.17);border-radius:10px;background:rgba(185,198,219,.055)}
+        #characterLibraryGrid .library-character-assignment-label{font-size:9px;letter-spacing:.09em;font-weight:700;color:#aeb8c9;white-space:nowrap}
+        #characterLibraryGrid .library-character-assignment-value{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:600}
+        #characterLibraryGrid .library-character-sample{box-sizing:border-box;min-width:0;height:48px;max-height:48px;overflow:hidden;margin:0;padding:3px 1px;font-size:11px;line-height:1.45;color:var(--muted,#9da7b8);display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}
+        #characterLibraryGrid .library-character-meta{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:center;gap:4px;min-width:0;overflow:hidden}
+        #characterLibraryGrid .library-character-meta span{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px}
+        #characterLibraryGrid .library-character-actions{display:flex!important;align-items:center;gap:5px!important;flex-wrap:nowrap!important;min-width:0;overflow:hidden}
+        #characterLibraryGrid .library-character-actions button{box-sizing:border-box;min-width:0;max-width:100%;flex:1 1 0;padding:7px 5px;font-size:10px;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        #characterLibraryGrid.character-library-compact{display:grid!important;grid-template-columns:minmax(1120px,1fr);gap:8px!important;overflow-x:auto;overflow-y:hidden;padding-bottom:5px}
+        #characterLibraryGrid.character-library-compact>.library-character-card{display:grid;grid-template-columns:175px 150px 190px minmax(190px,1.4fr) 200px 280px;align-items:center;justify-content:stretch;gap:10px;padding:9px 12px;min-width:1120px;width:100%;height:102px;min-height:102px;max-height:102px}
+        #characterLibraryGrid.character-library-compact .library-character-top{grid-template-columns:18px 30px minmax(0,1fr);gap:6px}
+        #characterLibraryGrid.character-library-compact .library-character-top .avatar{width:28px;height:28px}
+        #characterLibraryGrid.character-library-compact .alias-row{max-height:56px;flex-wrap:wrap;align-content:center;gap:4px}
+        #characterLibraryGrid.character-library-compact .alias-row .alias-tag{max-width:138px}
+        #characterLibraryGrid.character-library-compact .library-character-assignment{height:62px;min-height:62px}
+        #characterLibraryGrid.character-library-compact .library-character-sample{height:60px;max-height:60px;-webkit-line-clamp:3;line-clamp:3}
+        #characterLibraryGrid.character-library-compact .library-character-meta{grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}
+        #characterLibraryGrid.character-library-compact .library-character-actions{gap:4px!important}
+        #characterLibraryGrid.character-library-compact .library-character-actions button{padding:6px 4px;font-size:10px}
+        #characterRecoveryToolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:16px;padding:10px;border:1px solid rgba(174,184,202,.14);border-radius:12px;background:rgba(255,255,255,.025)}
+        #characterRecoveryToolbar .muted{margin-right:auto;font-size:12px}
+        #characterRecoveryItems .character-recovery-row{display:grid;grid-template-columns:20px minmax(0,1fr) auto;align-items:center;gap:12px;padding:13px;border:1px solid rgba(174,184,202,.12);border-radius:11px;background:rgba(255,255,255,.025)}
+        #characterRecoveryItems .character-recovery-row input{accent-color:#8e9db7}
+        #characterRecoveryItems .character-recovery-copy{min-width:0;overflow:hidden}
+        #characterRecoveryItems .character-recovery-copy>*{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        @media(max-width:760px){#characterLibraryBulkActions{align-items:stretch}#characterLibraryBulkActions .muted{width:100%}}
+      `;
       document.head.appendChild(style);
     }
     const compact = window.__ryuCharacterLibraryViewMode === 'compact';
     grid.classList.toggle('character-library-compact', compact);
-    grid.style.display = compact ? 'flex' : '';
-    grid.style.flexDirection = compact ? 'column' : '';
+    grid.style.display = 'grid';
+    grid.style.flexDirection = '';
     for (const button of document.querySelectorAll('button[data-character-view-mode]')) {
       const active = button.dataset.characterViewMode === (compact ? 'compact' : 'cards');
       button.classList.toggle('active', active);
@@ -5134,6 +5355,7 @@
     ensureCharacterDialogueSampleField();
     ensureCharacterRecoveryButton();
     ensureCharacterLibraryViewControls();
+    ensureCharacterLibraryBulkControls();
     const seriesFilter = $('characterSeriesFilter');
     const previousSeries = seriesFilter?.value || 'All series';
     const seriesNames = [...new Set(libraryCharacters.map(librarySeriesName).filter(Boolean))].sort((a,b) => a.localeCompare(b));
@@ -5150,11 +5372,56 @@
     const grid = $('characterLibraryGrid'), query = ($('characterLibrarySearch')?.value || '').trim().toLowerCase(), series = seriesFilter?.value || 'All series';
     const rows = libraryCharacters.filter(c => (!query || [c.name,c.short,c.voice,c.series,c.scope,...(c.aliases||[])].join(' ').toLowerCase().includes(query)) && (series === 'All series' || librarySeriesName(c) === series || c.scope === series));
     if (grid) grid.innerHTML = rows.map(c => {
+      const id = String(c.id || '');
+      const name = String(c.name || 'Unnamed character');
+      const seriesName = librarySeriesName(c) || 'Unassigned series';
+      const voiceName = String(c.voice || 'Unassigned');
+      const aliases = Array.isArray(c.aliases) ? c.aliases : [];
+      const aliasTitle = aliases.join(', ') || 'No aliases';
+      const aliasHtml = aliases.slice(0, 3).map(value =>
+        '<span class="alias-tag" title="' + esc(value) + '">' + esc(value) + '</span>'
+      ).join('') + (aliases.length > 3
+        ? '<span class="alias-tag" title="' + esc(aliasTitle) + '">+' + (aliases.length - 3) + '</span>' : '');
       const sample = String(c.dialogue_sample || '').trim();
-      const sampleText = sample ? '<p class="muted" style="margin:10px 0 0;line-height:1.5">“' + esc(sample.slice(0,220)) + (sample.length > 220 ? '…' : '') + '”</p>' : '';
-      return '<article class="library-character-card" data-library-id="' + esc(c.id) + '"><div class="library-character-top"><span class="avatar">' + esc((c.short||c.name||'?').slice(0,1)) + '</span><div><h3>' + esc(c.name) + '</h3><p>' + esc(librarySeriesName(c)||'Unassigned series') + ' · ' + esc(c.voice||'Unassigned') + '</p></div></div><div class="alias-row">' + ((c.aliases||[]).map(x=>'<span class="alias-tag">' + esc(x) + '</span>').join('') || '<span class="alias-tag">No aliases</span>') + '</div>' + sampleText + '<div class="library-character-meta"><span>' + Number(c.lines||0) + ' assigned lines</span><span>' + Number(c.chapters||0) + ' chapters</span><span>' + Number(c.confidence??100) + '% confidence</span><span>' + esc(librarySeriesName(c)||'Unassigned series') + '</span></div><div class="library-character-actions" style="display:flex;gap:7px;flex-wrap:wrap"><button type="button" class="btn small secondary" data-test-library="' + esc(c.id) + '">▶ Test</button><button type="button" class="btn small secondary" data-edit-library="' + esc(c.id) + '">Edit</button><button type="button" class="btn small secondary" data-character-studio="' + esc(c.id) + '">Character Studio</button><button type="button" class="btn small ghost library-delete" data-delete-library="' + esc(c.id) + '">Delete</button></div></article>';
+      const sampleText = sample
+        ? '“' + sample.slice(0, 220) + (sample.length > 220 ? '…' : '') + '”'
+        : 'No dialogue sample saved.';
+      const sourceTitle = String(c.source_project_title || '').trim() || 'Shared Character Library';
+      const assignedLines = Number(c.lines || 0);
+      const chapterCount = Number(c.chapters || 0);
+      const confidence = Number(c.confidence ?? 100);
+      return '<article class="library-character-card" data-library-id="' + esc(id) + '">' +
+        '<div class="library-character-top">' +
+          '<input class="library-character-select" type="checkbox" data-select-library="' + esc(id) + '" aria-label="Select ' + esc(name) + '" title="Select character" ' +
+            (characterLibrarySelection.has(id) ? 'checked' : '') + '>' +
+          '<span class="avatar">' + esc((c.short || name || '?').slice(0,1)) + '</span>' +
+          '<div class="library-character-name-block"><h3 title="' + esc(name) + '">' + esc(name) + '</h3>' +
+            '<p title="' + esc(seriesName) + '">' + esc(seriesName) + '</p></div>' +
+        '</div>' +
+        '<div class="alias-row" title="' + esc(aliasTitle) + '">' +
+          (aliasHtml || '<span class="alias-tag">No aliases</span>') +
+        '</div>' +
+        '<div class="library-character-assignment" title="Assigned voice: ' + esc(voiceName) + '">' +
+          '<span class="library-character-assignment-label">ASSIGNED VOICE</span>' +
+          '<span class="library-character-assignment-value">' + esc(voiceName) + '</span>' +
+        '</div>' +
+        '<p class="library-character-sample" title="' + esc(sample) + '">' + esc(sampleText) + '</p>' +
+        '<div class="library-character-meta">' +
+          '<span title="' + assignedLines + ' assigned lines">' + assignedLines + ' lines</span>' +
+          '<span title="' + chapterCount + ' chapters">' + chapterCount + ' chapters</span>' +
+          '<span title="' + confidence + '% confidence">' + confidence + '% confidence</span>' +
+          '<span title="' + esc(sourceTitle) + '">' + esc(sourceTitle) + '</span>' +
+        '</div>' +
+        '<div class="library-character-actions">' +
+          '<button type="button" class="btn small secondary" data-test-library="' + esc(id) + '"' + (voiceName === 'Unassigned' ? ' disabled' : '') + '>▶ Test</button>' +
+          '<button type="button" class="btn small secondary" data-edit-library="' + esc(id) + '">Edit</button>' +
+          '<button type="button" class="btn small secondary" data-character-studio="' + esc(id) + '">Studio</button>' +
+          '<button type="button" class="btn small ghost library-delete" data-delete-library="' + esc(id) + '">Delete</button>' +
+        '</div>' +
+      '</article>';
     }).join('') || '<div class="card"><b>No saved characters found</b><p class="muted">Import a cast or run Character Studio analysis on an imported book. Existing saved casts are indexed automatically; no sample characters are inserted.</p></div>';
     applyCharacterLibraryViewMode(grid);
+    updateCharacterLibraryBulkControls();
     renderCharacterStudioLive();
     return libraryCharacters;
   }

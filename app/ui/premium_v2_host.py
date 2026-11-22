@@ -45,6 +45,8 @@ from app.core.character_library import (
     prune_invalid_character_records,
     restore_character as restore_reusable_character,
     soft_delete_character as soft_delete_reusable_character,
+    soft_delete_characters_many as soft_delete_reusable_characters_many,
+    purge_deleted_characters_many as purge_deleted_reusable_characters_many,
     sync_characters as sync_reusable_characters,
     update_character as update_reusable_character,
 )
@@ -486,6 +488,9 @@ class PremiumV2Bridge(QObject):
                 "character_library.restore": self._character_library_restore,
                 "character_library.save": self._character_library_save,
                 "character_library.delete": self._character_library_delete,
+                "character_library.delete_many": self._character_library_delete_many,
+                "character_library.deleted.purge_many": self._character_library_deleted_purge_many,
+                "character_library.deleted.clear_all": self._character_library_deleted_clear_all,
                 "character_library.import": self._character_library_import,
                 "character.analyze": self._character_analyze,
                 "character.assign": self._character_assign,
@@ -659,6 +664,9 @@ class PremiumV2Bridge(QObject):
             "character_library.restore": True,
             "character_library.save": True,
             "character_library.delete": True,
+            "character_library.delete_many": True,
+            "character_library.deleted.purge_many": True,
+            "character_library.deleted.clear_all": True,
             "character_library.import": True,
             "character.analyze": True,
             "character.assign": True,
@@ -6815,6 +6823,32 @@ class PremiumV2Bridge(QObject):
             raise ValueError("Choose a character from the reusable Character Library.")
         record = soft_delete_reusable_character(row_id)
         return {"deleted": 1, "count": len(list_reusable_characters()), "character": self._character_library_ui_record(record)}
+
+    def _character_library_delete_many(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._character_library_bootstrap()
+        records = soft_delete_reusable_characters_many(payload.get("ids"))
+        return {
+            "deleted": len(records),
+            "count": len(list_reusable_characters()),
+            "characters": [self._character_library_ui_record(row) for row in records],
+        }
+
+    def _character_library_deleted_purge_many(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._character_library_bootstrap()
+        records = purge_deleted_reusable_characters_many(payload.get("ids"))
+        return {
+            "purged": len(records),
+            "count": len(list_reusable_deleted_characters()),
+            "characters": [self._character_library_ui_record(row) for row in records],
+        }
+
+    def _character_library_deleted_clear_all(self, _payload: dict[str, Any]) -> dict[str, Any]:
+        self._character_library_bootstrap()
+        records = purge_deleted_reusable_characters_many(None)
+        return {
+            "purged": len(records),
+            "count": len(list_reusable_deleted_characters()),
+        }
 
     def _character_library_restore(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._character_library_bootstrap()

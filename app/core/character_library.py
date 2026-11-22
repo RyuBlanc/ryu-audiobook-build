@@ -385,3 +385,101 @@ def restore_character(record_id: str, path: Path | None = None) -> dict:
     store["active"].append(record)
     _write_store(store, target)
     return dict(record)
+
+
+
+def _validated_record_ids(record_ids: Any) -> list[str]:
+    """Validate and de-duplicate explicit Character Library record IDs."""
+    if not isinstance(record_ids, (list, tuple, set)):
+        raise ValueError("Supply one or more Character Library record IDs.")
+    values = [str(value or "").strip() for value in record_ids]
+    if any(not value for value in values):
+        raise ValueError("Character Library record IDs cannot be empty.")
+    selected = list(dict.fromkeys(values))
+    if not selected:
+        raise ValueError("Select at least one character.")
+    return selected
+
+
+def soft_delete_characters_many(
+    record_ids: list[str] | tuple[str, ...] | set[str],
+    path: Path | None = None,
+) -> list[dict]:
+    """Move multiple active character records to Recovery in one atomic write.
+
+    Every requested ID must still be active. A stale or invalid selection fails
+    before the store is modified, preventing a misleading partial deletion.
+    Voice profile files are not touched; only reusable Character Library rows
+    move between the active and deleted collections.
+    """
+    selected = _validated_record_ids(record_ids)
+    target = path or character_library_path()
+    store = _read_store(target)
+    active_by_id = {
+        str(row.get("id") or ""): row
+        for row in store["active"]
+        if str(row.get("id") or "")
+    }
+    missing = [record_id for record_id in selected if record_id not in active_by_id]
+    if missing:
+        raise KeyError(
+            "One or more selected characters are no longer active. Refresh the Character Library and try again."
+        )
+
+    selected_set = set(selected)
+    deleted_at = _timestamp()
+    moved: list[dict] = []
+    remaining: list[dict] = []
+    for row in store["active"]:
+        if str(row.get("id") or "") not in selected_set:
+            remaining.append(row)
+            continue
+        record = dict(row)
+        record["deleted_at"] = deleted_at
+        record["updated_at"] = deleted_at
+        store["deleted"].append(record)
+        moved.append(dict(record))
+
+    store["active"] = remaining
+    _write_store(store, target)
+    return moved
+
+
+def purge_deleted_characters_many(
+    record_ids: list[str] | tuple[str, ...] | set[str] | None = None,
+    path: Path | None = None,
+) -> list[dict]:
+    """Permanently purge selected Recovery rows, or all rows when IDs are None.
+
+    Passing an explicit empty selection is rejected. Passing None is the
+    deliberate Clear All operation. The active Character Library is untouched.
+    """
+    target = path or character_library_path()
+    store = _read_store(target)
+    if record_ids is None:
+        selected = [str(row.get("id") or "") for row in store["deleted"]]
+        selected = [value for value in selected if value]
+        if not selected:
+            return []
+    else:
+        selected = _validated_record_ids(record_ids)
+
+    deleted_by_id = {
+        str(row.get("id") or ""): row
+        for row in store["deleted"]
+        if str(row.get("id") or "")
+    }
+    missing = [record_id for record_id in selected if record_id not in deleted_by_id]
+    if missing:
+        raise KeyError(
+            "One or more selected characters are no longer in Recovery. Refresh the Recovery Bin and try again."
+        )
+
+    selected_set = set(selected)
+    purged = [dict(row) for row in store["deleted"] if str(row.get("id") or "") in selected_set]
+    store["deleted"] = [
+        row for row in store["deleted"]
+        if str(row.get("id") or "") not in selected_set
+    ]
+    _write_store(store, target)
+    return purged

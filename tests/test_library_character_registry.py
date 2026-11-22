@@ -12,6 +12,8 @@ from app.core.character_library import (
     list_characters, list_deleted_characters, restore_character,
     soft_delete_character, sync_characters, update_character,
     prune_invalid_character_records,
+    soft_delete_characters_many,
+    purge_deleted_characters_many,
 )
 from app.core.paths import library_root as real_library_root
 from app.core.project import Project, delete_project
@@ -121,6 +123,85 @@ class CharacterLibraryRegistryTests(unittest.TestCase):
             self.assertEqual(active_a[0]["aliases"], ["Captain Mira"])
             self.assertEqual([row["primary_name"] for row in active_b], ["Magic"])
             self.assertEqual({row["id"] for row in deleted}, {"bad-magic", "bad-any"})
+
+
+    def test_bulk_soft_delete_moves_only_selected_records_and_preserves_voice_data(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-character-bulk-delete-") as tmp:
+            store = Path(tmp) / "character-library.json"
+            sync_characters(
+                "Bulk Series",
+                [
+                    {"name": "Mira", "aliases": ["Captain Mira"], "voice": "Voice A",
+                     "examples": ["I will protect you."], "pronunciation": "Mee-ra"},
+                    {"name": "Ren", "aliases": ["Renji"], "voice": "Voice B",
+                     "examples": ["Come with me."]},
+                    {"name": "Akari", "voice": "Voice C"},
+                ],
+                path=store,
+            )
+            active = list_characters(path=store)
+            selected = [active[0]["id"], active[2]["id"]]
+            moved = soft_delete_characters_many(selected, path=store)
+
+            self.assertEqual({row["id"] for row in moved}, set(selected))
+            self.assertEqual(
+                {row["primary_name"] for row in list_characters(path=store)},
+                {"Ren"},
+            )
+            recovery = list_deleted_characters(path=store)
+            self.assertEqual({row["id"] for row in recovery}, set(selected))
+            mira = next(row for row in recovery if row["primary_name"] == "Mira")
+            self.assertEqual(mira["aliases"], ["Captain Mira"])
+            self.assertEqual(mira["voice_name"], "Voice A")
+            self.assertEqual(mira["dialogue_sample"], "I will protect you.")
+            self.assertEqual(mira["pronunciation"], "Mee-ra")
+            self.assertTrue(mira.get("deleted_at"))
+
+    def test_bulk_soft_delete_rejects_stale_ids_without_partially_mutating_store(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-character-bulk-stale-") as tmp:
+            store = Path(tmp) / "character-library.json"
+            sync_characters("Series", [{"name": "Mira"}, {"name": "Ren"}], path=store)
+            before = list_characters(path=store)
+            with self.assertRaises(KeyError):
+                soft_delete_characters_many([before[0]["id"], "stale-id"], path=store)
+            self.assertEqual(list_characters(path=store), before)
+            self.assertEqual(list_deleted_characters(path=store), [])
+
+    def test_recovery_purge_selected_and_clear_all_never_touch_active_records(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-character-purge-") as tmp:
+            store = Path(tmp) / "character-library.json"
+            sync_characters(
+                "Series",
+                [{"name": "Mira", "voice": "Voice A"},
+                 {"name": "Ren", "voice": "Voice B"},
+                 {"name": "Akari", "voice": "Voice C"}],
+                path=store,
+            )
+            active = list_characters(path=store)
+            soft_delete_characters_many([active[0]["id"], active[1]["id"]], path=store)
+            deleted = list_deleted_characters(path=store)
+            first = purge_deleted_characters_many([deleted[0]["id"]], path=store)
+            self.assertEqual(len(first), 1)
+            self.assertEqual(len(list_deleted_characters(path=store)), 1)
+            self.assertEqual(len(list_characters(path=store)), 1)
+
+            all_purged = purge_deleted_characters_many(None, path=store)
+            self.assertEqual(len(all_purged), 1)
+            self.assertEqual(list_deleted_characters(path=store), [])
+            self.assertEqual(list_characters(path=store), active[2:])
+
+    def test_recovery_purge_rejects_unknown_ids_and_empty_explicit_selection(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-character-purge-validation-") as tmp:
+            store = Path(tmp) / "character-library.json"
+            sync_characters("Series", [{"name": "Mira"}], path=store)
+            active = list_characters(path=store)
+            soft_delete_characters_many([active[0]["id"]], path=store)
+            deleted = list_deleted_characters(path=store)
+            with self.assertRaises(KeyError):
+                purge_deleted_characters_many(["unknown"], path=store)
+            with self.assertRaises(ValueError):
+                purge_deleted_characters_many([], path=store)
+            self.assertEqual(list_deleted_characters(path=store), deleted)
 
 
 class ProjectDeletionHistoryTests(unittest.TestCase):
