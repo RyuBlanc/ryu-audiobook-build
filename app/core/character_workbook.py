@@ -235,6 +235,277 @@ def create_character_workbook_bytes(metadata, passages, chapter_text):
             )
     return output.getvalue()
 
+
+def character_workbook_book_revision(chapters):
+    """Stable revision for the exact ordered chapter set in a complete-book workbook."""
+    rows = []
+    seen_ids, seen_numbers = set(), set()
+    for row in chapters or []:
+        if not isinstance(row, dict):
+            raise ValueError("Every book-workbook chapter reference must be an object.")
+        chapter_id = _clean(row.get("chapter_id"))
+        revision = _clean(row.get("chapter_revision"))
+        try:
+            number = int(row.get("chapter_number"))
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("A book-workbook chapter has an invalid chapter number.")
+        title = _clean(row.get("chapter_title"))
+        if not chapter_id or not revision or number < 1:
+            raise ValueError("Every book-workbook chapter needs an ID, number and source revision.")
+        if chapter_id in seen_ids or number in seen_numbers:
+            raise ValueError("The book-workbook chapter register contains duplicate chapter identities.")
+        seen_ids.add(chapter_id)
+        seen_numbers.add(number)
+        rows.append({
+            "chapter_id": chapter_id,
+            "chapter_number": number,
+            "chapter_title": title,
+            "chapter_revision": revision,
+        })
+    rows.sort(key=lambda item: (item["chapter_number"], item["chapter_id"]))
+    if not rows:
+        raise ValueError("The active book has no chapters to export.")
+    encoded = json.dumps(rows, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return sha256(encoded).hexdigest()
+
+
+def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
+    """Create a v2 GPT workbook containing every chapter, passage and source context."""
+    chapter_rows = []
+    chapter_by_id = {}
+    for source in chapters or []:
+        row = dict(source)
+        chapter_id = _clean(row.get("chapter_id"))
+        try:
+            number = int(row.get("chapter_number"))
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("Every exported chapter needs a valid chapter number.")
+        title = _clean(row.get("chapter_title"))
+        revision = _clean(row.get("chapter_revision"))
+        text = str(row.get("text") or "")
+        if not chapter_id or not revision or number < 1 or chapter_id in chapter_by_id:
+            raise ValueError("The complete-book export contains an invalid or duplicate chapter reference.")
+        row.update({
+            "chapter_id": chapter_id, "chapter_number": number,
+            "chapter_title": title, "chapter_revision": revision, "text": text,
+        })
+        row["context_sha256"] = sha256(text.encode("utf-8")).hexdigest()
+        row["word_count"] = len(re.findall(r"\S+", text))
+        row["passage_count"] = 0
+        chapter_rows.append(row)
+        chapter_by_id[chapter_id] = row
+    if not chapter_rows:
+        raise ValueError("The active book has no chapters to export.")
+    chapter_rows.sort(key=lambda item: (item["chapter_number"], item["chapter_id"]))
+    book_revision = character_workbook_book_revision(chapter_rows)
+
+    dialogue_headers = [
+        "Passage ID", "Chapter ID", "Chapter Number", "Chapter Title", "Passage Type", "Dialogue Text",
+        "GPT Assigned Character", "GPT Confidence (0–1)", "Existing Assignment (Reference)",
+        "Assignment Source (Reference)", "Confidence (Reference)", "Start (Reference)",
+        "End (Reference)", "Chapter Revision (Reference)", "Evidence / Notes (GPT)",
+    ]
+    dialogue = [dialogue_headers]
+    seen_passages = set()
+    for source in passages or []:
+        row = dict(source)
+        chapter_id = _clean(row.get("chapter_id"))
+        chapter = chapter_by_id.get(chapter_id)
+        if chapter is None:
+            raise ValueError("A passage belongs to a chapter outside the complete-book chapter register.")
+        text = str(row.get("text") or "")
+        if len(text.encode("utf-16-le")) // 2 > 32767:
+            raise ValueError("A dialogue passage exceeds Excel's 32,767-character cell limit. Split the passage before exporting.")
+        narration = str(row.get("kind") or "").casefold() == "narration"
+        speakers = row.get("existing_speakers") or row.get("speakers") or []
+        if isinstance(speakers, str):
+            speakers = [speakers]
+        try:
+            start, end = int(row.get("start")), int(row.get("end"))
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("A source passage has invalid offsets and cannot be exported safely.")
+        passage_id = _clean(row.get("passage_id"))
+        if not passage_id or passage_id in seen_passages or start < 0 or end <= start:
+            raise ValueError("Every source passage needs a unique Passage ID and valid offsets.")
+        if str(chapter["text"])[start:end] != text:
+            raise ValueError("A source passage does not match the chapter source text. Refresh Character Studio and export again.")
+        if _clean(row.get("chapter_revision")) not in {"", chapter["chapter_revision"]}:
+            raise ValueError("A source passage revision does not match its Chapter Register entry.")
+        seen_passages.add(passage_id)
+        dialogue.append([
+            passage_id, chapter_id, chapter["chapter_number"], chapter["chapter_title"],
+            "Narration" if narration else "Dialogue", text,
+            "Narrator" if narration else "", "",
+            " + ".join(str(value) for value in speakers if str(value or "").strip()),
+            str(row.get("assignment_source") or row.get("source") or ""),
+            row.get("confidence") if row.get("confidence") is not None else "",
+            start, end, chapter["chapter_revision"], "",
+        ])
+        chapter["passage_count"] += 1
+    if len(dialogue) - 1 > MAX_ROWS:
+        raise ValueError("The complete book exceeds the 50,000 passage workbook export limit.")
+
+    char_headers = ["Full Name"] + ["Alias %d" % n for n in range(1, ALIAS_COLUMNS + 1)] + [
+        "Version / Age Variant", "Character Notes", "Included in This Book?",
+    ]
+    characters = [char_headers] + [[""] * len(char_headers) for _ in range(40)]
+
+    chapter_register = [[
+        "Chapter ID", "Chapter Number", "Chapter Title", "Chapter Revision (Reference)",
+        "Passage Count (Reference)", "Word Count (Reference)", "Context SHA256 (Reference)",
+    ]]
+    context = [[
+        "Chapter ID", "Chapter Number", "Chapter Title", "Context Part",
+        "Context Parts", "Chapter Text",
+    ]]
+    total_context_rows = 0
+    for chapter in chapter_rows:
+        chapter_register.append([
+            chapter["chapter_id"], chapter["chapter_number"], chapter["chapter_title"],
+            chapter["chapter_revision"], chapter["passage_count"], chapter["word_count"],
+            chapter["context_sha256"],
+        ])
+        source_text = chapter["text"]
+        chunks = [source_text[i:i + CHUNK] for i in range(0, len(source_text), CHUNK)] or [""]
+        for part, chunk in enumerate(chunks, 1):
+            context.append([
+                chapter["chapter_id"], chapter["chapter_number"], chapter["chapter_title"],
+                part, len(chunks), chunk,
+            ])
+            total_context_rows += 1
+            if total_context_rows > MAX_ROWS:
+                raise ValueError("The book's Chapter Context exceeds the 50,000-row workbook limit.")
+
+    reference_headers = [
+        "Canonical Character", "Known Alias", "Identity Base Name", "Version / Age Variant",
+    ]
+    reference_rows = [reference_headers]
+    for source in metadata.get("series_character_reference") or []:
+        if not isinstance(source, dict):
+            continue
+        primary = _clean(source.get("primary_name") or source.get("name"))
+        if not primary:
+            continue
+        base_name = _clean(source.get("identity_base_name") or primary)
+        variant = _clean(source.get("identity_variant") or source.get("version"))
+        aliases = source.get("aliases") or []
+        if isinstance(aliases, str):
+            aliases = [aliases]
+        cleaned_aliases = []
+        seen_aliases = {_key(primary)}
+        for raw_alias in aliases:
+            alias = _clean(raw_alias)
+            if alias and _key(alias) not in seen_aliases:
+                seen_aliases.add(_key(alias))
+                cleaned_aliases.append(alias)
+        if len(primary) > MAX_CHARACTER_NAME_LENGTH or len(base_name) > MAX_CHARACTER_NAME_LENGTH:
+            raise ValueError("Series Character Reference names must be 160 characters or fewer.")
+        if len(variant) > MAX_IDENTITY_VARIANT_LENGTH:
+            raise ValueError("Series Character Reference age/version labels must be 120 characters or fewer.")
+        if any(len(alias) > MAX_CHARACTER_ALIAS_LENGTH for alias in cleaned_aliases):
+            raise ValueError("Series Character Reference aliases must be 160 characters or fewer.")
+        for alias in (cleaned_aliases or [""]):
+            reference_rows.append([primary, alias, base_name, variant])
+            if len(reference_rows) - 1 > MAX_ROWS:
+                raise ValueError("The Series Character Reference exceeds the 50,000-row workbook limit.")
+
+    info = [
+        ["Field", "Value"],
+        ["Workbook Schema", "ryu.character-studio-workbook"],
+        ["Workbook Version", 2],
+        ["Export Scope", "complete_book"],
+        ["Export ID", str(metadata.get("export_id") or uuid.uuid4().hex)],
+        ["Passage Count", len(dialogue) - 1],
+        ["Chapter Count", len(chapter_rows)],
+        ["Book Title", _clean(metadata.get("project_title"))],
+        ["Series Name", _clean(metadata.get("series_name"))],
+        ["Book Revision", book_revision],
+        ["Exported At (UTC)", datetime.now(timezone.utc).isoformat(timespec="seconds")],
+        ["Instructions",
+         "This is a COMPLETE-BOOK workbook. Read every chapter in Chapter Context before assigning dialogue. "
+         "Dialogue Assignment contains every source-verified passage from every chapter. Assign only a clear, "
+         "named character; leave uncertain dialogue blank. Never invent a character from the book title, series "
+         "title, chapter title, narrator text or an unverified honorific. Narration is protected as Narrator. "
+         "Use numeric GPT Confidence from 0.0 to 1.0 and add concise evidence in Evidence / Notes (GPT). "
+         "Add every character appearing in this book to Character Register. Copy an existing canonical name and "
+         "its known aliases from Series Character Reference when it is the same person. Add newly discovered "
+         "characters with their full name and aliases. Use Version / Age Variant only for genuinely distinct "
+         "versions of one identity. Set Included in This Book? to YES for each character who appears in this book. "
+         "Only rows marked YES are imported into the series Character Library and this book's cast. "
+         "Series Character Reference, Chapter Register, Chapter Context and Workbook Info are read-only references. "
+         "Do not change Passage ID, Chapter ID, dialogue text, chapter revision, offsets or other reference columns. "
+         "Do not remove or duplicate passage rows. For more than 30 aliases, add Alias 31, Alias 32, and so on."],
+    ]
+
+    sheets = [
+        ("Dialogue Assignment", dialogue, [38,38,14,32,16,72,34,18,34,22,18,14,14,42,46], {6,8,9,14,15}),
+        ("Character Register", characters, [34] + [24] * ALIAS_COLUMNS + [26,48,24], set(range(1, ALIAS_COLUMNS + 5))),
+        ("Chapter Register", chapter_register, [38,14,32,42,22,20,66], set(range(1,8))),
+        ("Chapter Context", context, [38,14,32,14,14,100], {6}),
+        ("Series Character Reference", reference_rows, [38,34,38,26], {1,2,3,4}),
+        ("Workbook Info", info, [30,120], {2}),
+    ]
+    import io
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+        archive.writestr(
+            "[Content_Types].xml",
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Types xmlns="%s"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+            '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>%s</Types>'
+            % (CONTENT, "".join(
+                '<Override PartName="/xl/worksheets/sheet%d.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+                % number for number in range(1, len(sheets) + 1)
+            )),
+        )
+        archive.writestr(
+            "_rels/.rels",
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="%s"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'
+            % PKG,
+        )
+        sheet_nodes = "".join(
+            '<sheet name="%s" sheetId="%d" r:id="rId%d"/>'
+            % (escape(name), number, number)
+            for number, (name, _, _, _) in enumerate(sheets, 1)
+        )
+        archive.writestr(
+            "xl/workbook.xml",
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<workbook xmlns="%s" xmlns:r="%s"><bookViews><workbookView activeTab="0"/></bookViews>'
+            '<sheets>%s</sheets><calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>'
+            % (MAIN, REL, sheet_nodes),
+        )
+        relationships = "".join(
+            '<Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet%d.xml"/>'
+            % (number, number)
+            for number in range(1, len(sheets) + 1)
+        )
+        relationships += (
+            '<Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+            % (len(sheets) + 1)
+        )
+        archive.writestr(
+            "xl/_rels/workbook.xml.rels",
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="%s">%s</Relationships>'
+            % (PKG, relationships),
+        )
+        archive.writestr("xl/styles.xml", _styles())
+        for number, (name, rows, widths, wrap) in enumerate(sheets, 1):
+            archive.writestr(
+                "xl/worksheets/sheet%d.xml" % number,
+                _sheet(
+                    rows, widths, wrap,
+                    protect=name in {"Chapter Register", "Chapter Context", "Series Character Reference", "Workbook Info"},
+                ),
+            )
+    result = output.getvalue()
+    if len(result) > MAX_BYTES:
+        raise ValueError("The complete-book workbook exceeds the 25 MB safe import/export limit. Split the book into smaller volumes.")
+    return result
+
 def _read_sheet(archive, target, shared):
     normalized_target = str(target or "").replace("\\", "/")
     path = (
@@ -319,8 +590,9 @@ def read_character_workbook(path):
                 ss = ET.fromstring(z.read("xl/sharedStrings.xml"))
                 shared = ["".join(n.text or "" for n in x.iter(_t("t"))) for x in ss.findall(_t("si"))]
             sheets = {name: _read_sheet(z, targets[name], shared) for name in required}
-            if "Series Character Reference" in targets:
-                sheets["Series Character Reference"] = _read_sheet(z, targets["Series Character Reference"], shared)
+            for optional_sheet in ("Series Character Reference", "Chapter Register"):
+                if optional_sheet in targets:
+                    sheets[optional_sheet] = _read_sheet(z, targets[optional_sheet], shared)
     except (zipfile.BadZipFile, ET.ParseError, KeyError) as exc:
         raise ValueError("The .xlsx workbook is damaged or unsupported.") from exc
     info_rows = _records(sheets["Workbook Info"])
@@ -332,7 +604,18 @@ def read_character_workbook(path):
         raise ValueError("This workbook was not exported by Character Studio.")
     try: version = int(float(info.get("Workbook Version", "0")))
     except (TypeError, ValueError, OverflowError): version = 0
-    if version != 1: raise ValueError("This Character Studio workbook version is not supported.")
+    if version not in {1, 2}: raise ValueError("This Character Studio workbook version is not supported.")
+    if version == 2:
+        if info.get("Export Scope") != "complete_book":
+            raise ValueError("Version 2 Character Studio workbooks must use the complete-book export scope.")
+        if not {"Chapter Register", "Series Character Reference"}.issubset(sheets):
+            raise ValueError("The complete-book workbook is missing its Chapter Register or Series Character Reference sheet.")
+        reference_headers = {_clean(value) for value in (sheets["Series Character Reference"][0] if sheets["Series Character Reference"] else [])}
+        if not {"Canonical Character", "Known Alias", "Identity Base Name", "Version / Age Variant"}.issubset(reference_headers):
+            raise ValueError("The Series Character Reference is missing its canonical-name or alias columns.")
+        context_headers = {_clean(value) for value in (sheets["Chapter Context"][0] if sheets["Chapter Context"] else [])}
+        if not {"Chapter ID", "Chapter Number", "Chapter Title", "Context Part", "Context Parts", "Chapter Text"}.issubset(context_headers):
+            raise ValueError("The Chapter Context sheet is missing required chapter text or part-reference columns.")
     dialogue_headers = {_clean(value) for value in (sheets["Dialogue Assignment"][0] if sheets["Dialogue Assignment"] else [])}
     required_dialogue_headers = {
         "Passage ID", "Chapter ID", "Passage Type", "Dialogue Text",
@@ -344,6 +627,8 @@ def read_character_workbook(path):
     character_headers = {_clean(value) for value in (sheets["Character Register"][0] if sheets["Character Register"] else [])}
     if not {"Full Name", "Version / Age Variant"}.issubset(character_headers):
         raise ValueError("The Character Register sheet is missing its Full Name or Version / Age Variant column.")
+    if version == 2 and "Included in This Book?" not in character_headers:
+        raise ValueError("The complete-book Character Register is missing the Included in This Book? column.")
     dialogue = _records(sheets["Dialogue Assignment"])
     try:
         expected_passages = int(float(info.get("Passage Count", "-1")))
@@ -425,18 +710,124 @@ def read_character_workbook(path):
                 if len(alias) > MAX_CHARACTER_ALIAS_LENGTH:
                     raise ValueError("Character aliases must be 160 characters or fewer.")
                 aliases.append(alias)
+        included_raw = _clean(row.get("Included in This Book?")).casefold()
+        included = (included_raw in {"yes", "y", "true", "1", "x"}) if version == 2 else True
         characters.append({
             "full_name": name,
             "aliases": list(dict.fromkeys(a for a in aliases if _key(a) != _key(name))),
             "version": version,
             "notes": notes,
+            "included_in_book": included,
             "row_number": n,
         })
+
+    chapter_references = []
+    if version == 2:
+        chapter_rows = _records(sheets["Chapter Register"])
+        chapter_headers = {_clean(value) for value in (sheets["Chapter Register"][0] if sheets["Chapter Register"] else [])}
+        required_chapter_headers = {
+            "Chapter ID", "Chapter Number", "Chapter Title", "Chapter Revision (Reference)",
+            "Passage Count (Reference)", "Word Count (Reference)", "Context SHA256 (Reference)",
+        }
+        if not required_chapter_headers.issubset(chapter_headers):
+            raise ValueError("The Chapter Register is missing required source-reference columns.")
+        if not chapter_rows or len(chapter_rows) > 10000:
+            raise ValueError("The complete-book workbook must contain between 1 and 10,000 chapters.")
+        seen_chapter_ids, seen_chapter_numbers = set(), set()
+        for row in chapter_rows:
+            chapter_id = _clean(row.get("Chapter ID"))
+            try:
+                chapter_number = int(float(row.get("Chapter Number") or 0))
+                passage_count = int(float(row.get("Passage Count (Reference)") or -1))
+                word_count = int(float(row.get("Word Count (Reference)") or -1))
+            except (TypeError, ValueError, OverflowError):
+                raise ValueError("The Chapter Register contains an invalid number or count.")
+            title = _clean(row.get("Chapter Title"))
+            revision = _clean(row.get("Chapter Revision (Reference)"))
+            context_digest = _clean(row.get("Context SHA256 (Reference)"))
+            if not chapter_id or chapter_number < 1 or passage_count < 0 or word_count < 0 or not revision:
+                raise ValueError("Every Chapter Register row needs a valid chapter identity, revision and counts.")
+            if chapter_id in seen_chapter_ids or chapter_number in seen_chapter_numbers:
+                raise ValueError("The Chapter Register contains a duplicate chapter ID or number.")
+            if not re.fullmatch(r"[0-9a-f]{64}", context_digest):
+                raise ValueError("A Chapter Register context fingerprint is invalid.")
+            seen_chapter_ids.add(chapter_id)
+            seen_chapter_numbers.add(chapter_number)
+            chapter_references.append({
+                "chapter_id": chapter_id, "chapter_number": chapter_number,
+                "chapter_title": title, "chapter_revision": revision,
+                "passage_count": passage_count, "word_count": word_count,
+                "context_sha256": context_digest,
+            })
+        try:
+            declared_chapters = int(float(info.get("Chapter Count") or 0))
+        except (TypeError, ValueError, OverflowError):
+            declared_chapters = 0
+        if len(chapter_references) != declared_chapters:
+            raise ValueError("The Chapter Register count does not match Workbook Info.")
+        if character_workbook_book_revision(chapter_references) != _clean(info.get("Book Revision")):
+            raise ValueError("The Chapter Register was edited or no longer matches the exported book revision.")
+        context_rows = _records(sheets["Chapter Context"])
+        if len(context_rows) > MAX_ROWS:
+            raise ValueError("Chapter Context exceeds the 50,000-row workbook limit.")
+        context_chapter_ids = {_clean(row.get("Chapter ID")) for row in context_rows}
+        if context_chapter_ids != seen_chapter_ids:
+            raise ValueError("Chapter Context does not contain the exact Chapter Register chapter set.")
+        for chapter in chapter_references:
+            rows_for_chapter = [row for row in context_rows if _clean(row.get("Chapter ID")) == chapter["chapter_id"]]
+            if not rows_for_chapter:
+                raise ValueError("Chapter %s is missing from Chapter Context." % chapter["chapter_number"])
+            try:
+                numbered = sorted(
+                    ((int(float(row.get("Context Part") or 0)), int(float(row.get("Context Parts") or 0)), row)
+                     for row in rows_for_chapter),
+                    key=lambda item: (item[0], item[1]),
+                )
+            except (TypeError, ValueError, OverflowError):
+                raise ValueError("Chapter Context contains an invalid part number.")
+            part_total = numbered[0][1]
+            if any(
+                int(float(item[2].get("Chapter Number") or 0)) != chapter["chapter_number"]
+                or _clean(item[2].get("Chapter Title")) != chapter["chapter_title"]
+                for item in numbered
+            ):
+                raise ValueError("Chapter %s Context metadata does not match the Chapter Register." % chapter["chapter_number"])
+            if part_total < 1 or len(numbered) != part_total or [item[0] for item in numbered] != list(range(1, part_total + 1)):
+                raise ValueError("Chapter %s has missing, duplicated or reordered context parts." % chapter["chapter_number"])
+            if any(item[1] != part_total for item in numbered):
+                raise ValueError("Chapter %s has inconsistent context part counts." % chapter["chapter_number"])
+            context_text = "".join(str(item[2].get("Chapter Text") or "") for item in numbered)
+            if sha256(context_text.encode("utf-8")).hexdigest() != chapter["context_sha256"]:
+                raise ValueError("Chapter %s context was changed or truncated. Restore the exported Chapter Context." % chapter["chapter_number"])
+            if len(re.findall(r"\S+", context_text)) != chapter["word_count"]:
+                raise ValueError("Chapter %s context word count does not match its source reference." % chapter["chapter_number"])
+        chapters_by_id = {row["chapter_id"]: row for row in chapter_references}
+        passage_counts = {chapter_id: 0 for chapter_id in chapters_by_id}
+        for row in dialogue:
+            chapter_id = _clean(row.get("Chapter ID"))
+            chapter = chapters_by_id.get(chapter_id)
+            if chapter is None:
+                raise ValueError("A Dialogue Assignment row references a chapter outside the Chapter Register.")
+            try:
+                number = int(float(row.get("Chapter Number") or 0))
+            except (TypeError, ValueError, OverflowError):
+                raise ValueError("A Dialogue Assignment row has an invalid chapter number.")
+            if (number != chapter["chapter_number"]
+                or _clean(row.get("Chapter Title")) != chapter["chapter_title"]
+                or _clean(row.get("Chapter Revision (Reference)")) != chapter["chapter_revision"]):
+                raise ValueError("A Dialogue Assignment row no longer matches its Chapter Register reference.")
+            passage_counts[chapter_id] += 1
+        for chapter in chapter_references:
+            if passage_counts[chapter["chapter_id"]] != chapter["passage_count"]:
+                raise ValueError("Chapter %s is missing or has added dialogue passage rows." % chapter["chapter_number"])
+
     return {
         "info": info,
         "dialogue_rows": dialogue,
         "characters": characters,
         "series_character_reference": series_character_reference,
+        "chapter_references": chapter_references,
+        "schema_version": version,
         "path": str(source.resolve()),
         "sha256": sha256(source.read_bytes()).hexdigest(),
     }
@@ -506,6 +897,8 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
 
     planned, imported_keys, owners = [], set(), {}
     for source in document.get("characters") or []:
+        if source.get("included_in_book") is False:
+            continue
         name = _clean(source.get("full_name"))
         if not name:
             continue
@@ -694,13 +1087,152 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
 
 
 
+def plan_complete_book_character_workbook_import(
+    document, *, series, registry_rows, project_characters, current_chapters,
+    deleted_registry_rows=None, book_title="",
+):
+    """Preflight all chapter revisions, identity merges and assignments as one book plan."""
+    info = document.get("info") or {}
+    if int(document.get("schema_version") or 0) != 2 or _clean(info.get("Export Scope")) != "complete_book":
+        raise ValueError("Choose a version 2 complete-book Character Studio workbook.")
+    active_series = _clean(series)
+    if not active_series or _key(info.get("Series Name")) != _key(active_series):
+        raise ValueError("The complete-book workbook series does not match the active book's series.")
+    if _clean(book_title) and _key(info.get("Book Title")) != _key(book_title):
+        raise ValueError("This workbook belongs to a different book. Select the correct project or export the active book again.")
+    references = list(document.get("chapter_references") or [])
+    current = list(current_chapters or [])
+    if not references or not current:
+        raise ValueError("The complete-book workbook or active project has no chapters.")
+    current_by_id = {_clean(row.get("chapter_id")): row for row in current if isinstance(row, dict)}
+    reference_ids = {_clean(row.get("chapter_id")) for row in references}
+    if len(reference_ids) != len(references) or reference_ids != set(current_by_id):
+        raise ValueError("The workbook does not contain the exact active book chapter set. Export the complete book again.")
+    current_revision = character_workbook_book_revision([
+        {
+            "chapter_id": row.get("chapter_id"),
+            "chapter_number": row.get("chapter_number"),
+            "chapter_title": row.get("chapter_title"),
+            "chapter_revision": row.get("chapter_revision"),
+        }
+        for row in current
+    ])
+    if current_revision != _clean(info.get("Book Revision")):
+        raise ValueError("One or more chapters changed after export. Export the complete book again.")
+    rows_by_chapter = {chapter_id: [] for chapter_id in reference_ids}
+    for row in document.get("dialogue_rows") or []:
+        chapter_id = _clean(row.get("Chapter ID"))
+        if chapter_id not in rows_by_chapter:
+            raise ValueError("A Dialogue Assignment row references an unknown chapter.")
+        rows_by_chapter[chapter_id].append(row)
+
+    chapter_plans, issues = [], []
+    identity_plan_json = None
+    identity_plan = []
+    for reference in sorted(references, key=lambda item: (int(item["chapter_number"]), item["chapter_id"])):
+        chapter_id = _clean(reference.get("chapter_id"))
+        active = current_by_id[chapter_id]
+        if (int(active.get("chapter_number") or 0) != int(reference["chapter_number"])
+            or _clean(active.get("chapter_title")) != _clean(reference.get("chapter_title"))
+            or _clean(active.get("chapter_revision")) != _clean(reference.get("chapter_revision"))):
+            raise ValueError("Chapter %s changed after export. Export the complete book again." % reference["chapter_number"])
+        passages = list(active.get("current_passages") or [])
+        assignments = list(active.get("current_assignments") or [])
+        if len(passages) != int(reference.get("passage_count") or 0):
+            raise ValueError("Chapter %s passage coverage changed after export. Export the complete book again." % reference["chapter_number"])
+        active_text = str(active.get("text") or "")
+        if sha256(active_text.encode("utf-8")).hexdigest() != _clean(reference.get("context_sha256")):
+            raise ValueError("Chapter %s context does not match the active source text. Export the complete book again." % reference["chapter_number"])
+        if len(re.findall(r"\S+", active_text)) != int(reference.get("word_count") or 0):
+            raise ValueError("Chapter %s word count does not match the active source text. Export the complete book again." % reference["chapter_number"])
+        chapter_info = dict(info)
+        chapter_info.update({
+            "Chapter ID": chapter_id,
+            "Chapter Number": str(reference["chapter_number"]),
+            "Chapter Title": _clean(reference.get("chapter_title")),
+            "Chapter Revision": _clean(reference.get("chapter_revision")),
+            "Passage Count": str(len(passages)),
+        })
+        chapter_document = dict(document)
+        chapter_document.update({
+            "info": chapter_info,
+            "dialogue_rows": rows_by_chapter[chapter_id],
+        })
+        plan = plan_character_workbook_import(
+            chapter_document,
+            series=active_series,
+            registry_rows=registry_rows,
+            project_characters=project_characters,
+            chapter_id=chapter_id,
+            chapter_revision=_clean(reference.get("chapter_revision")),
+            current_passages=passages,
+            current_assignments=assignments,
+            deleted_registry_rows=deleted_registry_rows,
+            book_title=book_title,
+        )
+        identity_json = json.dumps(
+            plan.get("characters") or [], ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        if identity_plan_json is None:
+            identity_plan_json = identity_json
+            identity_plan = list(plan.get("characters") or [])
+        elif identity_plan_json != identity_json:
+            issues.append("The character merge plan changed between chapters. Resolve the series identity conflict before importing.")
+        issues.extend(plan.get("issues") or [])
+        chapter_entry = {
+            "chapter_id": chapter_id,
+            "chapter_number": int(reference["chapter_number"]),
+            "chapter_title": _clean(reference.get("chapter_title")),
+            "chapter_revision": _clean(reference.get("chapter_revision")),
+            "passage_count": int(reference.get("passage_count") or 0),
+            "assignments": [],
+        }
+        for assignment in plan.get("assignments") or []:
+            imported = dict(assignment)
+            imported["chapter_number"] = int(reference["chapter_number"])
+            imported["chapter_revision"] = _clean(reference.get("chapter_revision"))
+            chapter_entry["assignments"].append(imported)
+        chapter_plans.append(chapter_entry)
+
+    assignments = [
+        assignment
+        for chapter in chapter_plans
+        for assignment in chapter["assignments"]
+    ]
+    reviewed_chapters = [
+        {key: value for key, value in row.items() if key != "assignments"}
+        for row in chapter_plans
+    ]
+    issues = list(dict.fromkeys(issues))
+    summary = {
+        "matched_characters": sum(row.get("action") == "merge" for row in identity_plan),
+        "new_characters": sum(row.get("action") == "create" for row in identity_plan),
+        "aliases_to_merge": sum(len(row.get("aliases_to_add") or []) for row in identity_plan),
+        "dialogue_assignments": len(assignments),
+        "characters_in_register": len(identity_plan),
+        "chapters": len(chapter_plans),
+    }
+    return {
+        "ready": not issues,
+        "issues": issues,
+        "scope": "book",
+        "book_revision": current_revision,
+        "chapters": reviewed_chapters,
+        "chapter_assignments": chapter_plans,
+        "characters": identity_plan,
+        "assignments": assignments,
+        "summary": summary,
+    }
+
+
+
 def character_workbook_plan_fingerprint(plan: dict) -> str:
     """Digest every identity and assignment decision the user reviewed before commit."""
     if not isinstance(plan, dict):
         raise ValueError("A valid character workbook plan is required.")
     reviewed = {
         key: plan.get(key)
-        for key in ("ready", "issues", "characters", "assignments", "summary")
+        for key in ("ready", "issues", "scope", "book_revision", "chapters", "chapter_assignments", "characters", "assignments", "summary")
     }
     try:
         encoded = json.dumps(

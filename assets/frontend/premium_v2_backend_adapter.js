@@ -4325,12 +4325,11 @@
     ensureAssignedAudioProfileControls();
   }
   async function exportSelectedCharacterWorkbook() {
-    const chapterNumber = Number(characterStudioSelectedChapter || window.ryuPremiumSelectedChapter || chapters[0]?.number || 0);
-    if (!chapterNumber) throw new Error('Select a chapter before exporting the GPT workbook.');
-    const result = await call('character.workbook.export', {chapter_number:chapterNumber});
+    const result = await call('character.workbook.export', {scope:'book'});
     if (result?.cancelled) return;
-    message('Exported Chapter ' + result.chapter_number + ' workbook · ' +
-      result.dialogue_count + ' dialogue passages and ' + result.narration_count + ' Narrator passages.');
+    message('Exported complete-book workbook · ' + Number(result.chapter_count || 0) + ' chapters · ' +
+      Number(result.passage_count || 0) + ' total passages (' + Number(result.dialogue_count || 0) +
+      ' dialogue, ' + Number(result.narration_count || 0) + ' Narrator passages).');
   }
 
   async function importCompletedCharacterWorkbook() {
@@ -4349,10 +4348,12 @@
       const aliases = (Array.isArray(row.aliases_to_add) ? row.aliases_to_add : [])
         .map(value => String(value || '').trim()).filter(Boolean);
       const extraAliases = Math.max(0, Number(row.aliases_to_add_total || aliases.length) - aliases.length);
+      const savedVoice = String(row.existing_voice_name || '').trim();
       return action + ': ' + String(row.canonical_name || 'Unnamed identity') +
         (variant ? ' [' + variant + ']' : '') +
         (aliases.length ? ' · add aliases: ' + aliases.join(', ') : '') +
-        (extraAliases ? ' · +' + extraAliases + ' more aliases' : '');
+        (extraAliases ? ' · +' + extraAliases + ' more aliases' : '') +
+        (savedVoice ? ' · keep saved voice: ' + savedVoice : ' · voice needs assignment after import');
     });
     const totalChanges = Number(preview.character_plan_total || characterPlan.length);
     const remainingChanges = Math.max(0, totalChanges - identityLines.length);
@@ -4360,14 +4361,29 @@
     if (preview.character_plan_truncated) {
       identityLines.push('More than 40 identity changes are planned. This preview lists the first 40; only the first 24 are expanded above.');
     }
+    const importScope = preview.scope === 'book'
+      ? 'Complete book · ' + Number(preview.chapter_count || 0) + ' chapters'
+      : 'Chapter ' + preview.chapter_number;
+    const chapterLines = (Array.isArray(preview.chapters) ? preview.chapters : []).slice(0, 20).map(row =>
+      'Chapter ' + Number(row.chapter_number || 0) + ' · ' + String(row.chapter_title || 'Untitled') +
+      ' — ' + Number(row.assignment_count || 0) + ' assignments / ' + Number(row.passage_count || 0) + ' passages');
+    const extraChapters = Math.max(0, Number(preview.chapters?.length || 0) - chapterLines.length);
+    if (extraChapters) chapterLines.push('…and ' + extraChapters + ' more chapters.');
+    const speakerLines = (Array.isArray(preview.assignment_summary) ? preview.assignment_summary : []).slice(0, 20).map(row =>
+      String(row.canonical_name || 'Unknown character') + ' — ' + Number(row.dialogue_assignments || 0) +
+      ' dialogue assignments across ' + Number(row.chapter_count || 0) + ' chapters');
+    const extraSpeakers = Math.max(0, Number(preview.assignment_summary?.length || 0) - speakerLines.length);
+    if (extraSpeakers) speakerLines.push('…and ' + extraSpeakers + ' more characters.');
     const prompt = 'Import the completed GPT workbook into Series "' + preview.series +
-      '" · Chapter ' + preview.chapter_number + '?\n\n' +
+      '" · ' + importScope + '?\n\n' +
       'Existing characters to merge: ' + Number(summary.matched_characters || 0) + '\n' +
       'New series characters: ' + Number(summary.new_characters || 0) + '\n' +
       'Aliases to reconcile: ' + Number(summary.aliases_to_merge || 0) + '\n' +
       'Dialogue assignments to add: ' + Number(summary.dialogue_assignments || 0) +
+      '\n\nChapter coverage:\n' + (chapterLines.join('\n') || 'No chapter coverage returned.') +
+      '\n\nSpeaker assignment summary:\n' + (speakerLines.join('\n') || 'No new dialogue assignments.') +
       '\n\nCharacter identity plan:\n' + (identityLines.join('\n') || 'No character changes.') +
-      '\n\nExisting character voice profiles will be preserved. Continue?';
+      '\n\nExisting character voice profiles will be preserved. New characters will be added without a voice until you choose one in Character Studio. Continue?';
     if (!window.confirm(prompt)) return;
     const result = await call('character.workbook.import.commit', {token:preview.token});
     await refreshChapters();
@@ -4376,10 +4392,14 @@
     await refreshCharacterDialogueSuggestions();
     renderCharacterStudioLive();
     renderDialogueReview();
-    message('Workbook imported into the Series Character Library · ' +
+    const importedScope = result.scope === 'book'
+      ? ' across ' + Number(result.chapter_count || 0) + ' chapters (' +
+        Number(result.chapters_updated || 0) + ' chapters received assignments)'
+      : ' into Chapter ' + Number(result.chapter_number || 0);
+    message('Workbook imported into the Series Character Library' + importedScope + ' · ' +
       result.characters_merged + ' identities merged · ' + result.characters_created +
       ' new identities · ' + result.aliases_merged + ' aliases reconciled · ' +
-      result.dialogue_assignments + ' dialogue assignments added.');
+      result.dialogue_assignments + ' dialogue assignments added. Existing voice profiles were preserved.');
   }
 
   function renderCharacterStudioLive() {

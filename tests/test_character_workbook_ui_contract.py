@@ -34,7 +34,7 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn("reference_by_identity", self.workbook)
         self.assertIn("series_character_reference", self.host)
         self.assertIn("self._character_library_bootstrap()", self.host)
-        self.assertIn("Export Chapter Workbook", self.html)
+        self.assertIn("Export Complete-Book GPT Workbook", self.html)
         self.assertIn("Import Completed Workbook", self.html)
         self.assertIn("character.workbook.import.preview", self.adapter)
         self.assertIn("character.workbook.import.commit", self.adapter)
@@ -58,6 +58,33 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
             self.adapter.index("installCharacterStudioHandlers();"),
             self.adapter.index("await call('app.get_info')"),
         )
+
+
+    def test_complete_book_workbook_is_v2_and_routes_all_chapters_through_one_safe_import(self):
+        self.assertIn("def create_complete_book_character_workbook_bytes(", self.workbook)
+        self.assertIn("def plan_complete_book_character_workbook_import(", self.workbook)
+        self.assertIn('"Workbook Version", 2', self.workbook)
+        self.assertIn('"Export Scope", "complete_book"', self.workbook)
+        self.assertIn("Chapter Register", self.workbook)
+        self.assertIn("Chapter Context", self.workbook)
+        self.assertIn("Series Character Reference", self.workbook)
+        self.assertIn("Included in This Book?", self.workbook)
+        self.assertIn("context_sha256", self.workbook)
+        self.assertIn("plan_complete_book_character_workbook_import(", self.host)
+        self.assertIn("def _character_workbook_export_complete_book(", self.host)
+        self.assertIn("def _character_workbook_book_snapshot(", self.host)
+        self.assertIn("assignments_by_chapter", self.host)
+        self.assertIn("target_chapter.dialogue_assignments = sorted(", self.host)
+        self.assertIn("scope:'book'", self.adapter)
+        self.assertIn("Complete book · ", self.adapter)
+        self.assertIn("Existing voice profiles will be preserved.", self.adapter)
+        self.assertIn("voice needs assignment after import", self.adapter)
+        self.assertIn("Chapter coverage:", self.adapter)
+        self.assertIn("Speaker assignment summary:", self.adapter)
+        self.assertIn('"assignment_summary": assignment_summary', self.host)
+        self.assertIn('"chapters": chapter_preview', self.host)
+        self.assertIn("Export Complete-Book GPT Workbook", self.html)
+
 
     def test_outsourced_origin_is_supported_as_a_third_assignment_source(self):
         self.assertIn('{"manual", "ai", "outsourced"}', self.host)

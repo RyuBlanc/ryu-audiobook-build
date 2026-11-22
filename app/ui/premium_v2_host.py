@@ -72,8 +72,10 @@ from app.tts.voice_profile import load_profiles
 from app.core.state import load_state, save_state
 from app.core.character_workbook import (
     create_character_workbook_bytes,
+    create_complete_book_character_workbook_bytes,
     read_character_workbook,
     plan_character_workbook_import,
+    plan_complete_book_character_workbook_import,
     character_workbook_plan_fingerprint,
 )
 from app.production_metadata import missing_required_metadata_fields, normalize_metadata_text
@@ -5144,9 +5146,152 @@ class PremiumV2Bridge(QObject):
         ]
         return state, series, chapter, chapter_row, passages, assignments
 
+    def _character_workbook_book_snapshot(self, project):
+        """Return the entire active book and its revision-scoped passages for workbook work."""
+        from app.chapters.passage_index import load_or_build_passage_index
+
+        state = load_state(project.folder)
+        series = self._project_series_name(project, state)
+        if not series:
+            raise ValueError("Set the book's Series before exporting or importing a Character Studio workbook.")
+        if not project.chapters:
+            raise ValueError("The active book has no chapters to export.")
+        index = load_or_build_passage_index(
+            project.folder, project.chapters,
+            suggested_passages=state.get("character_dialogue_suggestions") or [],
+        )
+        indexed_chapters = {
+            str(row.get("chapter_id") or ""): row
+            for row in index.get("chapters", [])
+            if isinstance(row, dict)
+        }
+        indexed_passages = [
+            dict(row) for row in index.get("passages", [])
+            if isinstance(row, dict)
+        ]
+        result = []
+        for chapter in sorted(project.chapters, key=lambda item: int(item.number)):
+            chapter_id = str(chapter.chapter_id)
+            chapter_index = indexed_chapters.get(chapter_id)
+            if chapter_index is None:
+                raise ValueError(
+                    "Chapter %s has no current dialogue index. Refresh Character Studio and try again."
+                    % int(chapter.number)
+                )
+            passages = [
+                dict(row) for row in indexed_passages
+                if str(row.get("chapter_id") or "") == chapter_id
+            ]
+            assignments = [
+                dict(row) for row in (getattr(chapter, "dialogue_assignments", []) or [])
+                if isinstance(row, dict)
+            ]
+            result.append({
+                "chapter_id": chapter_id,
+                "chapter_number": int(chapter.number),
+                "chapter_title": str(chapter.title or ""),
+                "chapter_revision": str(chapter_index.get("chapter_revision") or ""),
+                "passage_count": len(passages),
+                "text": str(chapter.text or ""),
+                "current_passages": passages,
+                "current_assignments": assignments,
+            })
+        return state, series, result
+
+    def _character_workbook_export_complete_book(self, project) -> dict[str, Any]:
+        """Export every chapter, complete source context and the current series character reference."""
+        state, series, book_chapters = self._character_workbook_book_snapshot(project)
+        self._character_library_bootstrap()
+        series_character_reference = [
+            {
+                "primary_name": str(row.get("primary_name") or row.get("name") or ""),
+                "aliases": list(row.get("aliases") or []),
+                "identity_base_name": str(row.get("identity_base_name") or row.get("primary_name") or row.get("name") or ""),
+                "identity_variant": str(row.get("identity_variant") or ""),
+            }
+            for row in list_reusable_characters(series)
+            if isinstance(row, dict)
+        ]
+        export_rows = []
+        for chapter in book_chapters:
+            for source in chapter["current_passages"]:
+                item = dict(source)
+                match = next((
+                    assignment for assignment in chapter["current_assignments"]
+                    if int(assignment.get("start", -1)) == int(source.get("start", -2))
+                    and int(assignment.get("end", -1)) == int(source.get("end", -2))
+                    and str(assignment.get("text") or source.get("text") or "") == str(source.get("text") or "")
+                ), None)
+                if match:
+                    speakers = match.get("speakers")
+                    if not isinstance(speakers, (list, tuple)):
+                        speakers = [match.get("speaker")] if match.get("speaker") else []
+                    item["existing_speakers"] = [
+                        str(value) for value in speakers if str(value or "").strip()
+                    ]
+                    item["assignment_source"] = str(match.get("source") or "")
+                    item["confidence"] = match.get("confidence")
+                item.update({
+                    "chapter_id": chapter["chapter_id"],
+                    "chapter_number": chapter["chapter_number"],
+                    "chapter_title": chapter["chapter_title"],
+                    "chapter_revision": chapter["chapter_revision"],
+                })
+                export_rows.append(item)
+
+        metadata = {
+            "project_title": str(getattr(project, "title", "") or ""),
+            "series_name": series,
+            "series_character_reference": series_character_reference,
+        }
+        workbook_bytes = create_complete_book_character_workbook_bytes(
+            metadata, book_chapters, export_rows
+        )
+        safe_title = re.sub(r'[<>:"/\\|?*]+', "_", str(project.title or "Book")).strip(" .") or "Book"
+        default_name = "%s_Complete_Book_Character_Workbook.xlsx" % safe_title
+        selected_path, _ = QFileDialog.getSaveFileName(
+            self, "Export Complete-Book Character Studio GPT Workbook",
+            str(Path.home() / default_name), "Excel Workbook (*.xlsx)",
+        )
+        if not selected_path:
+            return {"cancelled": True}
+        destination = Path(selected_path).expanduser()
+        if destination.suffix.casefold() != ".xlsx":
+            destination = destination.with_suffix(".xlsx")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(
+            prefix="." + destination.name + ".", suffix=".tmp", dir=str(destination.parent)
+        )
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(workbook_bytes)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, destination)
+        except Exception:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            Path(temporary).unlink(missing_ok=True)
+            raise
+        return {
+            "cancelled": False,
+            "path": str(destination.resolve()),
+            "scope": "book",
+            "chapter_count": len(book_chapters),
+            "passage_count": len(export_rows),
+            "dialogue_count": sum(1 for row in export_rows if row.get("kind") != "narration"),
+            "narration_count": sum(1 for row in export_rows if row.get("kind") == "narration"),
+            "series": series,
+        }
+
     def _character_workbook_export(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Export the selected chapter's source-verified passages to an editable XLSX."""
+        """Export a complete-book GPT workbook, retaining chapter export compatibility."""
         project = self._active_project()
+        scope = str(payload.get("scope") or "").strip().casefold()
+        if scope in {"book", "complete_book", "complete-book"} or payload.get("chapter_number") in (None, ""):
+            return self._character_workbook_export_complete_book(project)
         raw_number = payload.get("chapter_number")
         try:
             number = int(raw_number) if raw_number not in (None, "") else int(project.chapters[0].number)
@@ -5231,6 +5376,20 @@ class PremiumV2Bridge(QObject):
 
     def _character_workbook_import_plan(self, project, document: dict[str, Any]):
         info = document.get("info") or {}
+        if int(document.get("schema_version") or 0) == 2:
+            state, series, chapters = self._character_workbook_book_snapshot(project)
+            plan = plan_complete_book_character_workbook_import(
+                document,
+                series=series,
+                registry_rows=list_reusable_characters(series),
+                project_characters=state.get("characters") if isinstance(state.get("characters"), list) else [],
+                current_chapters=chapters,
+                deleted_registry_rows=list_reusable_deleted_characters(),
+                book_title=str(getattr(project, "title", "") or ""),
+            )
+            first_chapter = next(iter(project.chapters), None)
+            return state, series, first_chapter, plan
+
         try:
             chapter_number = int(float(info.get("Chapter Number") or 0))
         except (TypeError, ValueError, OverflowError):
@@ -5267,7 +5426,9 @@ class PremiumV2Bridge(QObject):
                 "cancelled": False, "ready": False,
                 "issues": plan["issues"][:12],
                 "summary": plan["summary"],
-                "chapter_number": int(chapter.number),
+                "scope": plan.get("scope", "chapter"),
+                "chapter_count": len(plan.get("chapters") or []) or 1,
+                "chapter_number": int(chapter.number) if chapter is not None else None,
             }
         token = uuid.uuid4().hex
         sessions = getattr(self, "_character_workbook_import_sessions", None)
@@ -5280,14 +5441,56 @@ class PremiumV2Bridge(QObject):
             "sha256": document["sha256"],
             "project_folder": str(Path(project.folder).resolve()),
             "export_id": str(document["info"].get("Export ID") or ""),
-            "chapter_number": int(chapter.number),
+            "chapter_number": int(chapter.number) if chapter is not None else None,
+            "scope": plan.get("scope", "chapter"),
+            "book_revision": str(plan.get("book_revision") or ""),
             "plan_sha256": character_workbook_plan_fingerprint(plan),
         }
+        assignment_groups: dict[str, dict[str, Any]] = {}
+        for assignment in plan.get("assignments") or []:
+            speaker = str(assignment.get("speaker") or "").strip()
+            if not speaker:
+                continue
+            entry = assignment_groups.setdefault(speaker, {"dialogue_assignments": 0, "chapters": set()})
+            entry["dialogue_assignments"] += 1
+            try:
+                entry["chapters"].add(int(assignment.get("chapter_number") or getattr(chapter, "number", 0)))
+            except (TypeError, ValueError, OverflowError):
+                pass
+        assignment_summary = [
+            {
+                "canonical_name": name,
+                "dialogue_assignments": values["dialogue_assignments"],
+                "chapter_count": len(values["chapters"]),
+            }
+            for name, values in sorted(assignment_groups.items(), key=lambda item: item[0].casefold())
+        ]
+        chapter_preview = [
+            {
+                "chapter_number": int(row.get("chapter_number") or 0),
+                "chapter_title": str(row.get("chapter_title") or ""),
+                "passage_count": int(row.get("passage_count") or 0),
+                "assignment_count": len(row.get("assignments") or []),
+            }
+            for row in plan.get("chapter_assignments", [])
+        ]
+        if not chapter_preview and chapter is not None:
+            chapter_preview = [{
+                "chapter_number": int(chapter.number),
+                "chapter_title": str(chapter.title or ""),
+                "passage_count": len(document.get("dialogue_rows") or []),
+                "assignment_count": len(plan.get("assignments") or []),
+            }]
         return {
             "cancelled": False, "ready": True, "token": token,
             "book_title": str(getattr(project, "title", "") or ""),
-            "series": series, "chapter_number": int(chapter.number),
+            "series": series,
+            "scope": plan.get("scope", "chapter"),
+            "chapter_number": int(chapter.number) if chapter is not None else None,
+            "chapter_count": len(plan.get("chapters") or []) or 1,
             "summary": plan["summary"],
+            "chapters": chapter_preview,
+            "assignment_summary": assignment_summary,
             "character_plan_total": len(plan.get("characters") or []),
             "character_plan_truncated": len(plan.get("characters") or []) > 40,
             "characters": [
@@ -5427,29 +5630,47 @@ class PremiumV2Bridge(QObject):
                     })
 
                 from app.chapters.assignment_utils import normalize_assignment
-                existing_assignments = list(getattr(chapter, "dialogue_assignments", []) or [])
+                active_chapters = {
+                    str(getattr(item, "chapter_id", "") or ""): item
+                    for item in project.chapters
+                }
+                assignments_by_chapter = {}
                 for imported in plan["assignments"]:
+                    chapter_id = str(imported.get("chapter_id") or getattr(chapter, "chapter_id", "") or "")
+                    target_chapter = active_chapters.get(chapter_id)
+                    if target_chapter is None:
+                        raise ValueError("An imported passage belongs to a chapter that is no longer in the active book.")
+                    if imported.get("chapter_number") not in (None, "") and int(imported["chapter_number"]) != int(target_chapter.number):
+                        raise ValueError("A chapter number changed during import. No changes were retained.")
                     start, end = int(imported["start"]), int(imported["end"])
-                    exact = str(chapter.text or "")[start:end]
+                    exact = str(target_chapter.text or "")[start:end]
                     if exact != str(imported["text"]):
                         raise ValueError("A dialogue passage changed during import. No changes were retained.")
+                    if chapter_id not in assignments_by_chapter:
+                        assignments_by_chapter[chapter_id] = list(
+                            getattr(target_chapter, "dialogue_assignments", []) or []
+                        )
                     base = {"start": start, "end": end, "text": exact, "source": "outsourced"}
                     normalized = normalize_assignment(base, [str(imported["speaker"])], "single")
                     normalized.update({
                         "source": "outsourced", "confidence": float(imported["confidence"]),
                         "series": series,
                     })
-                    existing_assignments = [
-                        row for row in existing_assignments
-                        if not (isinstance(row, dict)
-                                and int(row.get("start", -1)) == start
-                                and int(row.get("end", -1)) == end)
+                    assignments_by_chapter[chapter_id] = [
+                        row for row in assignments_by_chapter[chapter_id]
+                        if not (
+                            isinstance(row, dict)
+                            and int(row.get("start", -1)) == start
+                            and int(row.get("end", -1)) == end
+                        )
                     ]
-                    existing_assignments.append(normalized)
-                chapter.dialogue_assignments = sorted(
-                    existing_assignments,
-                    key=lambda row: (int(row.get("start", 0)), int(row.get("end", 0))),
-                )
+                    assignments_by_chapter[chapter_id].append(normalized)
+                for chapter_id, chapter_assignments in assignments_by_chapter.items():
+                    target_chapter = active_chapters[chapter_id]
+                    target_chapter.dialogue_assignments = sorted(
+                        chapter_assignments,
+                        key=lambda row: (int(row.get("start", 0)), int(row.get("end", 0))),
+                    )
                 state["characters"] = cast
                 state["modified_at"] = self._now()
                 project.save()
@@ -5480,7 +5701,10 @@ class PremiumV2Bridge(QObject):
             return {
                 "imported": True,
                 "series": series,
-                "chapter_number": int(chapter.number),
+                "scope": plan.get("scope", "chapter"),
+                "chapter_number": int(chapter.number) if chapter is not None else None,
+                "chapter_count": len(plan.get("chapters") or []) or 1,
+                "chapters_updated": len(assignments_by_chapter),
                 "characters_merged": int(plan["summary"]["matched_characters"]),
                 "characters_created": int(plan["summary"]["new_characters"]),
                 "dialogue_assignments": len(plan["assignments"]),

@@ -12,7 +12,9 @@ from app.core.character_library import (
 )
 from app.core.character_workbook import (
     create_character_workbook_bytes,
+    create_complete_book_character_workbook_bytes,
     plan_character_workbook_import,
+    plan_complete_book_character_workbook_import,
     read_character_workbook,
     character_workbook_plan_fingerprint,
 )
@@ -605,6 +607,227 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             self.assertEqual(saved[0]["voice_name"], "Mira Voice")
             self.assertTrue(set(aliases).issubset(set(saved[0]["aliases"])))
             self.assertEqual(len(merged), 1)
+
+
+    def _complete_book_fixture(self, folder: Path):
+        chapters = []
+        all_passages = []
+        source_specs = [
+            (1, "chapter-001", "The Arrival", "revision-001",
+             "“Mira, listen!”\nThe corridor was silent.",
+             [("p1-dialogue", "“Mira, listen!”", "character_dialogue"),
+              ("p1-narration", "The corridor was silent.", "narration")]),
+            (2, "chapter-002", "The Warning", "revision-002",
+             "“Captain Mira, wait!”\nShe turned back.",
+             [("p2-dialogue", "“Captain Mira, wait!”", "character_dialogue"),
+              ("p2-narration", "She turned back.", "narration")]),
+        ]
+        for number, chapter_id, title, revision, text, specs in source_specs:
+            passages = []
+            for passage_id, passage_text, kind in specs:
+                start = text.index(passage_text)
+                row = {
+                    "passage_id": passage_id,
+                    "chapter_id": chapter_id,
+                    "chapter_number": number,
+                    "chapter_title": title,
+                    "chapter_revision": revision,
+                    "start": start,
+                    "end": start + len(passage_text),
+                    "text": passage_text,
+                    "kind": kind,
+                    "speakers": [],
+                }
+                passages.append(row)
+                all_passages.append(row)
+            chapters.append({
+                "chapter_id": chapter_id,
+                "chapter_number": number,
+                "chapter_title": title,
+                "chapter_revision": revision,
+                "text": text,
+                "current_passages": passages,
+                "current_assignments": [],
+            })
+        metadata = {
+            "project_title": "The Silver Archive",
+            "series_name": "Silver Archive",
+            "series_character_reference": [{
+                "primary_name": "Mira",
+                "aliases": ["Captain Mira", "Mira-sama"],
+                "identity_base_name": "Mira",
+                "identity_variant": "",
+                "voice_name": "Do not export voice assets or local profile data",
+            }],
+        }
+        path = folder / "complete-book.xlsx"
+        path.write_bytes(create_complete_book_character_workbook_bytes(metadata, chapters, all_passages))
+        document = read_character_workbook(path)
+        return path, chapters, all_passages, document
+
+    def test_complete_book_v2_exports_all_chapters_context_passages_and_separate_series_reference(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, chapters, passages, document = self._complete_book_fixture(Path(tmp))
+            with ZipFile(path, "r") as archive:
+                book_xml = ET.fromstring(archive.read("xl/workbook.xml"))
+                ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+                names = [sheet.get("name") for sheet in book_xml.findall(".//" + ns + "sheet")]
+                self.assertEqual(names, [
+                    "Dialogue Assignment", "Character Register", "Chapter Register",
+                    "Chapter Context", "Series Character Reference", "Workbook Info",
+                ])
+                self.assertGreater(archive.getinfo("xl/worksheets/sheet4.xml").file_size, 0)
+                self.assertGreater(archive.getinfo("xl/worksheets/sheet5.xml").file_size, 0)
+            self.assertEqual(document["schema_version"], 2)
+            self.assertEqual(document["info"]["Export Scope"], "complete_book")
+            self.assertEqual(len(document["chapter_references"]), 2)
+            self.assertEqual(len(document["dialogue_rows"]), len(passages))
+            self.assertEqual(document["chapter_references"][0]["chapter_number"], 1)
+            self.assertEqual(document["chapter_references"][1]["chapter_number"], 2)
+            self.assertEqual(document["series_character_reference"][0]["canonical_name"], "Mira")
+            self.assertEqual(document["series_character_reference"][0]["aliases"], ["Captain Mira", "Mira-sama"])
+            self.assertNotIn("voice_name", document["series_character_reference"][0])
+            self.assertEqual(document["characters"], [])
+
+
+    def test_complete_book_reader_parses_gpt_character_names_aliases_and_book_inclusion_flag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original, _chapters, _passages, _document = self._complete_book_fixture(Path(tmp))
+            edited = Path(tmp) / "gpt-filled-book.xlsx"
+            ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+
+            def set_inline_cell(root, row_number, reference, value):
+                row = root.find(".//%srow[@r='%s']" % (ns, row_number))
+                self.assertIsNotNone(row)
+                cell = next((item for item in row.findall("%sc" % ns)
+                             if item.get("r") == reference), None)
+                if cell is None:
+                    cell = ET.SubElement(row, ns + "c", {"r": reference})
+                else:
+                    cell.clear()
+                    cell.set("r", reference)
+                cell.set("t", "inlineStr")
+                inline = ET.SubElement(cell, ns + "is")
+                text_node = ET.SubElement(inline, ns + "t")
+                text_node.text = value
+
+            with ZipFile(original, "r") as source, ZipFile(edited, "w", ZIP_DEFLATED) as target:
+                for item in source.infolist():
+                    data = source.read(item.filename)
+                    if item.filename == "xl/worksheets/sheet1.xml":
+                        root = ET.fromstring(data)
+                        set_inline_cell(root, 2, "G2", "Mira")
+                        set_inline_cell(root, 2, "O2", "The direct address confirms the speaker.")
+                        row = root.find(".//%srow[@r='2']" % ns)
+                        confidence = ET.SubElement(row, ns + "c", {"r": "H2"})
+                        ET.SubElement(confidence, ns + "v").text = "0.97"
+                        data = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+                    elif item.filename == "xl/worksheets/sheet2.xml":
+                        root = ET.fromstring(data)
+                        set_inline_cell(root, 2, "A2", "Mira")
+                        set_inline_cell(root, 2, "B2", "Captain Mira")
+                        set_inline_cell(root, 2, "AH2", "YES")
+                        data = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+                    target.writestr(item, data)
+
+            parsed = read_character_workbook(edited)
+            self.assertEqual(parsed["characters"][0]["full_name"], "Mira")
+            self.assertEqual(parsed["characters"][0]["aliases"], ["Captain Mira"])
+            self.assertTrue(parsed["characters"][0]["included_in_book"])
+            self.assertEqual(parsed["dialogue_rows"][0]["GPT Assigned Character"], "Mira")
+            self.assertEqual(parsed["dialogue_rows"][0]["GPT Confidence (0–1)"], "0.97")
+
+
+    def test_complete_book_import_plans_cross_chapter_assignments_and_series_merge(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _path, chapters, _passages, document = self._complete_book_fixture(Path(tmp))
+            document["characters"] = [{
+                "full_name": "Mira",
+                "aliases": ["Captain Mira", "Mira-sama"],
+                "version": "",
+                "notes": "Confirmed from the complete narrative.",
+                "included_in_book": True,
+            }]
+            for row in document["dialogue_rows"]:
+                if row["Passage ID"] == "p1-dialogue":
+                    row["GPT Assigned Character"] = "Mira"
+                    row["GPT Confidence (0–1)"] = "0.97"
+                elif row["Passage ID"] == "p2-dialogue":
+                    row["GPT Assigned Character"] = "Captain Mira"
+                    row["GPT Confidence (0–1)"] = "0.94"
+            plan = plan_complete_book_character_workbook_import(
+                document,
+                series="Silver Archive",
+                book_title="The Silver Archive",
+                registry_rows=[{
+                    "id": "library-mira",
+                    "series": "Silver Archive",
+                    "primary_name": "Mira",
+                    "aliases": ["Captain Mira"],
+                    "identity_variant": "",
+                    "voice_name": "Existing Mira Voice",
+                }],
+                project_characters=[{
+                    "name": "Mira",
+                    "series": "Silver Archive",
+                    "aliases": ["Captain Mira"],
+                    "voice_profile": "Saved Qwen Mira Profile",
+                }],
+                current_chapters=chapters,
+            )
+            self.assertTrue(plan["ready"], plan["issues"])
+            self.assertEqual(plan["scope"], "book")
+            self.assertEqual(plan["summary"]["chapters"], 2)
+            self.assertEqual(plan["summary"]["matched_characters"], 1)
+            self.assertEqual(plan["summary"]["new_characters"], 0)
+            self.assertEqual(plan["summary"]["dialogue_assignments"], 2)
+            self.assertEqual(
+                [(row["chapter_id"], row["passage_id"], row["speaker"]) for row in plan["assignments"]],
+                [
+                    ("chapter-001", "p1-dialogue", "Mira"),
+                    ("chapter-002", "p2-dialogue", "Mira"),
+                ],
+            )
+            self.assertEqual(plan["characters"][0]["existing_voice_name"], "Existing Mira Voice")
+            self.assertEqual(
+                character_workbook_plan_fingerprint(plan),
+                character_workbook_plan_fingerprint(plan),
+            )
+
+    def test_complete_book_import_rejects_stale_chapter_context_or_missing_chapter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _path, chapters, _passages, document = self._complete_book_fixture(Path(tmp))
+            changed = [dict(row) for row in chapters]
+            changed[1] = {**changed[1], "text": changed[1]["text"] + "New sentence."}
+            with self.assertRaisesRegex(ValueError, "context does not match"):
+                plan_complete_book_character_workbook_import(
+                    document, series="Silver Archive", book_title="The Silver Archive",
+                    registry_rows=[], project_characters=[], current_chapters=changed,
+                )
+            with self.assertRaisesRegex(ValueError, "exact active book chapter set"):
+                plan_complete_book_character_workbook_import(
+                    document, series="Silver Archive", book_title="The Silver Archive",
+                    registry_rows=[], project_characters=[], current_chapters=chapters[:1],
+                )
+
+    def test_complete_book_import_ignores_character_rows_not_marked_for_this_book(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _path, chapters, _passages, document = self._complete_book_fixture(Path(tmp))
+            document["characters"] = [{
+                "full_name": "Future Volume Character",
+                "aliases": ["Future Hero"],
+                "version": "",
+                "notes": "",
+                "included_in_book": False,
+            }]
+            plan = plan_complete_book_character_workbook_import(
+                document, series="Silver Archive", book_title="The Silver Archive",
+                registry_rows=[], project_characters=[], current_chapters=chapters,
+            )
+            self.assertTrue(plan["ready"], plan["issues"])
+            self.assertEqual(plan["characters"], [])
+            self.assertEqual(plan["summary"]["new_characters"], 0)
+
 
 
 if __name__ == "__main__":
