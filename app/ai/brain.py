@@ -455,7 +455,20 @@ class AudiobookBrain:
             # speakers/dialogue. Do not silently accept an empty core extraction:
             # make one compact, evidence-seeded AI repair attempt before using the
             # deterministic parser as a visible last-resort recovery.
-            expected_core = self._fallback_core(Chapter(chapter.number, chapter.title, chunk))
+            actual_characters = core_data.get("characters")
+            actual_dialogue = core_data.get("dialogue")
+            if not isinstance(actual_characters, list):
+                actual_characters = []
+            if not isinstance(actual_dialogue, list):
+                actual_dialogue = []
+            needs_source_check = (
+                not any(isinstance(row, dict) for row in actual_characters)
+                or not any(isinstance(row, dict) for row in actual_dialogue)
+            )
+            expected_core = (
+                self._fallback_core(Chapter(chapter.number, chapter.title, chunk))
+                if needs_source_check else {"characters": [], "dialogue": []}
+            )
             expected_dialogue = [
                 row for row in (expected_core.get("dialogue") or [])
                 if isinstance(row, dict) and str(row.get("quote") or "").strip()
@@ -476,7 +489,10 @@ class AudiobookBrain:
                 for row in rows if isinstance(rows, list) else []:
                     if not isinstance(row, dict):
                         continue
-                    values = [row.get("name"), *(row.get("aliases") or [])]
+                    aliases = row.get("aliases") or []
+                    if isinstance(aliases, str):
+                        aliases = [aliases]
+                    values = [row.get("name"), *aliases]
                     for value in values:
                         key = unicodedata.normalize("NFC", str(value or "")).strip().casefold()
                         if key:
@@ -484,14 +500,9 @@ class AudiobookBrain:
                 return keys
 
             def _core_quote_key(value):
-                return re.sub(r"\\s+", " ", str(value or "")).strip().casefold()
+                cleaned = str(value or "").strip().strip('“”"')
+                return re.sub(r"\s+", " ", cleaned).casefold()
 
-            actual_characters = core_data.get("characters")
-            actual_dialogue = core_data.get("dialogue")
-            if not isinstance(actual_characters, list):
-                actual_characters = []
-            if not isinstance(actual_dialogue, list):
-                actual_dialogue = []
             actual_character_keys = _core_name_keys(actual_characters)
             actual_dialogue_keys = {
                 _core_quote_key(row.get("quote"))
