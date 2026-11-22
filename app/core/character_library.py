@@ -489,13 +489,13 @@ def merge_imported_character_records(
                 "short": str(incoming.get("short") or primary.split()[0])[:120],
                 "aliases": aliases,
                 "voice_name": str(incoming.get("existing_voice_name") or "").strip() or None,
-                "dialogue_sample": "",
-                "dialogue_sample_source": "character-workbook",
-                "pronunciation": "",
+                "dialogue_sample": str(incoming.get("dialogue_sample") or "").strip()[:4000],
+                "dialogue_sample_source": "character-library-import",
+                "pronunciation": str(incoming.get("pronunciation") or "").strip()[:500],
                 "notes": incoming_notes,
-                "line_count": 0,
-                "chapter_count": 0,
-                "confidence": 100,
+                "line_count": _safe_count(incoming.get("line_count", 0)),
+                "chapter_count": _safe_count(incoming.get("chapter_count", 0)),
+                "confidence": _safe_confidence(incoming.get("confidence", 100), default=100),
                 "user_created": True,
                 "manual": True,
                 "manual_aliases": True,
@@ -521,6 +521,23 @@ def merge_imported_character_records(
                 record["identity_base_name"] = base_name
             if incoming_notes and not str(record.get("notes") or "").strip():
                 record["notes"] = incoming_notes
+            incoming_sample = str(incoming.get("dialogue_sample") or "").strip()[:4000]
+            if incoming_sample and not str(record.get("dialogue_sample") or "").strip():
+                record["dialogue_sample"] = incoming_sample
+                record["dialogue_sample_source"] = "character-library-import"
+            incoming_pronunciation = str(incoming.get("pronunciation") or "").strip()[:500]
+            if incoming_pronunciation and not str(record.get("pronunciation") or "").strip():
+                record["pronunciation"] = incoming_pronunciation
+            record["line_count"] = max(
+                _safe_count(record.get("line_count", 0)), _safe_count(incoming.get("line_count", 0))
+            )
+            record["chapter_count"] = max(
+                _safe_count(record.get("chapter_count", 0)), _safe_count(incoming.get("chapter_count", 0))
+            )
+            if not record.get("confidence"):
+                record["confidence"] = _safe_confidence(incoming.get("confidence", 100), default=100)
+            # Deliberately do not update voice_name here: a portable identity
+            # import is not permission to replace this computer's saved voice.
             record["updated_at"] = _timestamp()
 
         results.append(dict(record))
@@ -528,6 +545,103 @@ def merge_imported_character_records(
     if rows:
         _write_store(store, target)
     return results
+
+
+def import_character_library_records(rows: list[dict], path: Path | None = None) -> list[dict]:
+    """Atomically merge portable Character Library rows across one or more series.
+
+    All series are applied to a staged copy of the registry. Any invalid identity,
+    alias collision or Recovery Bin conflict discards the staged copy and leaves
+    the user's existing library file untouched.
+    """
+    if not isinstance(rows, list) or not rows:
+        raise ValueError("Choose a JSON file containing a non-empty character list.")
+    grouped: dict[str, dict[str, Any]] = {}
+    seen_identities: set[tuple[str, str, str]] = set()
+    accepted = 0
+    for candidate in rows:
+        if not isinstance(candidate, dict):
+            continue
+        name = unicodedata.normalize(
+            "NFC", str(candidate.get("name") or candidate.get("primary_name") or "")
+        ).strip()
+        if not name:
+            continue
+        scope = str(candidate.get("scope") or "").strip()
+        series = unicodedata.normalize("NFC", str(candidate.get("series") or "")).strip()
+        if not series and scope.casefold().startswith("series"):
+            series = scope[6:].strip()
+            if series[:1] in {"·", ":", "-", "–", "—"}:
+                series = series[1:].strip()
+        if not series or series.casefold() in {"global character library", "all series", "global characters"}:
+            series = str(candidate.get("source_project_title") or "Imported cast").strip()
+        if not series:
+            raise ValueError("Every imported character must have a series name.")
+        aliases = candidate.get("aliases") or []
+        if isinstance(aliases, str):
+            aliases = [part.strip() for part in aliases.replace("\n", ",").split(",") if part.strip()]
+        if not isinstance(aliases, (list, tuple)):
+            raise ValueError("Character aliases must be a list or comma-separated text.")
+        aliases = _clean_names(aliases, name)
+        variant = unicodedata.normalize(
+            "NFC", str(candidate.get("identity_variant") or candidate.get("version") or "")
+        ).strip()
+        identity_key = (_identity_key(series), _identity_key(name), _identity_key(variant))
+        if identity_key in seen_identities:
+            raise ValueError("The import file contains the same canonical character more than once in one series.")
+        seen_identities.add(identity_key)
+        record = {
+            "canonical_name": name,
+            "identity_base_name": str(candidate.get("identity_base_name") or name).strip(),
+            "identity_variant": variant,
+            "aliases": aliases,
+            "short": str(candidate.get("short") or candidate.get("short_name") or "").strip(),
+            "notes": str(candidate.get("notes") or "").strip(),
+            "dialogue_sample": str(candidate.get("dialogue_sample") or candidate.get("sample") or "").strip(),
+            "pronunciation": str(candidate.get("pronunciation") or "").strip(),
+            "line_count": candidate.get("line_count", candidate.get("lines", 0)),
+            "chapter_count": candidate.get("chapter_count", candidate.get("chapters", 0)),
+            "confidence": candidate.get("confidence", 100),
+            # Legacy same-PC JSON files may contain a voice label. The v1
+            # portable schema intentionally never supplies this property.
+            "existing_voice_name": str(candidate.get("voice") or candidate.get("voice_name") or "").strip(),
+        }
+        if len(record["notes"]) > 4000:
+            raise ValueError("Character notes must be 4,000 characters or fewer.")
+        if len(record["dialogue_sample"]) > 4000:
+            raise ValueError("Character dialogue samples must be 4,000 characters or fewer.")
+        if len(record["pronunciation"]) > 500:
+            raise ValueError("Character pronunciation notes must be 500 characters or fewer.")
+        series_key = _identity_key(series)
+        bucket = grouped.setdefault(series_key, {"series": series, "rows": []})
+        bucket["rows"].append(record)
+        accepted += 1
+
+    if not accepted:
+        raise ValueError("The selected JSON file contained no valid named characters.")
+    target = path or character_library_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, staged_name = tempfile.mkstemp(
+        prefix=".character-library-import-", suffix=".staged", dir=str(target.parent)
+    )
+    os.close(fd)
+    staged = Path(staged_name)
+    try:
+        if target.is_file():
+            staged.write_bytes(target.read_bytes())
+        else:
+            staged.write_text(json.dumps(_empty_store(), ensure_ascii=False, indent=2), encoding="utf-8")
+        merged: list[dict] = []
+        for bucket in grouped.values():
+            merged.extend(merge_imported_character_records(
+                bucket["series"], bucket["rows"], path=staged
+            ))
+        # The only visible registry mutation occurs after every series validates.
+        os.replace(staged, target)
+        return merged
+    except Exception:
+        staged.unlink(missing_ok=True)
+        raise
 
 
 def update_character(record_id: str, changes: dict, path: Path | None = None) -> dict:

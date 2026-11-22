@@ -5010,6 +5010,16 @@
     message('Skipped this analysis suggestion. The source text and character assignments were not changed.');
   }
 
+  function ensureCharacterEditorModalHost() {
+    const modal = $('characterEditorModal');
+    if (!modal) return null;
+    // The shared editor is authored inside Character Studio, but Add Character
+    // is launched from the separate Library page. Hoist the dialog out of the
+    // page's display:none subtree so it can be opened from either workspace.
+    if (document.body && modal.parentElement !== document.body) document.body.appendChild(modal);
+    return modal;
+  }
+
   function getEditCharacterSeriesValue() {
     const selected = String($('editCharacterSeries')?.value || '').trim();
     if (selected === '__new_series__') return String($('editCharacterNewSeries')?.value || '').trim();
@@ -5038,7 +5048,7 @@
     if (newInput && select.value !== '__new_series__') newInput.value = '';
   }
   function ensureCharacterSeriesField() {
-    const modal = $('characterEditorModal');
+    const modal = ensureCharacterEditorModalHost();
     if (!modal) return;
     const legacyScope = $('editCharacterScope');
     const legacyGroup = legacyScope?.closest('.form-group, .form-row, .field') || legacyScope?.parentElement;
@@ -5515,6 +5525,7 @@
     return libraryCharacters;
   }
   function openLibraryEditor(c) {
+    ensureCharacterEditorModalHost();
     libraryEditorActive = true; libraryEditorId = c?.id || null;
     if ($('characterEditorTitle')) $('characterEditorTitle').textContent = c ? 'Edit character' : 'Add new character';
     if ($('editCharacterName')) $('editCharacterName').value = c?.name || ''; if ($('editCharacterShort')) $('editCharacterShort').value = c?.short || '';

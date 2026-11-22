@@ -48,6 +48,7 @@ from app.core.character_library import (
     soft_delete_character as soft_delete_reusable_character,
     soft_delete_characters_many as soft_delete_reusable_characters_many,
     merge_imported_character_records,
+    import_character_library_records as import_reusable_character_records,
     purge_deleted_characters_many as purge_deleted_reusable_characters_many,
     sync_characters as sync_reusable_characters,
     update_character as update_reusable_character,
@@ -7770,6 +7771,7 @@ class PremiumV2Bridge(QObject):
 
     @_serialize_character_identity_state
     def _character_library_import(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Validate and atomically merge a portable cast without replacing local voice bindings."""
         self._character_library_bootstrap()
         schema = str(payload.get("schema") or "").strip()
         if schema and schema != "ryu.character-library":
@@ -7786,57 +7788,16 @@ class PremiumV2Bridge(QObject):
             incoming = incoming.get("characters")
         if not isinstance(incoming, list) or not incoming:
             raise ValueError("Choose a JSON file containing a non-empty character list.")
-        imported = 0
-        for candidate in incoming:
-            if not isinstance(candidate, dict):
-                continue
-            name = str(candidate.get("name") or candidate.get("primary_name") or "").strip()
-            if not name:
-                continue
-            scope = str(candidate.get("scope") or "").strip()
-            series = str(candidate.get("series") or "").strip()
-            if not series and re.match(r"(?i)^series\s*[·:-]", scope):
-                series = re.sub(r"(?i)^series\s*[·:-]\s*", "", scope).strip()
-            if not series or series.casefold() in {"global character library", "all series"}:
-                series = str(candidate.get("source_project_title") or "Imported cast").strip()
-            aliases = candidate.get("aliases") or []
-            if isinstance(aliases, str):
-                aliases = [part.strip() for part in aliases.replace("\n", ",").split(",") if part.strip()]
-            examples = candidate.get("examples") or []
-            sample = str(candidate.get("dialogue_sample") or candidate.get("sample") or "").strip()
-            if sample:
-                examples = [sample, *(examples if isinstance(examples, list) else [])]
-            sync_reusable_characters(
-                series,
-                [{
-                    "name": name,
-                    "short": candidate.get("short") or candidate.get("short_name") or "",
-                    "aliases": aliases if isinstance(aliases, list) else [],
-                    "voice": candidate.get("voice") or candidate.get("voice_name") or "",
-                    "dialogue_sample": sample,
-                    "examples": examples if isinstance(examples, list) else [],
-                    "notes": candidate.get("notes") or "",
-                    "pronunciation": candidate.get("pronunciation") or "",
-                    "line_count": candidate.get("line_count", candidate.get("lines", 0)),
-                    "chapter_count": candidate.get("chapter_count", candidate.get("chapters", 0)),
-                    "confidence": candidate.get("confidence", 100),
-                    "identity_base_name": candidate.get("identity_base_name") or candidate.get("name") or candidate.get("primary_name") or "",
-                    "identity_variant": candidate.get("identity_variant") or candidate.get("version") or "",
-                    "imported_from_workbook": bool(candidate.get("imported_from_workbook")),
-                    "character_origin": candidate.get("character_origin") or "",
-                    "character_library_id": candidate.get("character_library_id") or "",
-                }],
-                source_project_folder=str(candidate.get("source_project_folder") or ""),
-                source_project_title=str(candidate.get("source_project_title") or ""),
-                update_names=True,
-                # A portable library export intentionally omits machine-local
-                # voice bindings. Preserve an existing local voice in that case.
-                update_voice=bool(str(candidate.get("voice") or candidate.get("voice_name") or "").strip()),
-            )
-            imported += 1
-        if not imported:
+        imported_rows = import_reusable_character_records(incoming)
+        if not imported_rows:
             raise ValueError("The selected JSON file contained no valid named characters.")
-        return {"imported": imported, "count": len(list_reusable_characters()), "merged_by_name_and_series": True}
+        return {
+            "imported": len(imported_rows),
+            "count": len(list_reusable_characters()),
+            "merged_by_name_and_series": True,
+            "voice_assets_included": False,
+            "local_voice_profiles_preserved": True,
+        }
 
     def _pronunciation_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
         """List only this book, its matching series and the shared global library."""

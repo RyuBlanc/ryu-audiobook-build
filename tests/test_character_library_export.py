@@ -4,7 +4,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from app.core.character_library import list_characters, sync_characters
+from app.core.character_library import (
+    import_character_library_records,
+    list_characters,
+    soft_delete_character,
+    sync_characters,
+)
 from app.ui.premium_v2_host import _character_library_export_document
 
 
@@ -114,6 +119,91 @@ class CharacterLibraryExportDocumentTests(unittest.TestCase):
             self.assertEqual(saved[0]["primary_name"], "Mira")
             self.assertIn("Captain Mira", saved[0]["aliases"])
             self.assertEqual(saved[0]["voice_name"], "This PC's Saved Qwen Voice")
+
+
+
+    def test_portable_import_merges_all_series_and_preserves_local_voice_and_manual_details(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-portable-library-atomic-") as tmp:
+            store = Path(tmp) / "character-library.json"
+            sync_characters("Silver Archive", [{
+                "name": "Mira",
+                "aliases": ["Captain Mira"],
+                "voice": "This PC's Qwen 1.7B voice",
+                "notes": "Locally confirmed notes.",
+                "dialogue_sample": "Stay behind me.",
+            }], path=store)
+            imported = import_character_library_records([
+                {
+                    "name": "Mira",
+                    "series": "Silver Archive",
+                    "aliases": ["Mira-sama", "Captain Mira"],
+                    "identity_base_name": "Mira",
+                    "identity_variant": "",
+                    "notes": "Notes from the transfer PC.",
+                    "dialogue_sample": "Transferred sample.",
+                    "pronunciation": "Mee-ra",
+                    "line_count": 70,
+                    "chapter_count": 9,
+                    "confidence": 99,
+                },
+                {
+                    "name": "Ren",
+                    "series": "Another Series",
+                    "aliases": ["Ren-kun"],
+                    "identity_base_name": "Ren",
+                    "identity_variant": "",
+                    "notes": "A different series character.",
+                    "dialogue_sample": "I will go first.",
+                    "pronunciation": "Wren",
+                    "line_count": 12,
+                    "chapter_count": 2,
+                    "confidence": 96,
+                },
+            ], path=store)
+
+            saved = list_characters(path=store)
+            self.assertEqual(len(imported), 2)
+            self.assertEqual({(row["series"], row["primary_name"]) for row in saved}, {
+                ("Silver Archive", "Mira"), ("Another Series", "Ren")
+            })
+            mira = next(row for row in saved if row["series"] == "Silver Archive")
+            self.assertEqual(mira["voice_name"], "This PC's Qwen 1.7B voice")
+            self.assertEqual(mira["notes"], "Locally confirmed notes.")
+            self.assertEqual(mira["dialogue_sample"], "Stay behind me.")
+            self.assertIn("Mira-sama", mira["aliases"])
+            self.assertIn("Captain Mira", mira["aliases"])
+            ren = next(row for row in saved if row["series"] == "Another Series")
+            self.assertEqual(ren["dialogue_sample"], "I will go first.")
+            self.assertEqual(ren["pronunciation"], "Wren")
+            self.assertEqual(ren["line_count"], 12)
+            self.assertEqual(ren["chapter_count"], 2)
+            self.assertFalse(ren.get("voice_name"))
+
+    def test_portable_import_is_atomic_when_a_later_series_hits_recovery_conflict(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-portable-library-rollback-") as tmp:
+            store = Path(tmp) / "character-library.json"
+            sync_characters("Series Two", [{"name": "Deleted Hero", "aliases": ["Old Alias"]}], path=store)
+            deleted = list_characters(series="Series Two", path=store)[0]
+            soft_delete_character(deleted["id"], path=store)
+            before = store.read_bytes()
+
+            with self.assertRaisesRegex(ValueError, "Recovery Bin"):
+                import_character_library_records([
+                    {
+                        "name": "New Character",
+                        "series": "Series One",
+                        "aliases": ["New Alias"],
+                    },
+                    {
+                        "name": "Replacement",
+                        "series": "Series Two",
+                        "aliases": ["Old Alias"],
+                    },
+                ], path=store)
+
+            self.assertEqual(store.read_bytes(), before)
+            self.assertEqual(list_characters(series="Series One", path=store), [])
+            self.assertEqual(list_characters(series="Series Two", include_deleted=True, path=store)[0]["primary_name"], "Deleted Hero")
 
 
 

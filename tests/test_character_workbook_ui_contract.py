@@ -111,7 +111,31 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn("button.id === 'saveCharacterProfile' && libraryEditorActive", self.adapter)
         self.assertIn("const payload=Array.isArray(data)?{characters:data}:data", self.adapter)
         self.assertIn("This Ryu Character Library export version is not supported.", self.host)
+        self.assertIn("import_reusable_character_records(incoming)", self.host)
+        self.assertIn("def import_character_library_records(", self.registry)
+        self.assertIn("All series are applied to a staged copy", self.registry)
+        self.assertIn("Deliberately do not update voice_name here", self.registry)
         self.assertIn("update_voice=bool(str(candidate.get", self.host)
+
+
+    def test_character_editor_modal_is_hoisted_out_of_hidden_character_studio_page(self):
+        character_page_start = self.html.index('<section class="page" id="characters">')
+        pronunciation_page_start = self.html.index('<section class="page" id="pronunciation">', character_page_start)
+        modal_start = self.html.index('id="characterEditorModal"')
+        library_start = self.html.index('id="characterLibraryZone"')
+        library_end = self.html.index('<section class="page" id="import">', library_start)
+        self.assertLess(character_page_start, modal_start)
+        self.assertLess(modal_start, pronunciation_page_start)
+        self.assertLess(library_start, self.html.index('id="addLibraryCharacter"', library_start))
+        self.assertLess(self.html.index('id="addLibraryCharacter"', library_start), library_end)
+        self.assertIn("function ensureCharacterEditorModalHost()", self.adapter)
+        self.assertIn("document.body.appendChild(modal)", self.adapter)
+        self.assertIn("const modal = ensureCharacterEditorModalHost();", self.adapter)
+        editor_start = self.adapter.index("function openLibraryEditor(c)")
+        editor_end = self.adapter.index("async function saveLibraryEditor()", editor_start)
+        self.assertIn("ensureCharacterEditorModalHost();", self.adapter[editor_start:editor_end])
+        self.assertIn("button.id === 'addLibraryCharacter'", self.adapter)
+
 
 
     def test_outsourced_origin_is_supported_as_a_third_assignment_source(self):
