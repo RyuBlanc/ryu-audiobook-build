@@ -467,9 +467,35 @@ class AudiobookBrain:
                 actual_characters = []
             if not isinstance(actual_dialogue, list):
                 actual_dialogue = []
+
+            # A non-empty AI response is not sufficient: reject supposed
+            # dialogue that is not one of the exact dialogue spans in this
+            # source excerpt. This prevents narration/prose from being
+            # accepted as a spoken quote merely because the model supplied a
+            # speaker label.
+            source_dialogue_keys = {
+                _core_quote_key(row[2])
+                for row in _all_dialogue_spans(chunk)
+                if isinstance(row, (tuple, list)) and len(row) >= 3
+                and _core_quote_key(row[2])
+            }
+            unsupported_dialogue = [
+                row for row in actual_dialogue
+                if not isinstance(row, dict)
+                or _core_quote_key(row.get("quote")) not in source_dialogue_keys
+            ]
+            if unsupported_dialogue:
+                actual_dialogue = [
+                    row for row in actual_dialogue
+                    if isinstance(row, dict)
+                    and _core_quote_key(row.get("quote")) in source_dialogue_keys
+                ]
+                core_data["dialogue"] = actual_dialogue
+
             needs_source_check = (
                 not any(isinstance(row, dict) for row in actual_characters)
                 or not any(isinstance(row, dict) for row in actual_dialogue)
+                or bool(unsupported_dialogue)
             )
             expected_core = (
                 self._fallback_core(Chapter(chapter.number, chapter.title, chunk))
@@ -548,10 +574,11 @@ class AudiobookBrain:
                     ],
                 }
                 repair_user = (
-                    "/no_think The first core pass omitted source-supported items. Re-read this excerpt "
-                    "and recover the missing items below. These candidates come from exact local "
-                    "speaker-tag/quote matching; verify each one against the excerpt before returning it. "
-                    "Do not add other names or dialogue.\n"
+                    "/no_think The first core pass omitted source-supported items or returned text that "
+                    "was not an exact dialogue span from this excerpt. Re-read the excerpt and recover "
+                    "the missing items below. These candidates come from exact local speaker-tag/quote "
+                    "matching; verify each one against the excerpt before returning it. Do not return "
+                    "narration or paraphrase as dialogue. Do not add other names or dialogue.\n"
                     "Missing source candidates:\n"
                     + json.dumps(repair_candidates, ensure_ascii=False)
                     + f"\nChapter: {chapter.title}\nExcerpt:\n{chunk}\nJSON only."

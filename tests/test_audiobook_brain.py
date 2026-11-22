@@ -178,6 +178,77 @@ class AudiobookBrainTests(unittest.TestCase):
         )
 
 
+    def test_nonempty_core_response_with_unsupported_prose_is_repaired_from_exact_dialogue_spans(self):
+        from app.ai.brain import AudiobookBrain, BrainConfig
+        from app.chapters.detector import Chapter
+
+        sample = (
+            'Haruka is a student. Rahul is her friend. '
+            'Haruka said, "We should go now." '
+            'Rahul replied, "Wait for me." '
+            'Haruka and Rahul walked together toward Kyoto.'
+        )
+        class SequenceLLM:
+            def __init__(self):
+                self.responses = [
+                    json.dumps({
+                        "characters": [
+                            {"name": "Haruka", "aliases": [], "role": "student", "confidence": 0.99},
+                            {"name": "Rahul", "aliases": [], "role": "friend", "confidence": 0.99},
+                        ],
+                        "dialogue": [{
+                            "quote": "Haruka is a student. Rahul is her friend.",
+                            "speaker": "Haruka", "confidence": 0.91,
+                            "evidence": "The model mistook narration for dialogue.",
+                        }],
+                        "pronunciation": [],
+                    }),
+                    json.dumps({
+                        "characters": [],
+                        "dialogue": [
+                            {"quote": "We should go now.", "speaker": "Haruka", "confidence": 0.99, "evidence": "Haruka said"},
+                            {"quote": "Wait for me.", "speaker": "Rahul", "confidence": 0.99, "evidence": "Rahul replied"},
+                        ],
+                    }),
+                    json.dumps({"scenes": [], "continuity_notes": []}),
+                ]
+                self.calls = []
+
+            def complete(self, system, user, **kwargs):
+                self.calls.append((system, user, kwargs))
+                return self.responses.pop(0)
+
+            def close(self):
+                return None
+
+        with tempfile.TemporaryDirectory(prefix="ryu-brain-invalid-quote-repair-") as temporary:
+            folder = Path(temporary)
+            brain = AudiobookBrain.__new__(AudiobookBrain)
+            brain.project_folder = folder
+            brain.analysis_dir = folder / "analysis"
+            brain.analysis_dir.mkdir()
+            brain.output_file = brain.analysis_dir / "audiobook_brain.json"
+            brain.config = BrainConfig()
+            brain.llm = SequenceLLM()
+
+            result = brain.analyze_chapter(Chapter(1, "AI Smoke Chapter", sample))
+
+        actual_pairs = {
+            (row["quote"], row["speaker"])
+            for row in result["dialogue"]
+        }
+        self.assertEqual(
+            actual_pairs,
+            {("We should go now.", "Haruka"), ("Wait for me.", "Rahul")},
+        )
+        self.assertNotIn(
+            "Haruka is a student. Rahul is her friend.",
+            {row["quote"] for row in result["dialogue"]},
+        )
+        self.assertFalse(result.get("warnings"))
+        self.assertEqual(len(brain.llm.calls), 3)
+        self.assertIn("not an exact dialogue span", brain.llm.calls[1][1])
+
     def test_valid_but_empty_core_response_triggers_compact_source_grounded_ai_repair(self):
         from app.ai.brain import AudiobookBrain, BrainConfig
         from app.chapters.detector import Chapter
