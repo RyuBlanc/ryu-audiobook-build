@@ -49,6 +49,23 @@ class DialogueAssignmentTests(unittest.TestCase):
         self.assertEqual(segments[0].suggestions[0][0], "Sarah")
         self.assertEqual(segments[0].suggestions[0][1], 1.0)
 
+    def test_outsourced_assignment_fallback_preserves_imported_provenance_and_confidence(self):
+        from app.chapters.assignment_utils import assign_dialogue_to_chapters
+
+        text = "“An imported line.”"
+        chapter = Chapter(1, "Imported", text)
+        result = assign_dialogue_to_chapters(
+            [chapter], text, ["Mira"], chapter_number=1,
+            source="outsourced", confidence=0.86,
+        )
+        self.assertTrue(result["saved"])
+        self.assertEqual(result["source"], "outsourced")
+        self.assertEqual(result["confidence"], 0.86)
+        saved = chapter.dialogue_assignments[0]
+        self.assertEqual(saved["source"], "outsourced")
+        self.assertEqual(saved["confidence"], 0.86)
+        self.assertEqual(saved["speaker"], "Mira")
+
     def test_editing_chapter_text_remaps_unchanged_dialogue_assignment(self):
         from app.chapters.editor import ChapterEditor
 
