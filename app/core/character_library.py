@@ -576,6 +576,37 @@ def restore_character(record_id: str, path: Path | None = None) -> dict:
     index = next((i for i, item in enumerate(store["deleted"]) if str(item.get("id")) == str(record_id)), None)
     if index is None:
         raise KeyError("The character is no longer in the recovery bin.")
+
+    record = store["deleted"][index]
+    series_key = _identity_key(record.get("series"))
+
+    def _identity_tokens(item: dict) -> set[str]:
+        aliases = item.get("aliases") or []
+        if isinstance(aliases, str):
+            aliases = [aliases]
+        values = [item.get("primary_name") or item.get("name"), *(
+            aliases if isinstance(aliases, (list, tuple)) else []
+        )]
+        return {_identity_key(value) for value in values if _identity_key(value)}
+
+    restoring_tokens = _identity_tokens(record)
+    conflicts = [
+        item for item in store["active"]
+        if _identity_key(item.get("series")) == series_key
+        and restoring_tokens.intersection(_identity_tokens(item))
+    ]
+    if conflicts:
+        conflict_names = sorted({
+            str(item.get("primary_name") or item.get("name") or "Unnamed character").strip()
+            for item in conflicts
+        })
+        raise ValueError(
+            "Cannot restore this character because one or more names or aliases are already in use "
+            "by an active character in this series (%s). Resolve the identity conflict first." %
+            ", ".join(conflict_names[:4])
+        )
+
+    # Do not remove the Recovery Bin record until every collision check passes.
     record = store["deleted"].pop(index)
     record.pop("deleted_at", None)
     record["updated_at"] = _timestamp()

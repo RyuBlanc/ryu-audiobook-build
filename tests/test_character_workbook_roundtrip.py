@@ -368,6 +368,48 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                     current_assignments=[],
                 )
 
+    def test_character_register_accepts_alias_columns_above_thirty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, _text, _passages = self._export(Path(tmp))
+            edited = Path(tmp) / "extended-alias-register.xlsx"
+            ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+
+            def set_inline_cell(root, row_number, reference, value):
+                sheet_data = root.find("%ssheetData" % ns)
+                row = next((item for item in sheet_data.findall("%srow" % ns)
+                            if item.get("r") == str(row_number)), None)
+                if row is None:
+                    row = ET.SubElement(sheet_data, ns + "row", {"r": str(row_number)})
+                cell = next((item for item in row.findall("%sc" % ns)
+                             if item.get("r") == reference), None)
+                if cell is None:
+                    cell = ET.SubElement(row, ns + "c", {"r": reference})
+                else:
+                    cell.clear()
+                    cell.set("r", reference)
+                cell.set("t", "inlineStr")
+                inline = ET.SubElement(cell, ns + "is")
+                ET.SubElement(inline, ns + "t").text = value
+
+            with ZipFile(path, "r") as source, ZipFile(edited, "w", ZIP_DEFLATED) as target:
+                for item in source.infolist():
+                    data = source.read(item.filename)
+                    if item.filename == "xl/worksheets/sheet2.xml":
+                        root = ET.fromstring(data)
+                        set_inline_cell(root, 1, "AH1", "Alias 31")
+                        set_inline_cell(root, 2, "A2", "Mira")
+                        set_inline_cell(root, 2, "AH2", "Thirty-First Alias")
+                        dimension = root.find("%sdimension" % ns)
+                        if dimension is not None:
+                            dimension.set("ref", "A1:AH2")
+                        data = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+                    target.writestr(item, data)
+
+            document = read_character_workbook(edited)
+            self.assertEqual(len(document["characters"]), 1)
+            self.assertEqual(document["characters"][0]["full_name"], "Mira")
+            self.assertEqual(document["characters"][0]["aliases"], ["Thirty-First Alias"])
+
     def test_registry_merge_accepts_more_than_five_aliases_and_preserves_voice(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = Path(tmp) / "characters.json"

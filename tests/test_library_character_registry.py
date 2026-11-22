@@ -209,6 +209,58 @@ class CharacterLibraryRegistryTests(unittest.TestCase):
             self.assertEqual({row["id"] for row in deleted}, {"bad-magic", "bad-any"})
 
 
+    def test_restore_refuses_same_series_name_or_alias_collision_without_mutating_recovery(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-character-restore-collision-") as tmp:
+            store = Path(tmp) / "character-library.json"
+            store.write_text(json.dumps({
+                "version": 1,
+                "active": [{
+                    "id": "active-mira", "series": "Star Series",
+                    "primary_name": "Mira", "aliases": ["Captain"],
+                    "voice_name": "Mira Voice",
+                }],
+                "deleted": [{
+                    "id": "deleted-ren", "series": "Star Series",
+                    "primary_name": "Ren", "aliases": ["Captain"],
+                    "voice_name": "Ren Voice", "deleted_at": "2026-11-22T10:00:00Z",
+                }],
+            }, ensure_ascii=False), encoding="utf-8")
+
+            before_active = list_characters(series="Star Series", path=store)
+            before_deleted = list_deleted_characters(series="Star Series", path=store)
+
+            with self.assertRaisesRegex(ValueError, "already in use"):
+                restore_character("deleted-ren", path=store)
+
+            self.assertEqual(list_characters(series="Star Series", path=store), before_active)
+            self.assertEqual(list_deleted_characters(series="Star Series", path=store), before_deleted)
+            saved = json.loads(store.read_text(encoding="utf-8"))
+            self.assertEqual([row["id"] for row in saved["active"]], ["active-mira"])
+            self.assertEqual([row["id"] for row in saved["deleted"]], ["deleted-ren"])
+
+    def test_restore_allows_same_name_in_a_different_series(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-character-restore-series-") as tmp:
+            store = Path(tmp) / "character-library.json"
+            store.write_text(json.dumps({
+                "version": 1,
+                "active": [{
+                    "id": "volume-one-mira", "series": "Series One",
+                    "primary_name": "Mira", "aliases": ["Captain Mira"],
+                }],
+                "deleted": [{
+                    "id": "volume-two-mira", "series": "Series Two",
+                    "primary_name": "Mira", "aliases": ["Captain Mira"],
+                }],
+            }, ensure_ascii=False), encoding="utf-8")
+
+            restored = restore_character("volume-two-mira", path=store)
+            self.assertEqual(restored["series"], "Series Two")
+            self.assertEqual(
+                {(row["series"], row["primary_name"]) for row in list_characters(path=store)},
+                {("Series One", "Mira"), ("Series Two", "Mira")},
+            )
+            self.assertEqual(list_deleted_characters(path=store), [])
+
     def test_bulk_soft_delete_moves_only_selected_records_and_preserves_voice_data(self):
         with tempfile.TemporaryDirectory(prefix="ryu-character-bulk-delete-") as tmp:
             store = Path(tmp) / "character-library.json"

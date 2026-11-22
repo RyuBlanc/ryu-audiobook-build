@@ -61,6 +61,7 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn('book_title=str(getattr(project, "title", "") or "")', self.host)
         self.assertIn("Character identity plan", self.adapter)
         self.assertIn("remainingChanges", self.adapter)
+        self.assertIn("only the first 24 are expanded above", self.adapter)
 
     def test_identity_variant_survives_cross_volume_sync_voice_assignment_and_import_commit(self):
         self.assertIn('"identity_variant": row.get("identity_variant") or ""', self.host)

@@ -4371,7 +4371,9 @@
         const totalChanges = Number(preview.character_plan_total || characterPlan.length);
         const remainingChanges = Math.max(0, totalChanges - identityLines.length);
         if (remainingChanges) identityLines.push('…and ' + remainingChanges + ' more character identity changes.');
-        if (preview.character_plan_truncated) identityLines.push('Only the first 40 identity changes are listed above.');
+        if (preview.character_plan_truncated) {
+          identityLines.push('More than 40 identity changes are planned. This preview lists the first 40; only the first 24 are expanded above.');
+        }
         const prompt = 'Import the completed GPT workbook into Series "' + preview.series +
           '" · Chapter ' + preview.chapter_number + '?\n\n' +
           'Existing characters to merge: ' + Number(summary.matched_characters || 0) + '\n' +
