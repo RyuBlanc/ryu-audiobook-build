@@ -126,6 +126,37 @@ def main() -> None:
                 + json.dumps(diagnostic, ensure_ascii=False, default=str)
             )
 
+        actual_names = {
+            str(row.get('name') or '').strip().casefold()
+            for row in chapter_result.get('characters', [])
+            if isinstance(row, dict)
+        }
+        expected_names = {'haruka', 'rahul'}
+        if not expected_names.issubset(actual_names):
+            raise SystemExit(
+                'Audiobook AI omitted an explicitly named character: '
+                + json.dumps(sorted(actual_names), ensure_ascii=False)
+            )
+
+        def quote_key(value: str) -> str:
+            cleaned = str(value or '').replace('“', '').replace('”', '').replace('"', '')
+            return ' '.join(cleaned.split()).casefold()
+
+        actual_dialogue = {
+            (quote_key(row.get('quote')), str(row.get('speaker') or '').strip().casefold())
+            for row in chapter_result.get('dialogue', [])
+            if isinstance(row, dict)
+        }
+        expected_dialogue = {
+            ('we should go now.', 'haruka'),
+            ('wait for me.', 'rahul'),
+        }
+        if not expected_dialogue.issubset(actual_dialogue):
+            raise SystemExit(
+                'Audiobook AI did not preserve both exact source dialogue/speaker pairs: '
+                + json.dumps(sorted(actual_dialogue), ensure_ascii=False)
+            )
+
         print('LIVE_AUDIOBOOK_AI_BRAIN_SMOKE=PASS')
         print('characters=', len(chapter_result['characters']))
         print('dialogue=', len(chapter_result['dialogue']))

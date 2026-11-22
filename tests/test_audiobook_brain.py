@@ -1,3 +1,5 @@
+import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -150,6 +152,107 @@ class AudiobookBrainTests(unittest.TestCase):
         self.assertIn("Required keys: characters, dialogue, pronunciation.", brain_source)
         self.assertIn("if core_data is None:", brain_source)
         self.assertIn("AI core pass fallback", brain_source)
+
+
+    def test_valid_but_empty_core_response_triggers_compact_source_grounded_ai_repair(self):
+        from app.ai.brain import AudiobookBrain, BrainConfig
+        from app.chapters.detector import Chapter
+
+        sample = (
+            'Haruka is a student. Rahul is her friend. '
+            'Haruka said, "We should go now." '
+            'Rahul replied, "Wait for me." '
+            'Haruka and Rahul walked together toward Kyoto.'
+        )
+        class SequenceLLM:
+            def __init__(self):
+                self.responses = [
+                    json.dumps({"characters": [], "dialogue": [], "pronunciation": []}),
+                    json.dumps({
+                        "characters": [
+                            {"name": "Haruka", "aliases": [], "role": "student", "confidence": 0.99},
+                            {"name": "Rahul", "aliases": [], "role": "friend", "confidence": 0.99},
+                        ],
+                        "dialogue": [
+                            {"quote": "We should go now.", "speaker": "Haruka", "confidence": 0.99, "evidence": "Haruka said"},
+                            {"quote": "Wait for me.", "speaker": "Rahul", "confidence": 0.99, "evidence": "Rahul replied"},
+                        ],
+                    }),
+                    json.dumps({"scenes": [], "continuity_notes": []}),
+                ]
+                self.calls = []
+
+            def complete(self, system, user, **kwargs):
+                self.calls.append((system, user, kwargs))
+                return self.responses.pop(0)
+
+            def close(self):
+                return None
+
+        with tempfile.TemporaryDirectory(prefix="ryu-brain-semantic-repair-") as temporary:
+            folder = Path(temporary)
+            brain = AudiobookBrain.__new__(AudiobookBrain)
+            brain.project_folder = folder
+            brain.analysis_dir = folder / "analysis"
+            brain.analysis_dir.mkdir()
+            brain.output_file = brain.analysis_dir / "audiobook_brain.json"
+            brain.config = BrainConfig()
+            brain.llm = SequenceLLM()
+
+            result = brain.analyze_chapter(Chapter(1, "AI Smoke Chapter", sample))
+
+        self.assertEqual({row["name"] for row in result["characters"]}, {"Haruka", "Rahul"})
+        self.assertEqual(
+            {(row["quote"], row["speaker"]) for row in result["dialogue"]},
+            {("We should go now.", "Haruka"), ("Wait for me.", "Rahul")},
+        )
+        self.assertFalse(result.get("warnings"))
+        self.assertEqual(len(brain.llm.calls), 3)
+        self.assertIn("source-grounded audiobook character/dialogue extraction", brain.llm.calls[1][0])
+        self.assertIn('"Haruka"', brain.llm.calls[1][1])
+        self.assertIn('"Wait for me."', brain.llm.calls[1][1])
+
+    def test_failed_semantic_repair_uses_explicit_source_evidence_with_warning(self):
+        from app.ai.brain import AudiobookBrain, BrainConfig
+        from app.chapters.detector import Chapter
+
+        sample = (
+            'Haruka is a student. Rahul is her friend. '
+            'Haruka said, "We should go now." '
+            'Rahul replied, "Wait for me."'
+        )
+        class SequenceLLM:
+            def __init__(self):
+                self.responses = [
+                    json.dumps({"characters": [], "dialogue": [], "pronunciation": []}),
+                    json.dumps({"characters": [], "dialogue": []}),
+                    json.dumps({"scenes": [], "continuity_notes": []}),
+                ]
+
+            def complete(self, _system, _user, **_kwargs):
+                return self.responses.pop(0)
+
+            def close(self):
+                return None
+
+        with tempfile.TemporaryDirectory(prefix="ryu-brain-deterministic-recovery-") as temporary:
+            folder = Path(temporary)
+            brain = AudiobookBrain.__new__(AudiobookBrain)
+            brain.project_folder = folder
+            brain.analysis_dir = folder / "analysis"
+            brain.analysis_dir.mkdir()
+            brain.output_file = brain.analysis_dir / "audiobook_brain.json"
+            brain.config = BrainConfig()
+            brain.llm = SequenceLLM()
+
+            result = brain.analyze_chapter(Chapter(1, "AI Smoke Chapter", sample))
+
+        self.assertEqual({row["name"] for row in result["characters"]}, {"Haruka", "Rahul"})
+        self.assertEqual(
+            {(row["quote"], row["speaker"]) for row in result["dialogue"]},
+            {("We should go now.", "Haruka"), ("Wait for me.", "Rahul")},
+        )
+        self.assertTrue(any("deterministic recovery supplied" in item for item in result.get("warnings", [])))
 
 
 

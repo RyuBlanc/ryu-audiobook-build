@@ -451,6 +451,162 @@ class AudiobookBrain:
                     result.setdefault('warnings', []).append(
                         f'AI core pass fallback for chapter {chapter.number}, excerpt {idx}: {second_error}'
                     )
+            # A syntactically valid JSON object can still omit plainly tagged
+            # speakers/dialogue. Do not silently accept an empty core extraction:
+            # make one compact, evidence-seeded AI repair attempt before using the
+            # deterministic parser as a visible last-resort recovery.
+            expected_core = self._fallback_core(Chapter(chapter.number, chapter.title, chunk))
+            expected_dialogue = [
+                row for row in (expected_core.get("dialogue") or [])
+                if isinstance(row, dict) and str(row.get("quote") or "").strip()
+                and str(row.get("speaker") or "").strip()
+            ]
+            tagged_speakers = {
+                unicodedata.normalize("NFC", str(row.get("speaker") or "")).strip().casefold()
+                for row in expected_dialogue
+            }
+            expected_characters = [
+                row for row in (expected_core.get("characters") or [])
+                if isinstance(row, dict)
+                and unicodedata.normalize("NFC", str(row.get("name") or "")).strip().casefold() in tagged_speakers
+            ]
+
+            def _core_name_keys(rows):
+                keys = set()
+                for row in rows if isinstance(rows, list) else []:
+                    if not isinstance(row, dict):
+                        continue
+                    values = [row.get("name"), *(row.get("aliases") or [])]
+                    for value in values:
+                        key = unicodedata.normalize("NFC", str(value or "")).strip().casefold()
+                        if key:
+                            keys.add(key)
+                return keys
+
+            def _core_quote_key(value):
+                return re.sub(r"\\s+", " ", str(value or "")).strip().casefold()
+
+            actual_characters = core_data.get("characters")
+            actual_dialogue = core_data.get("dialogue")
+            if not isinstance(actual_characters, list):
+                actual_characters = []
+            if not isinstance(actual_dialogue, list):
+                actual_dialogue = []
+            actual_character_keys = _core_name_keys(actual_characters)
+            actual_dialogue_keys = {
+                _core_quote_key(row.get("quote"))
+                for row in actual_dialogue if isinstance(row, dict) and _core_quote_key(row.get("quote"))
+            }
+            missing_characters = [
+                row for row in expected_characters
+                if unicodedata.normalize("NFC", str(row.get("name") or "")).strip().casefold()
+                not in actual_character_keys
+            ]
+            missing_dialogue = [
+                row for row in expected_dialogue
+                if _core_quote_key(row.get("quote")) not in actual_dialogue_keys
+            ]
+
+            if missing_characters or missing_dialogue:
+                repair_system = (
+                    "You are repairing a missed source-grounded audiobook character/dialogue extraction. "
+                    "Return exactly one compact JSON object with keys characters and dialogue. "
+                    "Each character needs name, aliases, role, confidence. "
+                    "Each dialogue item needs quote, speaker, confidence, evidence. "
+                    "Include only people and spoken lines verified in the supplied excerpt. "
+                    "Keep dialogue quote text exact. Never guess a speaker."
+                )
+                repair_candidates = {
+                    "characters": [
+                        {"name": str(row.get("name") or ""), "aliases": list(row.get("aliases") or [])}
+                        for row in missing_characters
+                    ],
+                    "dialogue": [
+                        {
+                            "quote": str(row.get("quote") or ""),
+                            "speaker": str(row.get("speaker") or ""),
+                            "evidence": str(row.get("evidence") or ""),
+                        }
+                        for row in missing_dialogue
+                    ],
+                }
+                repair_user = (
+                    "/no_think The first core pass omitted source-supported items. Re-read this excerpt "
+                    "and recover the missing items below. These candidates come from exact local "
+                    "speaker-tag/quote matching; verify each one against the excerpt before returning it. "
+                    "Do not add other names or dialogue.\n"
+                    "Missing source candidates:\n"
+                    + json.dumps(repair_candidates, ensure_ascii=False)
+                    + f"\nChapter: {chapter.title}\nExcerpt:\n{chunk}\nJSON only."
+                )
+                recovered = {}
+                repair_error = None
+                try:
+                    repair_raw = self.llm.complete(
+                        repair_system, repair_user, max_tokens=700,
+                        temperature=0.0, response_schema=None,
+                    )
+                    repair_data = _json(repair_raw)
+                    repaired_characters = repair_data.get("characters")
+                    repaired_dialogue = repair_data.get("dialogue")
+                    if isinstance(repaired_characters, list):
+                        wanted = {
+                            unicodedata.normalize("NFC", str(row.get("name") or "")).strip().casefold()
+                            for row in missing_characters
+                        }
+                        recovered["characters"] = [
+                            row for row in repaired_characters
+                            if isinstance(row, dict)
+                            and unicodedata.normalize("NFC", str(row.get("name") or "")).strip().casefold() in wanted
+                        ]
+                    if isinstance(repaired_dialogue, list):
+                        wanted_quotes = {_core_quote_key(row.get("quote")) for row in missing_dialogue}
+                        recovered["dialogue"] = [
+                            row for row in repaired_dialogue
+                            if isinstance(row, dict) and _core_quote_key(row.get("quote")) in wanted_quotes
+                        ]
+                except (BrainRuntimeError, BrainUnavailableError) as exc:
+                    repair_error = str(exc)
+
+                for category, missing_rows in (
+                    ("characters", missing_characters),
+                    ("dialogue", missing_dialogue),
+                ):
+                    existing_rows = core_data.get(category)
+                    if not isinstance(existing_rows, list):
+                        existing_rows = []
+                    repaired_rows = recovered.get(category) or []
+                    if repaired_rows:
+                        existing_rows = [*existing_rows, *repaired_rows]
+                    recovered_keys = (
+                        _core_name_keys(existing_rows) if category == "characters"
+                        else {_core_quote_key(row.get("quote")) for row in existing_rows if isinstance(row, dict)}
+                    )
+                    still_missing = [
+                        row for row in missing_rows
+                        if (
+                            unicodedata.normalize("NFC", str(row.get("name") or "")).strip().casefold()
+                            not in recovered_keys
+                            if category == "characters"
+                            else _core_quote_key(row.get("quote")) not in recovered_keys
+                        )
+                    ]
+                    if still_missing:
+                        existing_rows.extend(still_missing)
+                        core_data.setdefault("_deterministic_recovery", []).append(category)
+                    core_data[category] = existing_rows
+
+                deterministic_recovery = list(dict.fromkeys(core_data.pop("_deterministic_recovery", [])))
+                if deterministic_recovery:
+                    reason = (
+                        "AI core extraction remained incomplete after the compact repair pass; "
+                        "source-tagged deterministic recovery supplied: "
+                        + ", ".join(deterministic_recovery)
+                    )
+                    if repair_error:
+                        reason += f" (repair error: {repair_error})"
+                    result.setdefault("warnings", []).append(reason)
+
             self._merge(
                 result, core_data, seen,
                 source_text=chunk,
