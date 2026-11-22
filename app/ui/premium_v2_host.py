@@ -5332,16 +5332,30 @@ class PremiumV2Bridge(QObject):
             for planned, library_record in zip(plan["characters"], merged_library):
                 primary = str(library_record.get("primary_name") or planned["canonical_name"]).strip()
                 aliases = [str(value).strip() for value in (library_record.get("aliases") or []) if str(value or "").strip()]
-                identity_tokens = {primary.casefold(), *(value.casefold() for value in aliases)}
-                matches = [
+                def identity_text(value: Any) -> str:
+                    return unicodedata.normalize("NFC", str(value or "")).strip().casefold()
+                identity_tokens = {identity_text(primary), *(identity_text(value) for value in aliases)}
+                identity_tokens.discard("")
+                library_variant = identity_text(library_record.get("identity_variant"))
+                cast_identity_candidates = [
                     item for item in cast
-                    if str(item.get("series") or default_series).strip().casefold() == series.casefold()
+                    if identity_text(item.get("series") or default_series) == identity_text(series)
                     and identity_tokens.intersection({
-                        str(value or "").strip().casefold()
+                        identity_text(value)
                         for value in [item.get("name"), *(item.get("aliases") or [])]
-                        if str(value or "").strip()
+                        if identity_text(value)
                     })
                 ]
+                wrong_variant_matches = [
+                    item for item in cast_identity_candidates
+                    if identity_text(item.get("identity_variant")) != library_variant
+                ]
+                if wrong_variant_matches:
+                    raise ValueError(
+                        "The project cast already contains a matching name or alias for a different age/version of '%s'. "
+                        "Resolve the identity before importing." % primary
+                    )
+                matches = cast_identity_candidates
                 if len(matches) > 1:
                     raise ValueError("The project cast contains duplicate records for '%s'. Resolve them before import." % primary)
                 item = matches[0] if matches else None
@@ -6345,6 +6359,11 @@ class PremiumV2Bridge(QObject):
         if not matches:
             raise ValueError("That character is not in the selected series of the saved project cast. Refresh the list and try again.")
         if len(matches) > 1:
+            matched_series = {
+                identity_text(item.get("series") or active_series) for item in matches
+            }
+            if not requested_series and len(matched_series) > 1:
+                raise ValueError("This character name appears in more than one series. Select the series before assigning a voice.")
             raise ValueError("This character name matches multiple identities in the selected series. Select its exact age/version before assigning a voice.")
 
         item = matches[0]

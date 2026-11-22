@@ -62,10 +62,13 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn("Character identity plan", self.adapter)
         self.assertIn("remainingChanges", self.adapter)
 
-    def test_identity_variant_survives_cross_volume_sync_and_voice_assignment(self):
+    def test_identity_variant_survives_cross_volume_sync_voice_assignment_and_import_commit(self):
         self.assertIn('"identity_variant": row.get("identity_variant") or ""', self.host)
         self.assertIn("registry_matches", self.host)
         self.assertIn("variant_conflicts", self.registry)
+        self.assertIn("wrong_variant_matches", self.host)
+        self.assertIn("cast_identity_candidates", self.host)
+        self.assertIn("more than one series", self.host)
 
     def test_series_library_merge_and_aliases_are_not_limited_to_five(self):
         self.assertIn("def merge_imported_character_records(", self.registry)
