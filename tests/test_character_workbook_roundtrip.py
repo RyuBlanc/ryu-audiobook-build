@@ -89,6 +89,32 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 ],
             }
             path.write_bytes(create_character_workbook_bytes(metadata, passages, chapter_text))
+            with ZipFile(path, "r") as archive:
+                book_xml = ET.fromstring(archive.read("xl/workbook.xml"))
+                rels_xml = ET.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
+                package_ns = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+                document_ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+                relationship_items = rels_xml.findall(package_ns + "Relationship")
+                relationship_ids = [item.get("Id") for item in relationship_items]
+                self.assertEqual(len(relationship_ids), len(set(relationship_ids)))
+                relationships = {item.get("Id"): item for item in relationship_items}
+                sheets = {
+                    sheet.get("name"): relationships.get(sheet.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"))
+                    for sheet in book_xml.findall(".//" + document_ns + "sheet")
+                }
+                reference_relationship = sheets["Series Character Reference"]
+                self.assertTrue(reference_relationship.get("Type", "").endswith("/worksheet"))
+                self.assertEqual(reference_relationship.get("Target"), "worksheets/sheet5.xml")
+                styles = [
+                    item for item in relationship_items
+                    if item.get("Type", "").endswith("/styles")
+                ]
+                self.assertEqual(len(styles), 1)
+                self.assertNotEqual(styles[0].get("Id"), next(
+                    sheet.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
+                    for sheet in book_xml.findall(".//" + document_ns + "sheet")
+                    if sheet.get("name") == "Series Character Reference"
+                ))
             parsed = read_character_workbook(path)
             self.assertEqual(len(parsed["series_character_reference"]), 2)
             adult, younger = parsed["series_character_reference"]
@@ -100,6 +126,31 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             self.assertEqual(younger["identity_variant"], "Younger Version")
             self.assertNotIn("voice_name", adult)
             self.assertEqual(parsed["characters"], [])
+
+    def test_series_reference_supports_large_alias_lists_without_multiline_cells(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, chapter_text, passages = self._export(Path(tmp))
+            aliases = ["Alias %03d" % index for index in range(1, 181)]
+            metadata = {
+                "project_title": "The Silver Archive",
+                "series_name": "Silver Archive",
+                "chapter_id": "chapter-001", "chapter_number": 1,
+                "chapter_title": "The Arrival", "chapter_revision": "revision-abc",
+                "series_character_reference": [{
+                    "primary_name": "Mira",
+                    "aliases": aliases,
+                    "identity_base_name": "Mira", "identity_variant": "",
+                }],
+            }
+            path.write_bytes(create_character_workbook_bytes(metadata, passages, chapter_text))
+            with ZipFile(path, "r") as archive:
+                sheet = ET.fromstring(archive.read("xl/worksheets/sheet5.xml"))
+                main_ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+                rows = sheet.findall(".//" + main_ns + "sheetData/" + main_ns + "row")
+                self.assertEqual(len(rows), len(aliases) + 1)
+            parsed = read_character_workbook(path)
+            self.assertEqual(len(parsed["series_character_reference"]), 1)
+            self.assertEqual(parsed["series_character_reference"][0]["aliases"], aliases)
 
     def test_edited_xlsx_file_is_reopened_and_planned_from_real_sheet_cells(self):
         with tempfile.TemporaryDirectory() as tmp:
