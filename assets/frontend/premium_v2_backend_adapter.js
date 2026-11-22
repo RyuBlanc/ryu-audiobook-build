@@ -910,9 +910,9 @@
       let klass = 'ai-sentence';
       let label = '';
       if (row.assigned) {
-        const sourceKind = row.assignmentSource === 'ai' ? 'ai' : 'manual';
+        const sourceKind = row.assignmentSource === 'ai' ? 'ai' : (row.assignmentSource === 'outsourced' ? 'outsourced' : 'manual');
         klass += ' confirmed confirmed-' + sourceKind;
-        label = (sourceKind === 'ai' ? 'AI-assigned: ' : 'Manually assigned: ') + row.speakers.join(' + ');
+        label = (sourceKind === 'ai' ? 'AI-assigned: ' : (sourceKind === 'outsourced' ? 'Outsourced: ' : 'Manually assigned: ')) + row.speakers.join(' + ');
       } else if (!row.skipped && row.suggestions?.length) {
         klass += ' review';
         const candidate = row.suggestions[0];
@@ -3993,7 +3993,7 @@
         assignmentPresent:Boolean(assignment),
         assignmentSeries:String(assignment?.series || ''),
         assignmentSource:assignment
-          ? (String(assignment.source || 'manual').trim().toLowerCase() === 'ai' ? 'ai' : 'manual')
+          ? (String(assignment.source || 'manual').trim().toLowerCase() === 'ai' ? 'ai' : (String(assignment.source || '').trim().toLowerCase() === 'outsourced' ? 'outsourced' : 'manual'))
           : '',
         suggestions:suggestions.length ? suggestions : fallback
       });
@@ -4103,6 +4103,11 @@
       '.ryu-assigned-dialogue{display:block;width:100%;box-sizing:border-box;margin:0 0 8px;padding:11px 13px;border:1px solid transparent;border-radius:9px;color:inherit;text-align:left;font:inherit;white-space:pre-wrap;overflow-wrap:anywhere;cursor:pointer;}' +
       '.ryu-assigned-dialogue small{display:block;margin-bottom:6px;font-size:10px;letter-spacing:.06em;text-transform:uppercase;opacity:.8;}' +
       '.ryu-assigned-dialogue-ai{background:rgba(236,160,45,.075);border-color:rgba(236,160,45,.22);box-shadow:inset 3px 0 0 #efae35;}' +
+      '.ryu-assigned-dialogue-outsourced{background:rgba(238,242,248,.055);border-color:rgba(224,231,242,.22);box-shadow:inset 3px 0 0 rgba(225,232,242,.72);}' +
+      '.ryu-live-passage.is-assigned-outsourced{background:rgba(238,242,248,.055)!important;border-color:rgba(224,231,242,.24)!important;border-left-color:rgba(225,232,242,.72)!important;}' +
+      '.ryu-live-passage.is-assigned-outsourced .ryu-speaker-chip,.ryu-speaker-chip-outsourced{background:rgba(238,242,248,.12)!important;color:#e5eaf2!important;border:1px solid rgba(224,231,242,.2);}' +
+      '.quick-character.outsourced,.prediction-option.outsourced{background:rgba(238,242,248,.055)!important;border-color:rgba(224,231,242,.26)!important;box-shadow:inset 3px 0 0 rgba(225,232,242,.72);}' +
+      '.quick-character.outsourced small,.prediction-option.outsourced span{color:#d2d9e4!important;}' +
       '.ryu-assigned-dialogue-manual{background:rgba(36,190,122,.07);border-color:rgba(36,190,122,.2);box-shadow:inset 3px 0 0 #22c982;}' +
       '.ryu-assigned-dialogue-unknown{background:rgba(140,145,155,.06);border-color:rgba(140,145,155,.2);box-shadow:inset 3px 0 0 #8d929b;}' +
       '.ryu-assigned-dialogue.is-selected{outline:2px solid rgba(255,255,255,.62);outline-offset:1px;}' +
@@ -4115,7 +4120,8 @@
       '#characters .ai-sentence.confirmed{display:block;width:100%;max-width:100%;box-sizing:border-box;background:rgba(36,190,122,.07)!important;border:1px solid rgba(36,190,122,.18)!important;border-left:3px solid #22c982!important;box-shadow:none!important;color:inherit!important;text-align:left;white-space:pre-wrap;}' +
       '#characters .ai-sentence.confirmed-manual{background:rgba(36,190,122,.07)!important;border-color:rgba(36,190,122,.18)!important;border-left-color:#22c982!important;}' +
       '#characters .ai-sentence.confirmed-ai{background:rgba(236,160,45,.075)!important;border-color:rgba(236,160,45,.22)!important;border-left-color:#efae35!important;}' +
-      '#characters .ai-sentence.confirmed-ai.active,#characters .ai-sentence.confirmed-manual.active{outline:2px solid rgba(255,255,255,.65)!important;outline-offset:1px;}' +
+      '#characters .ai-sentence.confirmed-outsourced{background:rgba(238,242,248,.055)!important;border-color:rgba(224,231,242,.24)!important;border-left-color:rgba(225,232,242,.72)!important;}' +
+      '#characters .ai-sentence.confirmed-ai.active,#characters .ai-sentence.confirmed-manual.active,#characters .ai-sentence.confirmed-outsourced.active{outline:2px solid rgba(255,255,255,.65)!important;outline-offset:1px;}' +
       '#aiPredictionModal .ai-prediction-modal{width:min(640px,calc(100vw - 32px));height:min(680px,82vh);max-height:min(82vh,760px);overflow:auto;}' +
       '#aiPredictionModal .selected-dialogue-preview{margin-bottom:12px;min-height:64px;display:flex;align-items:center;line-height:1.6;}';
     document.head.appendChild(style);
@@ -4318,10 +4324,66 @@
     if ($('editAssignedCharacter')) $('editAssignedCharacter').disabled = false;
     ensureAssignedAudioProfileControls();
   }
+  function ensureCharacterWorkbookControls() {
+    const heading = $('manualChapterTitle');
+    if (!heading || $('characterWorkbookToolbar')) return;
+    const anchor = heading.closest('.story-head') || heading.parentElement;
+    if (!anchor) return;
+    const toolbar = document.createElement('div');
+    toolbar.id = 'characterWorkbookToolbar';
+    toolbar.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0 12px;';
+    toolbar.innerHTML =
+      '<button type="button" class="btn small secondary" id="exportCharacterWorkbook">Export Chapter Workbook</button>' +
+      '<button type="button" class="btn small secondary" id="importCharacterWorkbook">Import Completed Workbook</button>';
+    anchor.insertAdjacentElement('afterend', toolbar);
+    $('exportCharacterWorkbook')?.addEventListener('click', () => {
+      (async () => {
+        const chapterNumber = Number(characterStudioSelectedChapter || window.ryuPremiumSelectedChapter || chapters[0]?.number || 0);
+        if (!chapterNumber) throw new Error('Select a chapter before exporting the GPT workbook.');
+        const result = await call('character.workbook.export', {chapter_number:chapterNumber});
+        if (result?.cancelled) return;
+        message('Exported Chapter ' + result.chapter_number + ' workbook · ' +
+          result.dialogue_count + ' dialogue passages and ' + result.narration_count + ' Narrator passages.');
+      })().catch(error => message(error?.message || String(error), true));
+    });
+    $('importCharacterWorkbook')?.addEventListener('click', () => {
+      (async () => {
+        const preview = await call('character.workbook.import.preview');
+        if (preview?.cancelled) return;
+        if (!preview?.ready) {
+          const issues = (preview?.issues || []).slice(0, 8).join('\n• ');
+          window.alert('The workbook was not imported because preflight found issues:\n\n• ' + issues);
+          return;
+        }
+        const summary = preview.summary || {};
+        const prompt = 'Import the completed GPT workbook into Series "' + preview.series +
+          '" · Chapter ' + preview.chapter_number + '?\n\n' +
+          'Existing characters to merge: ' + Number(summary.matched_characters || 0) + '\n' +
+          'New series characters: ' + Number(summary.new_characters || 0) + '\n' +
+          'Aliases to reconcile: ' + Number(summary.aliases_to_merge || 0) + '\n' +
+          'Dialogue assignments to add: ' + Number(summary.dialogue_assignments || 0) +
+          '\n\nExisting character voice profiles will be preserved. Continue?';
+        if (!window.confirm(prompt)) return;
+        const result = await call('character.workbook.import.commit', {token:preview.token});
+        await refreshChapters();
+        await refreshCharacters();
+        await refreshCharacterLibrary();
+        await refreshCharacterDialogueSuggestions();
+        renderCharacterStudioLive();
+        renderDialogueReview();
+        message('Workbook imported into the Series Character Library · ' +
+          result.characters_merged + ' identities merged · ' + result.characters_created +
+          ' new identities · ' + result.aliases_merged + ' aliases reconciled · ' +
+          result.dialogue_assignments + ' dialogue assignments added.');
+      })().catch(error => message(error?.message || String(error), true));
+    });
+  }
+
   function renderCharacterStudioLive() {
     const root = $('characters');
     if (!root) return;
     installCharacterStudioStyles();
+    ensureCharacterWorkbookControls();
     ensureCharacterSeriesField();
     const liveChapters = Array.isArray(chapters) ? chapters : [];
     const selectedNumber = Number(characterStudioSelectedChapter || window.ryuPremiumSelectedChapter || liveChapters[0]?.number || 0);
@@ -4403,12 +4465,12 @@
             continue;
           }
           const assignedName = row.speakers.join(' + ');
-          const sourceClass = row.assignmentSource === 'ai' ? ' is-assigned-ai' : ' is-assigned-manual';
+          const sourceClass = row.assignmentSource === 'ai' ? ' is-assigned-ai' : (row.assignmentSource === 'outsourced' ? ' is-assigned-outsourced' : ' is-assigned-manual');
           const classes = 'ryu-live-passage' + (row.assigned ? ' is-assigned' + sourceClass : '');
           const title = row.assigned ? 'Assigned to ' + assignedName : 'Needs speaker review · Click to assign';
           html += '<button type="button" class="' + classes + '" data-manual-dialogue="1" data-dialogue-id="' + esc(row.id) +
             '" data-chapter-number="' + Number(chapter.number) + '" data-start="' + row.start + '" data-end="' + row.end +
-            '" title="' + esc(title) + '">' + (row.assigned ? '<span class="ryu-speaker-chip">' + esc(assignedName) + '</span>' :
+            '" title="' + esc(title) + '">' + (row.assigned ? '<span class="ryu-speaker-chip' + (row.assignmentSource === 'outsourced' ? ' ryu-speaker-chip-outsourced' : '') + '">' + esc(assignedName) + '</span>' :
               '<span class="ryu-speaker-chip ryu-needs-speaker-chip">Needs speaker</span>') +
             esc(row.text) + '</button>';
           cursor = row.end;
@@ -4625,11 +4687,12 @@
     const keys = new Set((window.ryuPremiumSelectedDialogueSpeakers || []).map(item => characterAssignmentKey(item.name,item.series)));
     list.innerHTML = visible.map(item => {
       const selected = keys.has(characterAssignmentKey(item.name,item.series));
-      return '<button type="button" class="quick-character' + (selected ? ' selected' : '') + '" aria-pressed="' + (selected ? 'true' : 'false') +
+      const outsourced = item.item?.character_origin === 'outsourced' || item.item?.imported_from_workbook === true;
+      return '<button type="button" class="quick-character' + (selected ? ' selected' : '') + (outsourced ? ' outsourced' : '') + '" aria-pressed="' + (selected ? 'true' : 'false') +
         '" data-live-character="' + esc(item.name) + '" data-live-series="' + esc(item.series) + '" data-live-profile="' + esc(item.voice_profile) +
         '" data-live-project="' + (item.project ? 'true' : 'false') + '"><span class="quick-character-check" aria-hidden="true">' + (selected ? '✓' : '+') +
         '</span><b>' + esc(item.name) + '</b><small>' + esc(item.series) + ' · ' + esc(item.voice_profile || 'Unassigned audio profile') +
-        (item.project ? ' · This project' : ' · Character Library') + '</small></button>';
+        (item.project ? ' · This project' : ' · Character Library') + (outsourced ? ' · Outsourced' : '') + '</small></button>';
     }).join('') || '<div class="ryu-character-empty"><b>No matching characters</b>Create a new character and assign a series.</div>';
     renderSelectedCharacterSpeakerControls();
   }
@@ -9304,11 +9367,13 @@ function renderProductionMetadataGate(active) {
     if ($('aiSelectedSentence')) $('aiSelectedSentence').textContent = String(item.text);
     const projectOptions = characters.map(c => ({
       name:characterCanonical(c), series:characterSeries(c), profile:String(c.voice_profile || ''),
-      aliases:characterAliases(c), source:'project'
+      aliases:characterAliases(c), source:'project',
+      outsourced:c.character_origin === 'outsourced' || c.imported_from_workbook === true
     }));
     const libraryOptions = libraryCharacters.map(c => ({
       name:characterCanonical(c), series:characterSeries(c), profile:String(c.voice_profile || c.voice || ''),
-      aliases:characterAliases(c), source:'library'
+      aliases:characterAliases(c), source:'library',
+      outsourced:c.character_origin === 'outsourced' || c.imported_from_workbook === true
     }));
     const projectSeriesKey = activeCharacterProjectSeries().toLowerCase();
     const suggestions = Array.isArray(item.suggestions) ? item.suggestions.filter(c => c && c.name).slice().sort((left,right) => {
@@ -9334,7 +9399,8 @@ function renderProductionMetadataGate(active) {
         (!item.assignmentSeries || candidateSeries.toLowerCase() === String(item.assignmentSeries).toLowerCase()) ||
         (!item.assigned && index === 0);
       const evidence = String(candidate.evidence || 'Local dialogue-context suggestion');
-      return '<button type="button" class="prediction-option ryu-ai-option' + (isActive ? ' active' : '') +
+      const outsourced = Boolean(linked?.outsourced);
+      return '<button type="button" class="prediction-option ryu-ai-option' + (outsourced ? ' outsourced' : '') + (isActive ? ' active' : '') +
         '" data-prediction="' + esc(name) + '" data-series="' + esc(candidateSeries) +
         '" data-profile="' + esc(linked?.profile || '') + '" data-source="ai" data-confidence="' + esc(probability) + '"><b>' + esc(name) + '</b><small>' +
         esc(candidateSeries) + ' · ' + Math.round(probability * 100) + '% · ' + esc(evidence) + '</small></button>';
@@ -9348,11 +9414,11 @@ function renderProductionMetadataGate(active) {
     const savedHtml = savedOptions.map((row,index) => {
       const active = item.speakers?.some(s => String(s).toLowerCase() === row.name.toLowerCase()) &&
         (!item.assignmentSeries || row.series.toLowerCase() === String(item.assignmentSeries).toLowerCase());
-      return '<button type="button" class="prediction-option ryu-ai-option' + (active ? ' active' : '') +
+      return '<button type="button" class="prediction-option ryu-ai-option' + (row.outsourced ? ' outsourced' : '') + (active ? ' active' : '') +
         '" data-prediction="' + esc(row.name) + '" data-series="' + esc(row.series) + '" data-profile="' +
         esc(row.profile) + '" data-source="' + esc(row.source) + '"><b>' + esc(row.name) +
         '</b><small>' + esc(row.series) + ' · ' + esc(row.profile || 'No audio profile assigned') +
-        (row.source === 'library' ? ' · Character Library' : ' · This project') + '</small></button>';
+        (row.outsourced ? ' · Outsourced workbook' : (row.source === 'library' ? ' · Character Library' : ' · This project')) + '</small></button>';
     }).join('') || '<p class="muted">No saved characters exist yet. Use New character to create one in a series.</p>';
     const savedVoiceProfiles = characterSavedProfiles();
     const profileOptions = ['<option value="">No character voice profile yet</option>',
@@ -13790,25 +13856,7 @@ function renderProductionMetadataGate(active) {
         (async () => {
           const item = (window.ryuPremiumDialogueReviewItems || []).find(row => row.id === button.dataset.dialogueId);
           if (!item || !item.text) throw new Error('This dialogue passage is stale. Refresh the chapter list and select it again.');
-          const savedCharacters = await call('character.list');
-          if (!savedCharacters.length) throw new Error('Run Analyze book with AI and save character candidates before assigning dialogue.');
-          window.ryuPremiumPendingDialogueText = item.text;
-          window.ryuPremiumPendingDialogueChapter = item.chapterNumber;
-          window.ryuPremiumPendingDialogueStart = item.start;
-          window.ryuPremiumPendingDialogueEnd = item.end;
-          window.ryuPremiumPendingDialogueId = item.id;
-          if ($('aiSelectedSentence')) $('aiSelectedSentence').textContent = item.text;
-          if ($('predictionList')) $('predictionList').innerHTML = savedCharacters.filter(c => c && c.name)
-            .map((c, i) => '<button class="prediction-option ' + (item.speakers.includes(c.name) ? 'active' : (i === 0 && !item.assigned ? 'active' : '')) +
-              '" data-prediction="' + esc(c.name) + '"><b>' + esc(c.name) +
-              '</b><span>Saved character · explicit selection</span></button>').join('');
-          if ($('confirmAiCharacter')) $('confirmAiCharacter').disabled = !savedCharacters.length;
-          const removeButton = ensureDialogueUnassignButton();
-          if (removeButton) removeButton.hidden = !item.assignmentPresent;
-          $('aiPredictionModal')?.classList.add('show');
-          message(item.assignmentPresent
-            ? 'Change the saved speaker or remove this passage assignment.'
-            : 'Choose a saved character to assign this passage. The displayed confidence score is not treated as verified evidence.');
+          await openAiCharacterReview(item);
         })().catch(err => message(err?.message || String(err), true));
         return;
       }

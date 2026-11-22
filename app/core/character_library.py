@@ -91,8 +91,6 @@ def _clean_names(values, primary: str = "") -> list[str]:
                 continue
             seen.add(key)
             result.append(name)
-            if len(result) >= 5:
-                break
     return result
 
 
@@ -320,6 +318,150 @@ def sync_characters(
 
     _write_store(store, target)
     return list_characters(path=target)
+
+
+
+
+def merge_imported_character_records(
+    series: str,
+    rows: list[dict],
+    path: Path | None = None,
+) -> list[dict]:
+    """Merge workbook identities into the canonical series registry in one atomic write.
+
+    Existing primary names and voice assignments are preserved. Name/alias collisions
+    across different characters and matches in Recovery fail closed.
+    """
+    series_name = str(series or "").strip()
+    if not series_name:
+        raise ValueError("A series name is required before merging imported characters.")
+    target = path or character_library_path()
+    store = _read_store(target)
+    active = store["active"]
+    deleted = store["deleted"]
+    results: list[dict] = []
+
+    def _variant(record: dict) -> str:
+        return str(record.get("identity_variant") or "").strip().casefold()
+
+    def _tokens(record: dict) -> set[str]:
+        primary = str(record.get("primary_name") or record.get("name") or "").strip()
+        aliases = record.get("aliases") or []
+        if isinstance(aliases, str):
+            aliases = [aliases]
+        return {
+            value.strip().casefold()
+            for value in [primary, *(aliases if isinstance(aliases, (list, tuple)) else [])]
+            if str(value or "").strip()
+        }
+
+    for incoming in rows or []:
+        if not isinstance(incoming, dict):
+            raise ValueError("Every imported Character Register entry must be an object.")
+        primary = str(incoming.get("canonical_name") or incoming.get("primary_name") or "").strip()
+        if not primary or primary.casefold() == "narrator":
+            raise ValueError("Imported characters need a non-empty name; Narrator is reserved.")
+        variant = str(incoming.get("identity_variant") or "").strip()
+        base_name = str(incoming.get("identity_base_name") or primary).strip()
+        raw_aliases = incoming.get("aliases") or []
+        if isinstance(raw_aliases, str):
+            raw_aliases = [raw_aliases]
+        aliases = _clean_names(raw_aliases, primary)
+        incoming_tokens = {primary.casefold(), *(value.casefold() for value in aliases)}
+        if any(not value for value in incoming_tokens):
+            raise ValueError("Imported character names and aliases cannot be empty.")
+
+        wanted_id = str(incoming.get("library_id") or "").strip()
+        matches = []
+        if wanted_id:
+            matches = [
+                item for item in active
+                if str(item.get("id") or "") == wanted_id
+                and str(item.get("series") or "").strip().casefold() == series_name.casefold()
+            ]
+            if len(matches) != 1:
+                raise KeyError("A matched Character Library identity changed before import. Review the workbook again.")
+            if _variant(matches[0]) != variant.casefold():
+                raise ValueError("The matched character version changed before import. Review the workbook again.")
+        else:
+            for item in active:
+                if str(item.get("series") or "").strip().casefold() != series_name.casefold():
+                    continue
+                if _variant(item) != variant.casefold():
+                    continue
+                if incoming_tokens & _tokens(item):
+                    matches.append(item)
+            if len(matches) > 1:
+                raise ValueError("An imported name or alias matches multiple series characters. Resolve the duplicate before importing.")
+
+        deleted_matches = [
+            item for item in deleted
+            if str(item.get("series") or "").strip().casefold() == series_name.casefold()
+            and _variant(item) == variant.casefold()
+            and incoming_tokens & _tokens(item)
+        ]
+        if not matches and deleted_matches:
+            raise ValueError(
+                "This identity is in the Character Library Recovery Bin. Restore it before importing; a duplicate will not be created."
+            )
+
+        match = matches[0] if matches else None
+        for item in active:
+            if item is match or str(item.get("series") or "").strip().casefold() != series_name.casefold():
+                continue
+            if incoming_tokens & _tokens(item):
+                raise ValueError(
+                    "An imported name or alias is already used by another character in this series: "
+                    + str(item.get("primary_name") or item.get("name") or "Unnamed")
+                )
+
+        if match is None:
+            record = {
+                "id": uuid.uuid4().hex,
+                "series": series_name,
+                "primary_name": primary,
+                "short": str(incoming.get("short") or primary.split()[0])[:120],
+                "aliases": aliases,
+                "voice_name": str(incoming.get("existing_voice_name") or "").strip() or None,
+                "dialogue_sample": "",
+                "dialogue_sample_source": "character-workbook",
+                "pronunciation": "",
+                "notes": str(incoming.get("notes") or "").strip()[:4000],
+                "line_count": 0,
+                "chapter_count": 0,
+                "confidence": 100,
+                "user_created": True,
+                "manual": True,
+                "manual_aliases": True,
+                "imported_from_workbook": True,
+                "identity_base_name": base_name,
+                "identity_variant": variant,
+                "created_at": _timestamp(),
+                "updated_at": _timestamp(),
+            }
+            active.append(record)
+        else:
+            record = match
+            existing_primary = str(record.get("primary_name") or primary).strip()
+            merged = _clean_names([*(record.get("aliases") or []), *aliases], existing_primary)
+            record["aliases"] = merged
+            record["series"] = series_name
+            record["user_created"] = True
+            record["manual"] = True
+            record["manual_aliases"] = True
+            record["imported_from_workbook"] = True
+            if variant:
+                record["identity_variant"] = variant
+                record["identity_base_name"] = base_name
+            if str(incoming.get("notes") or "").strip() and not str(record.get("notes") or "").strip():
+                record["notes"] = str(incoming.get("notes") or "").strip()[:4000]
+            record["updated_at"] = _timestamp()
+
+        results.append(dict(record))
+
+    if rows:
+        _write_store(store, target)
+    return results
 
 
 def update_character(record_id: str, changes: dict, path: Path | None = None) -> dict:

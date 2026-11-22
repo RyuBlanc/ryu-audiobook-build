@@ -1,0 +1,81 @@
+from pathlib import Path
+import unittest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+HOST = ROOT / "app" / "ui" / "premium_v2_host.py"
+ADAPTER = ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+REGISTRY = ROOT / "app" / "core" / "character_library.py"
+WORKBOOK = ROOT / "app" / "core" / "character_workbook.py"
+
+
+class CharacterWorkbookUiContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.host = HOST.read_text(encoding="utf-8")
+        cls.adapter = ADAPTER.read_text(encoding="utf-8")
+        cls.registry = REGISTRY.read_text(encoding="utf-8")
+        cls.workbook = WORKBOOK.read_text(encoding="utf-8")
+
+    def test_workbook_commands_are_registered_and_advertised(self):
+        for command, handler in {
+            "character.workbook.export": "_character_workbook_export",
+            "character.workbook.import.preview": "_character_workbook_import_preview",
+            "character.workbook.import.commit": "_character_workbook_import_commit",
+        }.items():
+            self.assertIn(f'"{command}": self.{handler}', self.host)
+            self.assertIn(f'"{command}": True', self.host)
+
+    def test_export_import_controls_use_preview_then_explicit_commit(self):
+        self.assertIn("Export Chapter Workbook", self.adapter)
+        self.assertIn("Import Completed Workbook", self.adapter)
+        self.assertIn("character.workbook.import.preview", self.adapter)
+        self.assertIn("character.workbook.import.commit", self.adapter)
+        self.assertIn("window.confirm(prompt)", self.adapter)
+        self.assertIn("await openAiCharacterReview(item)", self.adapter)
+        self.assertIn("source:'ai', confidence:topConfidence", self.adapter)
+
+    def test_outsourced_origin_is_supported_as_a_third_assignment_source(self):
+        self.assertIn('{"manual", "ai", "outsourced"}', self.host)
+        self.assertIn("assignment.source || '').trim().toLowerCase() === 'outsourced'", self.adapter)
+        self.assertIn("confirmed-outsourced", self.adapter)
+        self.assertIn("is-assigned-outsourced", self.adapter)
+
+    def test_outsourced_visual_state_is_soft_white_without_replacing_existing_styles(self):
+        self.assertIn("rgba(238,242,248,.055)", self.adapter)
+        self.assertIn(".quick-character.outsourced", self.adapter)
+        self.assertIn(".prediction-option.outsourced", self.adapter)
+        self.assertIn(".ryu-assigned-dialogue-outsourced", self.adapter)
+        self.assertIn(".ryu-assigned-dialogue-ai{background:rgba(236,160,45", self.adapter)
+        self.assertIn(".ryu-assigned-dialogue-manual{background:rgba(36,190,122", self.adapter)
+
+    def test_imported_characters_are_marked_in_both_assignment_pickers(self):
+        self.assertIn('"character_origin": "outsourced"', self.host)
+        self.assertIn('"imported_from_workbook": bool(record.get("imported_from_workbook"))', self.host)
+        self.assertIn("item.item?.character_origin === 'outsourced'", self.adapter)
+        self.assertIn("c.character_origin === 'outsourced'", self.adapter)
+
+    def test_series_library_merge_and_aliases_are_not_limited_to_five(self):
+        self.assertIn("def merge_imported_character_records(", self.registry)
+        self.assertIn("merge_imported_character_records(series, plan[\"characters\"]", self.host)
+        self.assertNotIn("if len(result) >= 5:", self.registry)
+        self.assertNotIn('if str(alias).strip()][:5]', self.host)
+        self.assertNotIn('str(item).strip()))[:5]', self.host)
+        self.assertNotIn("if len(result) >= 5:", self.registry)
+        self.assertIn('"imported_from_workbook": bool(record.get("imported_from_workbook"))', self.host)
+
+    def test_workbook_uses_standard_library_ooxml_and_revision_scoped_passages(self):
+        self.assertIn("zipfile.ZipFile", self.workbook)
+        self.assertIn("ryu.character-studio-workbook", self.workbook)
+        self.assertIn("Chapter Revision", self.workbook)
+        self.assertIn("Passage Count", self.workbook)
+        self.assertIn("GPT Confidence (0–1)", self.workbook)
+        self.assertIn("complete set of chapter passages", self.workbook)
+        self.assertIn("not listed in Character Register", self.workbook)
+        self.assertIn("protected Narrator assignment", self.workbook)
+        self.assertIn("Passage ID", self.workbook)
+        self.assertIn("plan_character_workbook_import", self.host)
+
+
+if __name__ == "__main__":
+    unittest.main()

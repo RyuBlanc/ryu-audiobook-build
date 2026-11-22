@@ -787,4 +787,12 @@ def merge_character_analysis_record(candidate: Character, prior: dict | None = N
         item["manual"] = True
     if str(prior.get("series") or "").strip():
         item["series"] = str(prior["series"]).strip()
+    # Workbook provenance and version identity must survive future Analyze Book
+    # refreshes so both Character Studio pickers retain their outsourced marker.
+    for key in (
+        "imported_from_workbook", "character_origin", "character_library_id",
+        "identity_base_name", "identity_variant",
+    ):
+        if key in prior:
+            item[key] = prior[key]
     return item
