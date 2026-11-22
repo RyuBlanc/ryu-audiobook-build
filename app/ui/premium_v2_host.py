@@ -6782,10 +6782,15 @@ class PremiumV2Bridge(QObject):
 
     @_serialize_character_identity_state
     def _character_assign(self, payload: dict[str, Any]) -> dict[str, Any]:
-        self._character_library_bootstrap()
+        bootstrap_library = getattr(self, "_character_library_bootstrap", None)
+        active_library_available = callable(bootstrap_library)
+        if active_library_available:
+            bootstrap_library()
         project = self._active_project()
-        self._character_list({})
-        project = self._active_project()
+        refresh_project_cast = getattr(self, "_character_list", None)
+        if active_library_available and callable(refresh_project_cast):
+            refresh_project_cast({})
+            project = self._active_project()
         name = str(payload.get("name") or "").strip()
         profile_name = str(payload.get("profile_name") or "").strip()
         if not name:
@@ -6854,7 +6859,7 @@ class PremiumV2Bridge(QObject):
         ]
         if recovery_matches:
             raise ValueError("The selected character or one of its aliases is in Character Library Recovery Bin. Restore or resolve that identity before assigning a voice.")
-        if matched_registry is None:
+        if active_library_available and matched_registry is None:
             raise ValueError("This character is no longer active in the Character Library. Restore it or create a new character before assigning a voice.")
 
         # Resolve identity conflicts before writing either project or series-level data.
