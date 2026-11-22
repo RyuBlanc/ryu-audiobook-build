@@ -519,6 +519,11 @@ class PremiumV2Bridge(QObject):
         self._preview_provider_cache_timer: threading.Timer | None = None
         self._load_durable_jobs()
 
+    def _character_workbook_dialog_parent(self) -> QWidget | None:
+        """Return the owning QWidget for workbook dialogs, never the QObject bridge."""
+        parent = self.parent()
+        return parent if isinstance(parent, QWidget) else None
+
     @Slot(str, str, result=str)
     def dispatch(self, command: str, payload_json: str = "{}") -> str:
         try:
@@ -5394,7 +5399,7 @@ class PremiumV2Bridge(QObject):
         safe_title = re.sub(r'[<>:"/\\|?*]+', "_", str(project.title or "Book")).strip(" .") or "Book"
         default_name = "%s_Complete_Book_Character_Workbook.xlsx" % safe_title
         selected_path, _ = QFileDialog.getSaveFileName(
-            self, "Export Complete-Book Character Studio GPT Workbook",
+            self._character_workbook_dialog_parent(), "Export Complete-Book Character Studio GPT Workbook",
             str(Path.home() / default_name), "Excel Workbook (*.xlsx)",
             options=QFileDialog.Option.DontUseNativeDialog,
         )
@@ -5560,7 +5565,7 @@ class PremiumV2Bridge(QObject):
     def _character_workbook_import_preview(self, _payload: dict[str, Any]) -> dict[str, Any]:
         """Select a GPT-completed workbook and reconcile it without changing saved data."""
         selected_path, _ = QFileDialog.getOpenFileName(
-            self, "Import GPT Character Workbook", str(Path.home()), "Excel Workbook (*.xlsx)",
+            self._character_workbook_dialog_parent(), "Import GPT Character Workbook", str(Path.home()), "Excel Workbook (*.xlsx)",
             options=QFileDialog.Option.DontUseNativeDialog,
         )
         if not selected_path:
