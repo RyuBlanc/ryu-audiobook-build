@@ -214,7 +214,7 @@ def create_character_workbook_bytes(metadata, passages, chapter_text):
             '<workbook xmlns="%s" xmlns:r="%s"><bookViews><workbookView activeTab="0"/></bookViews>'
             '<sheets>%s</sheets><calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>' % (MAIN, REL, sheet_nodes))
         rels = "".join('<Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet%d.xml"/>' % (n,n) for n in range(1,len(sheets) + 1))
-        rels += '<Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+        rels += '<Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' % (len(sheets) + 1)
         z.writestr("xl/_rels/workbook.xml.rels",
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="%s">%s</Relationships>' % (PKG, rels))
         z.writestr("xl/styles.xml", _styles())
@@ -283,8 +283,22 @@ def read_character_workbook(path):
                 if name not in z.namelist(): raise ValueError("The file is missing required Excel workbook data.")
             book = ET.fromstring(z.read("xl/workbook.xml"))
             relroot = ET.fromstring(z.read("xl/_rels/workbook.xml.rels"))
-            rels = {x.get("Id"): x.get("Target") for x in relroot.findall("{%s}Relationship" % PKG)}
-            targets = {s.get("name"): rels.get(s.get("{%s}id" % REL)) for s in book.findall(".//" + _t("sheet"))}
+            relationship_items = relroot.findall("{%s}Relationship" % PKG)
+            relationship_ids = [item.get("Id") for item in relationship_items]
+            if not all(relationship_ids) or len(relationship_ids) != len(set(relationship_ids)):
+                raise ValueError("The workbook contains duplicate or invalid relationship IDs.")
+            relationships = {item.get("Id"): item for item in relationship_items}
+            targets = {}
+            for sheet in book.findall(".//" + _t("sheet")):
+                sheet_name = _clean(sheet.get("name"))
+                relationship = relationships.get(sheet.get("{%s}id" % REL))
+                if not sheet_name or relationship is None:
+                    raise ValueError("A workbook sheet has a missing or invalid relationship.")
+                if not str(relationship.get("Type") or "").endswith("/worksheet"):
+                    raise ValueError("A workbook sheet does not reference a valid worksheet.")
+                if sheet_name in targets:
+                    raise ValueError("The workbook contains duplicate worksheet names.")
+                targets[sheet_name] = relationship.get("Target")
             required = {"Dialogue Assignment", "Character Register", "Chapter Context", "Workbook Info"}
             if not required.issubset(targets): raise ValueError("Required Character Studio workbook sheets are missing.")
             shared = []
