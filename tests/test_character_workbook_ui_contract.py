@@ -99,7 +99,6 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn('"character_library.export": True', self.host)
         self.assertIn("def _character_library_export_document(", self.host)
         self.assertIn("voice_assets_included", self.host)
-        self.assertIn("update_voice=bool(str(candidate.get", self.host)
         self.assertIn("function exportCharacterLibraryFile()", self.adapter)
         self.assertIn("character_library.export", self.adapter)
         self.assertIn("reservedFilters", self.adapter)
@@ -115,7 +114,7 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn("def import_character_library_records(", self.registry)
         self.assertIn("All series are applied to a staged copy", self.registry)
         self.assertIn("Deliberately do not update voice_name here", self.registry)
-        self.assertIn("update_voice=bool(str(candidate.get", self.host)
+        self.assertIn('"local_voice_profiles_preserved": True', self.host)
 
 
     def test_character_editor_modal_is_hoisted_out_of_hidden_character_studio_page(self):
