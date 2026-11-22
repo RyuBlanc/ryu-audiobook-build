@@ -94,7 +94,7 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn('id="exportCharacterLibrary"', library_header)
         self.assertIn('id="importCharacterLibrary"', library_header)
         self.assertIn('id="addLibraryCharacter"', library_header)
-        self.assertIn("voice model files, local profile IDs and hardware-specific settings stay on this PC", library_header.lower())
+        self.assertIn("voice model files, local profile ids and hardware-specific settings stay on this pc", library_header.lower())
         self.assertIn('"character_library.export": self._character_library_export', self.host)
         self.assertIn('"character_library.export": True', self.host)
         self.assertIn("def _character_library_export_document(", self.host)
