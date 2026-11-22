@@ -154,6 +154,30 @@ class AudiobookBrainTests(unittest.TestCase):
         self.assertIn("AI core pass fallback", brain_source)
 
 
+
+    def test_deterministic_core_fallback_uses_only_the_speaker_tag_adjacent_to_each_quote(self):
+        from app.ai.brain import AudiobookBrain
+        from app.chapters.detector import Chapter
+
+        sample = (
+            'Haruka is a student. Rahul is her friend. '
+            'Haruka said, "We should go now." '
+            'Rahul replied, "Wait for me." '
+            'Haruka and Rahul walked together toward Kyoto.'
+        )
+        brain = AudiobookBrain.__new__(AudiobookBrain)
+        result = brain._fallback_core(Chapter(1, "AI Smoke Chapter", sample))
+
+        self.assertEqual(
+            {(row["quote"], row["speaker"]) for row in result["dialogue"]},
+            {("We should go now.", "Haruka"), ("Wait for me.", "Rahul")},
+        )
+        self.assertEqual(
+            {row["name"] for row in result["characters"]},
+            {"Haruka", "Rahul"},
+        )
+
+
     def test_valid_but_empty_core_response_triggers_compact_source_grounded_ai_repair(self):
         from app.ai.brain import AudiobookBrain, BrainConfig
         from app.chapters.detector import Chapter

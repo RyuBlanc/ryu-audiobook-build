@@ -8,8 +8,11 @@ import unicodedata
 from typing import Any, Callable
 
 from app.chapters.detector import Chapter
-from app.chapters.characters import analyze_chapter as deterministic_character_analysis
-from app.chapters.dialogue import dialogue_segments
+from app.chapters.characters import (
+    analyze_chapter as deterministic_character_analysis,
+    _all_dialogue_spans,
+    _speaker_near_quote,
+)
 from app.tts.pronunciation_suggester import COMMON_ENGLISH_WORDS, is_common_english_phrase, nativeish_pronunciation
 from .model_runtime import LocalLLM, BrainRuntimeError
 
@@ -672,28 +675,58 @@ class AudiobookBrain:
     def _fallback_core(self, chapter: Chapter) -> dict[str, Any]:
         analysis = deterministic_character_analysis(chapter)
         characters = []
+        candidates = []
+        canonical_by_key: dict[str, str] = {}
         for item in analysis.characters[:12]:
+            canonical = unicodedata.normalize("NFC", str(item.name or "")).strip()
+            if not canonical:
+                continue
+            aliases = [str(value).strip() for value in (item.aliases or []) if str(value or "").strip()]
             characters.append({
-                'name': item.name,
-                'aliases': list(item.aliases),
+                'name': canonical,
+                'aliases': aliases,
                 'role': item.role,
                 'traits': [],
                 'voice_direction': {'age_impression': '', 'gender': '', 'tone': '', 'energy': ''},
                 'confidence': float(item.confidence),
             })
+            for value in [canonical, *aliases]:
+                key = unicodedata.normalize("NFC", value).strip().casefold()
+                if key:
+                    canonical_by_key[key] = canonical
+                    if value not in candidates:
+                        candidates.append(value)
+
         dialogue = []
-        try:
-            segments = dialogue_segments(chapter)
-            for segment in segments:
-                if segment.suggested_speaker:
-                    dialogue.append({
-                        'quote': segment.text,
-                        'speaker': segment.suggested_speaker,
-                        'confidence': float(segment.confidence),
-                        'evidence': 'Deterministic speaker analysis fallback.',
-                    })
-        except Exception:
-            pass
+        source = str(chapter.text or "")
+        last_speaker = None
+        seen_spans: set[tuple[int, int]] = set()
+        for start, end, raw_quote in _all_dialogue_spans(source):
+            span = (int(start), int(end))
+            if span in seen_spans:
+                continue
+            seen_spans.add(span)
+            speaker, confidence = _speaker_near_quote(
+                source, span[0], span[1], candidates, None, last_speaker
+            )
+            # The fallback is deliberately stricter than ordinary Character
+            # Studio suggestions. Only use an identity attached by an exact
+            # speaker tag or a direct in-quote self-identification; nearby
+            # names and future dialogue tags are not sufficient evidence.
+            if not speaker or float(confidence) < 0.98:
+                continue
+            speaker_key = unicodedata.normalize("NFC", str(speaker)).strip().casefold()
+            canonical = canonical_by_key.get(speaker_key, str(speaker).strip())
+            quote = str(raw_quote or "").strip()
+            if not quote:
+                continue
+            dialogue.append({
+                'quote': quote,
+                'speaker': canonical,
+                'confidence': float(confidence),
+                'evidence': 'Exact source-adjacent speaker tag or in-quote self-identification.',
+            })
+            last_speaker = canonical
         return {'characters': characters, 'dialogue': dialogue, 'pronunciation': []}
 
     def analyze_book(
