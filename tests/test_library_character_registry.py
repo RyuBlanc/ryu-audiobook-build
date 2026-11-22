@@ -140,7 +140,11 @@ class CharacterLibraryRegistryTests(unittest.TestCase):
                 path=store,
             )
             active = list_characters(path=store)
-            selected = [active[0]["id"], active[2]["id"]]
+            selected_names = {"Mira", "Akari"}
+            selected = [
+                row["id"] for row in active
+                if row["primary_name"] in selected_names
+            ]
             moved = soft_delete_characters_many(selected, path=store)
 
             self.assertEqual({row["id"] for row in moved}, set(selected))

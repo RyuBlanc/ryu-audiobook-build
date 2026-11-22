@@ -6835,6 +6835,8 @@ class PremiumV2Bridge(QObject):
 
     def _character_library_deleted_purge_many(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._character_library_bootstrap()
+        if "ids" not in payload:
+            raise ValueError("Select one or more Recovery Bin entries to clear.")
         records = purge_deleted_reusable_characters_many(payload.get("ids"))
         return {
             "purged": len(records),

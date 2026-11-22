@@ -21,6 +21,7 @@ class CharacterLibraryBulkUiContractTests(unittest.TestCase):
         }.items():
             self.assertIn(f'"{command}": self.{handler}', self.host)
             self.assertIn(f'"{command}": True', self.host)
+        self.assertIn('if "ids" not in payload', self.host)
 
     def test_library_has_multi_select_move_to_recovery_and_selection_count(self):
         self.assertIn("Select All Visible", self.adapter)
@@ -44,6 +45,7 @@ class CharacterLibraryBulkUiContractTests(unittest.TestCase):
             "grid-template-rows:48px 42px 58px 48px 42px 34px",
             ".character-library-compact>.library-character-card",
             "grid-template-columns:175px 150px 190px",
+            "grid-template-rows:minmax(0,1fr)",
             "text-overflow:ellipsis",
             "white-space:nowrap",
         ):

@@ -5146,10 +5146,10 @@
       .filter(row => ids.includes(String(row.id || '')))
       .slice(0, 8)
       .map(row => '• ' + String(row.name || 'Unnamed character'))
-      .join('\\n');
-    const remaining = ids.length > 8 ? '\\n• … and ' + (ids.length - 8) + ' more' : '';
+      .join(' | ');
+    const remaining = ids.length > 8 ? ' | … and ' + (ids.length - 8) + ' more' : '';
     const action = clearAll ? 'Clear the entire Recovery Bin' : 'Permanently clear the selected characters';
-    if (!window.confirm(action + ' (' + ids.length + ' record(s))? This cannot be undone.\\n\\n' + names + remaining)) return;
+    if (!window.confirm(action + ' (' + ids.length + ' record(s))? This cannot be undone. ' + names + remaining)) return;
     const selectedButton = document.querySelector('[data-purge-selected-characters]');
     const allButton = document.querySelector('[data-purge-all-characters]');
     if (selectedButton) selectedButton.disabled = true;
@@ -5190,6 +5190,10 @@
   function updateCharacterLibraryBulkControls() {
     const toolbar = $('characterLibraryBulkActions');
     if (!toolbar) return;
+    const liveCharacterIds = new Set(libraryCharacters.map(row => String(row.id || '')));
+    for (const selectedId of [...characterLibrarySelection]) {
+      if (!liveCharacterIds.has(selectedId)) characterLibrarySelection.delete(selectedId);
+    }
     const count = characterLibrarySelection.size;
     const countLabel = $('characterLibrarySelectedCount');
     const moveButton = $('moveSelectedLibraryCharacters');
@@ -5254,9 +5258,9 @@
       return;
     }
     const selected = libraryCharacters.filter(row => ids.includes(String(row.id)));
-    const names = selected.slice(0, 8).map(row => '• ' + String(row.name || 'Unnamed character')).join('\\n');
-    const remaining = selected.length > 8 ? '\\n• … and ' + (selected.length - 8) + ' more' : '';
-    if (!window.confirm('Move ' + ids.length + ' selected character(s) to the Recovery Bin? Their aliases, assigned voice, dialogue samples and pronunciation details will be retained. Voice Studio profile files will not be deleted.\\n\\n' + names + remaining)) return;
+    const names = selected.slice(0, 8).map(row => '• ' + String(row.name || 'Unnamed character')).join(' | ');
+    const remaining = selected.length > 8 ? ' | … and ' + (selected.length - 8) + ' more' : '';
+    if (!window.confirm('Move ' + ids.length + ' selected character(s) to the Recovery Bin? Their aliases, assigned voice, dialogue samples and pronunciation details will be retained. Voice Studio profile files will not be deleted. ' + names + remaining)) return;
     const button = $('moveSelectedLibraryCharacters');
     if (button) button.disabled = true;
     try {
@@ -5319,8 +5323,8 @@
         #characterLibraryGrid .library-character-meta span{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px}
         #characterLibraryGrid .library-character-actions{display:flex!important;align-items:center;gap:5px!important;flex-wrap:nowrap!important;min-width:0;overflow:hidden}
         #characterLibraryGrid .library-character-actions button{box-sizing:border-box;min-width:0;max-width:100%;flex:1 1 0;padding:7px 5px;font-size:10px;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-        #characterLibraryGrid.character-library-compact{display:grid!important;grid-template-columns:minmax(1120px,1fr);gap:8px!important;overflow-x:auto;overflow-y:hidden;padding-bottom:5px}
-        #characterLibraryGrid.character-library-compact>.library-character-card{display:grid;grid-template-columns:175px 150px 190px minmax(190px,1.4fr) 200px 280px;align-items:center;justify-content:stretch;gap:10px;padding:9px 12px;min-width:1120px;width:100%;height:102px;min-height:102px;max-height:102px}
+        #characterLibraryGrid.character-library-compact{display:grid!important;grid-template-columns:minmax(1280px,1fr);gap:8px!important;overflow-x:auto;overflow-y:hidden;padding-bottom:5px}
+        #characterLibraryGrid.character-library-compact>.library-character-card{display:grid;grid-template-columns:175px 150px 190px minmax(190px,1.4fr) 200px 280px;grid-template-rows:minmax(0,1fr);align-items:center;justify-content:stretch;gap:10px;padding:9px 12px;min-width:1280px;width:100%;height:102px;min-height:102px;max-height:102px}
         #characterLibraryGrid.character-library-compact .library-character-top{grid-template-columns:18px 30px minmax(0,1fr);gap:6px}
         #characterLibraryGrid.character-library-compact .library-character-top .avatar{width:28px;height:28px}
         #characterLibraryGrid.character-library-compact .alias-row{max-height:56px;flex-wrap:wrap;align-content:center;gap:4px}
