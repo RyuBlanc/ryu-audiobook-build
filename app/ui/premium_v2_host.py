@@ -5576,7 +5576,8 @@ class PremiumV2Bridge(QObject):
         if not plan["ready"]:
             return {
                 "cancelled": False, "ready": False,
-                "issues": plan["issues"][:12],
+                "issues": plan["issues"][:20],
+                "issue_count": len(plan["issues"]),
                 "summary": plan["summary"],
                 "scope": plan.get("scope", "chapter"),
                 "chapter_count": len(plan.get("chapters") or []) or 1,
@@ -5787,6 +5788,12 @@ class PremiumV2Bridge(QObject):
                     for item in project.chapters
                 }
                 assignments_by_chapter = {}
+                superseded_by_chapter: dict[str, list[dict[str, Any]]] = {}
+                for saved_assignment in plan.get("superseded_assignments") or []:
+                    if not isinstance(saved_assignment, dict):
+                        continue
+                    saved_chapter_id = str(saved_assignment.get("chapter_id") or "")
+                    superseded_by_chapter.setdefault(saved_chapter_id, []).append(saved_assignment)
                 for imported in plan["assignments"]:
                     chapter_id = str(imported.get("chapter_id") or getattr(chapter, "chapter_id", "") or "")
                     target_chapter = active_chapters.get(chapter_id)
@@ -5799,9 +5806,22 @@ class PremiumV2Bridge(QObject):
                     if exact != str(imported["text"]):
                         raise ValueError("A dialogue passage changed during import. No changes were retained.")
                     if chapter_id not in assignments_by_chapter:
-                        assignments_by_chapter[chapter_id] = list(
+                        existing_assignments = list(
                             getattr(target_chapter, "dialogue_assignments", []) or []
                         )
+                        for stale in superseded_by_chapter.get(chapter_id, []):
+                            stale_start, stale_end = int(stale.get("start", -1)), int(stale.get("end", -1))
+                            stale_source = str(stale.get("source") or "").strip().casefold()
+                            existing_assignments = [
+                                row for row in existing_assignments
+                                if not (
+                                    isinstance(row, dict)
+                                    and int(row.get("start", -1)) == stale_start
+                                    and int(row.get("end", -1)) == stale_end
+                                    and str(row.get("source") or "manual").strip().casefold() == stale_source
+                                )
+                            ]
+                        assignments_by_chapter[chapter_id] = existing_assignments
                     base = {"start": start, "end": end, "text": exact, "source": "outsourced"}
                     normalized = normalize_assignment(base, [str(imported["speaker"])], "single")
                     normalized.update({
@@ -5860,6 +5880,7 @@ class PremiumV2Bridge(QObject):
                 "characters_merged": int(plan["summary"]["matched_characters"]),
                 "characters_created": int(plan["summary"]["new_characters"]),
                 "dialogue_assignments": len(plan["assignments"]),
+                "saved_assignments_replaced": len(plan.get("superseded_assignments") or []),
                 "aliases_merged": int(plan["summary"]["aliases_to_merge"]),
             }
 

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import re
 
 from app.chapters.assignment_utils import assignment_speakers
-from app.chapters.characters import _all_dialogue_spans
+from app.chapters.characters import _all_dialogue_spans, is_embedded_quotation_reference
 from app.chapters.detector import Chapter
 
 
@@ -37,7 +37,7 @@ class _SourceBlock:
 
 def _dialogue_source_spans(text: str) -> list[tuple[int, int]]:
     """Return complete quote/dash dialogue spans without losing source offsets."""
-    spans = {(int(start), int(end)) for start, end, _raw in _all_dialogue_spans(text)}
+    spans = {(int(start), int(end)) for start, end, _raw in _all_dialogue_spans(text, include_embedded=True)}
     # Smart single quotation marks are common in English light novels. Do not
     # include ordinary apostrophes in contractions or possessives as dialogue.
     for match in re.finditer(r"‘[^’\r\n]{2,}’", text):
@@ -177,11 +177,19 @@ def segment_chapter_speakers(chapter: Chapter) -> list[SpeakerSegment]:
     if not text:
         return []
 
-    blocks = [
-        _SourceBlock(start, end)
-        for start, end in _dialogue_source_spans(text)
-        if 0 <= start < end <= len(text)
-    ]
+    blocks = []
+    for start, end in _dialogue_source_spans(text):
+        if not (0 <= start < end <= len(text)):
+            continue
+        if is_embedded_quotation_reference(text, start, end):
+            # Keep the old dialogue-family passage identity so an existing
+            # workbook can safely recognize this exact source slice, while
+            # classifying it as Narrator for all current UI/production views.
+            blocks.append(_SourceBlock(
+                start, end, (NARRATOR_ROLE,), "automatic_embedded_quote", True,
+            ))
+        else:
+            blocks.append(_SourceBlock(start, end))
     blocks.extend(_valid_assignment_blocks(chapter))
     dialogue_segments = _merge_dialogue_blocks(blocks)
 

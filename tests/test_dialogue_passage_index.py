@@ -9,6 +9,7 @@ from unittest.mock import patch
 from app.chapters.detector import Chapter
 from app.chapters.passage_index import (
     INDEX_FILENAME,
+    INDEX_SCHEMA_VERSION,
     chapter_index_summary,
     load_or_build_passage_index,
     passages_for_chapter,
@@ -128,6 +129,74 @@ class DialoguePassageIndexTests(unittest.TestCase):
             self.assertEqual(before_row["passage_id"], after_row["passage_id"])
             self.assertGreater(after_row["start"], before_row["start"])
             self.assertEqual(chapter.text[after_row["start"]:after_row["end"]], dialogue)
+
+    def test_quoted_term_inside_narration_is_not_indexed_as_spoken_dialogue(self):
+        from app.chapters.speaker_segmentation import segment_chapter_speakers
+
+        source = (
+            'She causes these sorts of “accidents” and keeps walking. '
+            'Kousuke said, “We should leave now.”'
+        )
+        chapter = Chapter(1, "Inline quotation", source)
+        segments = segment_chapter_speakers(chapter)
+
+        dialogue = [row for row in segments if row.kind != "narration"]
+        narration = [row for row in segments if row.kind == "narration"]
+        self.assertEqual(len(dialogue), 1)
+        self.assertEqual(dialogue[0].text, '“We should leave now.”')
+        self.assertTrue(any('“accidents”' in row.text for row in narration))
+
+    def test_inline_speech_tag_remains_dialogue_after_embedded_quote_filter(self):
+        from app.chapters.characters import _all_dialogue_spans
+
+        source = 'After a pause, Kousuke said, “I am ready.” Then he left.'
+        spans = _all_dialogue_spans(source)
+        self.assertEqual(len(spans), 1)
+        self.assertEqual(source[spans[0][0]:spans[0][1]], '“I am ready.”')
+
+    def test_legacy_cached_index_rebuilds_after_dialogue_segmentation_contract_changes(self):
+        chapter = Chapter(1, "Scene", "She called it an “accident” and left.")
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = self.make_project_folder(temporary)
+            current = load_or_build_passage_index(folder, [chapter])
+            path = folder / INDEX_FILENAME
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            saved["schema_version"] = 1
+            path.write_text(json.dumps(saved), encoding="utf-8")
+
+            rebuilt = load_or_build_passage_index(folder, [chapter])
+            self.assertEqual(INDEX_SCHEMA_VERSION, 2)
+            self.assertEqual(rebuilt["schema_version"], 2)
+            self.assertTrue(any(
+                row["text"] == "“accident”"
+                and row["kind"] == "narration"
+                and row["source"] == "automatic_embedded_quote"
+                for row in rebuilt["passages"]
+            ))
+
+    def test_quoted_term_at_sentence_start_is_narration_when_prose_continues(self):
+        from app.chapters.speaker_segmentation import segment_chapter_speakers
+
+        source = '“Accidents” were common in that dungeon.'
+        segments = segment_chapter_speakers(Chapter(1, "Quoted term", source))
+        self.assertTrue(any(
+            row.kind == "narration" and row.source == "automatic_embedded_quote"
+            and row.text == "“Accidents”"
+            for row in segments
+        ))
+
+    def test_reopened_quote_mark_splits_malformed_multi_turn_dialogue(self):
+        from app.chapters.speaker_segmentation import segment_chapter_speakers
+
+        source = '“Pumped?\n“Yeah, see, I’m so ridiculously hyped.”'
+        chapter = Chapter(1, "Two turns", source)
+        segments = segment_chapter_speakers(chapter)
+        dialogue = [row for row in segments if row.kind != "narration"]
+
+        self.assertEqual(len(dialogue), 2)
+        self.assertEqual(dialogue[0].text, "“Pumped?")
+        self.assertEqual(dialogue[1].text, "“Yeah, see, I’m so ridiculously hyped.”")
+        self.assertEqual(dialogue[0].end, dialogue[1].start - 1)
 
     def test_saved_index_with_wrong_source_slice_is_rebuilt_not_trusted(self):
         chapter = Chapter(1, "Scene", "Narration.\n\n“Check source.”")

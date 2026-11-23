@@ -19,7 +19,7 @@ from app.chapters.detector import Chapter
 from app.chapters.speaker_segmentation import segment_chapter_speakers
 
 
-INDEX_SCHEMA_VERSION = 1
+INDEX_SCHEMA_VERSION = 2
 INDEX_FILENAME = "dialogue_passage_index.json"
 
 _LOCKS_GUARD = threading.RLock()
@@ -242,12 +242,18 @@ def build_passage_index(
                     f"Dialogue segment no longer matches Chapter {chapter_number} source at {start}:{end}"
                 )
 
-            family = "narration" if segment["kind"] == "narration" else "dialogue"
+            # Inline quotations now classified as narration keep their prior
+            # dialogue-family identity. This preserves old workbook Passage IDs
+            # while changing the semantic kind to Narrator without data loss.
+            id_family = (
+                "dialogue" if str(segment.get("source") or "") == "automatic_embedded_quote"
+                else ("narration" if segment["kind"] == "narration" else "dialogue")
+            )
             text_hash = sha256(exact_text.encode("utf-8")).hexdigest()
-            occurrence_key = (family, text_hash)
+            occurrence_key = (id_family, text_hash)
             occurrence = occurrence_by_text.get(occurrence_key, 0)
             occurrence_by_text[occurrence_key] = occurrence + 1
-            stable_identity = f"{chapter_id}\\0{family}\\0{text_hash}\\0{occurrence}"
+            stable_identity = f"{chapter_id}\0{id_family}\0{text_hash}\0{occurrence}"
             passage_id = "ps_" + sha256(stable_identity.encode("utf-8")).hexdigest()[:32]
 
             exact_assignments = [
@@ -289,7 +295,7 @@ def build_passage_index(
                 "confidence": max(confidence_values) if confidence_values else None,
                 "ai_suggestions": list(segment.get("ai_suggestions") or []),
                 "suggestion_id": str(segment.get("suggestion_id") or ""),
-                "dialogue": family == "dialogue",
+                "dialogue": str(segment["kind"]) != "narration",
                 "source_length": end - start,
             }
             chapter_passages.append(row)

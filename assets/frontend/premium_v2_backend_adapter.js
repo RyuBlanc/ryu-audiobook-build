@@ -4340,8 +4340,21 @@
     const preview = await call('character.workbook.import.preview');
     if (preview?.cancelled) return;
     if (!preview?.ready) {
-      const issues = (preview?.issues || []).slice(0, 8).join('\n• ');
-      window.alert('The workbook was not imported because preflight found issues:\n\n• ' + issues);
+      const issueRows = Array.isArray(preview?.issues) ? preview.issues : [];
+      const issueCount = Math.max(issueRows.length, Number(preview?.issue_count || 0));
+      const unresolved = Number(preview?.summary?.unresolved_dialogue_passages || 0);
+      const shown = issueRows.slice(0, 12);
+      const remaining = Math.max(0, issueCount - shown.length);
+      const details = shown.join('\n• ');
+      const suffix = remaining ? '\n\n…and ' + remaining + ' more preflight issues. Review the full issue count in the workbook and resolve every affected passage.' : '';
+      const unresolvedLine = unresolved
+        ? '\nUnassigned dialogue passages: ' + unresolved + '. These must be resolved with confirmed identities; do not guess.'
+        : '';
+      window.alert(
+        'The workbook was not imported. Preflight found ' + issueCount + ' issue(s).' + unresolvedLine +
+        '\n\n' + (details ? '• ' + details : 'No issue details were returned.') + suffix +
+        '\n\nDo not change Passage IDs, chapter IDs, source text or offsets. Resolve uncertain speakers in Character Studio or fill GPT Assigned Character with a confirmed Character Register identity. Manual assignments are protected.'
+      );
       return;
     }
     const summary = preview.summary || {};
@@ -4383,7 +4396,9 @@
       'Existing characters to merge: ' + Number(summary.matched_characters || 0) + '\n' +
       'New series characters: ' + Number(summary.new_characters || 0) + '\n' +
       'Aliases to reconcile: ' + Number(summary.aliases_to_merge || 0) + '\n' +
-      'Dialogue assignments to add: ' + Number(summary.dialogue_assignments || 0) +
+      'Dialogue assignments to add: ' + Number(summary.dialogue_assignments || 0) + '\n' +
+      'Previously saved AI/outsourced assignment records to replace: ' + Number(summary.saved_assignments_replaced || 0) +
+      '\n\nOnly stale AI/outsourced records listed in the reviewed plan may be replaced. Manual and unknown-source assignments are protected.' +
       '\n\nChapter coverage:\n' + (chapterLines.join('\n') || 'No chapter coverage returned.') +
       '\n\nSpeaker assignment summary:\n' + (speakerLines.join('\n') || 'No new dialogue assignments.') +
       '\n\nCharacter identity plan:\n' + (identityLines.join('\n') || 'No character changes.') +
@@ -4403,7 +4418,8 @@
     const confirmation = 'Workbook imported into the Series Character Library' + importedScope + ' · ' +
       result.characters_merged + ' identities merged · ' + result.characters_created +
       ' new identities · ' + result.aliases_merged + ' aliases reconciled · ' +
-      result.dialogue_assignments + ' dialogue assignments added. Existing voice profiles were preserved.';
+      result.dialogue_assignments + ' dialogue assignments added · ' +
+      Number(result.saved_assignments_replaced || 0) + ' stale AI/outsourced assignments replaced. Existing voice profiles and manual assignments were preserved.';
     message(confirmation);
     window.alert(confirmation);
   }

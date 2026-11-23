@@ -509,15 +509,67 @@ def _resolve_canonical(name: str, canonical: list[str], aliases: dict[str, set[s
     return None
 
 
-def _all_dialogue_spans(text: str) -> list[tuple[int, int, str]]:
+def is_embedded_quotation_reference(text: str, start: int, end: int) -> bool:
+    """Recognize quoted references embedded in narration, not standalone speech."""
+    if start < 0 or end <= start or end > len(text):
+        return False
+    quote_text = text[start:end]
+    quote_pairs = {("“", "”"), ("‘", "’"), ("「", "」"), ("『", "』"), ('"', '"'), ("'", "'")}
+    if len(quote_text) < 3 or (quote_text[0], quote_text[-1]) not in quote_pairs:
+        return False
+    body = quote_text[1:-1].strip()
+    if not body or re.search(r"[.!?…。！？]\s*$", body):
+        return False
+
+    speech_verbs = (
+        "said|asked|replied|answered|shouted|yelled|whispered|muttered|called|cried|"
+        "exclaimed|continued|added|insisted|wondered|demanded|begged|groaned|sighed|"
+        "laughed|snapped|stammered|murmured|screamed|announced|explained|remarked|"
+        "responded|mumbled|roared"
+    )
+    preceding_speech_tag = re.compile(
+        r"\b(?:" + SPEAKER_VERBS + r")\b[^.!?。！？\n\r]{0,100}[,:]?\s*$",
+        flags=re.IGNORECASE,
+    )
+    following_speech_tag = re.compile(
+        r"^\s*[,;:]?\s*(?:(?:he|she|they|i|we|you|the man|the woman|the boy|the girl)\s+)?"
+        r"(?:" + speech_verbs + r")\b",
+        flags=re.IGNORECASE,
+    )
+
+    line_start = max(text.rfind("\n", 0, start), text.rfind("\r", 0, start)) + 1
+    line_prefix = text[line_start:start]
+    line_end_candidates = [index for index in (text.find("\n", end), text.find("\r", end)) if index >= 0]
+    line_end = min(line_end_candidates) if line_end_candidates else len(text)
+    line_suffix = text[end:line_end]
+    paragraph_break = max(text.rfind("\n\n", 0, start), text.rfind("\r\n\r\n", 0, start))
+    paragraph_start = 0 if paragraph_break < 0 else paragraph_break + (4 if text.startswith("\r\n\r\n", paragraph_break) else 2)
+    prefix = text[paragraph_start:start]
+
+    if preceding_speech_tag.search(prefix[-160:]) or following_speech_tag.search(line_suffix[:160]):
+        return False
+
+    # Inside a sentence, a quotation without a sentence-ending mark is a
+    # referenced word/phrase or thought, not a separate spoken turn.
+    if prefix.strip() and not re.search(r"[.!?…。！？][\"”’']?\s*$", prefix[-120:]):
+        return True
+
+    # A quoted term can also begin a sentence ("Accidents" were common).
+    # Treat it as narration only when ordinary prose continues on the same line.
+    if not line_prefix.strip() and line_suffix.strip() and line_suffix.lstrip()[:1].islower():
+        return True
+    return False
+
+
+def _all_dialogue_spans(
+    text: str, *, include_embedded: bool = False
+) -> list[tuple[int, int, str]]:
     spans: list[tuple[int, int, str]] = []
     for pattern in DIALOGUE_PATTERNS:
         for match in pattern.finditer(text):
             spans.append((match.start(), match.end(), match.group(1)))
 
     # Light-novel dialogue may be represented by a dash-only line.
-    # Detect the Unicode code points directly rather than relying on regex
-    # character-class encoding.
     offset = 0
     for line in text.splitlines(keepends=True):
         stripped = line.lstrip(" \t")
@@ -531,11 +583,41 @@ def _all_dialogue_spans(text: str) -> list[tuple[int, int, str]]:
                     spans.append((start, end, dialogue))
         offset += len(line)
 
+    # A malformed or lightly edited light novel can reopen the same quote mark
+    # before closing the prior turn. Treat that as a new turn boundary rather than
+    # one passage containing two speakers.
+    quote_closers = {"“": "”", "‘": "’", "「": "」", "『": "』", '"': '"', "'": "'"}
+    split_spans: list[tuple[int, int, str]] = []
+    for span_start, span_end, span_raw in spans:
+        opening = text[span_start:span_start + 1]
+        closing = quote_closers.get(opening)
+        if not closing:
+            split_spans.append((span_start, span_end, span_raw))
+            continue
+        current_start = span_start
+        cursor = span_start + 1
+        while cursor < span_end - 1:
+            next_open = text.find(opening, cursor, span_end - 1)
+            if next_open < 0:
+                break
+            first_end = next_open
+            while first_end > current_start and text[first_end - 1].isspace():
+                first_end -= 1
+            if first_end > current_start + 1:
+                split_spans.append((current_start, first_end, text[current_start + 1:first_end]))
+                current_start = next_open
+            cursor = next_open + 1
+        if current_start < span_end:
+            content_end = span_end - 1 if text[span_end - 1:span_end] == closing else span_end
+            split_spans.append((current_start, span_end, text[current_start + 1:content_end]))
+    spans = split_spans
 
     spans.sort(key=lambda x: (x[0], -(x[1] - x[0])))
     result: list[tuple[int, int, str]] = []
     for span in spans:
         if result and span[0] < result[-1][1]:
+            continue
+        if not include_embedded and is_embedded_quotation_reference(text, span[0], span[1]):
             continue
         result.append(span)
     return result

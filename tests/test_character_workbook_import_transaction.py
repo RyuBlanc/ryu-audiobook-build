@@ -219,6 +219,65 @@ class CharacterWorkbookImportTransactionTests(unittest.TestCase):
             self.assertEqual(state["characters"][0]["voice_profile_id"], "qwen-profile-123")
             self.assertEqual(first.dialogue_assignments[0]["speaker"], "Mira")
 
+    def test_commit_replaces_reviewed_stale_ai_overlap_but_preserves_unrelated_manual_assignment(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-workbook-replace-stale-ai-") as tmp:
+            folder = Path(tmp)
+            bridge, project, chapter, state, plan, document = self._fixture(folder)
+            line = str(chapter.text)
+            other_line = "“Ren, I am here.”"
+            chapter.text = line + "\n" + other_line
+            other_start = len(line) + 1
+            preserved_manual = {
+                "start": other_start, "end": other_start + len(other_line),
+                "text": other_line, "speaker": "Ren", "source": "manual",
+            }
+            stale_ai = {
+                "start": 0, "end": len(line) + 1,
+                "text": line + "\n", "speaker": "Legacy AI speaker", "source": "ai",
+            }
+            chapter.dialogue_assignments = [stale_ai, preserved_manual]
+            plan["superseded_assignments"] = [{
+                "chapter_id": "chapter-001", "start": 0, "end": len(line) + 1,
+                "source": "ai", "speakers": ["Legacy AI speaker"], "text": line + "\n",
+            }]
+            plan["summary"]["saved_assignments_replaced"] = 1
+            bridge._character_workbook_import_sessions["preview-token"]["plan_sha256"] = (
+                character_workbook_plan_fingerprint(plan)
+            )
+            library = folder / "character-library.json"
+            library.write_text(json.dumps({"version": 1, "active": [], "deleted": []}), encoding="utf-8")
+
+            def save_project():
+                (folder / "project.json").write_text("project saved", encoding="utf-8")
+                (folder / "chapters.json").write_text("chapters saved", encoding="utf-8")
+
+            project.save = Mock(side_effect=save_project)
+
+            def save_project_state(project_folder, payload):
+                (Path(project_folder) / "state.json").write_text(
+                    json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8"
+                )
+
+            with (
+                patch.object(host, "reusable_character_library_path", return_value=library),
+                patch.object(host, "read_character_workbook", return_value=document),
+                patch.object(host, "save_state", side_effect=save_project_state),
+            ):
+                result = bridge._character_workbook_import_commit({"token": "preview-token"})
+
+            self.assertTrue(result["imported"])
+            self.assertEqual(result["saved_assignments_replaced"], 1)
+            self.assertEqual(len(chapter.dialogue_assignments), 2)
+            self.assertFalse(any(
+                row.get("source") == "ai" and row.get("start") == 0
+                for row in chapter.dialogue_assignments
+            ))
+            self.assertTrue(any(
+                row.get("source") == "outsourced" and row.get("speaker") == "Mira"
+                for row in chapter.dialogue_assignments
+            ))
+            self.assertIn(preserved_manual, chapter.dialogue_assignments)
+
     def test_failed_save_rolls_back_library_files_and_live_chapter_assignments(self):
         with tempfile.TemporaryDirectory(prefix="ryu-workbook-rollback-") as tmp:
             folder = Path(tmp)

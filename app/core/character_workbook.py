@@ -436,9 +436,18 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
         ["Instructions",
          "This is a COMPLETE-BOOK workbook. Read every chapter in Chapter Context before assigning dialogue. "
          "Dialogue Assignment contains every source-verified passage from every chapter. Assign a confirmed "
-         "Character Register identity to every Dialogue row. Never guess a speaker or invent a character from the "
-         "book title, series title, chapter title, narrator text or an unverified honorific. If a speaker is uncertain, "
-         "leave the cell blank; import preview will block the entire workbook until that dialogue passage is resolved. "
+         "Character Register identity to every genuine spoken Dialogue row. Read the full surrounding scene and earlier/later "
+         "chapters; do not decide from the isolated quote alone. Reuse the exact canonical identity from Series Character "
+         "Reference whenever the speaker is the same person, and use aliases only as alternate names for that same identity. "
+         "Never infer a speaker from a nearby name alone. Never invent a personal name from the book title, series title, "
+         "chapter title, narrator text or an unverified honorific. If the source identifies a speaker only by a stable role "
+         "and gives no personal name, add one clearly descriptive role identity such as 'Unnamed Classroom Teacher' and "
+         "state in Character Notes that this is an unnamed role, not a supplied personal name; reuse it consistently only "
+         "when the source supports the same speaker. Use source-supported labels for identifiable non-human speakers or "
+         "collectives, and explain the evidence. Do not assign a speaker to a quoted word, thought, emphasized term or other "
+         "quotation embedded inside narration; those are not spoken dialogue. Do not combine distinct turns or speakers "
+         "into one identity. If the source truly cannot identify a speaker or role, leave that row blank and explain why "
+         "in Evidence / Notes (GPT); do not guess. A blank row is a deliberate unresolved review item and will block import. "
          "Narration is protected as Narrator. "
          "Use numeric GPT Confidence from 0.0 to 1.0 and add concise evidence in Evidence / Notes (GPT). "
          "Add every character appearing in this book to Character Register. Copy an existing canonical name and "
@@ -1016,15 +1025,21 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
     by_id = {_clean(x.get("passage_id")):x for x in current_passages if isinstance(x,dict) and _clean(x.get("passage_id"))}
     by_span = {(int(x.get("start",-1)),int(x.get("end",-1))):x for x in current_assignments if isinstance(x,dict)}
     assignments, seen = [], set()
-    workbook_ids = {_clean(row.get("Passage ID")) for row in document.get("dialogue_rows") or []}
+    superseded_assignments = {}
+    workbook_rows = [row for row in (document.get("dialogue_rows") or []) if isinstance(row, dict)]
+    workbook_row_by_id = {_clean(row.get("Passage ID")): row for row in workbook_rows}
+    workbook_ids = {_clean(row.get("Passage ID")) for row in workbook_rows}
     if workbook_ids != set(by_id):
-        issues.append("The workbook does not contain the complete set of chapter passages. Restore every exported row and try again.")
+        issues.append("The workbook does not contain the complete set of chapter passages. Export the active book again after source passage structure changes.")
     for row in document.get("dialogue_rows") or []:
+        if not isinstance(row, dict):
+            issues.append("The workbook contains an invalid dialogue row.")
+            continue
         pid = _clean(row.get("Passage ID"))
-        current = by_id.get(pid)
-        if not current: issues.append("Passage %s is no longer in this chapter." % pid); continue
         if pid in seen: issues.append("Duplicate Passage ID %s." % pid); continue
         seen.add(pid)
+        current = by_id.get(pid)
+        if not current: issues.append("Passage %s is no longer in this chapter." % pid); continue
         try:
             raw_start = float(row.get("Start (Reference)") or -1)
             raw_end = float(row.get("End (Reference)") or -1)
@@ -1040,8 +1055,21 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             issues.append("Passage %s text, offsets or source revision changed. Export again." % pid); continue
         workbook_type = _clean(row.get("Passage Type")).casefold()
         source_is_narration = _key(current.get("kind")) == "narration"
-        if workbook_type not in {"dialogue", "narration"} or (workbook_type == "narration") != source_is_narration:
+        legacy_inline_quote = (
+            source_is_narration
+            and _clean(current.get("source")) == "automatic_embedded_quote"
+            and workbook_type == "dialogue"
+        )
+        if (
+            workbook_type not in {"dialogue", "narration"}
+            or ((workbook_type == "narration") != source_is_narration and not legacy_inline_quote)
+        ):
             issues.append("Passage %s has an edited or invalid Passage Type. Export the chapter again." % pid)
+            continue
+        if legacy_inline_quote:
+            # Older GPT workbooks exposed inline quoted terms as dialogue.
+            # The stable Passage ID and exact source slice are preserved, but
+            # the corrected source classifier now treats the row as narration.
             continue
         narration = source_is_narration
         assigned = _clean(row.get("GPT Assigned Character"))
@@ -1064,22 +1092,81 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
         if not isinstance(speakers, (list, tuple)):
             speakers = [old.get("speaker")] if old.get("speaker") else []
         old_names = [_clean(value) for value in speakers if _clean(value)]
-        if any(
-            isinstance(item, dict)
-            and int(item.get("start", -1)) < end
-            and int(item.get("end", -1)) > start
-            and (int(item.get("start", -1)), int(item.get("end", -1))) != (start, end)
-            for item in current_assignments
-        ):
-            issues.append("Passage %s overlaps another saved assignment." % pid)
+
+        # Older AI/outsourced assignments may span multiple newly segmented source
+        # passages. Replace only non-manual records, only when every impacted
+        # current dialogue passage has an explicit workbook identity, and only
+        # through the explicit import-review/confirmation transaction.
+        overlap_blocked = False
+        for saved in current_assignments:
+            if not isinstance(saved, dict):
+                continue
+            try:
+                saved_start, saved_end = int(saved.get("start", -1)), int(saved.get("end", -1))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if saved_start >= end or saved_end <= start or (saved_start, saved_end) == (start, end):
+                continue
+            saved_source = _clean(saved.get("source") or "manual").casefold()
+            if saved_source not in {"ai", "outsourced"}:
+                issues.append(
+                    "Passage %s (Chapter %s, %s:%s) overlaps a saved %s assignment at %s:%s. "
+                    "Review that existing assignment in Character Studio; workbook import will not overwrite manual or unknown-source assignments."
+                    % (pid, chapter_id, start, end, saved_source or "manual", saved_start, saved_end)
+                )
+                overlap_blocked = True
+                continue
+            impacted_passages = [
+                item for item in current_passages
+                if isinstance(item, dict)
+                and int(item.get("start", -1)) < saved_end
+                and int(item.get("end", -1)) > saved_start
+            ]
+            impacted_rows = [
+                workbook_row_by_id.get(_clean(item.get("passage_id")))
+                for item in impacted_passages
+                if _key(item.get("kind")) != "narration"
+            ]
+            if (
+                not impacted_passages
+                or any(_key(item.get("kind")) == "narration" for item in impacted_passages)
+                or not impacted_rows
+                or any(not isinstance(item, dict) or not _clean(item.get("GPT Assigned Character")) for item in impacted_rows)
+            ):
+                issues.append(
+                    "Passage %s overlaps a stale AI assignment at %s:%s, but not every impacted dialogue passage "
+                    "has a confirmed workbook character. Resolve all affected rows before replacing it."
+                    % (pid, saved_start, saved_end)
+                )
+                overlap_blocked = True
+                continue
+            speakers_value = saved.get("speakers")
+            if not isinstance(speakers_value, (list, tuple)):
+                speakers_value = [saved.get("speaker")] if saved.get("speaker") else []
+            key = (saved_start, saved_end, saved_source)
+            superseded_assignments.setdefault(key, {
+                "chapter_id": _clean(chapter_id),
+                "start": saved_start,
+                "end": saved_end,
+                "source": saved_source,
+                "speakers": [_clean(value) for value in speakers_value if _clean(value)],
+                "text": str(saved.get("text") or ""),
+            })
+        if overlap_blocked:
             continue
 
         if not assigned:
             if not old_names:
+                passage_excerpt = re.sub(r"\s+", " ", str(current.get("text") or "")).strip()[:120]
                 issues.append(
-                    "Dialogue passage %s has no confirmed character assignment. "
-                    "Fill GPT Assigned Character with a Character Register identity before importing."
-                    % pid
+                    "Dialogue passage %s in Chapter %s (%s) has no confirmed character assignment: %s. "
+                    "Resolve it with a source-supported Character Register identity or leave the book import blocked; do not guess."
+                    % (
+                        pid,
+                        _clean(current.get("chapter_number")) or _clean(chapter_id),
+                        _clean(current.get("chapter_title")),
+                        passage_excerpt,
+                    )
                 )
                 continue
             old_identity_keys = set()
@@ -1118,8 +1205,23 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
         canonical = identity["canonical_name"]
         valid_identity_tokens = {_key(value) for value in identity.get("tokens", [])}
         if old_names and not all(_key(value) in valid_identity_tokens for value in old_names):
-            issues.append("Passage %s already belongs to %s; resolve this assignment before import." % (pid, " + ".join(old_names)))
-            continue
+            exact_source = _clean(old.get("source") or "manual").casefold()
+            if exact_source not in {"ai", "outsourced"}:
+                issues.append(
+                    "Passage %s already has a different saved %s speaker (%s). Resolve the manual or unknown-source assignment before import."
+                    % (pid, exact_source or "manual", " + ".join(old_names))
+                )
+                continue
+            exact_key = (start, end, exact_source)
+            superseded_assignments.setdefault(exact_key, {
+                "chapter_id": _clean(chapter_id),
+                "start": start,
+                "end": end,
+                "source": exact_source,
+                "speakers": old_names,
+                "text": str(old.get("text") or ""),
+            })
+            old_names = []
         if old_names:
             continue
         raw_confidence = _clean(row.get("GPT Confidence (0–1)"))
@@ -1136,11 +1238,23 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             continue
         assignments.append({"passage_id":pid,"chapter_id":chapter_id,"start":start,"end":end,
             "text":str(current.get("text") or ""),"speaker":canonical,"series":active_series,"confidence":confidence})
-    return {"ready":not issues,"issues":list(dict.fromkeys(issues)),"characters":planned,"assignments":assignments,
-        "summary":{"matched_characters":sum(x["action"]=="merge" for x in planned),
-        "new_characters":sum(x["action"]=="create" for x in planned),
-        "aliases_to_merge":sum(len(x.get("aliases_to_add", [])) for x in planned),
-        "dialogue_assignments":len(assignments),"characters_in_register":len(planned)}}
+    unique_issues = list(dict.fromkeys(issues))
+    return {
+        "ready": not unique_issues,
+        "issues": unique_issues,
+        "characters": planned,
+        "assignments": assignments,
+        "superseded_assignments": list(superseded_assignments.values()),
+        "summary": {
+            "matched_characters": sum(x["action"] == "merge" for x in planned),
+            "new_characters": sum(x["action"] == "create" for x in planned),
+            "aliases_to_merge": sum(len(x.get("aliases_to_add", [])) for x in planned),
+            "dialogue_assignments": len(assignments),
+            "characters_in_register": len(planned),
+            "unresolved_dialogue_passages": sum("no confirmed character assignment" in issue for issue in unique_issues),
+            "saved_assignments_replaced": len(superseded_assignments),
+        },
+    }
 
 
 
@@ -1184,6 +1298,7 @@ def plan_complete_book_character_workbook_import(
         rows_by_chapter[chapter_id].append(row)
 
     chapter_plans, issues = [], []
+    superseded_assignments = []
     identity_plan_json = None
     identity_plan = []
     for reference in sorted(references, key=lambda item: (int(item["chapter_number"]), item["chapter_id"])):
@@ -1195,8 +1310,15 @@ def plan_complete_book_character_workbook_import(
             raise ValueError("Chapter %s changed after export. Export the complete book again." % reference["chapter_number"])
         passages = list(active.get("current_passages") or [])
         assignments = list(active.get("current_assignments") or [])
-        if len(passages) != int(reference.get("passage_count") or 0):
-            raise ValueError("Chapter %s passage coverage changed after export. Export the complete book again." % reference["chapter_number"])
+        exported_passage_count = int(reference.get("passage_count") or 0)
+        if len(passages) != exported_passage_count:
+            raise ValueError(
+                "Chapter %s dialogue/narration segmentation changed after workbook export "
+                "(workbook: %s passages; active project: %s). A previously combined turn may now be split "
+                "into separate speakers. Export a fresh complete-book workbook before importing; the original "
+                "GPT workbook remains unchanged."
+                % (reference["chapter_number"], exported_passage_count, len(passages))
+            )
         active_text = str(active.get("text") or "")
         if sha256(active_text.encode("utf-8")).hexdigest() != _clean(reference.get("context_sha256")):
             raise ValueError("Chapter %s context does not match the active source text. Export the complete book again." % reference["chapter_number"])
@@ -1236,6 +1358,11 @@ def plan_complete_book_character_workbook_import(
         elif identity_plan_json != identity_json:
             issues.append("The character merge plan changed between chapters. Resolve the series identity conflict before importing.")
         issues.extend(plan.get("issues") or [])
+        for saved_assignment in plan.get("superseded_assignments") or []:
+            item = dict(saved_assignment)
+            item["chapter_id"] = chapter_id
+            item["chapter_number"] = int(reference["chapter_number"])
+            superseded_assignments.append(item)
         chapter_entry = {
             "chapter_id": chapter_id,
             "chapter_number": int(reference["chapter_number"]),
@@ -1273,6 +1400,8 @@ def plan_complete_book_character_workbook_import(
         "dialogue_assignments": len(assignments),
         "characters_in_register": len(identity_plan),
         "chapters": len(chapter_plans),
+        "unresolved_dialogue_passages": sum("no confirmed character assignment" in issue for issue in issues),
+        "saved_assignments_replaced": len(superseded_assignments),
     }
     return {
         "ready": not issues,
@@ -1283,6 +1412,7 @@ def plan_complete_book_character_workbook_import(
         "chapter_assignments": chapter_plans,
         "characters": identity_plan,
         "assignments": assignments,
+        "superseded_assignments": superseded_assignments,
         "summary": summary,
     }
 
@@ -1294,7 +1424,7 @@ def character_workbook_plan_fingerprint(plan: dict) -> str:
         raise ValueError("A valid character workbook plan is required.")
     reviewed = {
         key: plan.get(key)
-        for key in ("ready", "issues", "scope", "book_revision", "chapters", "chapter_assignments", "characters", "assignments", "summary")
+        for key in ("ready", "issues", "scope", "book_revision", "chapters", "chapter_assignments", "characters", "assignments", "superseded_assignments", "summary")
     }
     try:
         encoded = json.dumps(

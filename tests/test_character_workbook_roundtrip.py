@@ -856,6 +856,100 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 character_workbook_plan_fingerprint(plan),
             )
 
+    def test_complete_book_import_reconciles_stale_ai_overlap_only_when_all_impacted_rows_are_confirmed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _path, chapters, _passages, document = self._complete_book_fixture(Path(tmp))
+            document["characters"] = [{
+                "full_name": "Mira", "aliases": [], "version": "",
+                "notes": "Named character confirmed in the source.", "included_in_book": True,
+            }]
+            for row in document["dialogue_rows"]:
+                if row["Passage Type"] == "Dialogue":
+                    row["GPT Assigned Character"] = "Mira"
+                    row["GPT Confidence (0–1)"] = "0.97"
+
+            first = chapters[0]
+            first_dialogue = next(row for row in first["current_passages"] if row["kind"] != "narration")
+            stale_end = int(first_dialogue["end"]) + 1
+            first["current_assignments"] = [{
+                "start": int(first_dialogue["start"]),
+                "end": stale_end,
+                "text": first["text"][int(first_dialogue["start"]):stale_end],
+                "speaker": "Legacy AI speaker",
+                "source": "ai",
+                "confidence": 0.72,
+            }]
+            plan = plan_complete_book_character_workbook_import(
+                document, series="Silver Archive", book_title="The Silver Archive",
+                registry_rows=[], project_characters=[], current_chapters=chapters,
+            )
+            self.assertTrue(plan["ready"], plan["issues"])
+            self.assertEqual(len(plan["superseded_assignments"]), 1)
+            self.assertEqual(plan["superseded_assignments"][0]["source"], "ai")
+            self.assertEqual(plan["summary"]["saved_assignments_replaced"], 1)
+            self.assertEqual(plan["summary"]["dialogue_assignments"], 2)
+
+            first["current_assignments"][0]["source"] = "manual"
+            protected = plan_complete_book_character_workbook_import(
+                document, series="Silver Archive", book_title="The Silver Archive",
+                registry_rows=[], project_characters=[], current_chapters=chapters,
+            )
+            self.assertFalse(protected["ready"])
+            self.assertEqual(protected["superseded_assignments"], [])
+            self.assertTrue(any("will not overwrite manual" in issue for issue in protected["issues"]))
+
+    def test_legacy_inline_quoted_term_row_remains_importable_as_narration(self):
+        source = 'She causes these sorts of “accidents” and keeps walking.'
+        start = source.index('“accidents”')
+        quote = source[start:start + len('“accidents”')]
+        document = {
+            "schema_version": 1,
+            "info": {
+                "Series Name": "Silver Archive",
+                "Book Title": "The Silver Archive",
+                "Chapter ID": "chapter-001",
+                "Chapter Revision": "revision-001",
+            },
+            "characters": [],
+            "dialogue_rows": [{
+                "Passage ID": "ps_legacy_inline_quote",
+                "Chapter ID": "chapter-001",
+                "Chapter Revision (Reference)": "revision-001",
+                "Passage Type": "Dialogue",
+                "Dialogue Text": quote,
+                "GPT Assigned Character": "",
+                "GPT Confidence (0–1)": "",
+                "Start (Reference)": start,
+                "End (Reference)": start + len(quote),
+            }],
+        }
+        current_passages = [{
+            "passage_id": "ps_legacy_inline_quote",
+            "chapter_id": "chapter-001",
+            "chapter_number": 1,
+            "chapter_title": "The Opening",
+            "chapter_revision": "revision-001",
+            "start": start,
+            "end": start + len(quote),
+            "text": quote,
+            "kind": "narration",
+            "source": "automatic_embedded_quote",
+        }]
+        plan = plan_character_workbook_import(
+            document,
+            series="Silver Archive",
+            book_title="The Silver Archive",
+            registry_rows=[],
+            project_characters=[],
+            chapter_id="chapter-001",
+            chapter_revision="revision-001",
+            current_passages=current_passages,
+            current_assignments=[],
+        )
+        self.assertTrue(plan["ready"], plan["issues"])
+        self.assertEqual(plan["assignments"], [])
+        self.assertEqual(plan["summary"]["dialogue_assignments"], 0)
+
     def test_complete_book_import_blocks_any_dialogue_without_a_character(self):
         with tempfile.TemporaryDirectory() as tmp:
             _path, chapters, _passages, document = self._complete_book_fixture(Path(tmp))
@@ -881,6 +975,25 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 "has no confirmed character assignment" in issue and "p2-dialogue" in issue
                 for issue in plan["issues"]
             ))
+
+    def test_complete_book_import_explicitly_rejects_changed_dialogue_segmentation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _path, chapters, _passages, document = self._complete_book_fixture(Path(tmp))
+            changed = [dict(row) for row in chapters]
+            changed[0] = dict(changed[0])
+            changed[0]["current_passages"] = [
+                *changed[0]["current_passages"],
+                {
+                    **changed[0]["current_passages"][0],
+                    "passage_id": "new-split-passage",
+                    "start": changed[0]["current_passages"][0]["start"] + 1,
+                },
+            ]
+            with self.assertRaisesRegex(ValueError, "segmentation changed after workbook export"):
+                plan_complete_book_character_workbook_import(
+                    document, series="Silver Archive", book_title="The Silver Archive",
+                    registry_rows=[], project_characters=[], current_chapters=changed,
+                )
 
     def test_complete_book_import_rejects_stale_chapter_context_or_missing_chapter(self):
         with tempfile.TemporaryDirectory() as tmp:
