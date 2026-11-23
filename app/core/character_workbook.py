@@ -106,7 +106,9 @@ def create_character_workbook_bytes(metadata, passages, chapter_text):
         "Chapter ID": _clean(metadata.get("chapter_id")), "Chapter Number": metadata.get("chapter_number", ""),
         "Chapter Title": _clean(metadata.get("chapter_title")), "Chapter Revision": _clean(metadata.get("chapter_revision")),
         "Exported At (UTC)": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "Instructions": ("Fill GPT Assigned Character only for dialogue. Leave uncertain dialogue blank. "
+        "Instructions": ("Fill GPT Assigned Character for every Dialogue row when its speaker is supported by the source. "
+            "Do not guess. If a dialogue speaker is uncertain, leave the cell blank; import preview will block the workbook "
+            "until that passage is resolved manually or with a confirmed Character Register identity. "
             "Use GPT Confidence (0–1) as a numeric score from 0.0 to 1.0, and explain evidence in its notes. "
             "Narration is protected as Narrator. Add canonical full names and all other names as aliases. "
             "A younger/older version needing a different voice must be a separate Character Register row. "
@@ -433,9 +435,11 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
         ["Exported At (UTC)", datetime.now(timezone.utc).isoformat(timespec="seconds")],
         ["Instructions",
          "This is a COMPLETE-BOOK workbook. Read every chapter in Chapter Context before assigning dialogue. "
-         "Dialogue Assignment contains every source-verified passage from every chapter. Assign only a clear, "
-         "named character; leave uncertain dialogue blank. Never invent a character from the book title, series "
-         "title, chapter title, narrator text or an unverified honorific. Narration is protected as Narrator. "
+         "Dialogue Assignment contains every source-verified passage from every chapter. Assign a confirmed "
+         "Character Register identity to every Dialogue row. Never guess a speaker or invent a character from the "
+         "book title, series title, chapter title, narrator text or an unverified honorific. If a speaker is uncertain, "
+         "leave the cell blank; import preview will block the entire workbook until that dialogue passage is resolved. "
+         "Narration is protected as Narrator. "
          "Use numeric GPT Confidence from 0.0 to 1.0 and add concise evidence in Evidence / Notes (GPT). "
          "Add every character appearing in this book to Character Register. Copy an existing canonical name and "
          "its known aliases from Series Character Reference when it is the same person. Add newly discovered "
@@ -1045,11 +1049,64 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             if _key(assigned) != "narrator":
                 issues.append("Narration passage %s must retain the protected Narrator assignment." % pid)
             continue
-        if not assigned: continue
-        if _key(assigned) == "narrator": issues.append("Narrator cannot be assigned to dialogue."); continue
+
+        # Resolve the current assignment before considering a blank workbook
+        # cell. Blank is safe only when this exact dialogue span already has
+        # one known, unambiguous character assignment in the active project or
+        # series library. Otherwise the complete import must stop; silently
+        # skipping the row would leave dialogue without a character.
+        start, end = int(current["start"]), int(current["end"])
+        if str(current.get("assignment_state") or "").casefold() == "conflict":
+            issues.append("Passage %s already has conflicting saved assignments. Resolve it in Character Studio before import." % pid)
+            continue
+        old = by_span.get((start, end), {})
+        speakers = old.get("speakers")
+        if not isinstance(speakers, (list, tuple)):
+            speakers = [old.get("speaker")] if old.get("speaker") else []
+        old_names = [_clean(value) for value in speakers if _clean(value)]
+        if any(
+            isinstance(item, dict)
+            and int(item.get("start", -1)) < end
+            and int(item.get("end", -1)) > start
+            and (int(item.get("start", -1)), int(item.get("end", -1))) != (start, end)
+            for item in current_assignments
+        ):
+            issues.append("Passage %s overlaps another saved assignment." % pid)
+            continue
+
+        if not assigned:
+            if not old_names:
+                issues.append(
+                    "Dialogue passage %s has no confirmed character assignment. "
+                    "Fill GPT Assigned Character with a Character Register identity before importing."
+                    % pid
+                )
+                continue
+            old_identity_keys = set()
+            unresolved_old_names = []
+            for old_name in old_names:
+                old_matches = token_map.get(_key(old_name), set())
+                if len(old_matches) != 1:
+                    unresolved_old_names.append(old_name)
+                else:
+                    old_identity_keys.update(old_matches)
+            if unresolved_old_names or len(old_identity_keys) != 1:
+                issues.append(
+                    "Existing assignment for dialogue passage %s is missing, ambiguous or split across characters (%s). "
+                    "Resolve it before importing."
+                    % (pid, " + ".join(old_names))
+                )
+                continue
+            # A valid saved assignment already covers this dialogue span.
+            continue
+
+        if _key(assigned) == "narrator":
+            issues.append("Narrator cannot be assigned to dialogue.")
+            continue
         matches = token_map.get(_key(assigned), set())
         if len(matches) != 1:
-            issues.append("'%s' is missing or ambiguous. Add it to Character Register or resolve its alias." % assigned); continue
+            issues.append("'%s' is missing or ambiguous. Add it to Character Register or resolve its alias." % assigned)
+            continue
         identity_key = next(iter(matches))
         if identity_key not in registered_keys:
             issues.append(
@@ -1058,23 +1115,13 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             )
             continue
         identity = identities[identity_key]
-        start, end = int(current["start"]), int(current["end"])
-        if str(current.get("assignment_state") or "").casefold() == "conflict":
-            issues.append("Passage %s already has conflicting saved assignments. Resolve it in Character Studio before import." % pid)
-            continue
-        old = by_span.get((start,end),{})
-        speakers = old.get("speakers")
-        if not isinstance(speakers,(list,tuple)): speakers=[old.get("speaker")] if old.get("speaker") else []
-        old_names = [_clean(x) for x in speakers if _clean(x)]
         canonical = identity["canonical_name"]
         valid_identity_tokens = {_key(value) for value in identity.get("tokens", [])}
         if old_names and not all(_key(value) in valid_identity_tokens for value in old_names):
-            issues.append("Passage %s already belongs to %s; resolve this assignment before import." % (pid," + ".join(old_names)))
+            issues.append("Passage %s already belongs to %s; resolve this assignment before import." % (pid, " + ".join(old_names)))
             continue
-        if any(isinstance(x,dict) and int(x.get("start",-1))<end and int(x.get("end",-1))>start
-               and (int(x.get("start",-1)),int(x.get("end",-1)))!=(start,end) for x in current_assignments):
-            issues.append("Passage %s overlaps another saved assignment." % pid); continue
-        if old_names: continue
+        if old_names:
+            continue
         raw_confidence = _clean(row.get("GPT Confidence (0–1)"))
         if not raw_confidence:
             issues.append("Passage %s requires an explicit GPT Confidence value from 0.0 to 1.0; blank confidence is not accepted." % pid)

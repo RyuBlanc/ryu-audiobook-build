@@ -325,6 +325,49 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             self.assertEqual(plan["assignments"][0]["speaker"], "Mira (Younger Version)")
 
 
+    def test_import_plan_blocks_dialogue_without_character_and_preserves_known_existing_assignment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, _text, passages = self._export(Path(tmp))
+            document = read_character_workbook(path)
+            document["characters"] = [{
+                "full_name": "Mira", "aliases": ["Captain Mira"],
+                "version": "", "notes": "",
+            }]
+            plan = plan_character_workbook_import(
+                document, series="Silver Archive",
+                registry_rows=[{
+                    "id": "library-mira", "series": "Silver Archive",
+                    "primary_name": "Mira", "aliases": ["Captain Mira"],
+                }],
+                project_characters=[], chapter_id="chapter-001",
+                chapter_revision="revision-abc", current_passages=passages,
+                current_assignments=[],
+            )
+            self.assertFalse(plan["ready"])
+            self.assertEqual(plan["assignments"], [])
+            self.assertTrue(any(
+                "has no confirmed character assignment" in issue and "ps_dialogue" in issue
+                for issue in plan["issues"]
+            ))
+
+            existing_assignment = {
+                "start": passages[1]["start"], "end": passages[1]["end"],
+                "text": passages[1]["text"], "speakers": ["Captain Mira"],
+                "source": "manual", "series": "Silver Archive",
+            }
+            preserved = plan_character_workbook_import(
+                document, series="Silver Archive",
+                registry_rows=[{
+                    "id": "library-mira", "series": "Silver Archive",
+                    "primary_name": "Mira", "aliases": ["Captain Mira"],
+                }],
+                project_characters=[], chapter_id="chapter-001",
+                chapter_revision="revision-abc", current_passages=passages,
+                current_assignments=[existing_assignment],
+            )
+            self.assertTrue(preserved["ready"], preserved["issues"])
+            self.assertEqual(preserved["assignments"], [])
+
     def test_import_plan_requires_explicit_gpt_confidence_for_new_assignments(self):
         with tempfile.TemporaryDirectory() as tmp:
             path, _text, passages = self._export(Path(tmp))
@@ -812,6 +855,30 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 character_workbook_plan_fingerprint(plan),
                 character_workbook_plan_fingerprint(plan),
             )
+
+    def test_complete_book_import_blocks_any_dialogue_without_a_character(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _path, chapters, _passages, document = self._complete_book_fixture(Path(tmp))
+            document["characters"] = [{
+                "full_name": "Mira", "aliases": ["Captain Mira"],
+                "version": "", "notes": "", "included_in_book": True,
+            }]
+            for row in document["dialogue_rows"]:
+                if row["Passage ID"] == "p1-dialogue":
+                    row["GPT Assigned Character"] = "Mira"
+                    row["GPT Confidence (0–1)"] = "0.97"
+            # p2-dialogue is deliberately left blank. Import must not silently
+            # accept the first chapter while omitting this second-chapter line.
+            plan = plan_complete_book_character_workbook_import(
+                document, series="Silver Archive", book_title="The Silver Archive",
+                registry_rows=[], project_characters=[], current_chapters=chapters,
+            )
+            self.assertFalse(plan["ready"])
+            self.assertEqual(plan["assignments"], [])
+            self.assertTrue(any(
+                "has no confirmed character assignment" in issue and "p2-dialogue" in issue
+                for issue in plan["issues"]
+            ))
 
     def test_complete_book_import_rejects_stale_chapter_context_or_missing_chapter(self):
         with tempfile.TemporaryDirectory() as tmp:

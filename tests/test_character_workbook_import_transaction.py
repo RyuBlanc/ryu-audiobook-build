@@ -124,6 +124,101 @@ class CharacterWorkbookImportTransactionTests(unittest.TestCase):
             self.assertEqual(state["characters"][0]["character_library_id"], saved[0]["id"])
             self.assertEqual(state["characters"][0]["identity_variant"], "")
 
+    def test_complete_book_import_adds_new_alias_to_library_and_preserves_local_voice(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-workbook-alias-commit-") as tmp:
+            folder = Path(tmp)
+            first_line = "“Mira, listen!”"
+            first = SimpleNamespace(
+                number=1, title="The Arrival", chapter_id="chapter-001",
+                text=first_line, dialogue_assignments=[],
+            )
+            project = SimpleNamespace(
+                folder=folder, title="The Silver Archive", chapters=[first],
+            )
+            state = {"characters": [{
+                "name": "Mira", "series": "Silver Archive",
+                "aliases": ["Captain Mira"],
+                "voice_profile": "Saved Qwen Mira Profile",
+                "voice_profile_id": "qwen-profile-123",
+                "voice_model": "Qwen3-TTS-0.6B",
+            }], "modified_at": ""}
+            library = folder / "character-library.json"
+            from app.core.character_library import sync_characters
+            sync_characters(
+                "Silver Archive",
+                [{"name": "Mira", "aliases": ["Captain Mira"], "voice": "Local Library Mira Voice"}],
+                path=library,
+            )
+            existing_library = list_characters(series="Silver Archive", path=library)[0]
+            plan = {
+                "ready": True, "issues": [], "scope": "book",
+                "book_revision": "book-revision",
+                "chapters": [{
+                    "chapter_id": "chapter-001", "chapter_number": 1,
+                    "chapter_title": "The Arrival",
+                }],
+                "characters": [{
+                    "canonical_name": "Mira", "identity_base_name": "Mira",
+                    "identity_variant": "", "aliases": ["Captain Mira", "Mira-sama"],
+                    "aliases_to_add": ["Mira-sama"], "notes": "Confirmed alias",
+                    "library_id": existing_library["id"],
+                    "existing_voice_name": "Local Library Mira Voice",
+                    "action": "merge", "series": "Silver Archive",
+                }],
+                "assignments": [{
+                    "passage_id": "passage-001", "chapter_id": "chapter-001",
+                    "chapter_number": 1, "start": 0, "end": len(first_line),
+                    "text": first_line, "speaker": "Mira",
+                    "series": "Silver Archive", "confidence": 0.97,
+                }],
+                "summary": {
+                    "matched_characters": 1, "new_characters": 0,
+                    "aliases_to_merge": 1, "dialogue_assignments": 1,
+                    "chapters": 1,
+                },
+            }
+            workbook_path = folder / "complete-book.xlsx"
+            workbook_path.write_bytes(b"complete book workbook")
+            workbook_sha = hashlib.sha256(workbook_path.read_bytes()).hexdigest()
+            document = {"sha256": workbook_sha, "info": {"Export ID": "export-book-alias"}}
+            session = {
+                "path": str(workbook_path.resolve()), "sha256": workbook_sha,
+                "project_folder": str(folder.resolve()), "export_id": "export-book-alias",
+                "scope": "book", "book_revision": "book-revision",
+                "plan_sha256": character_workbook_plan_fingerprint(plan),
+            }
+            bridge = _WorkbookCommitBridge(project, first, state, plan, session)
+
+            def save_project():
+                (folder / "project.json").write_text("project saved", encoding="utf-8")
+                (folder / "chapters.json").write_text("chapters saved", encoding="utf-8")
+            project.save = Mock(side_effect=save_project)
+
+            def save_project_state(project_folder, payload):
+                (Path(project_folder) / "state.json").write_text(
+                    json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8"
+                )
+
+            with (
+                patch.object(host, "reusable_character_library_path", return_value=library),
+                patch.object(host, "read_character_workbook", return_value=document),
+                patch.object(host, "save_state", side_effect=save_project_state),
+            ):
+                result = bridge._character_workbook_import_commit({"token": "preview-token"})
+
+            saved_library = list_characters(series="Silver Archive", path=library)
+            self.assertTrue(result["imported"])
+            self.assertEqual(result["aliases_merged"], 1)
+            self.assertEqual(len(saved_library), 1)
+            self.assertEqual(saved_library[0]["primary_name"], "Mira")
+            self.assertTrue({"Captain Mira", "Mira-sama"}.issubset(set(saved_library[0]["aliases"])))
+            self.assertEqual(saved_library[0]["voice_name"], "Local Library Mira Voice")
+            self.assertEqual(state["characters"][0]["name"], "Mira")
+            self.assertTrue({"Captain Mira", "Mira-sama"}.issubset(set(state["characters"][0]["aliases"])))
+            self.assertEqual(state["characters"][0]["voice_profile"], "Saved Qwen Mira Profile")
+            self.assertEqual(state["characters"][0]["voice_profile_id"], "qwen-profile-123")
+            self.assertEqual(first.dialogue_assignments[0]["speaker"], "Mira")
+
     def test_failed_save_rolls_back_library_files_and_live_chapter_assignments(self):
         with tempfile.TemporaryDirectory(prefix="ryu-workbook-rollback-") as tmp:
             folder = Path(tmp)
