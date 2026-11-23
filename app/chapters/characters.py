@@ -549,6 +549,13 @@ def is_embedded_quotation_reference(text: str, start: int, end: int) -> bool:
     if preceding_speech_tag.search(prefix[-160:]) or following_speech_tag.search(line_suffix[:160]):
         return False
 
+    # Explicit speaker labels use a colon before the quote. Preserve these as
+    # dialogue even when the label is an unfamiliar script, an invalid decorated
+    # name, or a name the candidate detector will later reject. Dialogue counting
+    # and speaker validation are separate responsibilities.
+    if line_prefix.rstrip().endswith(":"):
+        return False
+
     # Inside a sentence, a quotation without a sentence-ending mark is a
     # referenced word/phrase or thought, not a separate spoken turn.
     if prefix.strip() and not re.search(r"[.!?…。！？][\"”’']?\s*$", prefix[-120:]):
