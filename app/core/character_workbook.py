@@ -1251,6 +1251,12 @@ def plan_complete_book_character_workbook_import(
             chapter_entry["assignments"].append(imported)
         chapter_plans.append(chapter_entry)
 
+    issues = list(dict.fromkeys(issues))
+    # A complete-book import is one atomic operation. Do not expose a partial
+    # set of accepted dialogue rows when any chapter has an unresolved issue.
+    if issues:
+        for chapter in chapter_plans:
+            chapter["assignments"] = []
     assignments = [
         assignment
         for chapter in chapter_plans
@@ -1260,7 +1266,6 @@ def plan_complete_book_character_workbook_import(
         {key: value for key, value in row.items() if key != "assignments"}
         for row in chapter_plans
     ]
-    issues = list(dict.fromkeys(issues))
     summary = {
         "matched_characters": sum(row.get("action") == "merge" for row in identity_plan),
         "new_characters": sum(row.get("action") == "create" for row in identity_plan),

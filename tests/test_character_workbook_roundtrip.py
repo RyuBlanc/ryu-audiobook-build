@@ -875,6 +875,8 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             )
             self.assertFalse(plan["ready"])
             self.assertEqual(plan["assignments"], [])
+            self.assertTrue(all(not chapter["assignments"] for chapter in plan["chapter_assignments"]))
+            self.assertEqual(plan["summary"]["dialogue_assignments"], 0)
             self.assertTrue(any(
                 "has no confirmed character assignment" in issue and "p2-dialogue" in issue
                 for issue in plan["issues"]
@@ -906,13 +908,29 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 "notes": "",
                 "included_in_book": False,
             }]
+            # The only Character Register row is for a future volume, but the
+            # current book already has confirmed assignments for both dialogue
+            # spans. Blank workbook cells may preserve these exact assignments.
+            registry_rows = [{
+                "id": "library-mira", "series": "Silver Archive",
+                "primary_name": "Mira", "aliases": ["Captain Mira"],
+            }]
+            for chapter in chapters:
+                for passage in chapter["current_passages"]:
+                    if passage["kind"] == "character_dialogue":
+                        chapter["current_assignments"].append({
+                            "start": passage["start"], "end": passage["end"],
+                            "text": passage["text"], "speakers": ["Mira"],
+                            "source": "manual", "series": "Silver Archive",
+                        })
             plan = plan_complete_book_character_workbook_import(
                 document, series="Silver Archive", book_title="The Silver Archive",
-                registry_rows=[], project_characters=[], current_chapters=chapters,
+                registry_rows=registry_rows, project_characters=[], current_chapters=chapters,
             )
             self.assertTrue(plan["ready"], plan["issues"])
             self.assertEqual(plan["characters"], [])
             self.assertEqual(plan["summary"]["new_characters"], 0)
+            self.assertEqual(plan["summary"]["dialogue_assignments"], 0)
 
 
 
