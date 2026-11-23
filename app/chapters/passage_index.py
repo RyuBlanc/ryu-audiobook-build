@@ -253,7 +253,7 @@ def build_passage_index(
             occurrence_key = (id_family, text_hash)
             occurrence = occurrence_by_text.get(occurrence_key, 0)
             occurrence_by_text[occurrence_key] = occurrence + 1
-            stable_identity = f"{chapter_id}\0{id_family}\0{text_hash}\0{occurrence}"
+            stable_identity = f"{chapter_id}\\0{id_family}\\0{text_hash}\\0{occurrence}"
             passage_id = "ps_" + sha256(stable_identity.encode("utf-8")).hexdigest()[:32]
 
             exact_assignments = [

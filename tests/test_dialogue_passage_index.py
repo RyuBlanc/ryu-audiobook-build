@@ -113,6 +113,22 @@ class DialoguePassageIndexTests(unittest.TestCase):
                 index["passages"],
             )
 
+    def test_passage_id_hash_uses_the_legacy_separator_for_existing_workbook_compatibility(self):
+        from hashlib import sha256
+
+        dialogue = "“A stable passage.”"
+        chapter = Chapter(1, "Scene", dialogue)
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = self.make_project_folder(temporary)
+            index = load_or_build_passage_index(folder, [chapter])
+            row = next(item for item in index["passages"] if item["text"] == dialogue)
+            text_hash = sha256(dialogue.encode("utf-8")).hexdigest()
+            stable_identity = (
+                f"{row['chapter_id']}\\0dialogue\\0{text_hash}\\00"
+            )
+            expected = "ps_" + sha256(stable_identity.encode("utf-8")).hexdigest()[:32]
+            self.assertEqual(row["passage_id"], expected)
+
     def test_passage_ids_survive_unrelated_prefix_edits_while_offsets_reconcile(self):
         dialogue = "“A stable passage.”"
         chapter = Chapter(1, "Scene", f"Opening paragraph.\n\n{dialogue}\n\nClosing paragraph.")
