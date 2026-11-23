@@ -528,12 +528,17 @@ def is_embedded_quotation_reference(text: str, start: int, end: int) -> bool:
         "responded|mumbled|roared"
     )
     preceding_speech_tag = re.compile(
-        r"\b(?:" + SPEAKER_VERBS + r")\b[^.!?。！？\n\r]{0,100}[,:]?\s*$",
+        r"\b(?:" + speech_verbs + r")\b"
+        r"(?:\s+(?:me|him|her|them|us|you))?"
+        r"(?:\s+[A-Za-z-]+ly)?\s*[,;:]?\s*$",
         flags=re.IGNORECASE,
     )
     following_speech_tag = re.compile(
         r"^\s*[,;:]?\s*(?:(?:he|she|they|i|we|you|the man|the woman|the boy|the girl)\s+)?"
-        r"(?:" + speech_verbs + r")\b",
+        r"(?:" + speech_verbs + r")\b"
+        r"|^\s*(?:と)?(?:答えた|言った|尋ねた|訊いた|叫んだ|呟いた|つぶやいた|囁いた|ささやいた|返した|続けた|聞いた|語った)"
+        r"|^\s*(?:说道|说|问道|回答道|回答说|喊道|叫道|低声说|说道)"
+        r"|^\s*(?:말했다|대답했다|물었다|외쳤다|속삭였다|중얼거렸다)",
         flags=re.IGNORECASE,
     )
 
@@ -603,17 +608,33 @@ def _all_dialogue_spans(
             continue
         current_start = span_start
         cursor = span_start + 1
+        split_found = False
         while cursor < span_end - 1:
             next_open = text.find(opening, cursor, span_end - 1)
             if next_open < 0:
                 break
+            # Repeated adjacent quote characters are valid legacy quote markers
+            # (for example, ""hello""). A new turn boundary requires a physical
+            # line break and no closing marker in the previous turn.
+            between_openers = text[current_start:next_open]
+            previous_turn = text[current_start + 1:next_open]
+            if (
+                ("\n" not in between_openers and "\r" not in between_openers)
+                or closing in previous_turn
+            ):
+                cursor = next_open + 1
+                continue
             first_end = next_open
             while first_end > current_start and text[first_end - 1].isspace():
                 first_end -= 1
             if first_end > current_start + 1:
                 split_spans.append((current_start, first_end, text[current_start + 1:first_end]))
                 current_start = next_open
+                split_found = True
             cursor = next_open + 1
+        if not split_found:
+            split_spans.append((span_start, span_end, span_raw))
+            continue
         if current_start < span_end:
             content_end = span_end - 1 if text[span_end - 1:span_end] == closing else span_end
             split_spans.append((current_start, span_end, text[current_start + 1:content_end]))
