@@ -79,6 +79,7 @@ from app.core.character_workbook import (
     read_character_workbook,
     plan_character_workbook_import,
     plan_complete_book_character_workbook_import,
+    refresh_complete_book_character_workbook_bytes,
     character_workbook_plan_fingerprint,
 )
 from app.production_metadata import missing_required_metadata_fields, normalize_metadata_text
@@ -5562,6 +5563,110 @@ class PremiumV2Bridge(QObject):
         )
         return state, series, chapter, plan
 
+    def _character_workbook_refresh_after_segmentation(
+        self, project, document: dict[str, Any], selected_path: str
+    ) -> dict[str, Any]:
+        """Save a refreshed workbook while retaining only exact unchanged GPT assignments."""
+        state, series, book_chapters = self._character_workbook_book_snapshot(project)
+        self._character_library_bootstrap()
+        series_character_reference = [
+            {
+                "primary_name": str(row.get("primary_name") or row.get("name") or ""),
+                "aliases": list(row.get("aliases") or []),
+                "identity_base_name": str(row.get("identity_base_name") or row.get("primary_name") or row.get("name") or ""),
+                "identity_variant": str(row.get("identity_variant") or ""),
+                "notes": str(row.get("notes") or ""),
+                "dialogue_sample": str(row.get("dialogue_sample") or ""),
+                "pronunciation": str(row.get("pronunciation") or ""),
+            }
+            for row in list_reusable_characters(series)
+            if isinstance(row, dict)
+        ]
+        export_rows = []
+        for chapter in book_chapters:
+            for source in chapter["current_passages"]:
+                item = dict(source)
+                match = next((
+                    assignment for assignment in chapter["current_assignments"]
+                    if int(assignment.get("start", -1)) == int(source.get("start", -2))
+                    and int(assignment.get("end", -1)) == int(source.get("end", -2))
+                    and str(assignment.get("text") or source.get("text") or "") == str(source.get("text") or "")
+                ), None)
+                if match:
+                    speakers = match.get("speakers")
+                    if not isinstance(speakers, (list, tuple)):
+                        speakers = [match.get("speaker")] if match.get("speaker") else []
+                    item["existing_speakers"] = [
+                        str(value) for value in speakers if str(value or "").strip()
+                    ]
+                    item["assignment_source"] = str(match.get("source") or "")
+                    item["confidence"] = match.get("confidence")
+                item.update({
+                    "chapter_id": chapter["chapter_id"],
+                    "chapter_number": chapter["chapter_number"],
+                    "chapter_title": chapter["chapter_title"],
+                    "chapter_revision": chapter["chapter_revision"],
+                })
+                export_rows.append(item)
+
+        metadata = {
+            "project_title": str(getattr(project, "title", "") or ""),
+            "author": str(state.get("author") or ""),
+            "publisher": str(state.get("publisher") or ""),
+            "language": str(state.get("language") or ""),
+            "genre": str(state.get("genre") or ""),
+            "year": str(state.get("year") or ""),
+            "series_name": series,
+            "series_volume": str(state.get("series_volume") or ""),
+            "series_character_reference": series_character_reference,
+        }
+        workbook_bytes, summary = refresh_complete_book_character_workbook_bytes(
+            document,
+            metadata=metadata,
+            chapters=book_chapters,
+            passages=export_rows,
+        )
+
+        original = Path(selected_path).expanduser()
+        default_name = "%s_Refreshed.xlsx" % original.stem
+        default_path = original.with_name(default_name)
+        destination_text, _ = QFileDialog.getSaveFileName(
+            self._character_workbook_dialog_parent(),
+            "Save Refreshed Complete-Book Character Workbook",
+            str(default_path),
+            "Excel Workbook (*.xlsx)",
+            options=QFileDialog.Option.DontUseNativeDialog,
+        )
+        if not destination_text:
+            return {"cancelled": True}
+        destination = Path(destination_text).expanduser()
+        if destination.suffix.casefold() != ".xlsx":
+            destination = destination.with_suffix(".xlsx")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(
+            prefix="." + destination.name + ".", suffix=".tmp", dir=str(destination.parent)
+        )
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(workbook_bytes)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, destination)
+        except Exception:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            Path(temporary).unlink(missing_ok=True)
+            raise
+        return {
+            "cancelled": False,
+            "refreshed": True,
+            "path": str(destination.resolve()),
+            "series": series,
+            **summary,
+        }
+
     def _character_workbook_import_preview(self, _payload: dict[str, Any]) -> dict[str, Any]:
         """Select a GPT-completed workbook and reconcile it without changing saved data."""
         selected_path, _ = QFileDialog.getOpenFileName(
@@ -5572,7 +5677,17 @@ class PremiumV2Bridge(QObject):
             return {"cancelled": True}
         document = read_character_workbook(selected_path)
         project = self._active_project()
-        state, series, chapter, plan = self._character_workbook_import_plan(project, document)
+        try:
+            state, series, chapter, plan = self._character_workbook_import_plan(project, document)
+        except ValueError as exc:
+            if (
+                int(document.get("schema_version") or 0) == 2
+                and "segmentation changed after workbook export" in str(exc)
+            ):
+                return self._character_workbook_refresh_after_segmentation(
+                    project, document, selected_path
+                )
+            raise
         if not plan["ready"]:
             return {
                 "cancelled": False, "ready": False,
@@ -5837,6 +5952,34 @@ class PremiumV2Bridge(QObject):
                         )
                     ]
                     assignments_by_chapter[chapter_id].append(normalized)
+                # A Narrator-only correction can supersede stale AI spans without
+                # adding any dialogue assignment in that chapter. Ensure those
+                # removals are still persisted instead of being skipped because
+                # the assignments loop above had no row for that chapter.
+                for chapter_id, stale_rows in superseded_by_chapter.items():
+                    if chapter_id in assignments_by_chapter:
+                        continue
+                    target_chapter = active_chapters.get(chapter_id)
+                    if target_chapter is None:
+                        raise ValueError("A superseded assignment belongs to a chapter that is no longer in the active book.")
+                    remaining = list(
+                        getattr(target_chapter, "dialogue_assignments", []) or []
+                    )
+                    for stale in stale_rows:
+                        stale_start = int(stale.get("start", -1))
+                        stale_end = int(stale.get("end", -1))
+                        stale_source = str(stale.get("source") or "").strip().casefold()
+                        remaining = [
+                            row for row in remaining
+                            if not (
+                                isinstance(row, dict)
+                                and int(row.get("start", -1)) == stale_start
+                                and int(row.get("end", -1)) == stale_end
+                                and str(row.get("source") or "manual").strip().casefold() == stale_source
+                            )
+                        ]
+                    assignments_by_chapter[chapter_id] = remaining
+
                 for chapter_id, chapter_assignments in assignments_by_chapter.items():
                     target_chapter = active_chapters[chapter_id]
                     target_chapter.dialogue_assignments = sorted(

@@ -334,23 +334,86 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
         if _clean(row.get("chapter_revision")) not in {"", chapter["chapter_revision"]}:
             raise ValueError("A source passage revision does not match its Chapter Register entry.")
         seen_passages.add(passage_id)
+        gpt_assigned = _clean(
+            row.get("gpt_assigned_character") or row.get("GPT Assigned Character")
+        )
+        gpt_confidence = (
+            row.get("gpt_confidence")
+            if row.get("gpt_confidence") not in (None, "")
+            else row.get("GPT Confidence (0–1)", "")
+        )
+        gpt_evidence = _clean(
+            row.get("gpt_evidence") or row.get("Evidence / Notes (GPT)")
+        )
         dialogue.append([
             passage_id, chapter_id, chapter["chapter_number"], chapter["chapter_title"],
             "Narration" if narration else "Dialogue", text,
-            "Narrator" if narration else "", "",
+            "Narrator" if narration else gpt_assigned, gpt_confidence if not narration else "",
             " + ".join(str(value) for value in speakers if str(value or "").strip()),
             str(row.get("assignment_source") or row.get("source") or ""),
             row.get("confidence") if row.get("confidence") is not None else "",
-            start, end, chapter["chapter_revision"], "",
+            start, end, chapter["chapter_revision"], "" if narration else gpt_evidence,
         ])
         chapter["passage_count"] += 1
     if len(dialogue) - 1 > MAX_ROWS:
         raise ValueError("The complete book exceeds the 50,000 passage workbook export limit.")
 
-    char_headers = ["Full Name"] + ["Alias %d" % n for n in range(1, ALIAS_COLUMNS + 1)] + [
-        "Version / Age Variant", "Character Notes", "Included in This Book?",
+    supplied_register = [
+        dict(row) for row in (metadata.get("character_register") or [])
+        if isinstance(row, dict)
     ]
-    characters = [char_headers] + [[""] * len(char_headers) for _ in range(40)]
+    cleaned_register = []
+    for row in supplied_register:
+        full_name = _clean(row.get("full_name"))
+        if not full_name:
+            continue
+        raw_aliases = row.get("aliases") or []
+        if isinstance(raw_aliases, str):
+            raw_aliases = [raw_aliases]
+        aliases = []
+        seen_aliases = {_key(full_name)}
+        for raw_alias in raw_aliases:
+            alias = _clean(raw_alias)
+            if not alias or _key(alias) in seen_aliases:
+                continue
+            if len(alias) > MAX_CHARACTER_ALIAS_LENGTH:
+                raise ValueError("Character Register aliases must be 160 characters or fewer.")
+            seen_aliases.add(_key(alias))
+            aliases.append(alias)
+        if len(full_name) > MAX_CHARACTER_NAME_LENGTH:
+            raise ValueError("Character Register names must be 160 characters or fewer.")
+        version = _clean(row.get("version"))
+        notes = _clean(row.get("notes"))
+        if len(version) > MAX_IDENTITY_VARIANT_LENGTH:
+            raise ValueError("Character age/version labels must be 120 characters or fewer.")
+        if len(notes) > MAX_CHARACTER_NOTES_LENGTH:
+            raise ValueError("Character Register notes must be 4,000 characters or fewer.")
+        included_raw = row.get("included_in_book", True)
+        included = (
+            included_raw.strip().casefold() in {"yes", "y", "true", "1", "x"}
+            if isinstance(included_raw, str) else bool(included_raw)
+        )
+        cleaned_register.append({
+            "full_name": full_name, "aliases": aliases,
+            "version": version, "notes": notes, "included_in_book": included,
+        })
+
+    alias_column_count = max(
+        [ALIAS_COLUMNS] + [len(row["aliases"]) for row in cleaned_register]
+    )
+    char_headers = ["Full Name"] + [
+        "Alias %d" % n for n in range(1, alias_column_count + 1)
+    ] + ["Version / Age Variant", "Character Notes", "Included in This Book?"]
+    characters = [char_headers]
+    for row in cleaned_register:
+        aliases = list(row["aliases"])
+        characters.append([
+            row["full_name"], *aliases,
+            *([""] * (alias_column_count - len(aliases))),
+            row["version"], row["notes"],
+            "YES" if row["included_in_book"] else "NO",
+        ])
+    characters.extend([[""] * len(char_headers) for _ in range(40)])
 
     chapter_register = [[
         "Chapter ID", "Chapter Number", "Chapter Title", "Chapter Revision (Reference)",
@@ -462,7 +525,7 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
 
     sheets = [
         ("Dialogue Assignment", dialogue, [38,38,14,32,16,72,34,18,34,22,18,14,14,42,46], {6,8,9,14,15}),
-        ("Character Register", characters, [34] + [24] * ALIAS_COLUMNS + [26,48,24], set(range(1, ALIAS_COLUMNS + 5))),
+        ("Character Register", characters, [34] + [24] * alias_column_count + [26,48,24], set(range(1, alias_column_count + 5))),
         ("Chapter Register", chapter_register, [38,14,32,42,22,20,66], set(range(1,8))),
         ("Chapter Context", context, [38,14,32,14,14,100], {6}),
         ("Series Character Reference", reference_rows, [38,34,38,26,56,64,32], {1,2,3,4,5,6,7}),
@@ -528,6 +591,169 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
     if len(result) > MAX_BYTES:
         raise ValueError("The complete-book workbook exceeds the 25 MB safe import/export limit. Split the book into smaller volumes.")
     return result
+
+def refresh_complete_book_character_workbook_bytes(
+    document, *, metadata, chapters, passages
+):
+    """Rebuild a current book workbook, carrying forward only exact unchanged GPT rows."""
+    if int(document.get("schema_version") or 0) != 2:
+        raise ValueError("Only a version 2 complete-book workbook can be refreshed safely.")
+    old_info = document.get("info") or {}
+    if _clean(old_info.get("Export Scope")) != "complete_book":
+        raise ValueError("Choose a complete-book Character Studio workbook to refresh.")
+    if _key(old_info.get("Series Name")) != _key(metadata.get("series_name")):
+        raise ValueError("The old workbook belongs to a different series. Refresh was not created.")
+    if _key(old_info.get("Book Title")) != _key(metadata.get("project_title")):
+        raise ValueError("The old workbook belongs to a different book. Refresh was not created.")
+
+    old_references = list(document.get("chapter_references") or [])
+    current_chapters = [
+        dict(row) for row in (chapters or []) if isinstance(row, dict)
+    ]
+    old_by_id = {_clean(row.get("chapter_id")): row for row in old_references}
+    current_by_id = {_clean(row.get("chapter_id")): row for row in current_chapters}
+    if (
+        not old_by_id or len(old_by_id) != len(old_references)
+        or set(old_by_id) != set(current_by_id)
+    ):
+        raise ValueError("The active book chapter set changed after export. Workbook refresh cannot reconcile different chapters.")
+
+    current_book_revision = character_workbook_book_revision(current_chapters)
+    if current_book_revision != _clean(old_info.get("Book Revision")):
+        raise ValueError("One or more chapter identities or revisions changed after export. Workbook refresh cannot copy assignments.")
+    for chapter_id, current in current_by_id.items():
+        old = old_by_id[chapter_id]
+        current_text = str(current.get("text") or "")
+        if (
+            int(current.get("chapter_number") or 0) != int(old.get("chapter_number") or 0)
+            or _clean(current.get("chapter_title")) != _clean(old.get("chapter_title"))
+            or _clean(current.get("chapter_revision")) != _clean(old.get("chapter_revision"))
+            or sha256(current_text.encode("utf-8")).hexdigest() != _clean(old.get("context_sha256"))
+            or len(re.findall(r"\S+", current_text)) != int(old.get("word_count") or 0)
+        ):
+            raise ValueError(
+                "Chapter %s source text or revision changed after export. Workbook refresh will not transfer GPT assignments."
+                % (old.get("chapter_number") or "?")
+            )
+
+    old_rows_by_chapter = {chapter_id: [] for chapter_id in old_by_id}
+    for row in document.get("dialogue_rows") or []:
+        if not isinstance(row, dict):
+            continue
+        chapter_id = _clean(row.get("Chapter ID"))
+        if chapter_id in old_rows_by_chapter:
+            try:
+                start = int(float(row.get("Start (Reference)")))
+                end = int(float(row.get("End (Reference)")))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            old_rows_by_chapter[chapter_id].append({
+                "passage_id": _clean(row.get("Passage ID")),
+                "start": start,
+                "end": end,
+                "text": str(row.get("Dialogue Text") or ""),
+                "kind": _clean(row.get("Passage Type")).casefold(),
+                "assigned": _clean(row.get("GPT Assigned Character")),
+                "confidence": _clean(row.get("GPT Confidence (0–1)")),
+                "evidence": _clean(row.get("Evidence / Notes (GPT)")),
+            })
+
+    refreshed_passages = []
+    exact_rows_carried = 0
+    assignments_carried = 0
+    review_required = 0
+    reclassified_as_narration = 0
+    for source in passages or []:
+        if not isinstance(source, dict):
+            continue
+        row = dict(source)
+        chapter_id = _clean(row.get("chapter_id"))
+        chapter = current_by_id.get(chapter_id)
+        if chapter is None:
+            raise ValueError("A refreshed passage belongs to a chapter outside the active book.")
+        start, end = int(row.get("start", -1)), int(row.get("end", -1))
+        text = str(row.get("text") or "")
+        source_text = str(chapter.get("text") or "")
+        if start < 0 or end <= start or source_text[start:end] != text:
+            raise ValueError("A refreshed passage does not match the unchanged chapter source text.")
+        old_rows = old_rows_by_chapter.get(chapter_id, [])
+        exact = [
+            old for old in old_rows
+            if old["start"] == start and old["end"] == end and old["text"] == text
+        ]
+        narration = _key(row.get("kind")) == "narration"
+        if narration:
+            if any(old["kind"] == "dialogue" for old in exact):
+                reclassified_as_narration += 1
+            refreshed_passages.append(row)
+            continue
+
+        exact_dialogue = [old for old in exact if old["kind"] == "dialogue"]
+        if len(exact_dialogue) == 1 and len(exact) == 1:
+            old = exact_dialogue[0]
+            row["gpt_assigned_character"] = old["assigned"]
+            row["gpt_confidence"] = old["confidence"]
+            row["gpt_evidence"] = old["evidence"]
+            exact_rows_carried += 1
+            if old["assigned"]:
+                assignments_carried += 1
+            refreshed_passages.append(row)
+            continue
+
+        overlapping = [
+            old for old in old_rows
+            if old["end"] > start and old["start"] < end
+        ]
+        if overlapping:
+            previous = []
+            for old in overlapping[:4]:
+                label = old["passage_id"] or "%s:%s" % (old["start"], old["end"])
+                assigned = old["assigned"] or "unassigned"
+                previous.append(
+                    "previous passage %s (%s; %s:%s)" %
+                    (label, assigned, old["start"], old["end"])
+                )
+            row["gpt_evidence"] = (
+                "REVIEW REQUIRED — this passage no longer exactly matches one old workbook row. "
+                + "; ".join(previous)
+                + ". Previous speaker values were not copied because the old passage may have split or changed boundaries. "
+                "Read the full scene and assign the speaker for this passage only."
+            )
+        else:
+            row["gpt_evidence"] = (
+                "REVIEW REQUIRED — this is a new dialogue passage with no exact match in the previous workbook. "
+                "Read the full scene and assign a source-supported Character Register identity; do not guess."
+            )
+        review_required += 1
+        refreshed_passages.append(row)
+
+    refreshed_metadata = dict(metadata or {})
+    refreshed_metadata["character_register"] = list(document.get("characters") or [])
+    unresolved_dialogue = 0
+    for row in refreshed_passages:
+        if _key(row.get("kind")) == "narration":
+            continue
+        assigned = _clean(row.get("gpt_assigned_character"))
+        saved_speakers = row.get("existing_speakers") or row.get("speakers") or []
+        if isinstance(saved_speakers, str):
+            saved_speakers = [saved_speakers]
+        has_saved_identity = any(_clean(value) for value in saved_speakers)
+        if not assigned and not has_saved_identity:
+            unresolved_dialogue += 1
+    workbook_bytes = create_complete_book_character_workbook_bytes(
+        refreshed_metadata, current_chapters, refreshed_passages
+    )
+    return workbook_bytes, {
+        "exact_dialogue_rows_carried": exact_rows_carried,
+        "gpt_assignments_carried": assignments_carried,
+        "new_or_changed_dialogue_rows_for_review": review_required,
+        "unresolved_dialogue_passages": unresolved_dialogue,
+        "dialogue_rows_reclassified_as_narration": reclassified_as_narration,
+        "character_register_entries_preserved": len(refreshed_metadata["character_register"]),
+        "chapter_count": len(current_chapters),
+        "passage_count": len(refreshed_passages),
+    }
+
 
 def _read_sheet(archive, target, shared):
     normalized_target = str(target or "").replace("\\", "/")
@@ -1066,15 +1292,50 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
         ):
             issues.append("Passage %s has an edited or invalid Passage Type. Export the chapter again." % pid)
             continue
-        if legacy_inline_quote:
-            # Older GPT workbooks exposed inline quoted terms as dialogue.
-            # The stable Passage ID and exact source slice are preserved, but
-            # the corrected source classifier now treats the row as narration.
-            continue
         narration = source_is_narration
         assigned = _clean(row.get("GPT Assigned Character"))
         if narration:
-            if _key(assigned) != "narrator":
+            if _clean(current.get("source")) == "automatic_embedded_quote":
+                quote_start, quote_end = int(current.get("start", -1)), int(current.get("end", -1))
+                for saved in current_assignments:
+                    if not isinstance(saved, dict):
+                        continue
+                    saved_source = _clean(saved.get("source") or "manual").casefold()
+                    if saved_source not in {"ai", "outsourced"}:
+                        continue
+                    try:
+                        saved_start = int(saved.get("start", -1))
+                        saved_end = int(saved.get("end", -1))
+                    except (TypeError, ValueError, OverflowError):
+                        continue
+                    if saved_start >= quote_end or saved_end <= quote_start:
+                        continue
+                    impacted = [
+                        item for item in current_passages
+                        if isinstance(item, dict)
+                        and int(item.get("start", -1)) < saved_end
+                        and int(item.get("end", -1)) > saved_start
+                    ]
+                    exact_quote = saved_start == quote_start and saved_end == quote_end
+                    only_embedded_narration = bool(impacted) and all(
+                        _key(item.get("kind")) == "narration"
+                        and _clean(item.get("source")) == "automatic_embedded_quote"
+                        for item in impacted
+                    )
+                    if exact_quote or only_embedded_narration:
+                        speakers_value = saved.get("speakers")
+                        if not isinstance(speakers_value, (list, tuple)):
+                            speakers_value = [saved.get("speaker")] if saved.get("speaker") else []
+                        key = (saved_start, saved_end, saved_source)
+                        superseded_assignments.setdefault(key, {
+                            "chapter_id": _clean(chapter_id),
+                            "start": saved_start,
+                            "end": saved_end,
+                            "source": saved_source,
+                            "speakers": [_clean(value) for value in speakers_value if _clean(value)],
+                            "text": str(saved.get("text") or ""),
+                        })
+            if not legacy_inline_quote and _key(assigned) != "narrator":
                 issues.append("Narration passage %s must retain the protected Narrator assignment." % pid)
             continue
 
@@ -1127,9 +1388,14 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                 for item in impacted_passages
                 if _key(item.get("kind")) != "narration"
             ]
+            blocking_narration = any(
+                _key(item.get("kind")) == "narration"
+                and _clean(item.get("source")) != "automatic_embedded_quote"
+                for item in impacted_passages
+            )
             if (
                 not impacted_passages
-                or any(_key(item.get("kind")) == "narration" for item in impacted_passages)
+                or blocking_narration
                 or not impacted_rows
                 or any(not isinstance(item, dict) or not _clean(item.get("GPT Assigned Character")) for item in impacted_rows)
             ):

@@ -72,9 +72,16 @@ def _valid_assignment_blocks(chapter: Chapter) -> list[_SourceBlock]:
         ))
         if not speakers:
             continue
-        normalized_source = str(item.get("source") or "manual").strip().casefold()
-        if normalized_source not in {"ai", "manual"}:
-            normalized_source = "manual"
+        raw_source = str(item.get("source") or "manual").strip().casefold()
+        if (
+            raw_source in {"ai", "outsourced"}
+            and is_embedded_quotation_reference(source, start, end)
+        ):
+            # A stale machine assignment must not turn a verified quoted word
+            # inside narration into a speaking character. Manual assignments
+            # are intentionally not skipped; those remain protected conflicts.
+            continue
+        normalized_source = raw_source if raw_source in {"ai", "manual"} else "manual"
         output.append(_SourceBlock(start, end, speakers, normalized_source, True))
     return output
 

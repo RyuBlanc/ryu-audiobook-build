@@ -124,6 +124,94 @@ class CharacterWorkbookImportTransactionTests(unittest.TestCase):
             self.assertEqual(state["characters"][0]["character_library_id"], saved[0]["id"])
             self.assertEqual(state["characters"][0]["identity_variant"], "")
 
+    def test_commit_persists_narrator_only_stale_ai_cleanup_without_new_dialogue_rows(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-workbook-narrator-cleanup-") as tmp:
+            folder = Path(tmp)
+            bridge, project, chapter, state, plan, document = self._fixture(folder)
+            stale_text = str(chapter.text)
+            chapter.dialogue_assignments = [{
+                "start": 0, "end": len(stale_text), "text": stale_text,
+                "speaker": "Legacy AI speaker", "source": "ai",
+            }]
+            plan["assignments"] = []
+            plan["superseded_assignments"] = [{
+                "chapter_id": "chapter-001",
+                "start": 0, "end": len(stale_text),
+                "text": stale_text, "source": "ai",
+                "speakers": ["Legacy AI speaker"],
+            }]
+            plan["summary"]["dialogue_assignments"] = 0
+            plan["summary"]["saved_assignments_replaced"] = 1
+            bridge._character_workbook_import_sessions["preview-token"]["plan_sha256"] = (
+                character_workbook_plan_fingerprint(plan)
+            )
+
+            library = folder / "character-library.json"
+            library.write_text(
+                json.dumps({"version": 1, "active": [], "deleted": []}),
+                encoding="utf-8",
+            )
+
+            def save_project():
+                (folder / "project.json").write_text("project saved", encoding="utf-8")
+                (folder / "chapters.json").write_text("chapters saved", encoding="utf-8")
+
+            project.save = Mock(side_effect=save_project)
+
+            def save_project_state(project_folder, payload):
+                (Path(project_folder) / "state.json").write_text(
+                    json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8"
+                )
+
+            with (
+                patch.object(host, "reusable_character_library_path", return_value=library),
+                patch.object(host, "read_character_workbook", return_value=document),
+                patch.object(host, "save_state", side_effect=save_project_state),
+            ):
+                result = bridge._character_workbook_import_commit({"token": "preview-token"})
+
+            self.assertTrue(result["imported"])
+            self.assertEqual(result["dialogue_assignments"], 0)
+            self.assertEqual(result["saved_assignments_replaced"], 1)
+            self.assertEqual(result["chapters_updated"], 1)
+            self.assertEqual(chapter.dialogue_assignments, [])
+            self.assertTrue(project.save.called)
+
+    def test_import_preview_routes_segmentation_mismatch_to_safe_workbook_refresh(self):
+        class _RefreshPreviewBridge:
+            _character_workbook_import_preview = host.PremiumV2Bridge._character_workbook_import_preview
+
+            def _character_workbook_dialog_parent(self):
+                return None
+
+            def _active_project(self):
+                return object()
+
+            def _character_workbook_import_plan(self, _project, _document):
+                raise ValueError(
+                    "Chapter 1 dialogue/narration segmentation changed after workbook export "
+                    "(workbook: 10 passages; active project: 11)."
+                )
+
+            def _character_workbook_refresh_after_segmentation(self, _project, document, selected_path):
+                return {
+                    "cancelled": False, "refreshed": True,
+                    "path": selected_path.replace(".xlsx", "_Refreshed.xlsx"),
+                    "gpt_assignments_carried": 8,
+                }
+
+        bridge = _RefreshPreviewBridge()
+        document = {"schema_version": 2, "info": {"Export Scope": "complete_book"}}
+        with (
+            patch.object(host.QFileDialog, "getOpenFileName", return_value=("completed.xlsx", "")),
+            patch.object(host, "read_character_workbook", return_value=document),
+        ):
+            result = bridge._character_workbook_import_preview({})
+
+        self.assertTrue(result["refreshed"])
+        self.assertEqual(result["gpt_assignments_carried"], 8)
+        self.assertEqual(result["path"], "completed_Refreshed.xlsx")
+
     def test_complete_book_import_adds_new_alias_to_library_and_preserves_local_voice(self):
         with tempfile.TemporaryDirectory(prefix="ryu-workbook-alias-commit-") as tmp:
             folder = Path(tmp)

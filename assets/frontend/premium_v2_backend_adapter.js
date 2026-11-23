@@ -4339,6 +4339,26 @@
   async function importCompletedCharacterWorkbook() {
     const preview = await call('character.workbook.import.preview');
     if (preview?.cancelled) return;
+    if (preview?.refreshed) {
+      const retained = Number(preview.gpt_assignments_carried || 0);
+      const reviewRows = Number(preview.new_or_changed_dialogue_rows_for_review || 0);
+      const narrationRows = Number(preview.dialogue_rows_reclassified_as_narration || 0);
+      const unresolvedRows = Number(preview.unresolved_dialogue_passages || 0);
+      const characterRows = Number(preview.character_register_entries_preserved || 0);
+      const destination = String(preview.path || 'the selected destination');
+      const refreshedMessage =
+        'A refreshed workbook was saved to:\n' + destination +
+        '\n\nThe original workbook was not modified.' +
+        '\nExact unchanged GPT speaker assignments retained: ' + retained +
+        '\nNew or changed dialogue passages requiring review: ' + reviewRows +
+        '\nDialogue passages still without a confirmed speaker: ' + unresolvedRows +
+        '\nQuoted rows now correctly treated as narration: ' + narrationRows +
+        '\nCharacter Register identities preserved: ' + characterRows +
+        '\n\nOpen the refreshed workbook. Review every row whose Evidence / Notes (GPT) begins with REVIEW REQUIRED, assign only source-confirmed speakers, save it, then run Import again and select the refreshed copy. One old speaker assignment was never copied onto multiple split turns.';
+      message('Workbook refreshed safely · ' + retained + ' GPT assignments retained · ' + unresolvedRows + ' dialogue passages still need speaker confirmation.');
+      window.alert(refreshedMessage);
+      return;
+    }
     if (!preview?.ready) {
       const issueRows = Array.isArray(preview?.issues) ? preview.issues : [];
       const issueCount = Math.max(issueRows.length, Number(preview?.issue_count || 0));
@@ -4912,7 +4932,7 @@
     const seriesChoice = String($('ryuManualSeries')?.value || '');
     const series = seriesChoice === '__new_series__' ? String($('ryuManualNewSeries')?.value || '').trim() : seriesChoice.trim();
     if (!series) throw new Error('Choose an existing series or enter a new series name.');
-    const aliases = String($('ryuManualNewAliases')?.value || '').split(/[,\\n]/).map(value => value.trim()).filter(Boolean);
+    const aliases = String($('ryuManualNewAliases')?.value || '').split(/[,\n]/).map(value => value.trim()).filter(Boolean);
     const profile = String($('ryuManualNewProfile')?.value || '').trim();
     if (profile && !characterProfileByName(profile)) throw new Error('Choose one of the saved audio profiles.');
     const result = await call('character.create',{name,series,aliases,short:name.split(/\\s+/)[0],voice_profile:profile,dialogue_sample:String(window.ryuPremiumPendingDialogueText || '')});
@@ -14475,8 +14495,8 @@ function renderProductionMetadataGate(active) {
                         ? 'the local Audiobook AI runtime and model files'
                         : 'the selected app-managed component files';
             const accepted = window.confirm(
-              'Uninstall ' + componentLabel + '?\\n\\nThis removes ' + exactTarget +
-              '.\\n\\nProjects, source books, generated audiobooks and saved voice profiles are not uninstall targets.\\n\\nThe action will be blocked while any other application job is active. Continue?'
+              'Uninstall ' + componentLabel + '?\n\nThis removes ' + exactTarget +
+              '.\n\nProjects, source books, generated audiobooks and saved voice profiles are not uninstall targets.\n\nThe action will be blocked while any other application job is active. Continue?'
             );
             if (!accepted) return;
           }

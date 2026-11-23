@@ -170,6 +170,36 @@ class DialoguePassageIndexTests(unittest.TestCase):
         self.assertEqual(len(spans), 1)
         self.assertEqual(source[spans[0][0]:spans[0][1]], '“I am ready.”')
 
+    def test_embedded_quoted_term_ignores_stale_machine_assignment_but_keeps_manual_conflict(self):
+        from app.chapters.speaker_segmentation import segment_chapter_speakers
+
+        source = 'She causes these sorts of “accidents” and keeps walking.'
+        start = source.index('“accidents”')
+        end = start + len('“accidents”')
+        quote = source[start:end]
+
+        for assignment_source in ("ai", "outsourced"):
+            chapter = Chapter(1, "Quoted term", source)
+            chapter.dialogue_assignments = [{
+                "start": start, "end": end, "text": quote,
+                "speaker": "Legacy AI speaker", "source": assignment_source,
+            }]
+            segments = segment_chapter_speakers(chapter)
+            embedded = next(row for row in segments if row.text == quote)
+            self.assertEqual(embedded.kind, "narration")
+            self.assertEqual(embedded.source, "automatic_embedded_quote")
+            self.assertFalse(embedded.needs_review)
+
+        manual = Chapter(1, "Quoted term", source)
+        manual.dialogue_assignments = [{
+            "start": start, "end": end, "text": quote,
+            "speaker": "User Confirmed Speaker", "source": "manual",
+        }]
+        manual_segments = segment_chapter_speakers(manual)
+        protected = next(row for row in manual_segments if row.start <= start < row.end)
+        self.assertEqual(protected.kind, "needs_speaker_review")
+        self.assertTrue(protected.needs_review)
+
     def test_legacy_cached_index_rebuilds_after_dialogue_segmentation_contract_changes(self):
         chapter = Chapter(1, "Scene", "She called it an “accident” and left.")
         with tempfile.TemporaryDirectory() as temporary:
