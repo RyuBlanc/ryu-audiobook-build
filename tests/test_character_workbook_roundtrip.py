@@ -1178,7 +1178,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             self.assertTrue(all(not row["GPT Assigned Character"] for row in split_rows))
             self.assertTrue(all(
                 row["Evidence / Notes (GPT)"].startswith("REVIEW REQUIRED")
-                and "Ren" in row["Evidence / Notes (GPT")]
+                and "Ren" in row["Evidence / Notes (GPT)"]
                 for row in split_rows
             ))
             carried = next(row for row in refreshed["dialogue_rows"] if row["Passage ID"] == "p2-dialogue")

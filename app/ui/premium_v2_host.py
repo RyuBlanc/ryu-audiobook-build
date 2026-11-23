@@ -5642,6 +5642,14 @@ class PremiumV2Bridge(QObject):
         destination = Path(destination_text).expanduser()
         if destination.suffix.casefold() != ".xlsx":
             destination = destination.with_suffix(".xlsx")
+        original_resolved = original.resolve()
+        destination_resolved = destination.resolve()
+        if os.path.normcase(str(destination_resolved)) == os.path.normcase(str(original_resolved)):
+            raise ValueError(
+                "Choose a different destination for the refreshed workbook. "
+                "The original GPT-completed workbook is protected and will not be overwritten."
+            )
+        destination = destination_resolved
         destination.parent.mkdir(parents=True, exist_ok=True)
         fd, temporary = tempfile.mkstemp(
             prefix="." + destination.name + ".", suffix=".tmp", dir=str(destination.parent)

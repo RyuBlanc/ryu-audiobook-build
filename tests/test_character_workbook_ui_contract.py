@@ -334,9 +334,12 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
     def test_complete_book_workbook_uses_reliable_qt_file_dialogs_and_routes_by_button_id(self):
         self.assertIn("options=QFileDialog.Option.DontUseNativeDialog", self.host)
         self.assertIn("def _character_workbook_dialog_parent(self) -> QWidget | None:", self.host)
-        self.assertEqual(self.host.count("self._character_workbook_dialog_parent()"), 2)
+        self.assertEqual(self.host.count("self._character_workbook_dialog_parent()"), 3)
         self.assertNotIn('QFileDialog.getSaveFileName(\n            self, "Export Complete-Book', self.host)
         self.assertNotIn('QFileDialog.getOpenFileName(\n            self, "Import GPT Character', self.host)
+        self.assertIn("original_resolved = original.resolve()", self.host)
+        self.assertIn("destination_resolved = destination.resolve()", self.host)
+        self.assertIn("will not be overwritten", self.host)
         self.assertIn("#exportCharacterWorkbook, #importCharacterWorkbook", self.adapter)
         self.assertIn("Workbook export failed.", self.adapter)
         self.assertIn("Workbook import failed.", self.adapter)

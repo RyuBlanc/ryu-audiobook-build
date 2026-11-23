@@ -177,6 +177,60 @@ class CharacterWorkbookImportTransactionTests(unittest.TestCase):
             self.assertEqual(chapter.dialogue_assignments, [])
             self.assertTrue(project.save.called)
 
+    def test_refreshed_workbook_save_cannot_overwrite_the_original_gpt_workbook(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-workbook-refresh-safe-save-") as tmp:
+            folder = Path(tmp)
+            original = folder / "completed.xlsx"
+            original.write_bytes(b"original GPT workbook")
+            original_bytes = original.read_bytes()
+            chapter = SimpleNamespace(
+                number=1, title="The Arrival", chapter_id="chapter-001",
+                text="“Mira, listen!”", dialogue_assignments=[],
+            )
+            project = SimpleNamespace(
+                folder=folder, title="The Silver Archive", chapters=[chapter],
+            )
+            state = {
+                "author": "", "publisher": "", "language": "", "genre": "",
+                "year": "", "series_volume": "",
+            }
+            book_chapters = [{
+                "chapter_id": "chapter-001", "chapter_number": 1,
+                "chapter_title": "The Arrival", "chapter_revision": "revision-001",
+                "text": chapter.text, "current_passages": [], "current_assignments": [],
+            }]
+
+            class _RefreshBridge:
+                _character_workbook_refresh_after_segmentation = (
+                    host.PremiumV2Bridge._character_workbook_refresh_after_segmentation
+                )
+
+                def _character_workbook_book_snapshot(self, _project):
+                    return state, "Silver Archive", book_chapters
+
+                def _character_library_bootstrap(self):
+                    return None
+
+                def _character_workbook_dialog_parent(self):
+                    return None
+
+            bridge = _RefreshBridge()
+            with (
+                patch.object(host, "list_reusable_characters", return_value=[]),
+                patch.object(
+                    host, "refresh_complete_book_character_workbook_bytes",
+                    return_value=(b"refreshed workbook", {"gpt_assignments_carried": 0}),
+                ),
+                patch.object(host.QFileDialog, "getSaveFileName", return_value=(str(original), "")),
+            ):
+                with self.assertRaisesRegex(ValueError, "original GPT-completed workbook is protected"):
+                    bridge._character_workbook_refresh_after_segmentation(
+                        project, {"schema_version": 2}, str(original)
+                    )
+
+            self.assertEqual(original.read_bytes(), original_bytes)
+            self.assertEqual(list(folder.iterdir()), [original])
+
     def test_import_preview_routes_segmentation_mismatch_to_safe_workbook_refresh(self):
         class _RefreshPreviewBridge:
             _character_workbook_import_preview = host.PremiumV2Bridge._character_workbook_import_preview
