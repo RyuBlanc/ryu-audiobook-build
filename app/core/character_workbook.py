@@ -1267,8 +1267,10 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
         current = by_id.get(pid)
         if not current: issues.append("Passage %s is no longer in this chapter." % pid); continue
         try:
-            raw_start = float(row.get("Start (Reference)") or -1)
-            raw_end = float(row.get("End (Reference)") or -1)
+            start_value = row.get("Start (Reference)")
+            end_value = row.get("End (Reference)")
+            raw_start = float(start_value) if start_value not in (None, "") else -1
+            raw_end = float(end_value) if end_value not in (None, "") else -1
             start_ref, end_ref = int(raw_start), int(raw_end)
             if raw_start != start_ref or raw_end != end_ref:
                 raise ValueError("Non-integer source offset")
