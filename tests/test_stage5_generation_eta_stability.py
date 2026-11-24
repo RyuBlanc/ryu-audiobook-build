@@ -6,6 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 import wave
+import math
 from threading import Event, RLock
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -59,7 +60,11 @@ class _WavProvider:
             handle.setnchannels(1)
             handle.setsampwidth(2)
             handle.setframerate(22050)
-            handle.writeframes(bytes(8820))
+            frames = bytearray()
+            for index in range(4410):
+                sample = int(6000 * math.sin(2 * math.pi * 440 * index / 22050))
+                frames.extend(sample.to_bytes(2, byteorder="little", signed=True))
+            handle.writeframes(frames)
         return target
 
 
