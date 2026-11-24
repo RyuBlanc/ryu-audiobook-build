@@ -323,6 +323,22 @@ class Stage3CastRoutingTests(unittest.TestCase):
 
         self.assertEqual(narrator.calls, [])
 
+    def test_missing_series_scoped_cast_profile_fails_instead_of_using_narrator(self):
+        from app.core.character_identity import character_identity_key
+
+        narrator = _RecordingNarratorProvider()
+        provider = CastAwareProvider(
+            narrator, "Narrator", {}, {},
+            identity_assignments={
+                character_identity_key("Mira", "Silver Archive"): "Deleted Mira Voice",
+            },
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "assigned character voice profile.*unavailable"):
+            provider.synthesize("Wait here.", Path("unused-identity.wav"), "Deleted Mira Voice")
+
+        self.assertEqual(narrator.calls, [])
+
     def test_unassigned_narration_still_uses_narrator_provider(self):
         narrator = _RecordingNarratorProvider()
         provider = CastAwareProvider(

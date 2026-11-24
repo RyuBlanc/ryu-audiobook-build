@@ -238,6 +238,8 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             rows = {row["Passage ID"]: row for row in document["dialogue_rows"]}
             self.assertEqual(rows["ps_dialogue"]["GPT Assigned Character"], "")
             self.assertEqual(rows["ps_dialogue"]["GPT Confidence (0–1)"], "")
+            self.assertEqual(rows["ps_dialogue"]["GPT Assigned Characters (JSON)"], "")
+            self.assertEqual(rows["ps_dialogue"]["GPT Multi-Speaker Mode"], "")
             self.assertEqual(rows["ps_narration"]["GPT Assigned Character"], "Narrator")
             self.assertEqual(rows["ps_narration"]["GPT Confidence (0–1)"], "")
             self.assertEqual(rows["ps_dialogue"]["Dialogue Text"], expected[1]["text"])
@@ -245,6 +247,113 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             self.assertEqual(document["info"]["Series Name"], "Silver Archive")
             self.assertEqual(document["info"]["Chapter Revision"], "revision-abc")
             self.assertEqual(document["info"]["Passage Count"], "2")
+            self.assertEqual(document["dialogue_split_corrections"], [])
+            with ZipFile(path, "r") as archive:
+                workbook = ET.fromstring(archive.read("xl/workbook.xml"))
+                namespace = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+                sheet_names = [sheet.get("name") for sheet in workbook.findall(".//" + namespace + "sheet")]
+                self.assertIn("Dialogue Split Corrections", sheet_names)
+
+
+    def test_single_chapter_xlsx_round_trips_exact_split_corrections(self):
+        source = '“Pumped?” “Yeah.”'
+        first = '“Pumped?”'
+        second = '“Yeah.”'
+        first_start = source.index(first)
+        second_start = source.index(second)
+        metadata = {
+            "project_title": "The Silver Archive",
+            "series_name": "Silver Archive",
+            "chapter_id": "chapter-001",
+            "chapter_number": 1,
+            "chapter_title": "The Opening",
+            "chapter_revision": "revision-abc",
+        }
+        passages = [{
+            "passage_id": "ps_merged",
+            "chapter_id": "chapter-001",
+            "chapter_number": 1,
+            "chapter_title": "The Opening",
+            "chapter_revision": "revision-abc",
+            "start": 0,
+            "end": len(source),
+            "text": source,
+            "kind": "character_dialogue",
+        }]
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "single-chapter.xlsx"
+            edited = Path(temporary) / "single-chapter-completed.xlsx"
+            path.write_bytes(create_character_workbook_bytes(metadata, passages, source))
+            namespace = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+
+            def set_inline_cell(root, row_number, reference, value):
+                sheet_data = root.find(".//" + namespace + "sheetData")
+                row = root.find(".//%srow[@r='%s']" % (namespace, row_number))
+                if row is None:
+                    row = ET.SubElement(sheet_data, namespace + "row", {"r": str(row_number)})
+                cell = next(
+                    (item for item in row.findall(namespace + "c") if item.get("r") == reference),
+                    None,
+                )
+                if cell is None:
+                    cell = ET.SubElement(row, namespace + "c", {"r": reference})
+                else:
+                    cell.clear()
+                    cell.set("r", reference)
+                cell.set("t", "inlineStr")
+                inline = ET.SubElement(cell, namespace + "is")
+                text_node = ET.SubElement(inline, namespace + "t")
+                text_node.text = str(value)
+
+            with ZipFile(path, "r") as source_zip, ZipFile(edited, "w", ZIP_DEFLATED) as target_zip:
+                for item in source_zip.infolist():
+                    data = source_zip.read(item.filename)
+                    if item.filename == "xl/worksheets/sheet2.xml":
+                        root = ET.fromstring(data)
+                        set_inline_cell(root, 2, "A2", "Mira")
+                        set_inline_cell(root, 3, "A3", "Ren")
+                        data = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+                    elif item.filename == "xl/worksheets/sheet5.xml":
+                        root = ET.fromstring(data)
+                        rows = [
+                            (2, "1", str(first_start), str(first_start + len(first)), first, "Mira", "0.97"),
+                            (3, "2", str(second_start), str(second_start + len(second)), second, "Ren", "0.96"),
+                        ]
+                        for row_number, index, start, end, exact, speaker, confidence in rows:
+                            values = {
+                                "A": "ps_merged",
+                                "B": "chapter-001",
+                                "C": index,
+                                "D": start,
+                                "E": end,
+                                "F": exact,
+                                "G": speaker,
+                                "I": "single",
+                                "J": confidence,
+                                "K": "The adjacent quote is the next speaker turn.",
+                            }
+                            for column, value in values.items():
+                                set_inline_cell(root, row_number, f"{column}{row_number}", value)
+                        data = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+                    target_zip.writestr(item, data)
+
+            document = read_character_workbook(edited)
+            self.assertEqual(len(document["dialogue_split_corrections"]), 2)
+            plan = plan_character_workbook_import(
+                document,
+                series="Silver Archive",
+                registry_rows=[],
+                project_characters=[],
+                chapter_id="chapter-001",
+                chapter_revision="revision-abc",
+                current_passages=passages,
+                current_assignments=[],
+                book_title="The Silver Archive",
+            )
+            self.assertTrue(plan["ready"], plan["issues"])
+            self.assertEqual([row["speaker"] for row in plan["assignments"]], ["Mira", "Ren"])
+            self.assertEqual([row["text"] for row in plan["assignments"]], [first, second])
+            self.assertEqual([row["start"] for row in plan["assignments"]], [first_start, second_start])
 
     def test_export_includes_read_only_series_character_reference_without_voice_data(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -280,7 +389,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 sheet_nodes = book_xml.findall(".//" + document_ns + "sheet")
                 self.assertEqual(
                     [sheet.get("name") for sheet in sheet_nodes],
-                    ["Dialogue Assignment", "Character Register", "Chapter Context", "Workbook Info"],
+                    ["Dialogue Assignment", "Character Register", "Chapter Context", "Workbook Info", "Dialogue Split Corrections"],
                 )
                 relationships = {item.get("Id"): item for item in relationship_items}
                 sheet_rel_ids = [
@@ -380,6 +489,8 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                         root = ET.fromstring(data)
                         set_inline_cell(root, 3, "G3", "Captain Mira")
                         set_inline_cell(root, 3, "O3", "The narration identifies Captain Mira.")
+                        set_inline_cell(root, 3, "P3", '[ "Captain Mira", "Ren" ]')
+                        set_inline_cell(root, 3, "Q3", "chorus")
                         row = root.find(".//%srow[@r='3']" % ns)
                         confidence = ET.SubElement(row, ns + "c", {"r": "H3"})
                         ET.SubElement(confidence, ns + "v").text = "0.93"
@@ -388,13 +499,20 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                         root = ET.fromstring(data)
                         set_inline_cell(root, 2, "A2", "Captain Mira")
                         set_inline_cell(root, 2, "B2", "Mira-sama")
+                        set_inline_cell(root, 3, "A3", "Ren")
                         data = ET.tostring(root, encoding="utf-8", xml_declaration=True)
                     target.writestr(item, data)
 
             document = read_character_workbook(edited)
             self.assertEqual(document["characters"][0]["full_name"], "Captain Mira")
             self.assertEqual(document["characters"][0]["aliases"], ["Mira-sama"])
+            self.assertEqual(document["characters"][1]["full_name"], "Ren")
             self.assertEqual(document["dialogue_rows"][1]["GPT Assigned Character"], "Captain Mira")
+            self.assertEqual(
+                document["dialogue_rows"][1]["GPT Assigned Characters (JSON)"],
+                '[ "Captain Mira", "Ren" ]',
+            )
+            self.assertEqual(document["dialogue_rows"][1]["GPT Multi-Speaker Mode"], "chorus")
             self.assertEqual(document["dialogue_rows"][1]["GPT Confidence (0–1)"], "0.93")
             plan = plan_character_workbook_import(
                 document, series="Silver Archive", book_title="The Silver Archive",
@@ -409,6 +527,8 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             )
             self.assertTrue(plan["ready"], plan["issues"])
             self.assertEqual(plan["assignments"][0]["speaker"], "Mira")
+            self.assertEqual(plan["assignments"][0]["speakers"], ["Mira", "Ren"])
+            self.assertEqual(plan["assignments"][0]["multi_speaker_mode"], "chorus")
             self.assertEqual(plan["characters"][0]["action"], "merge")
 
     def test_import_plan_merges_existing_alias_into_series_canonical_character(self):

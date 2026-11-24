@@ -339,8 +339,10 @@ def prepare_chapter_plan(
         try:
             if not is_valid_wav_chunk(output):
                 raise ValueError("cached audio chunk is missing, truncated, or invalid")
-            if provider_uses_qwen_voice(provider, chunks_with_voices[index][1]) and not wav_has_audible_content(output):
-                raise ValueError("cached Qwen audio chunk contains silence")
+            chunk_voice = chunks_with_voices[index][1]
+            if provider_uses_character_voice(provider, chunk_voice) and not wav_has_audible_content(output):
+                provider_label = "Qwen" if provider_uses_qwen_voice(provider, chunk_voice) else "character"
+                raise ValueError(f"cached {provider_label} audio chunk contains silence")
         except (OSError, wave.Error, EOFError, ValueError):
             output.unlink(missing_ok=True)
             invalid_cached_chunk = True

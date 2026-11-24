@@ -177,6 +177,65 @@ class Stage53CheckpointCompatibilityTests(unittest.TestCase):
                         self.assertGreater(stream.getnframes(), 0)
                         self.assertGreater(stream.getframerate(), 0)
 
+    def test_silent_cached_non_qwen_character_chunk_is_regenerated_on_resume(self) -> None:
+        from app.tts.audio_validation import wav_has_audible_content
+
+        class CharacterProvider:
+            provider_id = "piper"
+            recommended_chunk_chars = 1400
+            recommended_chunk_sentences = 1
+
+            def __init__(self):
+                self.calls = 0
+
+            def generation_signature(self):
+                return "stage5-cached-character-audio-v1"
+
+            def is_character_voice(self, voice):
+                return voice == "Mira Voice"
+
+            def synthesize(self, text, output_path, voice=None):
+                self.calls += 1
+                target = Path(output_path)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with wave.open(str(target), "wb") as stream:
+                    stream.setnchannels(1)
+                    stream.setsampwidth(2)
+                    stream.setframerate(22050)
+                    # Non-zero PCM is sufficient for this cache-integrity test.
+                    stream.writeframes(bytes([0, 32]) * 4410)
+                return target
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "working_audio"
+            chapter = Chapter(1, "Character line", "Mira said the line clearly.")
+            provider = CharacterProvider()
+            first = generate_chapter(
+                chapter, provider, "Mira Voice", root,
+                narration_speed=1.0, pacing_profile="off",
+            )
+            chunk = first.output_path / "chunks" / "00001.wav"
+            self.assertTrue(wav_has_audible_content(chunk))
+            calls_before_resume = provider.calls
+
+            # Preserve a valid PCM header and payload length, but replace the
+            # cached character waveform with digital silence.
+            with wave.open(str(chunk), "wb") as stream:
+                stream.setnchannels(1)
+                stream.setsampwidth(2)
+                stream.setframerate(22050)
+                stream.writeframes(bytes(8820))
+            self.assertFalse(wav_has_audible_content(chunk))
+
+            resumed = generate_chapter(
+                chapter, provider, "Mira Voice", root,
+                narration_speed=1.0, pacing_profile="off",
+            )
+
+            self.assertEqual(provider.calls, calls_before_resume + 1)
+            self.assertEqual(resumed.chunks_completed, resumed.chunks_total)
+            self.assertTrue(wav_has_audible_content(chunk))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -3756,7 +3756,7 @@ class RegressionTests(unittest.TestCase):
     def test_dialogue_quote_marker_wrappers_are_detected_as_exact_spans(self):
         examples = [
             '("A separate turn.")', '{"A separate turn."}', '["A separate turn."]',
-            '(""A separate turn."")', '{"\"A separate turn.\""}',
+            '(""A separate turn."")', '""A separate turn.""', '""""A separate turn.""""', '{"\"A separate turn.\""}',
         ]
         for source in examples:
             spans = _all_dialogue_spans(source)

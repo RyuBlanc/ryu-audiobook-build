@@ -152,13 +152,16 @@ def create_character_workbook_bytes(metadata, passages, chapter_text):
             "Use the read-only Series Character Reference table on the Workbook Info tab to reuse existing canonical names and known aliases. "
             "Do not edit that reference table; add genuinely new identities in Character Register. "
             "For more than 30 aliases, add columns named Alias 31, Alias 32, and so on. "
+            "For multiple characters speaking the exact same words together, fill GPT Assigned Characters (JSON) with a JSON array of canonical names; use chorus for simultaneous delivery. "
+            "For one app-merged passage containing different consecutive speakers, add one row per turn in Dialogue Split Corrections with exact source text and 0-based inclusive/exclusive relative offsets. "
             "Do not edit Passage ID, Dialogue Text, chapter identity, offsets, or revision columns.")
     }
     dialogue_headers = [
         "Passage ID", "Chapter ID", "Chapter Number", "Chapter Title", "Passage Type", "Dialogue Text",
         "GPT Assigned Character", "GPT Confidence (0–1)", "Existing Assignment (Reference)", "Assignment Source (Reference)",
         "Confidence (Reference)", "Start (Reference)", "End (Reference)",
-        "Chapter Revision (Reference)", "Evidence / Notes (GPT)"
+        "Chapter Revision (Reference)", "Evidence / Notes (GPT)",
+        "GPT Assigned Characters (JSON)", "GPT Multi-Speaker Mode",
     ]
     dialogue = [dialogue_headers]
     for row in passages:
@@ -178,7 +181,7 @@ def create_character_workbook_bytes(metadata, passages, chapter_text):
             str(row.get("assignment_source") or ""),
             row.get("confidence") if row.get("confidence") is not None else "",
             int(row.get("start") or 0), int(row.get("end") or 0),
-            str(row.get("chapter_revision") or info["Chapter Revision"]), ""
+            str(row.get("chapter_revision") or info["Chapter Revision"]), "", "", ""
         ])
     if len(dialogue) - 1 > MAX_ROWS:
         raise ValueError("This chapter exceeds the 50,000 passage workbook export limit.")
@@ -236,11 +239,36 @@ def create_character_workbook_bytes(metadata, passages, chapter_text):
         workbook_info_rows.append([
             metadata_row[0], metadata_row[1], "", *reference_row,
         ])
+    split_headers = [
+        "Source Passage ID", "Chapter ID", "Subturn Index", "Start (Relative)", "End (Relative)",
+        "Exact Source Text", "GPT Assigned Character", "GPT Assigned Characters (JSON)",
+        "GPT Multi-Speaker Mode", "GPT Confidence (0–1)", "Evidence / Notes (GPT)",
+    ]
+    split_rows = [split_headers]
+    for source in metadata.get("dialogue_split_corrections") or []:
+        if not isinstance(source, dict):
+            continue
+        split_rows.append([
+            _clean(source.get("Source Passage ID") or source.get("source_passage_id")),
+            _clean(source.get("Chapter ID") or source.get("chapter_id") or info["Chapter ID"]),
+            source.get("Subturn Index", source.get("subturn_index", "")),
+            source.get("Start (Relative)", source.get("start_relative", "")),
+            source.get("End (Relative)", source.get("end_relative", "")),
+            str(source.get("Exact Source Text") or source.get("exact_source_text") or ""),
+            _clean(source.get("GPT Assigned Character") or source.get("gpt_assigned_character")),
+            str(source.get("GPT Assigned Characters (JSON)") or source.get("gpt_assigned_characters_json") or ""),
+            _clean(source.get("GPT Multi-Speaker Mode") or source.get("gpt_multi_speaker_mode")),
+            source.get("GPT Confidence (0–1)", source.get("gpt_confidence", "")),
+            str(source.get("Evidence / Notes (GPT)") or source.get("evidence_notes") or ""),
+        ])
+        if len(split_rows) - 1 > MAX_ROWS:
+            raise ValueError("Dialogue Split Corrections exceeds the 50,000-row workbook limit.")
     sheets = [
-        ("Dialogue Assignment", dialogue, [38,38,14,32,16,72,34,18,34,22,18,14,14,42,46], {6,8,9,14,15}),
+        ("Dialogue Assignment", dialogue, [38,38,14,32,16,72,34,18,34,22,18,14,14,42,46,46,22], {6,8,9,14,15,16}),
         ("Character Register", characters, [34] + [24] * ALIAS_COLUMNS + [26,48], set(range(1, ALIAS_COLUMNS + 4))),
         ("Chapter Context", context, [14,14,32,100], {4}),
         ("Workbook Info", workbook_info_rows, [28,110,4,36,32,36,28], {2,4,5,6,7}),
+        ("Dialogue Split Corrections", split_rows, [30,26,14,18,18,72,34,48,22,18,48], {6,8,11}),
     ]
     import io
     output = io.BytesIO()

@@ -639,7 +639,7 @@ class CastAwareProvider(TTSProvider):
         if profile is None:
             assigned_profile_names = {
                 str(name).strip().casefold()
-                for name in self.assignments.values()
+                for name in (*self.assignments.values(), *self.identity_assignments.values())
                 if str(name).strip()
             }
             if profile_name and profile_name in assigned_profile_names:
