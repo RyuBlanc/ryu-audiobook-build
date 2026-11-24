@@ -335,12 +335,23 @@ class CastAwareProvider(TTSProvider):
         for assignment in assignments:
             if not assignment_speakers(assignment):
                 continue
+            passage_id = str(assignment.get("passage_id") or "").strip()
             try:
                 start, end = int(assignment.get("start", -1)), int(assignment.get("end", -1))
             except (TypeError, ValueError, OverflowError):
+                if passage_id:
+                    raise ValueError(
+                        "Confirmed dialogue assignment for passage '%s' has invalid source offsets. "
+                        "Refresh Character Studio and review the passage before generating audio." % passage_id
+                    )
                 continue
             exact = str(assignment.get("text") or "")
             if start < 0 or end <= start or not exact.strip():
+                if passage_id:
+                    raise ValueError(
+                        "Confirmed dialogue assignment for passage '%s' has no valid source text or offsets. "
+                        "Refresh Character Studio and review the passage before generating audio." % passage_id
+                    )
                 continue
             if not assignment.get("source_passage_id") and text[start:end] != exact:
                 expected_norm, _ = self._normalized_text_with_map(exact)
@@ -355,10 +366,23 @@ class CastAwareProvider(TTSProvider):
                         positions.append(found)
                         search_from = found + 1
                 if len(positions) != 1:
+                    if passage_id:
+                        reason = "could not be found" if not positions else "matches more than once"
+                        raise ValueError(
+                            "Confirmed dialogue assignment for passage '%s' %s after TTS text normalization. "
+                            "The character route is ambiguous, so generation was stopped instead of using a fallback voice. "
+                            "Refresh the workbook or review the passage segmentation before retrying."
+                            % (passage_id, reason)
+                        )
                     continue
                 mapped_start_index = positions[0]
                 mapped_end_index = mapped_start_index + len(expected_norm) - 1
                 if mapped_end_index >= len(prepared_map):
+                    if passage_id:
+                        raise ValueError(
+                            "Confirmed dialogue assignment for passage '%s' exceeds the prepared TTS text. "
+                            "Refresh Character Studio and review the passage before generating audio." % passage_id
+                        )
                     continue
                 start = prepared_map[mapped_start_index]
                 end = prepared_map[mapped_end_index] + 1

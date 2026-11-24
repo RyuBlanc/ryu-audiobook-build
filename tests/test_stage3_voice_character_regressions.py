@@ -312,6 +312,25 @@ class Stage3CastRoutingTests(unittest.TestCase):
         self.assertEqual(provider.split_for_cast(text, "Narrator", dialogue_assignments=assignments),
                          [(text, "Narrator")])
 
+    def test_confirmed_passage_with_repeated_normalized_text_blocks_ambiguous_cast_routing(self):
+        narrator = _RecordingNarratorProvider()
+        provider = CastAwareProvider(narrator, "Narrator", {}, {"Mira": "Mira Voice"})
+        quote = "“Hello?”"
+        text = "Opening. %s Then again: %s" % (quote, quote)
+        assignment = {
+            "passage_id": "ps_ambiguous",
+            "start": 0,
+            "end": len(quote),
+            "text": quote,
+            "speaker": "Mira",
+            "source": "manual",
+        }
+
+        with self.assertRaisesRegex(ValueError, "ps_ambiguous.*matches more than once"):
+            provider.split_for_cast(text, "Narrator", dialogue_assignments=[assignment])
+
+        self.assertEqual(narrator.calls, [])
+
     def test_missing_assigned_cast_profile_fails_instead_of_using_narrator(self):
         narrator = _RecordingNarratorProvider()
         provider = CastAwareProvider(
