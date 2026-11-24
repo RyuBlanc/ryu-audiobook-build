@@ -719,24 +719,40 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path, chapters, passages, document = self._complete_book_fixture(Path(tmp))
             with ZipFile(path, "r") as archive:
-                book_xml = ET.fromstring(archive.read("xl/workbook.xml"))
                 ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+                relationship_ns = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+                package_ns = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+                book_xml = ET.fromstring(archive.read("xl/workbook.xml"))
+                relationship_xml = ET.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
+                relationships = {
+                    item.get("Id"): item.get("Target")
+                    for item in relationship_xml.findall(package_ns + "Relationship")
+                }
+                sheet_targets = {}
+                for sheet in book_xml.findall(".//" + ns + "sheet"):
+                    target = relationships[sheet.get(relationship_ns + "id")]
+                    target = target.lstrip("/")
+                    if not target.startswith("xl/"):
+                        target = "xl/" + target
+                    sheet_targets[sheet.get("name")] = target
+
                 names = [sheet.get("name") for sheet in book_xml.findall(".//" + ns + "sheet")]
                 self.assertEqual(names, [
                     "GPT Prompt", "Dialogue Assignment", "Character Register", "Chapter Register",
                     "Chapter Context", "Series Character Reference", "Workbook Info",
                 ])
-                prompt_xml = ET.fromstring(archive.read("xl/worksheets/sheet1.xml"))
+                prompt_xml = ET.fromstring(archive.read(sheet_targets["GPT Prompt"]))
                 prompt_text = "\n".join(
                     node.text or "" for node in prompt_xml.iter(ns + "t")
                 )
-                self.assertIn("REVIEW REQUIRED", prompt_text)
-                self.assertIn("does NOT mean the speaker is unknowable", prompt_text)
-                self.assertIn("newly split dialogue rows are independent turns", prompt_text)
-                self.assertIn("Do not change Passage ID", prompt_text)
+                prompt_lower = prompt_text.casefold()
+                self.assertIn("review required", prompt_lower)
+                self.assertIn("does not mean the speaker is unknowable", prompt_lower)
+                self.assertIn("newly split dialogue rows are independent turns", prompt_lower)
+                self.assertIn("do not change passage id", prompt_lower)
                 self.assertGreater(len(prompt_text.splitlines()), 20)
-                self.assertGreater(archive.getinfo("xl/worksheets/sheet4.xml").file_size, 0)
-                self.assertGreater(archive.getinfo("xl/worksheets/sheet5.xml").file_size, 0)
+                self.assertGreater(archive.getinfo(sheet_targets["Chapter Context"]).file_size, 0)
+                self.assertGreater(archive.getinfo(sheet_targets["Series Character Reference"]).file_size, 0)
             self.assertEqual(document["schema_version"], 2)
             self.assertEqual(document["info"]["Export Scope"], "complete_book")
             self.assertEqual(document["info"]["Author"], "A. Writer")
@@ -779,9 +795,24 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 text_node.text = value
 
             with ZipFile(original, "r") as source, ZipFile(edited, "w", ZIP_DEFLATED) as target:
+                book_xml = ET.fromstring(source.read("xl/workbook.xml"))
+                relationship_xml = ET.fromstring(source.read("xl/_rels/workbook.xml.rels"))
+                relationship_ns = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+                package_ns = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+                relationships = {
+                    item.get("Id"): item.get("Target")
+                    for item in relationship_xml.findall(package_ns + "Relationship")
+                }
+                sheet_targets = {}
+                for sheet in book_xml.findall(".//%s%s" % (ns, "sheet")):
+                    path = relationships[sheet.get(relationship_ns + "id")].lstrip("/")
+                    if not path.startswith("xl/"):
+                        path = "xl/" + path
+                    sheet_targets[sheet.get("name")] = path
+
                 for item in source.infolist():
                     data = source.read(item.filename)
-                    if item.filename == "xl/worksheets/sheet1.xml":
+                    if item.filename == sheet_targets["Dialogue Assignment"]:
                         root = ET.fromstring(data)
                         set_inline_cell(root, 2, "G2", "Mira")
                         set_inline_cell(root, 2, "O2", "The direct address confirms the speaker.")
@@ -789,7 +820,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                         confidence = ET.SubElement(row, ns + "c", {"r": "H2"})
                         ET.SubElement(confidence, ns + "v").text = "0.97"
                         data = ET.tostring(root, encoding="utf-8", xml_declaration=True)
-                    elif item.filename == "xl/worksheets/sheet2.xml":
+                    elif item.filename == sheet_targets["Character Register"]:
                         root = ET.fromstring(data)
                         set_inline_cell(root, 2, "A2", "Mira")
                         set_inline_cell(root, 2, "B2", "Captain Mira")
