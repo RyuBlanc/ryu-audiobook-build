@@ -545,7 +545,7 @@ class CastAwareProvider(TTSProvider):
             parts.append((text[cursor:], fallback_voice))
         return [(segment.strip(), voice) for segment, voice in parts if segment.strip()]
 
-f close(self) -> None:
+    def close(self) -> None:
         providers = [self.narrator_provider, *[item[0] for item in self._providers.values()]]
         seen = set()
         for provider in providers:
