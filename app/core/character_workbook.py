@@ -54,7 +54,7 @@ def _cell(ref, value, style):
         ref, style, escape(raw)
     )
 
-def _sheet(rows, widths, wrap, protect=False):
+def _sheet(rows, widths, wrap, protect=False, auto_filter=True):
     cols = "".join('<col min="%d" max="%d" width="%.2f" customWidth="1"/>' % (
         i + 1, i + 1, widths[i] if i < len(widths) else 20
     ) for i in range(max([len(row) for row in rows] or [1])))
@@ -69,7 +69,7 @@ def _sheet(rows, widths, wrap, protect=False):
         )
         rendered.append('<row r="%d"%s>%s</row>' % (ri, height, cells))
     end_row = max(1, len(rows))
-    filt = '<autoFilter ref="A1:%s%d"/>' % (last_col, end_row) if len(rows) > 1 else ""
+    filt = '<autoFilter ref="A1:%s%d"/>' % (last_col, end_row) if auto_filter and len(rows) > 1 else ""
     protection = '<sheetProtection sheet="1" objects="1" scenarios="1"/>' if protect else ""
     return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<worksheet xmlns="%s"><dimension ref="A1:%s%d"/>'
@@ -269,6 +269,57 @@ def character_workbook_book_revision(chapters):
         raise ValueError("The active book has no chapters to export.")
     encoded = json.dumps(rows, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return sha256(encoded).hexdigest()
+
+
+def complete_book_gpt_prompt() -> str:
+    """Return the versioned task prompt embedded in every complete-book workbook."""
+    return "\\n".join([
+        "You are the careful character-attribution assistant completing the attached Ryu Audiobook COMPLETE-BOOK Character Studio workbook. Return a completed .xlsx workbook file, not only a written report.",
+        "",
+        "SOURCE FIRST — READ THE WHOLE BOOK",
+        "1. Read every row in Chapter Context. Reassemble each chapter by Chapter ID and ascending Context Part; do not skip later chunks or chapters.",
+        "2. Read Workbook Info, all Character Register rows, and the complete Series Character Reference. Build a book-wide cast and alias map before assigning any dialogue.",
+        "3. Use the workbook's chapter text as the primary source. Use an additionally attached original novel only to clarify text that is genuinely missing or corrupted; never invent missing source wording.",
+        "",
+        "CRITICAL MEANING OF REVIEW REQUIRED",
+        "A REVIEW REQUIRED note means the app could not safely carry an old GPT answer onto a changed or newly split passage. It does NOT mean the speaker is unknowable, and it is NOT a reason to leave the row blank without investigation.",
+        "Re-identify each such passage from the full chapter scene and the wider book context. Newly split dialogue rows are independent turns and must each receive their own speaker decision. Never copy the previous row's speaker merely because the rows are adjacent.",
+        "",
+        "HOW TO IDENTIFY THE SPEAKER",
+        "For every row whose Passage Type is Dialogue, identify the person or source actually uttering those exact words — not the person being addressed, named, discussed, or quoted.",
+        "Use evidence in this order: explicit speech tags; nearby action beats or narration that identify who spoke; the exchange's question/answer and turn-taking structure; established point of view and character voice; earlier and later scenes that confirm the same speaker.",
+        "Read the sentences before and after the passage. A name inside a line (for example, 'Mira, listen') may identify the addressee, not the speaker. Do not assign a speaker from name proximity alone.",
+        "Do not leave a row blank merely because it has no explicit 'X said' tag. Use the complete scene, conversational sequence, and consistent identities to make a well-supported contextual attribution when there is one clear answer.",
+        "Treat each Dialogue Assignment row as one app-defined source passage. If two adjacent rows are separate turns, analyze them separately even when the old workbook had them combined.",
+        "If one row itself contains two or more distinct turns by different speakers, do not force one name onto it and do not split, duplicate, delete, or rewrite the row. Leave its assignment blank and write 'STRUCTURAL SPLIT REQUIRED' in Evidence / Notes (GPT), identifying the exact sub-turns and the likely speaker of each for a later app-side segmentation correction.",
+        "Do not classify thoughts, emphasized words, quoted terms, or quotations embedded in narration as spoken dialogue. Narration rows remain Narrator; do not assign a character to them or change Passage Type.",
+        "",
+        "CHARACTER IDENTITY AND REGISTER",
+        "For each identifiable speaker, use the exact canonical Full Name from Character Register. If the same person already exists in Series Character Reference, reuse that canonical identity and preserve its known aliases; do not create a duplicate.",
+        "If a real character appears in this book but is missing from Character Register, add a row with a source-supported canonical name, confirmed aliases, useful notes, and Included in This Book? = YES. Do not add characters merely mentioned in metadata or chapter titles.",
+        "A nickname, title, surname, honorific, or spelling variant is an alias only when the book confirms it refers to the same person. Do not turn an addressee or descriptive phrase into a character.",
+        "If the source gives no personal name but consistently identifies a speaker by a role (for example, an unnamed classroom teacher), use a clear role identity such as 'Unnamed Classroom Teacher'. State in Character Notes that this is an unnamed role, not a supplied personal name, and reuse it only when the text supports the same individual.",
+        "Use source-supported collective or non-human identities only when the text clearly identifies that speaker. For a true group/chorus, create one clear collective identity rather than guessing an individual.",
+        "Keep younger/older or otherwise distinct voice identities separate only when the source supports genuinely different identity versions. Use Version / Age Variant and preserve the base identity; do not merge distinct versions.",
+        "Keep rows marked Included in This Book? = NO as NO. Do not remove existing Character Register identities, aliases, notes, or future-volume entries.",
+        "",
+        "FILL THE WORKBOOK",
+        "For every Dialogue row with a supported speaker, fill GPT Assigned Character with one canonical Full Name, GPT Confidence (0–1) with a numeric value from 0.75 to 1.00, and Evidence / Notes (GPT) with a concise source-based reason.",
+        "Calibrate confidence: 0.95–1.00 for explicit attribution; 0.85–0.94 for clear action-beat or strong scene evidence; 0.75–0.84 for a strong contextual inference with no credible competing speaker. Do not use low confidence to disguise a guess.",
+        "If you exhaust the whole-book context and there is still no single defensible speaker, leave GPT Assigned Character and GPT Confidence blank and explain the ambiguity in Evidence / Notes (GPT). Do not invent a person, guess from an honorific, or use Narrator to bypass an unresolved spoken line. Such rows require human review and will correctly block import until resolved.",
+        "Evidence should identify the chapter and the actual clue (for example, the speech tag, action beat, response pattern, or prior identity reference). Keep it concise and distinguish direct evidence from contextual inference.",
+        "Do not overwrite a clearly confirmed existing manual assignment. If workbook evidence and an existing manual assignment conflict, explain the conflict in Evidence / Notes (GPT) and leave the row for human review.",
+        "",
+        "DO NOT DAMAGE THE SOURCE OR WORKBOOK",
+        "Do not change Passage ID, Chapter ID, chapter number/title/revision, Passage Type, Dialogue Text, Start/End offsets, Chapter Register, Chapter Context, Series Character Reference, or Workbook Info.",
+        "Do not add, delete, duplicate, merge, split, or reorder Dialogue Assignment rows. The app owns passage segmentation and validates these source references exactly.",
+        "Only fill the GPT answer columns in Dialogue Assignment and make necessary, source-supported edits/additions in Character Register. Preserve every other sheet, row, and reference value.",
+        "Save the completed workbook as a NEW .xlsx copy. Never overwrite the original exported or refreshed workbook.",
+        "",
+        "FINAL CHECK BEFORE RETURNING THE FILE",
+        "Check every Dialogue row across every chapter, especially REVIEW REQUIRED rows and adjacent newly split turns. Confirm that each assigned name exists as a canonical Character Register identity or its confirmed alias, each confidence is numeric and within range, narration remains Narrator, and no reference columns or passage rows were changed.",
+        "Return the completed .xlsx file and a short summary with: dialogue rows assigned; unresolved rows (with Passage IDs and reasons); new Character Register identities; aliases added; structural-split issues; and any manual-assignment conflicts. Do not claim full completion when unresolved rows remain.",
+    ])
 
 
 def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
@@ -496,34 +547,23 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
         ["Series Volume", _clean(metadata.get("series_volume"))],
         ["Book Revision", book_revision],
         ["Exported At (UTC)", datetime.now(timezone.utc).isoformat(timespec="seconds")],
+        ["GPT Prompt Version", "1.0"],
         ["Instructions",
-         "This is a COMPLETE-BOOK workbook. Read every chapter in Chapter Context before assigning dialogue. "
-         "Dialogue Assignment contains every source-verified passage from every chapter. Assign a confirmed "
-         "Character Register identity to every genuine spoken Dialogue row. Read the full surrounding scene and earlier/later "
-         "chapters; do not decide from the isolated quote alone. Reuse the exact canonical identity from Series Character "
-         "Reference whenever the speaker is the same person, and use aliases only as alternate names for that same identity. "
-         "Never infer a speaker from a nearby name alone. Never invent a personal name from the book title, series title, "
-         "chapter title, narrator text or an unverified honorific. If the source identifies a speaker only by a stable role "
-         "and gives no personal name, add one clearly descriptive role identity such as 'Unnamed Classroom Teacher' and "
-         "state in Character Notes that this is an unnamed role, not a supplied personal name; reuse it consistently only "
-         "when the source supports the same speaker. Use source-supported labels for identifiable non-human speakers or "
-         "collectives, and explain the evidence. Do not assign a speaker to a quoted word, thought, emphasized term or other "
-         "quotation embedded inside narration; those are not spoken dialogue. Do not combine distinct turns or speakers "
-         "into one identity. If the source truly cannot identify a speaker or role, leave that row blank and explain why "
-         "in Evidence / Notes (GPT); do not guess. A blank row is a deliberate unresolved review item and will block import. "
-         "Narration is protected as Narrator. "
-         "Use numeric GPT Confidence from 0.0 to 1.0 and add concise evidence in Evidence / Notes (GPT). "
-         "Add every character appearing in this book to Character Register. Copy an existing canonical name and "
-         "its known aliases from Series Character Reference when it is the same person. Add newly discovered "
-         "characters with their full name and aliases. Use Version / Age Variant only for genuinely distinct "
-         "versions of one identity. Set Included in This Book? to YES for each character who appears in this book. "
-         "Only rows marked YES are imported into the series Character Library and this book's cast. "
-         "Series Character Reference, Chapter Register, Chapter Context and Workbook Info are read-only references. "
-         "Do not change Passage ID, Chapter ID, dialogue text, chapter revision, offsets or other reference columns. "
-         "Do not remove or duplicate passage rows. For more than 30 aliases, add Alias 31, Alias 32, and so on."],
+         "This is a COMPLETE-BOOK workbook. Start with the GPT Prompt tab: it contains the full ready-to-copy task prompt and explains how to analyze every chapter, resolve newly split dialogue turns, assign canonical identities, calibrate confidence, and preserve source references. " 
+         "A REVIEW REQUIRED note means an old answer was not copied across a changed passage; it does not mean the speaker is unknowable. Use the full Chapter Context to re-identify each changed turn independently. " 
+         "Do not change passage rows, IDs, dialogue text, chapter references, offsets, revisions, or read-only reference sheets. Return a new workbook copy. Unresolved speakers must remain explicit and will block import until confirmed."],
+    ]
+
+    gpt_prompt_rows = [
+        ["COPY THIS PROMPT INTO CHATGPT"],
+        ["Upload this entire workbook to ChatGPT, then copy the prompt between BEGIN PROMPT and END PROMPT below. Ask GPT to return a completed .xlsx copy."],
+        ["----- BEGIN PROMPT -----"],
+        *[[line] for line in complete_book_gpt_prompt().splitlines()],
+        ["----- END PROMPT -----"],
     ]
 
     sheets = [
+        ("GPT Prompt", gpt_prompt_rows, [120], {1}),
         ("Dialogue Assignment", dialogue, [38,38,14,32,16,72,34,18,34,22,18,14,14,42,46], {6,8,9,14,15}),
         ("Character Register", characters, [34] + [24] * alias_column_count + [26,48,24], set(range(1, alias_column_count + 5))),
         ("Chapter Register", chapter_register, [38,14,32,42,22,20,66], set(range(1,8))),
@@ -585,6 +625,7 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
                 _sheet(
                     rows, widths, wrap,
                     protect=name in {"Chapter Register", "Chapter Context", "Series Character Reference", "Workbook Info"},
+                    auto_filter=name != "GPT Prompt",
                 ),
             )
     result = output.getvalue()
@@ -716,8 +757,8 @@ def refresh_complete_book_character_workbook_bytes(
             row["gpt_evidence"] = (
                 "REVIEW REQUIRED — this passage no longer exactly matches one old workbook row. "
                 + "; ".join(previous)
-                + ". Previous speaker values were not copied because the old passage may have split or changed boundaries. "
-                "Read the full scene and assign the speaker for this passage only."
+                + ". The previous speaker was not copied because the old passage may have split or changed boundaries. "
+                "Open the GPT Prompt sheet and re-identify this turn from the full Chapter Context. Treat this row independently; do not inherit the previous row speaker without source evidence."
             )
         else:
             row["gpt_evidence"] = (

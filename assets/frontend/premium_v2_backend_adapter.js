@@ -4333,7 +4333,7 @@
       ' total passages (' + Number(result.dialogue_count || 0) + ' dialogue, ' +
       Number(result.narration_count || 0) + ' Narrator passages).';
     message(confirmation);
-    window.alert(confirmation);
+    window.alert(confirmation + '\n\nThe workbook opens on the GPT Prompt sheet. Upload the whole workbook to ChatGPT, copy the prompt between BEGIN PROMPT and END PROMPT, and ask GPT to return a completed .xlsx copy. Then import that completed copy.');
   }
 
   async function importCompletedCharacterWorkbook() {
@@ -4354,7 +4354,7 @@
         '\nDialogue passages still without a confirmed speaker: ' + unresolvedRows +
         '\nQuoted rows now correctly treated as narration: ' + narrationRows +
         '\nCharacter Register identities preserved: ' + characterRows +
-        '\n\nOpen the refreshed workbook. Review every row whose Evidence / Notes (GPT) begins with REVIEW REQUIRED, assign only source-confirmed speakers, save it, then run Import again and select the refreshed copy. One old speaker assignment was never copied onto multiple split turns.';
+        '\n\nOpen the refreshed workbook and use its GPT Prompt sheet. Upload the entire refreshed workbook to ChatGPT, copy the prompt between BEGIN PROMPT and END PROMPT, and ask GPT to resolve every REVIEW REQUIRED row from the full Chapter Context. A new/split row is not automatically an unknown speaker: GPT must analyze each turn independently. Ask GPT to return a new completed .xlsx copy, then import that copy. The original workbook remains unchanged; passage IDs and offsets must not be edited.';
       message('Workbook refreshed safely · ' + retained + ' GPT assignments retained · ' + unresolvedRows + ' dialogue passages still need speaker confirmation.');
       window.alert(refreshedMessage);
       return;
@@ -9641,9 +9641,38 @@ function renderProductionMetadataGate(active) {
     }
     await previewSavedVoice(profile, String(selected.text || ''), current.name, {routeCharacterCast:false});
   }
+  function installCharacterWorkbookHelpButton() {
+    const exportButton = $('exportCharacterWorkbook');
+    if (!exportButton || $('characterWorkbookHelp')) return;
+    const helpButton = document.createElement('button');
+    helpButton.type = 'button';
+    helpButton.id = 'characterWorkbookHelp';
+    helpButton.textContent = 'i';
+    helpButton.title = 'How to complete the GPT workbook';
+    helpButton.setAttribute('aria-label', 'How to complete the complete-book GPT workbook');
+    helpButton.style.cssText = 'width:28px;height:28px;min-width:28px;margin-left:7px;border:1px solid currentColor;border-radius:50%;background:transparent;color:inherit;font:700 13px/1 sans-serif;cursor:pointer;vertical-align:middle';
+    exportButton.insertAdjacentElement('afterend', helpButton);
+  }
+
+  function characterWorkbookHelpText() {
+    return [
+      'COMPLETE-BOOK GPT WORKBOOK',
+      '',
+      '1. Export the complete-book workbook. It opens on the GPT Prompt tab.',
+      '2. Upload the entire workbook to ChatGPT. Copy the text between BEGIN PROMPT and END PROMPT on the GPT Prompt tab and paste it into ChatGPT.',
+      '3. Ask GPT to read every chapter in Chapter Context, resolve every Dialogue row independently, update Character Register, and return a completed .xlsx copy.',
+      '4. Import the completed copy and inspect the preview before confirming.',
+      '',
+      'IMPORTANT: REVIEW REQUIRED means a previous answer was not carried across a changed or newly split passage. It does not mean the speaker is unknown. GPT must use the complete scene and book context to identify each new turn.',
+      'Never edit Passage IDs, chapter references, dialogue text, offsets, or revisions. If one row contains multiple different speakers, GPT must flag STRUCTURAL SPLIT REQUIRED instead of guessing or changing workbook rows.',
+      'Only genuinely ambiguous speakers should remain blank; those rows correctly block import until resolved.'
+    ].join('\n');
+  }
+
   function installCharacterStudioHandlers() {
     if (characterStudioCaptureBound) return;
     characterStudioCaptureBound = true;
+    installCharacterWorkbookHelpButton();
     document.addEventListener('input', event => {
       const target = event.target;
       if (!target || !['manualChapterSearch','assignedSearch','assignCharacterSearch'].includes(target.id)) return;
@@ -9663,6 +9692,7 @@ function renderProductionMetadataGate(active) {
           if (errorTitle) window.alert(errorTitle + '\n\n' + detail);
         });
       };
+      if (button.id === 'characterWorkbookHelp') { handle(() => window.alert(characterWorkbookHelpText())); return; }
       if (button.id === 'addLibraryCharacter') { handle(() => openLibraryEditor(null)); return; }
       if (button.id === 'exportCharacterLibrary') { handle(() => exportCharacterLibraryFile()); return; }
       if (button.id === 'importCharacterLibrary') { handle(() => importCharacterLibraryFile()); return; }

@@ -64,6 +64,10 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn('data-character-workbook-action="import"', header)
         self.assertIn("function exportSelectedCharacterWorkbook()", self.adapter)
         self.assertIn("function importCompletedCharacterWorkbook()", self.adapter)
+        self.assertIn("function installCharacterWorkbookHelpButton()", self.adapter)
+        self.assertIn("characterWorkbookHelpText()", self.adapter)
+        self.assertIn("characterWorkbookHelp", self.adapter)
+        self.assertIn("GPT Prompt sheet", self.adapter)
         self.assertIn("button.closest('#characters [data-character-workbook-action]')", self.adapter)
         self.assertIn("button.closest('#exportCharacterWorkbook, #importCharacterWorkbook')", self.adapter)
         self.assertNotIn("ensureCharacterWorkbookControls", self.adapter)
@@ -97,6 +101,8 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn('"assignment_summary": assignment_summary', self.host)
         self.assertIn('"chapters": chapter_preview', self.host)
         self.assertIn("Export Complete-Book GPT Workbook", self.html)
+        self.assertIn("GPT Prompt Version", self.workbook)
+        self.assertIn("complete_book_gpt_prompt()", self.workbook)
 
 
 

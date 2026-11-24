@@ -723,9 +723,17 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
                 names = [sheet.get("name") for sheet in book_xml.findall(".//" + ns + "sheet")]
                 self.assertEqual(names, [
-                    "Dialogue Assignment", "Character Register", "Chapter Register",
+                    "GPT Prompt", "Dialogue Assignment", "Character Register", "Chapter Register",
                     "Chapter Context", "Series Character Reference", "Workbook Info",
                 ])
+                prompt_xml = ET.fromstring(archive.read("xl/worksheets/sheet1.xml"))
+                prompt_text = "\\n".join(
+                    node.text or "" for node in prompt_xml.iter(ns + "t")
+                )
+                self.assertIn("REVIEW REQUIRED", prompt_text)
+                self.assertIn("does NOT mean the speaker is unknowable", prompt_text)
+                self.assertIn("newly split dialogue rows are independent turns", prompt_text)
+                self.assertIn("Do not change Passage ID", prompt_text)
                 self.assertGreater(archive.getinfo("xl/worksheets/sheet4.xml").file_size, 0)
                 self.assertGreater(archive.getinfo("xl/worksheets/sheet5.xml").file_size, 0)
             self.assertEqual(document["schema_version"], 2)
@@ -736,6 +744,8 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             self.assertEqual(document["info"]["Genre"], "Fantasy")
             self.assertEqual(document["info"]["Publication Year"], "2024")
             self.assertEqual(document["info"]["Series Volume"], "Volume 2")
+            self.assertIn("GPT Prompt", document["info"]["Instructions"])
+            self.assertEqual(document["info"]["GPT Prompt Version"], "1.0")
             self.assertEqual(len(document["chapter_references"]), 2)
             self.assertEqual(len(document["dialogue_rows"]), len(passages))
             self.assertEqual(document["chapter_references"][0]["chapter_number"], 1)
@@ -1179,6 +1189,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             self.assertTrue(all(
                 row["Evidence / Notes (GPT)"].startswith("REVIEW REQUIRED")
                 and "Ren" in row["Evidence / Notes (GPT)"]
+                and "GPT Prompt sheet" in row["Evidence / Notes (GPT)"]
                 for row in split_rows
             ))
             carried = next(row for row in refreshed["dialogue_rows"] if row["Passage ID"] == "p2-dialogue")
