@@ -294,7 +294,7 @@ class CastAwareProvider(TTSProvider):
             last_speaker=last_speaker,
         )
 
-    de    @staticmethod
+    @staticmethod
     def _normalized_text_with_map(value: str) -> tuple[str, list[int]]:
         """Normalize text for source matching while mapping tokens to source offsets."""
         normalized: list[str] = []
