@@ -28,7 +28,7 @@ class GenerationResult:
     chunks_completed: int
 
 
-GENERATION_PIPELINE_VERSION = "2026-11-multi-speaker-marker-chorus-v7"
+GENERATION_PIPELINE_VERSION = "2026-11-multi-speaker-marker-chorus-split-v8"
 
 @dataclass(frozen=True)
 class ChapterPlan:
@@ -433,10 +433,11 @@ def generate_chapter(
                 f"Audio chunk {index + 1}/{len(chunks)} is missing, truncated, or not a valid PCM WAV: "
                 f"{output.name}"
             )
-        if provider_uses_qwen_voice(provider, chunks_with_voices[index][1]) and not wav_has_audible_content(output):
+        if not wav_has_audible_content(output):
+            provider_label = "Qwen" if provider_uses_qwen_voice(provider, chunks_with_voices[index][1]) else "TTS"
             raise RuntimeError(
-                f"Qwen audio chunk {index + 1}/{len(chunks)} contains silence instead of narration. "
-                "The chunk was not marked complete; retry it after checking the Qwen worker log."
+                f"{provider_label} audio chunk {index + 1}/{len(chunks)} contains silence instead of speech. "
+                "The chunk was not marked complete; check the voice provider log and retry."
             )
 
         completed.add(index)

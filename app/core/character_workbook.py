@@ -28,6 +28,42 @@ def _t(name): return "{%s}%s" % (MAIN, name)
 def _clean(value): return unicodedata.normalize("NFC", str(value or "")).strip()
 def _key(value): return _clean(value).casefold()
 
+def _workbook_speaker_names(row):
+    """Read a legacy single speaker or a JSON/comma-separated list of canonical names."""
+    raw_json = str(row.get("GPT Assigned Characters (JSON)") or "").strip()
+    single = _clean(row.get("GPT Assigned Character"))
+    if raw_json:
+        if raw_json.startswith("["):
+            try:
+                values = json.loads(raw_json)
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise ValueError("GPT Assigned Characters (JSON) must be a valid JSON array.") from exc
+        else:
+            values = [part.strip() for part in re.split(r"[;,]", raw_json) if part.strip()]
+        if not isinstance(values, list):
+            raise ValueError("GPT Assigned Characters (JSON) must be a JSON array of character names.")
+        names = []
+        for value in values:
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError("GPT Assigned Characters (JSON) may contain only non-empty character names.")
+            name = _clean(value)
+            if name.casefold() not in {item.casefold() for item in names}:
+                names.append(name)
+        if names and single and single.casefold() != names[0].casefold():
+            raise ValueError("GPT Assigned Character must match the first name in GPT Assigned Characters (JSON).")
+        return names or ([single] if single else [])
+    return [single] if single else []
+
+
+def _workbook_multi_speaker_mode(row, speaker_count):
+    if speaker_count <= 1:
+        return "single"
+    mode = _clean(row.get("GPT Multi-Speaker Mode")).casefold() or "chorus"
+    if mode not in {"chorus", "sequential", "alternating"}:
+        raise ValueError("GPT Multi-Speaker Mode must be chorus, sequential, or alternating.")
+    return mode
+
+
 def _col_name(number):
     result = ""
     while number:
@@ -304,16 +340,25 @@ def complete_book_gpt_prompt() -> str:
         "Keep rows marked Included in This Book? = NO as NO. Do not remove existing Character Register identities, aliases, notes, or future-volume entries.",
         "",
         "FILL THE WORKBOOK",
-        "For every Dialogue row with a supported speaker, fill GPT Assigned Character with one canonical Full Name, GPT Confidence (0–1) with a numeric value from 0.75 to 1.00, and Evidence / Notes (GPT) with a concise source-based reason.",
+        "For every Dialogue row with a supported speaker, fill GPT Assigned Character with the first canonical Full Name, GPT Assigned Characters (JSON) with a JSON array of every character who speaks those exact same words, GPT Multi-Speaker Mode when more than one character is assigned, GPT Confidence (0–1) with a numeric value from 0.75 to 1.00, and Evidence / Notes (GPT) with a concise source-based reason.",
+        "Use one JSON array cell, for example [\\"Rias Gremory\\", \\"Akeno Himejima\\"]; do not create one column per character. JSON is preferred to comma-separated names because it safely preserves commas inside names. For simultaneous same-word delivery use chorus (the default); use sequential only when the exact same line should be repeated once per character; use alternating only when specifically supported by the scene.",
+        "A chorus is one dialogue passage with multiple speakers, not multiple split corrections. Assign all clearly identified simultaneous speakers to the same row.",
         "Calibrate confidence: 0.95–1.00 for explicit attribution; 0.85–0.94 for clear action-beat or strong scene evidence; 0.75–0.84 for a strong contextual inference with no credible competing speaker. Do not use low confidence to disguise a guess.",
-        "If you exhaust the whole-book context and there is still no single defensible speaker, leave GPT Assigned Character and GPT Confidence blank and explain the ambiguity in Evidence / Notes (GPT). Do not invent a person, guess from an honorific, or use Narrator to bypass an unresolved spoken line. Such rows require human review and will correctly block import until resolved.",
-        "Evidence should identify the chapter and the actual clue (for example, the speech tag, action beat, response pattern, or prior identity reference). Keep it concise and distinguish direct evidence from contextual inference.",
-        "Do not overwrite a clearly confirmed existing manual assignment. If workbook evidence and an existing manual assignment conflict, explain the conflict in Evidence / Notes (GPT) and leave the row for human review.",
+        "If whole-book context still cannot establish a defensible speaker, leave speaker cells blank and explain why. Do not invent a person, guess from an honorific, or use Narrator to bypass unresolved speech. Such rows require human review and block import.",
+        "Evidence should identify the chapter and actual clue (speech tag, action beat, response pattern, or prior identity reference). Distinguish direct evidence from contextual inference.",
+        "Do not overwrite a clearly confirmed existing manual assignment. If workbook evidence and a manual assignment conflict, explain the conflict and leave the row for human review.",
+        "",
+        "CORRECT A PASSAGE THAT THE APP MERGED FROM DIFFERENT SPEAKERS",
+        "If one Dialogue Assignment row contains two or more consecutive turns by different speakers, do not edit or split the original row. Add one row per turn to the separate Dialogue Split Corrections sheet.",
+        "Each correction row repeats the parent Source Passage ID and Chapter ID; uses Subturn Index 1, 2, 3... in source order; provides 0-based Start (Relative) inclusive and End (Relative) exclusive offsets measured from the beginning of the parent's Dialogue Text; and copies Exact Source Text character-for-character from that slice, including source quote markers.",
+        "Subturn ranges must be ordered, non-overlapping, inside the parent text, and cover each spoken turn. Leave narration or attribution prose between turns outside the ranges so it remains narration. Give every subturn its canonical speaker(s), mode, numeric confidence and evidence. A structural split requires at least two subturn rows.",
+        "Use multiple speakers on one correction row only when those characters utter the exact same words simultaneously. Different consecutive turns require separate correction rows. Do not invent a split or guess a speaker.",
+        "Do not use Dialogue Split Corrections for a correctly segmented single turn or a same-word chorus; use the multi-speaker JSON cell instead.",
         "",
         "DO NOT DAMAGE THE SOURCE OR WORKBOOK",
-        "Do not change Passage ID, Chapter ID, chapter number/title/revision, Passage Type, Dialogue Text, Start/End offsets, Chapter Register, Chapter Context, Series Character Reference, or Workbook Info.",
-        "Do not add, delete, duplicate, merge, split, or reorder Dialogue Assignment rows. The app owns passage segmentation and validates these source references exactly.",
-        "Only fill the GPT answer columns in Dialogue Assignment and make necessary, source-supported edits/additions in Character Register. Preserve every other sheet, row, and reference value.",
+        "Do not change Passage ID, Chapter ID, chapter number/title/revision, Passage Type, Dialogue Text, Start/End offsets, Chapter Register, Chapter Context, Series Character Reference, Workbook Info, or existing dialogue rows.",
+        "Do not add, delete, duplicate, merge, split, reorder, or rewrite Dialogue Assignment rows. The app applies validated subturn corrections from Dialogue Split Corrections while preserving the original source passage.",
+        "Only fill GPT answer columns, add source-supported Character Register identities, and add validated Dialogue Split Corrections rows. Preserve all other sheets, rows and references.",
         "Save the completed workbook as a NEW .xlsx copy. Never overwrite the original exported or refreshed workbook.",
         "",
         "FINAL CHECK BEFORE RETURNING THE FILE",
@@ -357,6 +402,7 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
         "GPT Assigned Character", "GPT Confidence (0–1)", "Existing Assignment (Reference)",
         "Assignment Source (Reference)", "Confidence (Reference)", "Start (Reference)",
         "End (Reference)", "Chapter Revision (Reference)", "Evidence / Notes (GPT)",
+        "GPT Assigned Characters (JSON)", "GPT Multi-Speaker Mode",
     ]
     dialogue = [dialogue_headers]
     seen_passages = set()
@@ -396,6 +442,14 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
         gpt_evidence = _clean(
             row.get("gpt_evidence") or row.get("Evidence / Notes (GPT)")
         )
+        gpt_speakers = row.get("gpt_assigned_characters") or row.get("GPT Assigned Characters (JSON)") or []
+        if isinstance(gpt_speakers, str):
+            try:
+                gpt_speakers = json.loads(gpt_speakers) if gpt_speakers.strip().startswith("[") else [part.strip() for part in re.split(r"[;,]", gpt_speakers) if part.strip()]
+            except (TypeError, ValueError, json.JSONDecodeError):
+                gpt_speakers = [part.strip() for part in re.split(r"[;,]", gpt_speakers) if part.strip()]
+        if not isinstance(gpt_speakers, (list, tuple)):
+            gpt_speakers = []
         dialogue.append([
             passage_id, chapter_id, chapter["chapter_number"], chapter["chapter_title"],
             "Narration" if narration else "Dialogue", text,
@@ -404,6 +458,9 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
             str(row.get("assignment_source") or row.get("source") or ""),
             row.get("confidence") if row.get("confidence") is not None else "",
             start, end, chapter["chapter_revision"], "" if narration else gpt_evidence,
+            json.dumps(list(dict.fromkeys(_clean(value) for value in gpt_speakers if _clean(value))), ensure_ascii=False)
+            if not narration and gpt_speakers else "",
+            _clean(row.get("gpt_multi_speaker_mode") or row.get("GPT Multi-Speaker Mode")),
         ])
         chapter["passage_count"] += 1
     if len(dialogue) - 1 > MAX_ROWS:
@@ -547,12 +604,35 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
         ["Series Volume", _clean(metadata.get("series_volume"))],
         ["Book Revision", book_revision],
         ["Exported At (UTC)", datetime.now(timezone.utc).isoformat(timespec="seconds")],
-        ["GPT Prompt Version", "1.0"],
+        ["GPT Prompt Version", "2.0"],
         ["Instructions",
          "This is a COMPLETE-BOOK workbook. Start with the GPT Prompt tab: it contains the full ready-to-copy task prompt and explains how to analyze every chapter, resolve newly split dialogue turns, assign canonical identities, calibrate confidence, and preserve source references. " 
          "A REVIEW REQUIRED note means an old answer was not copied across a changed passage; it does not mean the speaker is unknowable. Use the full Chapter Context to re-identify each changed turn independently. " 
-         "Do not change passage rows, IDs, dialogue text, chapter references, offsets, revisions, or read-only reference sheets. Return a new workbook copy. Unresolved speakers must remain explicit and will block import until confirmed."],
+         "Use GPT Assigned Characters (JSON) for multiple characters speaking the same words together. Use Dialogue Split Corrections for a genuinely merged passage containing different consecutive turns. Do not alter original passage rows or reference columns; return a new workbook copy. Unresolved speakers must remain explicit and will block import until confirmed."],
     ]
+
+    split_headers = [
+        "Source Passage ID", "Chapter ID", "Subturn Index", "Start (Relative)", "End (Relative)",
+        "Exact Source Text", "GPT Assigned Character", "GPT Assigned Characters (JSON)",
+        "GPT Multi-Speaker Mode", "GPT Confidence (0–1)", "Evidence / Notes (GPT)",
+    ]
+    split_rows = [split_headers]
+    for source in metadata.get("dialogue_split_corrections") or []:
+        if not isinstance(source, dict):
+            continue
+        split_rows.append([
+            _clean(source.get("Source Passage ID") or source.get("source_passage_id")),
+            _clean(source.get("Chapter ID") or source.get("chapter_id")),
+            source.get("Subturn Index", source.get("subturn_index", "")),
+            source.get("Start (Relative)", source.get("start_relative", "")),
+            source.get("End (Relative)", source.get("end_relative", "")),
+            str(source.get("Exact Source Text") or source.get("exact_source_text") or ""),
+            _clean(source.get("GPT Assigned Character") or source.get("gpt_assigned_character")),
+            str(source.get("GPT Assigned Characters (JSON)") or source.get("gpt_assigned_characters_json") or ""),
+            _clean(source.get("GPT Multi-Speaker Mode") or source.get("multi_speaker_mode")),
+            source.get("GPT Confidence (0–1)", source.get("gpt_confidence", "")),
+            _clean(source.get("Evidence / Notes (GPT)") or source.get("gpt_evidence")),
+        ])
 
     gpt_prompt_rows = [
         ["COPY THIS PROMPT INTO CHATGPT"],
@@ -564,7 +644,8 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
 
     sheets = [
         ("GPT Prompt", gpt_prompt_rows, [120], {1}),
-        ("Dialogue Assignment", dialogue, [38,38,14,32,16,72,34,18,34,22,18,14,14,42,46], {6,8,9,14,15}),
+        ("Dialogue Assignment", dialogue, [38,38,14,32,16,72,34,18,34,22,18,14,14,42,46,58,24], {6,8,9,14,15,16,17}),
+        ("Dialogue Split Corrections", split_rows, [38,38,14,18,18,72,34,58,24,20,70], set(range(1,12))),
         ("Character Register", characters, [34] + [24] * alias_column_count + [26,48,24], set(range(1, alias_column_count + 5))),
         ("Chapter Register", chapter_register, [38,14,32,42,22,20,66], set(range(1,8))),
         ("Chapter Context", context, [38,14,32,14,14,100], {6}),
@@ -697,6 +778,8 @@ def refresh_complete_book_character_workbook_bytes(
                 "assigned": _clean(row.get("GPT Assigned Character")),
                 "confidence": _clean(row.get("GPT Confidence (0–1)")),
                 "evidence": _clean(row.get("Evidence / Notes (GPT)")),
+                "assigned_speakers": _workbook_speaker_names(row),
+                "multi_speaker_mode": _clean(row.get("GPT Multi-Speaker Mode")),
             })
 
     refreshed_passages = []
@@ -735,8 +818,10 @@ def refresh_complete_book_character_workbook_bytes(
             row["gpt_assigned_character"] = old["assigned"]
             row["gpt_confidence"] = old["confidence"]
             row["gpt_evidence"] = old["evidence"]
+            row["gpt_assigned_characters"] = list(old.get("assigned_speakers") or ([old["assigned"]] if old["assigned"] else []))
+            row["gpt_multi_speaker_mode"] = old.get("multi_speaker_mode") or ""
             exact_rows_carried += 1
-            if old["assigned"]:
+            if old["assigned"] or old.get("assigned_speakers"):
                 assignments_carried += 1
             refreshed_passages.append(row)
             continue
@@ -770,6 +855,28 @@ def refresh_complete_book_character_workbook_bytes(
 
     refreshed_metadata = dict(metadata or {})
     refreshed_metadata["character_register"] = list(document.get("characters") or [])
+    exact_refreshed_ids = {
+        _clean(row.get("passage_id")): row
+        for row in refreshed_passages
+        if isinstance(row, dict) and _clean(row.get("passage_id"))
+    }
+    safe_split_corrections = []
+    for correction in (document.get("dialogue_split_corrections") or []):
+        if not isinstance(correction, dict):
+            continue
+        parent_id = _clean(correction.get("Source Passage ID"))
+        parent = exact_refreshed_ids.get(parent_id)
+        if not parent or _clean(correction.get("Chapter ID")) != _clean(parent.get("chapter_id")):
+            continue
+        try:
+            rel_start = int(correction.get("Start (Relative)"))
+            rel_end = int(correction.get("End (Relative)"))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        parent_text = str(parent.get("text") or "")
+        if 0 <= rel_start < rel_end <= len(parent_text) and str(correction.get("Exact Source Text") or "") == parent_text[rel_start:rel_end]:
+            safe_split_corrections.append(dict(correction))
+    refreshed_metadata["dialogue_split_corrections"] = safe_split_corrections
     unresolved_dialogue = 0
     for row in refreshed_passages:
         if _key(row.get("kind")) == "narration":
@@ -779,7 +886,7 @@ def refresh_complete_book_character_workbook_bytes(
         if isinstance(saved_speakers, str):
             saved_speakers = [saved_speakers]
         has_saved_identity = any(_clean(value) for value in saved_speakers)
-        if not assigned and not has_saved_identity:
+        if not assigned and not row.get("gpt_assigned_characters") and not has_saved_identity:
             unresolved_dialogue += 1
     workbook_bytes = create_complete_book_character_workbook_bytes(
         refreshed_metadata, current_chapters, refreshed_passages
@@ -880,9 +987,21 @@ def read_character_workbook(path):
                 ss = ET.fromstring(z.read("xl/sharedStrings.xml"))
                 shared = ["".join(n.text or "" for n in x.iter(_t("t"))) for x in ss.findall(_t("si"))]
             sheets = {name: _read_sheet(z, targets[name], shared) for name in required}
-            for optional_sheet in ("Series Character Reference", "Chapter Register"):
+            for optional_sheet in ("Series Character Reference", "Chapter Register", "Dialogue Split Corrections"):
                 if optional_sheet in targets:
                     sheets[optional_sheet] = _read_sheet(z, targets[optional_sheet], shared)
+            split_rows = _records(sheets.get("Dialogue Split Corrections", []))
+            if len(split_rows) > MAX_ROWS:
+                raise ValueError("Dialogue Split Corrections exceeds the 50,000-row workbook limit.")
+            if split_rows:
+                split_headers = {_clean(value) for value in sheets["Dialogue Split Corrections"][0]}
+                required_split_headers = {
+                    "Source Passage ID", "Chapter ID", "Subturn Index", "Start (Relative)",
+                    "End (Relative)", "Exact Source Text", "GPT Assigned Character",
+                    "GPT Confidence (0–1)",
+                }
+                if not required_split_headers.issubset(split_headers):
+                    raise ValueError("Dialogue Split Corrections is missing required source or speaker columns.")
     except (zipfile.BadZipFile, ET.ParseError, KeyError) as exc:
         raise ValueError("The .xlsx workbook is damaged or unsupported.") from exc
     info_rows = _records(sheets["Workbook Info"])
@@ -1117,6 +1236,7 @@ def read_character_workbook(path):
         "characters": characters,
         "series_character_reference": series_character_reference,
         "chapter_references": chapter_references,
+        "dialogue_split_corrections": _records(sheets.get("Dialogue Split Corrections", [])),
         "schema_version": workbook_version,
         "path": str(source.resolve()),
         "sha256": sha256(source.read_bytes()).hexdigest(),
@@ -1298,6 +1418,173 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
     workbook_ids = {_clean(row.get("Passage ID")) for row in workbook_rows}
     if workbook_ids != set(by_id):
         issues.append("The workbook does not contain the complete set of chapter passages. Export the active book again after source passage structure changes.")
+
+    def resolve_workbook_names(raw_row, label):
+        try:
+            names = _workbook_speaker_names(raw_row)
+        except ValueError as exc:
+            issues.append("%s: %s" % (label, exc))
+            return []
+        canonical_names, identity_keys = [], set()
+        for name in names:
+            matches = token_map.get(_key(name), set())
+            if len(matches) != 1:
+                issues.append("%s speaker '%s' is missing or ambiguous. Add it to Character Register or resolve its alias." % (label, name))
+                continue
+            identity_key = next(iter(matches))
+            if identity_key not in registered_keys:
+                issues.append("%s speaker '%s' is not listed in Character Register for this book." % (label, name))
+                continue
+            if identity_key not in identity_keys:
+                identity_keys.add(identity_key)
+                canonical_names.append(identities[identity_key]["canonical_name"])
+        return canonical_names
+
+    split_groups = {}
+    for correction in document.get("dialogue_split_corrections") or []:
+        if not isinstance(correction, dict):
+            issues.append("Dialogue Split Corrections contains an invalid row.")
+            continue
+        parent_id = _clean(correction.get("Source Passage ID"))
+        if not parent_id:
+            issues.append("A Dialogue Split Corrections row is missing Source Passage ID.")
+            continue
+        split_groups.setdefault(parent_id, []).append(correction)
+
+    split_parent_ids = set()
+    active_chapter_text = str(document.get("_active_chapter_text") or "")
+    for parent_id, correction_rows in split_groups.items():
+        parent_row = workbook_row_by_id.get(parent_id)
+        parent_passage = by_id.get(parent_id)
+        if not parent_row or not parent_passage:
+            issues.append("Dialogue Split Corrections references missing parent passage '%s'." % parent_id)
+            continue
+        if (_clean(parent_row.get("Chapter ID")) != _clean(chapter_id)
+            or _clean(parent_passage.get("chapter_id")) != _clean(chapter_id)
+            or _clean(parent_row.get("Passage Type")).casefold() != "dialogue"
+            or _key(parent_passage.get("kind")) == "narration"
+            or str(parent_passage.get("assignment_state") or "").casefold() == "conflict"):
+            issues.append("Dialogue Split Corrections parent '%s' must be a Dialogue passage in the active chapter." % parent_id)
+            continue
+        parent_text = str(parent_passage.get("text") or "")
+        parent_start, parent_end = int(parent_passage.get("start", -1)), int(parent_passage.get("end", -1))
+        if (parent_start < 0 or parent_end <= parent_start
+            or parent_text != str(parent_row.get("Dialogue Text") or "")
+            or (active_chapter_text and active_chapter_text[parent_start:parent_end] != parent_text)):
+            issues.append("Dialogue Split Corrections parent '%s' no longer matches its exact source passage." % parent_id)
+            continue
+        source_context_before = active_chapter_text[max(0, parent_start - 160):parent_start] if active_chapter_text else ""
+        source_context_after = active_chapter_text[parent_end:min(len(active_chapter_text), parent_end + 160)] if active_chapter_text else ""
+        try:
+            parent_ref_start = int(float(parent_row.get("Start (Reference)")))
+            parent_ref_end = int(float(parent_row.get("End (Reference)")))
+        except (TypeError, ValueError, OverflowError):
+            parent_ref_start = parent_ref_end = -1
+        if parent_ref_start != parent_start or parent_ref_end != parent_end:
+            issues.append("Dialogue Split Corrections parent '%s' has changed source offsets." % parent_id)
+            continue
+        try:
+            if _workbook_speaker_names(parent_row):
+                issues.append("Parent passage '%s' cannot have a whole-passage speaker and subturn corrections at the same time." % parent_id)
+                continue
+        except ValueError as exc:
+            issues.append("Parent passage '%s': %s" % (parent_id, exc))
+            continue
+
+        ordered = []
+        valid_group = True
+        for correction in correction_rows:
+            try:
+                index = int(float(correction.get("Subturn Index")))
+                rel_start = int(float(correction.get("Start (Relative)")))
+                rel_end = int(float(correction.get("End (Relative)")))
+                if any(isinstance(correction.get(key), bool) for key in ("Subturn Index", "Start (Relative)", "End (Relative)")):
+                    raise ValueError("boolean position")
+                if (float(correction.get("Subturn Index")) != index
+                    or float(correction.get("Start (Relative)")) != rel_start
+                    or float(correction.get("End (Relative)")) != rel_end):
+                    raise ValueError("non-integer position")
+            except (TypeError, ValueError, OverflowError):
+                issues.append("Dialogue Split Corrections for '%s' contains an invalid subturn index or relative offset." % parent_id)
+                valid_group = False
+                break
+            exact_text = str(correction.get("Exact Source Text") or "")
+            if rel_start < 0 or rel_end <= rel_start or rel_end > len(parent_text) or parent_text[rel_start:rel_end] != exact_text:
+                issues.append("Subturn %s for '%s' does not match its exact source text and relative offsets." % (index, parent_id))
+                valid_group = False
+                break
+            ordered.append((index, rel_start, rel_end, correction))
+        if not valid_group:
+            continue
+        ordered.sort(key=lambda item: (item[1], item[2]))
+        if len(ordered) < 2 or [item[0] for item in ordered] != list(range(1, len(ordered) + 1)):
+            issues.append("A structural split for '%s' requires at least two subturns indexed 1..N." % parent_id)
+            continue
+        if any(ordered[i][1] < ordered[i - 1][2] for i in range(1, len(ordered))):
+            issues.append("Subturn ranges for '%s' overlap. Correct them so turns are in source order without overlap." % parent_id)
+            continue
+
+        # Never erase a manual/unknown source assignment. Only an exact old AI/outsourced
+        # parent span may be superseded by the confirmed child subturns.
+        blocked_saved = False
+        for saved in current_assignments:
+            if not isinstance(saved, dict):
+                continue
+            try:
+                saved_start, saved_end = int(saved.get("start", -1)), int(saved.get("end", -1))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if saved_start >= parent_end or saved_end <= parent_start:
+                continue
+            saved_source = _clean(saved.get("source") or "manual").casefold()
+            if (saved_start, saved_end) != (parent_start, parent_end) or saved_source not in {"ai", "outsourced"}:
+                issues.append("Merged parent '%s' overlaps a saved %s assignment at %s:%s. Resolve the manual or unknown-source assignment before applying subturn corrections." % (parent_id, saved_source or "manual", saved_start, saved_end))
+                blocked_saved = True
+                continue
+            old_speakers = saved.get("speakers")
+            if not isinstance(old_speakers, (list, tuple)):
+                old_speakers = [saved.get("speaker")] if saved.get("speaker") else []
+            superseded_assignments.setdefault((saved_start, saved_end, saved_source), {
+                "chapter_id": _clean(chapter_id), "start": saved_start, "end": saved_end,
+                "source": saved_source, "speakers": [_clean(value) for value in old_speakers if _clean(value)],
+                "text": str(saved.get("text") or parent_text),
+            })
+        if blocked_saved:
+            continue
+
+        added = []
+        for index, rel_start, rel_end, correction in ordered:
+            label = "Subturn %s in passage %s" % (index, parent_id)
+            canonical_names = resolve_workbook_names(correction, label)
+            if not canonical_names:
+                valid_group = False
+                continue
+            try:
+                mode = _workbook_multi_speaker_mode(correction, len(canonical_names))
+                confidence = float(_clean(correction.get("GPT Confidence (0–1)")))
+                if not (0.0 <= confidence <= 1.0):
+                    raise ValueError("confidence outside 0–1")
+            except (TypeError, ValueError, OverflowError) as exc:
+                issues.append("%s has an invalid multi-speaker mode or GPT Confidence: %s." % (label, exc))
+                valid_group = False
+                continue
+            added.append({
+                "passage_id": "%s::subturn-%d" % (parent_id, index),
+                "source_passage_id": parent_id, "source_passage_text": parent_text,
+                "source_passage_start": parent_start, "source_passage_end": parent_end,
+                "source_context_before": source_context_before,
+                "source_context_after": source_context_after,
+                "source_start_relative": rel_start, "source_end_relative": rel_end,
+                "chapter_id": _clean(chapter_id),
+                "start": parent_start + rel_start, "end": parent_start + rel_end,
+                "text": str(correction.get("Exact Source Text") or ""),
+                "speaker": canonical_names[0], "speakers": canonical_names,
+                "multi_speaker_mode": mode, "series": active_series, "confidence": confidence,
+            })
+        if valid_group and len(added) == len(ordered):
+            assignments.extend(added)
+            split_parent_ids.add(parent_id)
+
     for row in document.get("dialogue_rows") or []:
         if not isinstance(row, dict):
             issues.append("The workbook contains an invalid dialogue row.")
@@ -1336,7 +1623,12 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             issues.append("Passage %s has an edited or invalid Passage Type. Export the chapter again." % pid)
             continue
         narration = source_is_narration
-        assigned = _clean(row.get("GPT Assigned Character"))
+        try:
+            assigned_names = _workbook_speaker_names(row)
+        except ValueError as exc:
+            issues.append("Passage %s: %s" % (pid, exc))
+            continue
+        assigned = assigned_names[0] if assigned_names else ""
         if narration:
             if _clean(current.get("source")) == "automatic_embedded_quote":
                 quote_start, quote_end = int(current.get("start", -1)), int(current.get("end", -1))
@@ -1380,6 +1672,9 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                         })
             if not legacy_inline_quote and _key(assigned) != "narrator":
                 issues.append("Narration passage %s must retain the protected Narrator assignment." % pid)
+            continue
+
+        if pid in split_parent_ids:
             continue
 
         # Resolve the current assignment before considering a blank workbook
@@ -1440,7 +1735,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                 not impacted_passages
                 or blocking_narration
                 or not impacted_rows
-                or any(not isinstance(item, dict) or not _clean(item.get("GPT Assigned Character")) for item in impacted_rows)
+                or any(not isinstance(item, dict) or not _workbook_speaker_names(item) for item in impacted_rows)
             ):
                 issues.append(
                     "Passage %s overlaps a stale AI assignment at %s:%s, but not every impacted dialogue passage "
@@ -1464,75 +1759,73 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
         if overlap_blocked:
             continue
 
-        if not assigned:
+        if not assigned_names:
             if not old_names:
                 passage_excerpt = re.sub(r"\s+", " ", str(current.get("text") or "")).strip()[:120]
                 issues.append(
                     "Dialogue passage %s in Chapter %s (%s) has no confirmed character assignment: %s. "
-                    "Resolve it with a source-supported Character Register identity or leave the book import blocked; do not guess."
-                    % (
-                        pid,
-                        _clean(current.get("chapter_number")) or _clean(chapter_id),
-                        _clean(current.get("chapter_title")),
-                        passage_excerpt,
-                    )
+                    "Resolve it with source-supported Character Register identities or leave the book import blocked; do not guess."
+                    % (pid, _clean(current.get("chapter_number")) or _clean(chapter_id),
+                       _clean(current.get("chapter_title")), passage_excerpt)
                 )
                 continue
-            old_identity_keys = set()
-            unresolved_old_names = []
+            old_identity_keys, unresolved_old_names = set(), []
             for old_name in old_names:
                 old_matches = token_map.get(_key(old_name), set())
                 if len(old_matches) != 1:
                     unresolved_old_names.append(old_name)
                 else:
                     old_identity_keys.update(old_matches)
-            if unresolved_old_names or len(old_identity_keys) != 1:
-                issues.append(
-                    "Existing assignment for dialogue passage %s is missing, ambiguous or split across characters (%s). "
-                    "Resolve it before importing."
-                    % (pid, " + ".join(old_names))
-                )
-                continue
-            # A valid saved assignment already covers this dialogue span.
+            if unresolved_old_names or not old_identity_keys:
+                issues.append("Existing assignment for dialogue passage %s is missing or ambiguous (%s). Resolve it before importing." % (pid, " + ".join(old_names)))
             continue
 
-        if _key(assigned) == "narrator":
+        if any(_key(name) == "narrator" for name in assigned_names):
             issues.append("Narrator cannot be assigned to dialogue.")
             continue
-        matches = token_map.get(_key(assigned), set())
-        if len(matches) != 1:
-            issues.append("'%s' is missing or ambiguous. Add it to Character Register or resolve its alias." % assigned)
-            continue
-        identity_key = next(iter(matches))
-        if identity_key not in registered_keys:
-            issues.append(
-                "Speaker '%s' is not listed in Character Register. Add the canonical character and aliases there before importing dialogue."
-                % assigned
-            )
-            continue
-        identity = identities[identity_key]
-        canonical = identity["canonical_name"]
-        valid_identity_tokens = {_key(value) for value in identity.get("tokens", [])}
-        if old_names and not all(_key(value) in valid_identity_tokens for value in old_names):
-            exact_source = _clean(old.get("source") or "manual").casefold()
-            if exact_source not in {"ai", "outsourced"}:
-                issues.append(
-                    "Passage %s already has a different saved %s speaker (%s). Resolve the manual or unknown-source assignment before import."
-                    % (pid, exact_source or "manual", " + ".join(old_names))
-                )
+        canonical_speakers, incoming_keys = [], set()
+        invalid_speaker = False
+        for assigned_name in assigned_names:
+            matches = token_map.get(_key(assigned_name), set())
+            if len(matches) != 1:
+                issues.append("'%s' is missing or ambiguous. Add it to Character Register or resolve its alias." % assigned_name)
+                invalid_speaker = True
                 continue
-            exact_key = (start, end, exact_source)
-            superseded_assignments.setdefault(exact_key, {
-                "chapter_id": _clean(chapter_id),
-                "start": start,
-                "end": end,
-                "source": exact_source,
-                "speakers": old_names,
-                "text": str(old.get("text") or ""),
-            })
-            old_names = []
-        if old_names:
+            identity_key = next(iter(matches))
+            if identity_key not in registered_keys:
+                issues.append("Speaker '%s' is not listed in Character Register. Add the canonical character and aliases there before importing dialogue." % assigned_name)
+                invalid_speaker = True
+                continue
+            if identity_key not in incoming_keys:
+                incoming_keys.add(identity_key)
+                canonical_speakers.append(identities[identity_key]["canonical_name"])
+        if invalid_speaker or not canonical_speakers:
             continue
+        try:
+            multi_mode = _workbook_multi_speaker_mode(row, len(canonical_speakers))
+        except ValueError as exc:
+            issues.append("Passage %s: %s" % (pid, exc))
+            continue
+
+        old_keys, unresolved_old_names = set(), []
+        for old_name in old_names:
+            old_matches = token_map.get(_key(old_name), set())
+            if len(old_matches) != 1:
+                unresolved_old_names.append(old_name)
+            else:
+                old_keys.update(old_matches)
+        old_source = _clean(old.get("source") or "manual").casefold()
+        old_mode = _clean(old.get("multi_speaker_mode")).casefold() or ("chorus" if len(old_names) > 1 else "single")
+        if old_names and not unresolved_old_names and old_keys == incoming_keys and old_mode == multi_mode:
+            continue
+        if old_names:
+            if old_source not in {"ai", "outsourced"}:
+                issues.append("Passage %s already has a different saved %s speaker set (%s). Resolve the manual or unknown-source assignment before import." % (pid, old_source or "manual", " + ".join(old_names)))
+                continue
+            superseded_assignments.setdefault((start, end, old_source), {
+                "chapter_id": _clean(chapter_id), "start": start, "end": end,
+                "source": old_source, "speakers": old_names, "text": str(old.get("text") or ""),
+            })
         raw_confidence = _clean(row.get("GPT Confidence (0–1)"))
         if not raw_confidence:
             issues.append("Passage %s requires an explicit GPT Confidence value from 0.0 to 1.0; blank confidence is not accepted." % pid)
@@ -1545,8 +1838,12 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
         if not 0.0 <= confidence <= 1.0:
             issues.append("Passage %s GPT Confidence must be between 0.0 and 1.0." % pid)
             continue
-        assignments.append({"passage_id":pid,"chapter_id":chapter_id,"start":start,"end":end,
-            "text":str(current.get("text") or ""),"speaker":canonical,"series":active_series,"confidence":confidence})
+        assignments.append({
+            "passage_id": pid, "chapter_id": chapter_id, "start": start, "end": end,
+            "text": str(current.get("text") or ""), "speaker": canonical_speakers[0],
+            "speakers": canonical_speakers, "multi_speaker_mode": multi_mode,
+            "series": active_series, "confidence": confidence,
+        })
     unique_issues = list(dict.fromkeys(issues))
     return {
         "ready": not unique_issues,
@@ -1605,6 +1902,12 @@ def plan_complete_book_character_workbook_import(
         if chapter_id not in rows_by_chapter:
             raise ValueError("A Dialogue Assignment row references an unknown chapter.")
         rows_by_chapter[chapter_id].append(row)
+    split_rows_by_chapter = {chapter_id: [] for chapter_id in reference_ids}
+    for row in document.get("dialogue_split_corrections") or []:
+        chapter_id = _clean(row.get("Chapter ID"))
+        if chapter_id not in split_rows_by_chapter:
+            raise ValueError("A Dialogue Split Corrections row references an unknown chapter.")
+        split_rows_by_chapter[chapter_id].append(row)
 
     chapter_plans, issues = [], []
     superseded_assignments = []
@@ -1645,6 +1948,8 @@ def plan_complete_book_character_workbook_import(
         chapter_document.update({
             "info": chapter_info,
             "dialogue_rows": rows_by_chapter[chapter_id],
+            "dialogue_split_corrections": split_rows_by_chapter[chapter_id],
+            "_active_chapter_text": active_text,
         })
         plan = plan_character_workbook_import(
             chapter_document,

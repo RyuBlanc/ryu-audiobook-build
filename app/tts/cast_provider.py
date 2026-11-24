@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from pathlib import Path
+import unicodedata
 from pathlib import Path
 
 from app.chapters.characters import infer_speaker_for_quote, _all_dialogue_spans
@@ -294,40 +294,173 @@ class CastAwareProvider(TTSProvider):
             last_speaker=last_speaker,
         )
 
-    def split_for_cast(self, text: str, fallback_voice: str | None, dialogue_assignments=None):        # Use the same dialogue span detector as Voice Cast analysis so
-        # generation and review cannot disagree about what counts as dialogue.
+    de    @staticmethod
+    def _normalized_text_with_map(value: str) -> tuple[str, list[int]]:
+        """Normalize text for source matching while mapping tokens to source offsets."""
+        normalized: list[str] = []
+        source_positions: list[int] = []
+        pending_space_at: int | None = None
+        for source_index, source_char in enumerate(str(value or "")):
+            expanded = unicodedata.normalize("NFKC", source_char).casefold()
+            for char in expanded:
+                if char.isalnum() or char == "_":
+                    if pending_space_at is not None and normalized:
+                        normalized.append(" ")
+                        source_positions.append(pending_space_at)
+                    pending_space_at = None
+                    normalized.append(char)
+                    source_positions.append(source_index)
+                elif normalized:
+                    pending_space_at = source_index
+        while normalized and normalized[-1] == " ":
+            normalized.pop()
+            source_positions.pop()
+        return "".join(normalized), source_positions
+
+    @classmethod
+    def _context_match_length(cls, expected: str, actual: str, *, before: bool) -> int:
+        expected_norm, _ = cls._normalized_text_with_map(expected)
+        actual_norm, _ = cls._normalized_text_with_map(actual)
+        for size in range(min(len(expected_norm), 80), 11, -1):
+            sample = expected_norm[-size:] if before else expected_norm[:size]
+            if (actual_norm.endswith(sample) if before else actual_norm.startswith(sample)):
+                return size
+        return 0
+
+    def split_for_cast(self, text: str, fallback_voice: str | None, dialogue_assignments=None):
+        """Split dialogue and apply source-bound subturns after narration normalization."""
         spans = _all_dialogue_spans(text)
-        # Explicitly saved source assignments may be unquoted or originate
-        # from manual selection. Include exact, validated spans when they are
-        # not already contained in a detected quotation.
-        for assignment in dialogue_assignments or []:
-            if not isinstance(assignment, dict) or not assignment_speakers(assignment):
-                continue
-            raw_start, raw_end = assignment.get("start"), assignment.get("end")
-            if isinstance(raw_start, bool) or isinstance(raw_end, bool):
+        assignments = [dict(item) for item in (dialogue_assignments or []) if isinstance(item, dict)]
+        valid_assignments = []
+        for assignment in assignments:
+            if not assignment_speakers(assignment):
                 continue
             try:
-                start, end = int(raw_start), int(raw_end)
+                start, end = int(assignment.get("start", -1)), int(assignment.get("end", -1))
             except (TypeError, ValueError, OverflowError):
                 continue
-            if start < 0 or end <= start or end > len(text):
+            exact = str(assignment.get("text") or "")
+            if start < 0 or end <= start or not exact.strip():
                 continue
-            exact = text[start:end]
-            if not exact.strip():
+            valid_assignments.append((start, end, exact, assignment))
+
+        # App offsets refer to original chapter text. TTS receives cleaned narration,
+        # so map each corrected parent and its turns through normalization first.
+        split_groups: dict[str, list[tuple[int, int, str, dict]]] = {}
+        for item in valid_assignments:
+            assignment = item[3]
+            parent_id = str(assignment.get("source_passage_id") or "").strip()
+            parent_text = str(assignment.get("source_passage_text") or "")
+            if parent_id and parent_text:
+                split_groups.setdefault(parent_id, []).append(item)
+
+        router_assignments = [dict(item) for item in assignments]
+        replaced_parent_ids: set[str] = set()
+        for parent_id, children in split_groups.items():
+            parent_text = str(children[0][3].get("source_passage_text") or "")
+            if any(str(child[3].get("source_passage_text") or "") != parent_text for child in children):
+                raise ValueError("Corrected dialogue parent '%s' has inconsistent saved source text." % parent_id)
+            parent_norm, parent_map = self._normalized_text_with_map(parent_text)
+            target_norm, target_map = self._normalized_text_with_map(text)
+            if not parent_norm or not target_map:
+                raise ValueError("Corrected dialogue parent '%s' is empty after TTS text normalization." % parent_id)
+
+            candidates = []
+            search_from = 0
+            while True:
+                found = target_norm.find(parent_norm, search_from)
+                if found < 0:
+                    break
+                candidates.append(found)
+                search_from = found + 1
+            if not candidates:
+                raise ValueError(
+                    "Corrected dialogue parent '%s' could not be matched to prepared narration text. "
+                    "Refresh the chapter's dialogue segmentation before generating audio." % parent_id
+                )
+            before_context = str(children[0][3].get("source_context_before") or "")
+            after_context = str(children[0][3].get("source_context_after") or "")
+            scored = []
+            for found in candidates:
+                target_start = target_map[found]
+                target_end = target_map[found + len(parent_norm) - 1] + 1
+                before_score = self._context_match_length(before_context, text[:target_start], before=True)
+                after_score = self._context_match_length(after_context, text[target_end:], before=False)
+                scored.append((before_score + after_score, before_score, after_score, found))
+            best_score = max((item[0], item[1], item[2]) for item in scored)
+            best = [item for item in scored if (item[0], item[1], item[2]) == best_score]
+            if len(candidates) > 1:
+                if best_score[0] == 0 or len(best) != 1:
+                    raise ValueError(
+                        "Corrected dialogue parent '%s' appears more than once and its context does not "
+                        "identify one safe occurrence. Review the chapter before generation." % parent_id
+                    )
+                parent_match = best[0][3]
+            else:
+                parent_match = candidates[0]
+
+            parent_target_start = target_map[parent_match]
+            parent_target_end = target_map[parent_match + len(parent_norm) - 1] + 1
+            children.sort(key=lambda item: int(item[3].get("source_start_relative", 0)))
+            mapped_children = []
+            for _absolute_start, _absolute_end, child_text, assignment in children:
+                try:
+                    relative_start = int(assignment.get("source_start_relative", -1))
+                    relative_end = int(assignment.get("source_end_relative", -1))
+                except (TypeError, ValueError, OverflowError):
+                    raise ValueError("Corrected subturn in parent '%s' has invalid original offsets." % parent_id)
+                if relative_start < 0 or relative_end <= relative_start or relative_end > len(parent_text):
+                    raise ValueError("Corrected subturn in parent '%s' is outside its original source passage." % parent_id)
+                if parent_text[relative_start:relative_end] != child_text:
+                    raise ValueError("Corrected subturn in parent '%s' no longer matches its exact source text." % parent_id)
+                relative_indices = [
+                    index for index, source_index in enumerate(parent_map)
+                    if relative_start <= source_index < relative_end
+                ]
+                if not relative_indices:
+                    raise ValueError("Corrected subturn in parent '%s' contains no spoken words after normalization." % parent_id)
+                normalized_child = parent_norm[relative_indices[0]:relative_indices[-1] + 1].strip()
+                if not normalized_child:
+                    raise ValueError("Corrected subturn in parent '%s' contains no spoken words after normalization." % parent_id)
+                target_start_index = parent_match + relative_indices[0]
+                target_end_index = parent_match + relative_indices[-1]
+                if target_end_index >= len(target_map):
+                    raise ValueError("Corrected subturn in parent '%s' exceeds the prepared chapter text." % parent_id)
+
+                mapped_start = target_map[target_start_index]
+                mapped_end = target_map[target_end_index] + 1
+                opening_chars = "“‘「『\"'([{"
+                closing_chars = "”’」』\"')]}.,!?;:…"
+                while mapped_start > parent_target_start and text[mapped_start - 1] in opening_chars:
+                    mapped_start -= 1
+                while mapped_end < parent_target_end and text[mapped_end] in closing_chars:
+                    mapped_end += 1
+                if not parent_target_start <= mapped_start < mapped_end <= parent_target_end:
+                    raise ValueError("Corrected subturn in parent '%s' mapped outside its parent passage." % parent_id)
+                mapped_text = text[mapped_start:mapped_end]
+                mapped_assignment = dict(assignment)
+                mapped_assignment.update({"start": mapped_start, "end": mapped_end, "text": mapped_text})
+                mapped_children.append((mapped_start, mapped_end, mapped_text, mapped_assignment))
+
+            if len(mapped_children) < 2:
+                raise ValueError("Corrected dialogue parent '%s' requires at least two subturns." % parent_id)
+            if any(mapped_children[i][0] < mapped_children[i - 1][1] for i in range(1, len(mapped_children))):
+                raise ValueError("Corrected dialogue parent '%s' has overlapping mapped turns after TTS normalization." % parent_id)
+            spans = [span for span in spans if not (span[0] < parent_target_end and parent_target_start < span[1])]
+            spans.extend((start, end, raw) for start, end, raw, _assignment in mapped_children)
+            router_assignments.extend(item[3] for item in mapped_children)
+            replaced_parent_ids.add(parent_id)
+
+        spans.sort(key=lambda item: (item[0], -(item[1] - item[0])))
+        for start, end, exact, assignment in valid_assignments:
+            if str(assignment.get("source_passage_id") or "") in replaced_parent_ids:
                 continue
-            if assignment.get("text") is not None and str(assignment.get("text")) != exact:
-                continue
-            # A detected span containing the saved body already supports the
-            # existing exact/normalized assignment match. Avoid duplicate audio.
             if any(span_start <= start and end <= span_end for span_start, span_end, _ in spans):
                 continue
-            # Partial overlap is ambiguous source data; do not synthesize
-            # overlapping parts or guess which saved assignment should win.
             if any(start < span_end and span_start < end for span_start, span_end, _ in spans):
                 continue
             spans.append((start, end, exact))
         spans.sort(key=lambda item: (item[0], -(item[1] - item[0])))
-
         if not spans:
             return [(text, fallback_voice)]
 
@@ -338,13 +471,8 @@ class CastAwareProvider(TTSProvider):
         for start, end, _dialogue in spans:
             if start > cursor:
                 parts.append((text[cursor:start], fallback_voice))
-
             speakers, multi_mode, assignment_series = self._speakers_for(
-                text,
-                start,
-                end,
-                last_speaker,
-                dialogue_assignments=dialogue_assignments,
+                text, start, end, last_speaker, dialogue_assignments=router_assignments
             )
             assigned_voices = []
             for speaker in speakers:
@@ -352,11 +480,8 @@ class CastAwareProvider(TTSProvider):
                 identity_key = character_identity_key(speaker, assignment_series) if assignment_series else ""
                 known_series = self._identity_series_by_name.get(name_key, set())
                 if identity_key and identity_key in self.identity_assignments:
-                    # Explicitly saved empty value means this identity is unassigned.
                     profile_name = self.identity_assignments[identity_key]
                 elif assignment_series and known_series:
-                    # If this name is known in other series but not in the
-                    # assignment's series, don't fall back to its name-only key.
                     profile_name = ""
                 elif len(known_series) > 1:
                     profile_name = ""
@@ -365,13 +490,9 @@ class CastAwareProvider(TTSProvider):
                 if profile_name:
                     assigned_voices.append(profile_name)
                 elif self.unassigned_voice:
-                    # Every detected but unassigned character receives the
-                    # explicit app-wide fallback profile, never the narrator.
                     assigned_voices.append(self.unassigned_voice)
             if assigned_voices:
                 if len(assigned_voices) > 1 and multi_mode == "alternating":
-                    # Alternate one configured voice per dialogue span; do not
-                    # duplicate the same line or send an unsupported voice list.
                     voice = assigned_voices[alternating_voice_index % len(assigned_voices)]
                     alternating_voice_index += 1
                 elif len(assigned_voices) > 1 and multi_mode != "sequential":
@@ -379,53 +500,52 @@ class CastAwareProvider(TTSProvider):
                 else:
                     voice = assigned_voices[0]
             else:
-                # Dialogue with no reliable speaker identity is still dialogue.
-                # Route it to Unassigned Character; plain narration remains on
-                # the narrator path outside these quote spans.
                 voice = self.unassigned_voice or fallback_voice
             if speakers:
                 last_speaker = speakers[-1].casefold()
 
-            raw = text[start:end].strip()
-            dialogue = raw
-
-            # Normalize marker syntax only for synthesis. Source offsets and
-            # project text remain untouched. Repeated quotes are assignment syntax.
-            repeated_marker = re.fullmatch(r'\s*\{?"{2,}(.*?)"{2,}\}?\s*', dialogue, flags=re.S)
+            dialogue = text[start:end].strip()
+            for _ in range(3):
+                stripped = dialogue.strip()
+                changed = False
+                for opening, closing in (("(", ")"), ("{", "}"), ("[", "]")):
+                    if stripped.startswith(opening) and stripped.endswith(closing) and len(stripped) > 2:
+                        dialogue = stripped[1:-1].strip()
+                        changed = True
+                        break
+                if not changed:
+                    break
+            repeated_marker = re.fullmatch(r'\s*"{2,}(.*?)"{2,}\s*', dialogue, flags=re.S)
             if repeated_marker:
                 dialogue = repeated_marker.group(1).strip()
-            elif len(dialogue) >= 2 and (
-                (dialogue[0], dialogue[-1]) in {
-                    ("“", "”"), ('"', '"'), ("「", "」"),
-                    ("『", "』"), ("‘", "’"), ("'", "'"),
-                }
-            ):
-                dialogue = dialogue[1:-1].strip()
             else:
-                stripped = dialogue.lstrip(" \t")
-                if stripped and stripped[0] in "—–-":
-                    dialogue = stripped[1:].strip()
-
-            if dialogue:
-                if (
-                    assigned_voices
-                    and len(assigned_voices) > 1
-                    and multi_mode == "sequential"
+                if len(dialogue) >= 2 and (
+                    (dialogue[0], dialogue[-1]) in {
+                        ("“", "”"), ('"', '"'), ("「", "」"), ("『", "』"),
+                        ("‘", "’"), ("'", "'"),
+                    }
                 ):
+                    dialogue = dialogue[1:-1].strip()
+                else:
+                    if dialogue[:1] in {"“", "‘", "「", "『", '"', "'"}:
+                        dialogue = dialogue[1:].strip()
+                    if dialogue[-1:] in {"”", "’", "」", "』", '"', "'"}:
+                        dialogue = dialogue[:-1].strip()
+                    stripped = dialogue.lstrip(" \t")
+                    if stripped and stripped[0] in "—–-":
+                        dialogue = stripped[1:].strip()
+            if dialogue:
+                if assigned_voices and len(assigned_voices) > 1 and multi_mode == "sequential":
                     for assigned_voice in assigned_voices:
                         parts.append((dialogue, assigned_voice))
                 else:
                     parts.append((dialogue, voice))
             cursor = end
-
         if cursor < len(text):
             parts.append((text[cursor:], fallback_voice))
-        # Strip only boundary whitespace from each synthesis unit. The saved
-        # chapter source and dialogue offsets remain untouched; leading/trailing
-        # spaces are formatting separators, not audible narration content.
-        return [(t.strip(), v) for t, v in parts if t.strip()]
+        return [(segment.strip(), voice) for segment, voice in parts if segment.strip()]
 
-    def close(self) -> None:
+f close(self) -> None:
         providers = [self.narrator_provider, *[item[0] for item in self._providers.values()]]
         seen = set()
         for provider in providers:
@@ -524,8 +644,10 @@ class CastAwareProvider(TTSProvider):
             provider_voice = profile.voice_id
         return provider, provider_voice
 
-    def is_qwen_voice(self, voice: str | None = None) -> bool:
-        """Identify a Qwen-routed cast profile without starting the model."""
+    def is_qwen_voice(self, voice: str | list[str] | tuple[str, ...] | None = None) -> bool:
+        """Identify Qwen profiles, including each member of a multi-voice chorus."""
+        if isinstance(voice, (list, tuple, set)):
+            return any(self.is_qwen_voice(item) for item in voice)
         profile = self.profiles.get(str(voice or "").casefold())
         if profile is not None:
             return str(profile.provider or "").casefold() == "qwen-character"

@@ -42,6 +42,12 @@ DIALOGUE_PATTERNS = (
     re.compile(r'"([^"]{2,1800})"'),
     re.compile(r'[\u300c]([^\u300d]{2,1800})[\u300d]'),
     re.compile(r'[\u300e]([^\u300f]{2,1800})[\u300f]'),
+    re.compile(r'\(\s*([“][^”\r\n]{2,1800}[”]|"{1}[^"\r\n]{2,1800}"{1})\s*\)'),
+    re.compile(r'\{\s*([“][^”\r\n]{2,1800}[”]|"{1}[^"\r\n]{2,1800}"{1})\s*\}'),
+    re.compile(r'\[\s*([“][^”\r\n]{2,1800}[”]|"{1}[^"\r\n]{2,1800}"{1})\s*\]'),
+    re.compile(r'\(\s*("{2,}[^"\r\n]{2,1800}"{2,})\s*\)'),
+    re.compile(r'\{\s*("{2,}[^"\r\n]{2,1800}"{2,})\s*\}'),
+    re.compile(r'\[\s*("{2,}[^"\r\n]{2,1800}"{2,})\s*\]'),
     # Smart and straight single-quoted dialogue, excluding apostrophes inside words.
     re.compile(r'(?<![\w])‘([^’\r\n]{2,1800})’(?![\w])'),
     re.compile(r"(?<![\w])'([^'\r\n]{2,1800})'(?![\w])"),
@@ -513,7 +519,10 @@ def is_embedded_quotation_reference(text: str, start: int, end: int) -> bool:
     """Recognize quoted references embedded in narration, not standalone speech."""
     if start < 0 or end <= start or end > len(text):
         return False
-    quote_text = text[start:end]
+    quote_text = text[start:end].strip()
+    for opening, closing in (("(", ")"), ("{", "}"), ("[", "]")):
+        if quote_text.startswith(opening) and quote_text.endswith(closing) and len(quote_text) > 2:
+            quote_text = quote_text[1:-1].strip()
     quote_pairs = {("“", "”"), ("‘", "’"), ("「", "」"), ("『", "』"), ('"', '"'), ("'", "'")}
     if len(quote_text) < 3 or (quote_text[0], quote_text[-1]) not in quote_pairs:
         return False

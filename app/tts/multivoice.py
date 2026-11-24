@@ -7,6 +7,8 @@ import tempfile
 
 import imageio_ffmpeg
 
+from app.tts.audio_validation import provider_uses_qwen_voice, wav_has_audible_content
+
 
 def synthesize_voice_set(provider, text: str, voices, output: Path) -> Path:
     """Synthesize one chunk with one or several voices.
@@ -30,6 +32,12 @@ def synthesize_voice_set(provider, text: str, voices, output: Path) -> Path:
             provider.synthesize(text, path, voice)
             if not path.exists() or path.stat().st_size < 1024:
                 raise RuntimeError(f"Multi-speaker voice '{voice}' produced no usable audio.")
+            if not wav_has_audible_content(path):
+                provider_label = "Qwen character" if provider_uses_qwen_voice(provider, voice) else "Character"
+                raise RuntimeError(
+                    f"{provider_label} voice '{voice}' produced silent audio for a multi-speaker line. "
+                    "The line was not blended or marked complete; check that voice provider's log and retry."
+                )
             inputs.append(path)
 
         args = [imageio_ffmpeg.get_ffmpeg_exe(), "-y"]
@@ -49,5 +57,7 @@ def synthesize_voice_set(provider, text: str, voices, output: Path) -> Path:
         if result.returncode != 0 or not output.exists() or output.stat().st_size < 1024:
             detail = (result.stderr or result.stdout or "").strip()[-3000:]
             raise RuntimeError(f"Could not blend multiple character voices. {detail}")
+        if not wav_has_audible_content(output):
+            raise RuntimeError("The combined multi-speaker WAV contains no audible audio. The dialogue chunk was not accepted.")
 
     return output

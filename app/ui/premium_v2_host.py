@@ -1871,8 +1871,8 @@ class PremiumV2Bridge(QObject):
         except (TypeError, ValueError):
             raise ValueError("Choose a valid chapter number.")
         mode = str(payload.get("mode") or "single").strip().lower()
-        if mode not in {"single", "chorus", "alternating"}:
-            raise ValueError("Assignment mode must be single, chorus, or alternating.")
+        if mode not in {"single", "chorus", "sequential", "alternating"}:
+            raise ValueError("Assignment mode must be single, chorus, sequential, or alternating.")
         import math
         assignment_source = str(payload.get("source") or "manual").strip().casefold()
         if assignment_source not in {"manual", "ai", "outsourced"}:
@@ -5447,7 +5447,7 @@ class PremiumV2Bridge(QObject):
         if clipboard is None:
             raise RuntimeError("The system clipboard is unavailable. Open a complete-book workbook and copy the prompt from its GPT Prompt sheet.")
         clipboard.setText(prompt)
-        return {"copied": True, "prompt_version": "1.0", "characters": len(prompt)}
+        return {"copied": True, "prompt_version": "2.0", "characters": len(prompt)}
 
     def _character_workbook_export(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Export a complete-book GPT workbook, retaining chapter export compatibility."""
@@ -5958,10 +5958,22 @@ class PremiumV2Bridge(QObject):
                             ]
                         assignments_by_chapter[chapter_id] = existing_assignments
                     base = {"start": start, "end": end, "text": exact, "source": "outsourced"}
-                    normalized = normalize_assignment(base, [str(imported["speaker"])], "single")
+                    imported_speakers = imported.get("speakers") or [str(imported["speaker"])]
+                    imported_mode = str(imported.get("multi_speaker_mode") or ("chorus" if len(imported_speakers) > 1 else "single"))
+                    normalized = normalize_assignment(base, [str(name) for name in imported_speakers], imported_mode)
                     normalized.update({
                         "source": "outsourced", "confidence": float(imported["confidence"]),
                         "series": series,
+                        **{
+                            key: imported[key]
+                            for key in (
+                                "source_passage_id", "source_passage_text",
+                                "source_passage_start", "source_passage_end",
+                                "source_context_before", "source_context_after",
+                                "source_start_relative", "source_end_relative",
+                            )
+                            if key in imported
+                        },
                     })
                     assignments_by_chapter[chapter_id] = [
                         row for row in assignments_by_chapter[chapter_id]

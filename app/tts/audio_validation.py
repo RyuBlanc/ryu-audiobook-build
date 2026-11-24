@@ -47,7 +47,9 @@ def wav_has_audible_content(path: Path, *, minimum_peak: float = 0.00005, minimu
         return False
 
 
-def provider_uses_qwen_voice(provider, voice: str | None = None) -> bool:
+def provider_uses_qwen_voice(provider, voice: str | list[str] | tuple[str, ...] | set[str] | None = None) -> bool:
+    if isinstance(voice, (list, tuple, set)):
+        return any(provider_uses_qwen_voice(provider, item) for item in voice)
     if str(getattr(provider, "provider_id", "") or "").casefold() == "qwen-character":
         return True
     checker = getattr(provider, "is_qwen_voice", None)

@@ -3654,6 +3654,115 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(len(dialogue_parts), 1)
         self.assertEqual(dialogue_parts[0][1], ["Voice A", "Voice B"])
 
+    def test_cast_provider_routes_corrected_nested_subturns_to_separate_speakers(self):
+        from app.tts.cast_provider import CastAwareProvider
+        from app.tts.voice_profile import VoiceProfile
+
+        class DummyProvider:
+            recommended_chunk_chars = 1400
+            recommended_chunk_sentences = 2
+            def synthesize(self, text, output_path, voice=None):
+                return output_path
+
+        profiles = {
+            "Voice K": VoiceProfile("Voice K", "piper", "k"),
+            "Voice I": VoiceProfile("Voice I", "piper", "i"),
+        }
+        cast = CastAwareProvider(DummyProvider(), "Narrator", profiles,
+                                 {"Kousuke Takioto": "Voice K", "Iori Hijiri": "Voice I"})
+        source = '“Pumped? “Yeah, see, I’m so ridiculously hyped.”'
+        prepared = "The other characters paused. " + source.replace("“", '"').replace("”", '"') + " He answered."
+        first, second = '“Pumped?', '“Yeah, see, I’m so ridiculously hyped.”'
+        a, b = source.index(first), source.index(second)
+        parts = cast.split_for_cast(prepared, "Narrator", dialogue_assignments=[
+            {"start": a, "end": a + len(first), "text": first, "speaker": "Kousuke Takioto",
+             "speakers": ["Kousuke Takioto"], "source": "outsourced", "source_passage_id": "parent",
+             "source_passage_text": source, "source_passage_start": 0, "source_passage_end": len(source),
+             "source_context_before": "The other characters paused.", "source_context_after": "He answered.",
+             "source_start_relative": a, "source_end_relative": a + len(first)},
+            {"start": b, "end": b + len(second), "text": second, "speaker": "Iori Hijiri",
+             "speakers": ["Iori Hijiri"], "source": "outsourced", "source_passage_id": "parent",
+             "source_passage_text": source, "source_passage_start": 0, "source_passage_end": len(source),
+             "source_context_before": "The other characters paused.", "source_context_after": "He answered.",
+             "source_start_relative": b, "source_end_relative": b + len(second)},
+        ])
+        dialogue = [(text, voice) for text, voice in parts if voice in {"Voice K", "Voice I"}]
+        self.assertEqual([voice for _text, voice in dialogue], ["Voice K", "Voice I"])
+        self.assertEqual(len(dialogue), 2)
+
+    def test_multi_voice_synthesis_blends_all_requested_profiles(self):
+        from app.tts.multivoice import synthesize_voice_set
+        from app.tts.audio_validation import wav_has_audible_content
+
+        class DummyProvider:
+            provider_id = "piper"
+            def __init__(self):
+                self.calls = []
+            def synthesize(self, text, output_path, voice=None):
+                self.calls.append(voice)
+                _write_wav(Path(output_path), seconds=0.08)
+                return Path(output_path)
+
+        with tempfile.TemporaryDirectory() as temp:
+            provider = DummyProvider()
+            output = Path(temp) / "chorus.wav"
+            result = synthesize_voice_set(provider, "We are here!", ["Voice A", "Voice B"], output)
+            self.assertEqual(result, output)
+            self.assertEqual(provider.calls, ["Voice A", "Voice B"])
+            self.assertTrue(wav_has_audible_content(output))
+
+    def test_multi_voice_synthesis_rejects_silent_non_qwen_child_audio(self):
+        from app.tts.multivoice import synthesize_voice_set
+
+        class SilentPiper:
+            provider_id = "piper"
+            def synthesize(self, text, output_path, voice=None):
+                output = Path(output_path)
+                output.parent.mkdir(parents=True, exist_ok=True)
+                with wave.open(str(output), "wb") as wav:
+                    wav.setnchannels(1); wav.setsampwidth(2); wav.setframerate(24000)
+                    wav.writeframes(b"\\x00\\x00" * 4096)
+                return output
+
+        with tempfile.TemporaryDirectory() as temp:
+            with self.assertRaisesRegex(RuntimeError, "Character voice.*produced silent audio"):
+                synthesize_voice_set(SilentPiper(), "Together.", ["Piper A", "Piper B"], Path(temp) / "silent.wav")
+
+    def test_qwen_voice_detection_and_multivoice_child_validation_accept_voice_lists(self):
+        from app.tts.audio_validation import provider_uses_qwen_voice
+        from app.tts.multivoice import synthesize_voice_set
+
+        class QwenCast:
+            provider_id = "cast-aware"
+            def is_qwen_voice(self, voice):
+                return str(voice).startswith("Qwen")
+
+        self.assertTrue(provider_uses_qwen_voice(QwenCast(), ["Piper", "Qwen-Kousuke"]))
+
+        class QwenSilentProvider:
+            provider_id = "qwen-character"
+            def synthesize(self, text, output_path, voice=None):
+                output = Path(output_path)
+                output.parent.mkdir(parents=True, exist_ok=True)
+                with wave.open(str(output), "wb") as wav:
+                    wav.setnchannels(1); wav.setsampwidth(2); wav.setframerate(24000)
+                    wav.writeframes(b"\\x00\\x00" * 4096)
+                return output
+
+        with tempfile.TemporaryDirectory() as temp:
+            with self.assertRaisesRegex(RuntimeError, "produced silent audio"):
+                synthesize_voice_set(QwenSilentProvider(), "Together.", ["Qwen A", "Qwen B"], Path(temp) / "silent.wav")
+
+    def test_dialogue_quote_marker_wrappers_are_detected_as_exact_spans(self):
+        examples = [
+            '("A separate turn.")', '{"A separate turn."}', '["A separate turn."]',
+            '(""A separate turn."")', '{"\"A separate turn.\""}',
+        ]
+        for source in examples:
+            spans = _all_dialogue_spans(source)
+            self.assertTrue(spans, source)
+            self.assertIn("A separate turn.", source[spans[0][0]:spans[0][1]])
+
     def test_cast_signature_changes_when_saved_qwen_identity_changes(self):
         from app.tts.cast_provider import CastAwareProvider
         from app.tts.voice_profile import VoiceProfile
@@ -4286,6 +4395,29 @@ Rias Gremory
             self.assertEqual(len(summaries), 1, "fatal worker failure must produce one terminal result")
             self.assertEqual(summaries[0].chapters_failed, [1])
             self.assertIn("simulated planning failure", summaries[0].failure_details[1])
+
+    def test_generation_rejects_silent_non_qwen_character_audio_chunks(self):
+        from app.tts.generator import generate_chapter
+
+        class SilentPiper:
+            provider_id = "piper"
+            def synthesize(self, text, output_path, voice=None):
+                output = Path(output_path)
+                output.parent.mkdir(parents=True, exist_ok=True)
+                with wave.open(str(output), "wb") as wav:
+                    wav.setnchannels(1)
+                    wav.setsampwidth(2)
+                    wav.setframerate(24000)
+                    wav.writeframes(b"\\x00\\x00" * 8192)
+                return output
+
+        with tempfile.TemporaryDirectory() as temp:
+            chapter = Chapter(1, "Silent Voice", "This sentence must produce audible speech.")
+            with self.assertRaisesRegex(RuntimeError, "TTS audio chunk.*contains silence"):
+                generate_chapter(
+                    chapter, SilentPiper(), "Narrator", Path(temp) / "audio",
+                    narration_speed=1.0, pacing_profile="off",
+                )
 
     def test_generation_resume_reuses_completed_chunks_without_reopening_them(self):
         from app.tts.generator import generate_chapter

@@ -51,8 +51,18 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
             response = json.loads(bridge.dispatch("character.workbook.prompt.copy", "{}"))
         self.assertTrue(response.get("success"), response)
         self.assertTrue(response["data"]["copied"])
-        self.assertEqual(response["data"]["prompt_version"], "1.0")
+        self.assertEqual(response["data"]["prompt_version"], "2.0")
         clipboard.setText.assert_called_once_with(host.complete_book_gpt_prompt())
+
+    def test_workbook_manual_assignment_endpoint_accepts_sequential_multi_voice_mode(self):
+        self.assertIn('{"single", "chorus", "sequential", "alternating"}', self.host)
+        from app.chapters.assignment_utils import normalize_assignment
+        assignment = normalize_assignment(
+            {"start": 0, "end": 5, "text": "Hello", "source": "manual"},
+            ["Mira", "Rina"], "sequential",
+        )
+        self.assertEqual(assignment["speakers"], ["Mira", "Rina"])
+        self.assertEqual(assignment["multi_speaker_mode"], "sequential")
 
     def test_export_import_controls_use_preview_then_explicit_commit(self):
         self.assertIn("Series Character Reference", self.workbook)

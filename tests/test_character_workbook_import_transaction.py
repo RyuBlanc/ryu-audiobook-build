@@ -84,6 +84,65 @@ class CharacterWorkbookImportTransactionTests(unittest.TestCase):
         bridge = _WorkbookCommitBridge(project, chapter, state, plan, session)
         return bridge, project, chapter, state, plan, document
 
+    def test_commit_persists_multiple_speakers_and_split_source_metadata(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-workbook-multi-speaker-commit-") as tmp:
+            folder = Path(tmp)
+            bridge, project, chapter, state, plan, document = self._fixture(folder)
+            line = str(chapter.text)
+            plan["characters"].append({
+                "canonical_name": "Rina", "identity_base_name": "Rina",
+                "identity_variant": "", "aliases": [], "aliases_to_add": [], "notes": "Confirmed",
+                "library_id": "", "existing_voice_name": "", "action": "create", "series": "Silver Archive",
+            })
+            plan["assignments"] = [{
+                "passage_id": "passage-001::subturn-1", "chapter_id": "chapter-001",
+                "start": 0, "end": len(line), "text": line, "speaker": "Mira",
+                "speakers": ["Mira", "Rina"], "multi_speaker_mode": "chorus",
+                "series": "Silver Archive", "confidence": 0.98,
+                "source_passage_id": "passage-001", "source_passage_text": line,
+                "source_passage_start": 0, "source_passage_end": len(line),
+                "source_context_before": "The previous sentence.", "source_context_after": "The following sentence.",
+                "source_start_relative": 0, "source_end_relative": len(line),
+            }]
+            plan["summary"]["new_characters"] = 2
+            plan["summary"]["dialogue_assignments"] = 1
+            bridge._character_workbook_import_sessions["preview-token"]["plan_sha256"] = (
+                character_workbook_plan_fingerprint(plan)
+            )
+            library = folder / "character-library.json"
+            library.write_text(json.dumps({"version": 1, "active": [], "deleted": []}), encoding="utf-8")
+
+            def save_project():
+                (folder / "project.json").write_text("project saved", encoding="utf-8")
+                (folder / "chapters.json").write_text("chapters saved", encoding="utf-8")
+
+            project.save = Mock(side_effect=save_project)
+
+            def save_project_state(project_folder, payload):
+                (Path(project_folder) / "state.json").write_text(
+                    json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8"
+                )
+
+            with (
+                patch.object(host, "reusable_character_library_path", return_value=library),
+                patch.object(host, "read_character_workbook", return_value=document),
+                patch.object(host, "save_state", side_effect=save_project_state),
+            ):
+                result = bridge._character_workbook_import_commit({"token": "preview-token"})
+
+            self.assertTrue(result["imported"])
+            self.assertEqual(result["dialogue_assignments"], 1)
+            saved = chapter.dialogue_assignments[0]
+            self.assertEqual(saved["speaker"], "Mira")
+            self.assertEqual(saved["speakers"], ["Mira", "Rina"])
+            self.assertEqual(saved["multi_speaker_mode"], "chorus")
+            self.assertEqual(saved["source_passage_id"], "passage-001")
+            self.assertEqual(saved["source_passage_text"], line)
+            self.assertEqual(saved["source_start_relative"], 0)
+            self.assertEqual(saved["source_end_relative"], len(line))
+            self.assertEqual(saved["source_context_before"], "The previous sentence.")
+            self.assertEqual(saved["source_context_after"], "The following sentence.")
+
     def test_commit_persists_character_identity_and_outsourced_dialogue(self):
         with tempfile.TemporaryDirectory(prefix="ryu-workbook-commit-") as tmp:
             folder = Path(tmp)
