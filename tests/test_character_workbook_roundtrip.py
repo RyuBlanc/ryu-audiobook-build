@@ -727,13 +727,14 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                     "Chapter Context", "Series Character Reference", "Workbook Info",
                 ])
                 prompt_xml = ET.fromstring(archive.read("xl/worksheets/sheet1.xml"))
-                prompt_text = "\\n".join(
+                prompt_text = "\n".join(
                     node.text or "" for node in prompt_xml.iter(ns + "t")
                 )
                 self.assertIn("REVIEW REQUIRED", prompt_text)
                 self.assertIn("does NOT mean the speaker is unknowable", prompt_text)
                 self.assertIn("newly split dialogue rows are independent turns", prompt_text)
                 self.assertIn("Do not change Passage ID", prompt_text)
+                self.assertGreater(len(prompt_text.splitlines()), 20)
                 self.assertGreater(archive.getinfo("xl/worksheets/sheet4.xml").file_size, 0)
                 self.assertGreater(archive.getinfo("xl/worksheets/sheet5.xml").file_size, 0)
             self.assertEqual(document["schema_version"], 2)

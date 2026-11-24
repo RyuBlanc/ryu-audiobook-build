@@ -273,7 +273,7 @@ def character_workbook_book_revision(chapters):
 
 def complete_book_gpt_prompt() -> str:
     """Return the versioned task prompt embedded in every complete-book workbook."""
-    return "\\n".join([
+    return "\n".join([
         "You are the careful character-attribution assistant completing the attached Ryu Audiobook COMPLETE-BOOK Character Studio workbook. Return a completed .xlsx workbook file, not only a written report.",
         "",
         "SOURCE FIRST — READ THE WHOLE BOOK",
