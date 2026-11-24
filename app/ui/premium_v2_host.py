@@ -81,6 +81,7 @@ from app.core.character_workbook import (
     plan_complete_book_character_workbook_import,
     refresh_complete_book_character_workbook_bytes,
     character_workbook_plan_fingerprint,
+    complete_book_gpt_prompt,
 )
 from app.production_metadata import missing_required_metadata_fields, normalize_metadata_text
 from app.version import APP_NAME, full_version
@@ -593,6 +594,7 @@ class PremiumV2Bridge(QObject):
                 "character.dialogue.suggestions.list": self._character_dialogue_suggestions_list,
                 "character.dialogue.suggestion.skip": self._character_dialogue_suggestion_skip,
                 "character.analysis.status": self._character_analysis_status,
+                "character.workbook.prompt.copy": self._character_workbook_prompt_copy,
                 "character.workbook.export": self._character_workbook_export,
                 "character.workbook.import.preview": self._character_workbook_import_preview,
                 "character.workbook.import.commit": self._character_workbook_import_commit,
@@ -773,6 +775,7 @@ class PremiumV2Bridge(QObject):
             "character.dialogue.suggestions.list": True,
             "character.dialogue.suggestion.skip": True,
             "character.analysis.status": True,
+            "character.workbook.prompt.copy": True,
             "character.workbook.export": True,
             "character.workbook.import.preview": True,
             "character.workbook.import.commit": True,
@@ -5436,6 +5439,15 @@ class PremiumV2Bridge(QObject):
             "narration_count": sum(1 for row in export_rows if row.get("kind") == "narration"),
             "series": series,
         }
+
+    def _character_workbook_prompt_copy(self, _payload: dict[str, Any]) -> dict[str, Any]:
+        """Copy the same versioned GPT prompt used in complete-book exports."""
+        prompt = complete_book_gpt_prompt()
+        clipboard = QApplication.clipboard()
+        if clipboard is None:
+            raise RuntimeError("The system clipboard is unavailable. Open a complete-book workbook and copy the prompt from its GPT Prompt sheet.")
+        clipboard.setText(prompt)
+        return {"copied": True, "prompt_version": "1.0", "characters": len(prompt)}
 
     def _character_workbook_export(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Export a complete-book GPT workbook, retaining chapter export compatibility."""

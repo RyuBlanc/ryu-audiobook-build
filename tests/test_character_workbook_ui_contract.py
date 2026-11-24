@@ -33,12 +33,26 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
 
     def test_workbook_commands_are_registered_and_advertised(self):
         for command, handler in {
+            "character.workbook.prompt.copy": "_character_workbook_prompt_copy",
             "character.workbook.export": "_character_workbook_export",
             "character.workbook.import.preview": "_character_workbook_import_preview",
             "character.workbook.import.commit": "_character_workbook_import_commit",
         }.items():
             self.assertIn(f'"{command}": self.{handler}', self.host)
             self.assertIn(f'"{command}": True', self.host)
+
+    def test_gpt_prompt_copy_command_copies_the_same_complete_book_prompt(self):
+        clipboard = SimpleNamespace(setText=unittest.mock.Mock())
+        window = QMainWindow()
+        self.addCleanup(window.close)
+        bridge = host.PremiumV2Bridge(window)
+        self.addCleanup(bridge.deleteLater)
+        with patch.object(host.QApplication, "clipboard", return_value=clipboard):
+            response = json.loads(bridge.dispatch("character.workbook.prompt.copy", "{}"))
+        self.assertTrue(response.get("success"), response)
+        self.assertTrue(response["data"]["copied"])
+        self.assertEqual(response["data"]["prompt_version"], "1.0")
+        clipboard.setText.assert_called_once_with(host.complete_book_gpt_prompt())
 
     def test_export_import_controls_use_preview_then_explicit_commit(self):
         self.assertIn("Series Character Reference", self.workbook)
@@ -67,6 +81,7 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn("function installCharacterWorkbookHelpButton()", self.adapter)
         self.assertIn("characterWorkbookHelpText()", self.adapter)
         self.assertIn("characterWorkbookHelp", self.adapter)
+        self.assertIn("character.workbook.prompt.copy", self.adapter)
         self.assertIn("GPT Prompt sheet", self.adapter)
         self.assertIn("button.closest('#characters [data-character-workbook-action]')", self.adapter)
         self.assertIn("button.closest('#exportCharacterWorkbook, #importCharacterWorkbook')", self.adapter)

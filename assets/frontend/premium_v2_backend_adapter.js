@@ -9659,8 +9659,8 @@ function renderProductionMetadataGate(active) {
       'COMPLETE-BOOK GPT WORKBOOK',
       '',
       '1. Export the complete-book workbook. It opens on the GPT Prompt tab.',
-      '2. Upload the entire workbook to ChatGPT. Copy the text between BEGIN PROMPT and END PROMPT on the GPT Prompt tab and paste it into ChatGPT.',
-      '3. Ask GPT to read every chapter in Chapter Context, resolve every Dialogue row independently, update Character Register, and return a completed .xlsx copy.',
+      '2. Click this i button to copy the full GPT task prompt to the clipboard. This also works with an older refreshed workbook that does not have a GPT Prompt tab.',
+      '3. Upload the entire exported or refreshed workbook to ChatGPT and paste the copied prompt. Ask GPT to return a completed .xlsx copy. Keep the workbook and all Chapter Context sheets attached.',
       '4. Import the completed copy and inspect the preview before confirming.',
       '',
       'IMPORTANT: REVIEW REQUIRED means a previous answer was not carried across a changed or newly split passage. It does not mean the speaker is unknown. GPT must use the complete scene and book context to identify each new turn.',
@@ -9692,7 +9692,14 @@ function renderProductionMetadataGate(active) {
           if (errorTitle) window.alert(errorTitle + '\n\n' + detail);
         });
       };
-      if (button.id === 'characterWorkbookHelp') { handle(() => window.alert(characterWorkbookHelpText())); return; }
+      if (button.id === 'characterWorkbookHelp') {
+        handle(async () => {
+          const copied = await call('character.workbook.prompt.copy');
+          if (!copied?.copied) throw new Error('The GPT prompt could not be copied to the clipboard.');
+          window.alert(characterWorkbookHelpText() + '\\n\\nThe complete GPT prompt (version ' + String(copied.prompt_version || '1.0') + ') has been copied. Upload your existing refreshed workbook and paste the prompt into ChatGPT.');
+        });
+        return;
+      }
       if (button.id === 'addLibraryCharacter') { handle(() => openLibraryEditor(null)); return; }
       if (button.id === 'exportCharacterLibrary') { handle(() => exportCharacterLibraryFile()); return; }
       if (button.id === 'importCharacterLibrary') { handle(() => importCharacterLibraryFile()); return; }
