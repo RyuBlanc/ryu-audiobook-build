@@ -371,6 +371,74 @@ class Stage3CastRoutingTests(unittest.TestCase):
 
 
 
+    def test_multi_speaker_modes_route_expected_voice_sequences(self):
+        narrator = _RecordingNarratorProvider()
+        profiles = {
+            "Mira Voice": VoiceProfile(name="Mira Voice", provider="piper", voice_id="mira"),
+            "Ren Voice": VoiceProfile(name="Ren Voice", provider="piper", voice_id="ren"),
+        }
+        provider = CastAwareProvider(
+            narrator, "Narrator", profiles,
+            {"Mira": "Mira Voice", "Ren": "Ren Voice"},
+        )
+
+        def assignment(text, quote, passage_id, mode):
+            start = text.index(quote)
+            return {
+                "passage_id": passage_id,
+                "start": start,
+                "end": start + len(quote),
+                "text": quote,
+                "speaker": "Mira",
+                "speakers": ["Mira", "Ren"],
+                "multi_speaker_mode": mode,
+                "source": "manual",
+            }
+
+        chorus_text = 'She whispered, “Stay here.”'
+        chorus = provider.split_for_cast(
+            chorus_text, "Narrator",
+            dialogue_assignments=[
+                assignment(chorus_text, "“Stay here.”", "ps-chorus", "chorus")
+            ],
+        )
+        self.assertEqual(
+            [(spoken, voice) for spoken, voice in chorus if "Stay here." in spoken],
+            [("Stay here.", ["Mira Voice", "Ren Voice"])],
+        )
+
+        sequential_text = 'She whispered, “Stay here.”'
+        sequential = provider.split_for_cast(
+            sequential_text, "Narrator",
+            dialogue_assignments=[
+                assignment(sequential_text, "“Stay here.”", "ps-sequential", "sequential")
+            ],
+        )
+        self.assertEqual(
+            [(spoken, voice) for spoken, voice in sequential if "Stay here." in spoken],
+            [("Stay here.", "Mira Voice"), ("Stay here.", "Ren Voice")],
+        )
+
+        alternating_text = 'She whispered, “Stay here.” He replied, “I will.”'
+        alternating = provider.split_for_cast(
+            alternating_text, "Narrator",
+            dialogue_assignments=[
+                assignment(alternating_text, "“Stay here.”", "ps-alternating-1", "alternating"),
+                {
+                    **assignment(alternating_text, "“I will.”", "ps-alternating-2", "alternating"),
+                    "speaker": "Ren",
+                    "speakers": ["Mira", "Ren"],
+                },
+            ],
+        )
+        self.assertEqual(
+            [(spoken, voice) for spoken, voice in alternating if spoken in {"Stay here.", "I will."}],
+            [("Stay here.", "Mira Voice"), ("I will.", "Ren Voice")],
+        )
+        self.assertTrue(any("She whispered" in spoken and voice == "Narrator" for spoken, voice in alternating))
+        self.assertTrue(any("He replied" in spoken and voice == "Narrator" for spoken, voice in alternating))
+
+
 class Stage3HostSafetyContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
