@@ -59,3 +59,19 @@ def provider_uses_qwen_voice(provider, voice: str | list[str] | tuple[str, ...] 
         except Exception:
             return False
     return False
+
+
+
+def provider_uses_character_voice(provider, voice: str | list[str] | tuple[str, ...] | set[str] | None = None) -> bool:
+    """Return whether a chunk is routed to a saved character profile rather than narration."""
+    if isinstance(voice, (list, tuple, set)):
+        return any(provider_uses_character_voice(provider, item) for item in voice)
+    if provider_uses_qwen_voice(provider, voice):
+        return True
+    checker = getattr(provider, "is_character_voice", None)
+    if callable(checker):
+        try:
+            return checker(voice) is True
+        except Exception:
+            return False
+    return False

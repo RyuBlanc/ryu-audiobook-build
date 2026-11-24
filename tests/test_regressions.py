@@ -3721,7 +3721,7 @@ class RegressionTests(unittest.TestCase):
                 output.parent.mkdir(parents=True, exist_ok=True)
                 with wave.open(str(output), "wb") as wav:
                     wav.setnchannels(1); wav.setsampwidth(2); wav.setframerate(24000)
-                    wav.writeframes(b"\\x00\\x00" * 4096)
+                    wav.writeframes(bytes(8192))
                 return output
 
         with tempfile.TemporaryDirectory() as temp:
@@ -3746,7 +3746,7 @@ class RegressionTests(unittest.TestCase):
                 output.parent.mkdir(parents=True, exist_ok=True)
                 with wave.open(str(output), "wb") as wav:
                     wav.setnchannels(1); wav.setsampwidth(2); wav.setframerate(24000)
-                    wav.writeframes(b"\\x00\\x00" * 4096)
+                    wav.writeframes(bytes(8192))
                 return output
 
         with tempfile.TemporaryDirectory() as temp:
@@ -4401,6 +4401,9 @@ Rias Gremory
 
         class SilentPiper:
             provider_id = "piper"
+            def is_character_voice(self, voice):
+                return voice == "Test Character"
+
             def synthesize(self, text, output_path, voice=None):
                 output = Path(output_path)
                 output.parent.mkdir(parents=True, exist_ok=True)
@@ -4408,14 +4411,14 @@ Rias Gremory
                     wav.setnchannels(1)
                     wav.setsampwidth(2)
                     wav.setframerate(24000)
-                    wav.writeframes(b"\\x00\\x00" * 8192)
+                    wav.writeframes(bytes(16384))
                 return output
 
         with tempfile.TemporaryDirectory() as temp:
             chapter = Chapter(1, "Silent Voice", "This sentence must produce audible speech.")
             with self.assertRaisesRegex(RuntimeError, "TTS audio chunk.*contains silence"):
                 generate_chapter(
-                    chapter, SilentPiper(), "Narrator", Path(temp) / "audio",
+                    chapter, SilentPiper(), "Test Character", Path(temp) / "audio",
                     narration_speed=1.0, pacing_profile="off",
                 )
 

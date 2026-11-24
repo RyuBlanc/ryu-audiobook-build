@@ -342,6 +342,29 @@ class CastAwareProvider(TTSProvider):
             exact = str(assignment.get("text") or "")
             if start < 0 or end <= start or not exact.strip():
                 continue
+            if not assignment.get("source_passage_id") and text[start:end] != exact:
+                expected_norm, _ = self._normalized_text_with_map(exact)
+                prepared_norm, prepared_map = self._normalized_text_with_map(text)
+                positions = []
+                if expected_norm:
+                    search_from = 0
+                    while True:
+                        found = prepared_norm.find(expected_norm, search_from)
+                        if found < 0:
+                            break
+                        positions.append(found)
+                        search_from = found + 1
+                if len(positions) != 1:
+                    continue
+                mapped_start_index = positions[0]
+                mapped_end_index = mapped_start_index + len(expected_norm) - 1
+                if mapped_end_index >= len(prepared_map):
+                    continue
+                start = prepared_map[mapped_start_index]
+                end = prepared_map[mapped_end_index] + 1
+                assignment = dict(assignment)
+                exact = text[start:end]
+                assignment.update({"start": start, "end": end, "text": exact})
             valid_assignments.append((start, end, exact, assignment))
 
         # App offsets refer to original chapter text. TTS receives cleaned narration,
@@ -652,6 +675,12 @@ class CastAwareProvider(TTSProvider):
         if profile is not None:
             return str(profile.provider or "").casefold() == "qwen-character"
         return str(getattr(self.narrator_provider, "provider_id", "") or "").casefold() == "qwen-character"
+
+    def is_character_voice(self, voice: str | list[str] | tuple[str, ...] | None = None) -> bool:
+        """Identify any saved cast profile, regardless of its TTS model provider."""
+        if isinstance(voice, (list, tuple, set)):
+            return any(self.is_character_voice(item) for item in voice)
+        return str(voice or "").strip().casefold() in self.profiles
 
     def set_generation_context(self, context: dict | None = None) -> None:
         """Retain the current story window until the selected child voice is resolved."""

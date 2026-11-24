@@ -17,7 +17,7 @@ from app.tts.chunker import split_text
 from app.tts.narration import apply_pronunciation_dictionary_with_counts, prepare_for_narration
 from app.tts.pacing import append_silence, pause_after_ms, split_for_pacing
 from app.tts.multivoice import synthesize_voice_set
-from app.tts.audio_validation import provider_uses_qwen_voice, wav_has_audible_content
+from app.tts.audio_validation import provider_uses_character_voice, provider_uses_qwen_voice, wav_has_audible_content
 
 
 @dataclass
@@ -433,11 +433,12 @@ def generate_chapter(
                 f"Audio chunk {index + 1}/{len(chunks)} is missing, truncated, or not a valid PCM WAV: "
                 f"{output.name}"
             )
-        if not wav_has_audible_content(output):
-            provider_label = "Qwen" if provider_uses_qwen_voice(provider, chunks_with_voices[index][1]) else "TTS"
+        chunk_voice = chunks_with_voices[index][1]
+        if provider_uses_character_voice(provider, chunk_voice) and not wav_has_audible_content(output):
+            provider_label = "Qwen" if provider_uses_qwen_voice(provider, chunk_voice) else "Character TTS"
             raise RuntimeError(
                 f"{provider_label} audio chunk {index + 1}/{len(chunks)} contains silence instead of speech. "
-                "The chunk was not marked complete; check the voice provider log and retry."
+                "The chunk was not marked complete; check the character voice provider log and retry."
             )
 
         completed.add(index)
