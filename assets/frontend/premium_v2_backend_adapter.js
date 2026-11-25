@@ -3420,7 +3420,6 @@
         await refreshChapters();
         await refreshCharacters();
         await refreshCharacterLibrary();
-        await refreshCharacterDialogueReview?.();
         await renderCharacterStudioLive();
         await renderDialogueReview();
         message('Marked the exact source range as Narrator.');
@@ -4653,6 +4652,7 @@
       const canAssign = item.can_manual_assign === true && !isNarration && options.length > 0;
       const optionHtml = options.map((option,optionIndex) =>
         '<option value="' + optionIndex + '">' + esc(option.canonical_name) + ' · ' + esc(option.series) +
+        (option.pending_workbook_entry ? ' · from this workbook’s Character Register' : '') +
         (option.voice_profile ? ' · ' + esc(option.voice_profile) : ' · voice not assigned') + '</option>'
       ).join('');
       const reasons = (Array.isArray(item.reasons) ? item.reasons : []).map(reason => '<li>' + esc(reason) + '</li>').join('');
@@ -4721,7 +4721,7 @@
         if (result) result.textContent = 'Validating exact passage ID, revision, offsets and source text…';
         try {
           const activeCharacter = await ensureCharacterInActiveProject(
-            selected.canonical_name, selected.series, selected.voice_profile || ''
+            selected.canonical_name, selected.series, selected.voice_profile || '', selected.aliases || []
           );
           await call('chapter.dialogue.assign', {
             dialogue_text:String(item.text || ''),
@@ -5256,7 +5256,7 @@
     if (actions) actions.hidden = false;
     window.ryuPremiumSelectedDialogueSpeakers = [];
   }
-  async function ensureCharacterInActiveProject(name, preferredSeries = '', preferredProfile = '') {
+  async function ensureCharacterInActiveProject(name, preferredSeries = '', preferredProfile = '', preferredAliases = []) {
     const canonical = String(name || '').trim();
     if (!canonical) throw new Error('Choose a character before assigning dialogue.');
     const requestedSeries = String(preferredSeries || '').trim();
@@ -5296,7 +5296,8 @@
     const result = await call('character.create', {
       name:characterCanonical(saved || {name:canonical}),
       series,
-      aliases:characterAliases(saved || {}),
+      aliases:[...new Set([...characterAliases(saved || {}), ...(Array.isArray(preferredAliases) ? preferredAliases : [])]
+        .map(value => String(value || '').trim()).filter(value => value && value.toLowerCase() !== canonical.toLowerCase()))],
       short:String(saved?.short || canonical.split(/\\s+/)[0]),
       notes:String(saved?.notes || ''),
       dialogue_sample:String(saved?.dialogue_sample || ''),
