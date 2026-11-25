@@ -355,5 +355,17 @@ class DialoguePassageIndexTests(unittest.TestCase):
         vocalization = '“Zzzz…Zzzz…”'
         self.assertFalse(is_embedded_quotation_reference(vocalization, 0, len(vocalization)))
 
+
+    def test_external_developer_interview_quote_stays_in_narrator_stream(self):
+        from app.chapters.characters import is_embedded_quotation_reference
+
+        source = (
+            'I recalled that in an interview, one of the developers stated: '
+            '“We came up with this really amusing scene, but we scrapped it.”'
+        )
+        start = source.index('“')
+        end = source.index('”', start) + 1
+        self.assertTrue(is_embedded_quotation_reference(source, start, end))
+
 if __name__ == "__main__":
     unittest.main()
