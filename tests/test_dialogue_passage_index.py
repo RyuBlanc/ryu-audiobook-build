@@ -260,5 +260,72 @@ class DialoguePassageIndexTests(unittest.TestCase):
                 self.assertEqual(chapter.text[row["start"]:row["end"]], row["text"])
 
 
+
+    def test_sentence_final_quoted_phrase_inside_unfinished_narration_is_not_dialogue(self):
+        from app.chapters.speaker_segmentation import segment_chapter_speakers
+
+        source = (
+            'The protagonist was going to cause an event that would go far beyond '
+            '“some issues.” and put everyone in danger.'
+        )
+        segments = segment_chapter_speakers(Chapter(1, "Inline phrase", source))
+        quote_start = source.index('“some issues.”')
+        quote = next(row for row in segments if row.start <= quote_start < row.end)
+        self.assertEqual(quote.kind, "narration")
+        self.assertEqual(quote.source, "automatic_embedded_quote")
+
+    def test_narrative_proverb_introduction_is_not_a_speaker_label(self):
+        from app.chapters.speaker_segmentation import segment_chapter_speakers
+
+        source = (
+            'There was a proverb I found when researching the labyrinths: '
+            '“To consider the nature of dungeons is like questioning death.”'
+        )
+        segments = segment_chapter_speakers(Chapter(1, "Proverb", source))
+        self.assertTrue(any(
+            row.kind == "narration" and row.source == "automatic_embedded_quote"
+            and "nature of dungeons" in row.text
+            for row in segments
+        ))
+
+    def test_reported_speech_introduction_keeps_the_quoted_words_as_dialogue(self):
+        from app.chapters.speaker_segmentation import segment_chapter_speakers
+
+        source = 'She disclosed that “Everything I said back then was a front…”'
+        segments = segment_chapter_speakers(Chapter(1, "Reported speech", source))
+        self.assertTrue(any(
+            row.kind == "needs_speaker_review" and "Everything I said" in row.text
+            for row in segments
+        ))
+
+    def test_dash_narration_and_perspective_headings_are_not_spoken_turns(self):
+        from app.chapters.speaker_segmentation import segment_chapter_speakers
+
+        source = (
+            'I was about to answer.\n'
+            '—gave my reply.\n\n'
+            '—Yukine’s Perspective— How is she for real?\n\n'
+            '—our teacher told us to take our seats. My savior!\n\n'
+            '—nope, no chance at all.\n'
+            '“Yes, I understand.”'
+        )
+        segments = segment_chapter_speakers(Chapter(1, "Dash boundaries", source))
+        dash_rows = [row for row in segments if row.text.startswith("—")]
+        self.assertTrue(dash_rows)
+        self.assertTrue(all(row.kind == "narration" for row in dash_rows))
+        self.assertTrue(any(
+            row.kind == "needs_speaker_review" and row.text == '“Yes, I understand.”'
+            for row in segments
+        ))
+
+    def test_uppercase_dash_spoken_turn_remains_reviewable_dialogue(self):
+        from app.chapters.speaker_segmentation import segment_chapter_speakers
+
+        source = '—Yes, I heard you.'
+        segments = segment_chapter_speakers(Chapter(1, "Dash speech", source))
+        self.assertEqual(len(segments), 1)
+        self.assertEqual(segments[0].kind, "needs_speaker_review")
+
+
 if __name__ == "__main__":
     unittest.main()
