@@ -531,7 +531,7 @@ def is_embedded_quotation_reference(text: str, start: int, end: int) -> bool:
         return False
     # Ellipsis-only quoted turns express silence, not a spoken character line.
     # They stay in the source/narrator stream and never require a fake speaker.
-    if re.fullmatch(r"[.…⋯‥\\s]+", body):
+    if re.fullmatch(r"[.…⋯‥\s]+", body):
         return True
 
     speech_verbs = (
