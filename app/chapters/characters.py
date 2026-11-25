@@ -527,14 +527,14 @@ def is_embedded_quotation_reference(text: str, start: int, end: int) -> bool:
     if len(quote_text) < 3 or (quote_text[0], quote_text[-1]) not in quote_pairs:
         return False
     body = quote_text[1:-1].strip()
-    if not body or re.search(r"[.!?…。！？]\s*$", body):
+    if not body:
         return False
 
     speech_verbs = (
         "said|asked|replied|answered|shouted|yelled|whispered|muttered|called|cried|"
         "exclaimed|continued|added|insisted|wondered|demanded|begged|groaned|sighed|"
         "laughed|snapped|stammered|murmured|screamed|announced|explained|remarked|"
-        "responded|mumbled|roared"
+        "responded|mumbled|roared|stated|disclosed|told"
     )
     preceding_speech_tag = re.compile(
         r"\b(?:" + speech_verbs + r")\b"
@@ -563,16 +563,42 @@ def is_embedded_quotation_reference(text: str, start: int, end: int) -> bool:
     if preceding_speech_tag.search(prefix[-160:]) or following_speech_tag.search(line_suffix[:160]):
         return False
 
-    # Explicit speaker labels use a colon before the quote. Preserve these as
-    # dialogue even when the label is an unfamiliar script, an invalid decorated
-    # name, or a name the candidate detector will later reject. Dialogue counting
-    # and speaker validation are separate responsibilities.
-    if line_prefix.rstrip().endswith(":"):
+    # Reported utterances remain dialogue when the source explicitly introduces
+    # them with a speech verb (for example, "she disclosed that …").
+    reported_speech_intro = re.search(
+        r"\\b(?:said|asked|replied|answered|shouted|yelled|whispered|muttered|called|cried|"
+        r"exclaimed|continued|added|insisted|wondered|demanded|begged|groaned|sighed|"
+        r"laughed|snapped|stammered|murmured|screamed|announced|explained|remarked|"
+        r"responded|mumbled|roared|stated|disclosed|told)\\b"
+        r"(?:\\s+(?:me|him|her|them|us|you))?\\s+(?:that\\s+)?[,;:]?\\s*$",
+        prefix[-180:], flags=re.IGNORECASE,
+    )
+    if reported_speech_intro:
         return False
 
-    # Inside a sentence, a quotation without a sentence-ending mark is a
-    # referenced word/phrase or thought, not a separate spoken turn.
-    if prefix.strip() and not re.search(r"[.!?…。！？][\"”’']?\s*$", prefix[-120:]):
+    # Quoted proverbs, summaries, terms and examples are narrator references,
+    # not a new voice merely because the quotation happens to end a sentence.
+    narrative_introduction = re.search(
+        r"\\b(?:proverb|motto|summary|phrase|term|word|idiom|example|quotation|quote|"
+        r"thought|memory|one-sentence summary)\\s*:\\s*$",
+        prefix[-180:], flags=re.IGNORECASE,
+    )
+    if narrative_introduction:
+        return True
+
+    # A colon is a speaker label only when the complete prefix is a short label.
+    # Long prose such as "the game offers this summary:" is not a speaker name.
+    if line_prefix.rstrip().endswith(":"):
+        label = line_prefix.strip()[:-1].strip()
+        if label and len(label) <= 60 and len(label.split()) <= 5 and not re.search(r"[.!?…。！？]", label):
+            return False
+        if len(label) > 60 or re.search(r"[.!?…。！？]", label):
+            return True
+
+    # A quotation inside an unfinished sentence is a referenced word, phrase,
+    # remembered wording or thought, even when the quote itself contains a full
+    # stop (for example: "the protagonist went far beyond \"some issues.\"").
+    if prefix.strip() and not re.search(r"[.!?…。！？][\\"”’']?\\s*$", prefix[-120:]):
         return True
 
     # A quoted term can also begin a sentence ("Accidents" were common).
@@ -598,7 +624,22 @@ def _all_dialogue_spans(
             first = ord(stripped[0])
             if first in (0x2014, 0x2013, 0x2D):
                 dialogue = stripped[1:].strip()
-                if len(dialogue) >= 2:
+                perspective_heading = bool(re.match(
+                    r"^[—–-]\\s*[^.!?]{1,100}\\bperspective\\s*[—–-]",
+                    stripped, flags=re.IGNORECASE,
+                ))
+                first_content = dialogue[:1]
+                # Em dashes also join a narrator's interrupted sentence, an
+                # internal thought, or a perspective heading. Treat a dash line
+                # as dialogue only when it begins like a spoken turn. Ambiguous
+                # lower-case dash continuations remain narrator text and can be
+                # explicitly corrected in Chapter Studio's Dialogue Check.
+                spoken_starter = bool(first_content) and (
+                    not first_content.isascii()
+                    or not first_content.isalpha()
+                    or first_content.isupper()
+                )
+                if len(dialogue) >= 2 and not perspective_heading and spoken_starter:
                     start = offset + (len(line) - len(stripped))
                     end = offset + len(line.rstrip("\r\n"))
                     spans.append((start, end, dialogue))
