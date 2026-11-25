@@ -3407,7 +3407,8 @@
         if (speakerAction) {
           closeCharacterWorkbookDialog();
           await openCharacterAssignmentPopover({
-            id:passageId, chapter_number:Number(chapter.number), chapter_title:String(chapter.title || ''),
+            canonical_passage_id:passageId, chapter_revision:revision,
+            chapter_number:Number(chapter.number), chapter_title:String(chapter.title || ''),
             start,end,text:textValue
           }, window.innerWidth / 2, window.innerHeight / 2);
           return;
@@ -5222,7 +5223,8 @@
     window.ryuPremiumPendingDialogueChapter = Number(passage.chapter_number);
     window.ryuPremiumPendingDialogueStart = Number(passage.start);
     window.ryuPremiumPendingDialogueEnd = Number(passage.end);
-    window.ryuPremiumPendingDialogueId = String(passage.id || '');
+    window.ryuPremiumPendingDialogueId = String(passage.canonical_passage_id || '');
+    window.ryuPremiumPendingDialogueRevision = String(passage.chapter_revision || '');
     window.__ryuCharacterAssignmentAnchor = {x:Number(x || 0),y:Number(y || 0)};
     const priorNames = Array.isArray(passage.speakers) ? passage.speakers : (passage.speaker ? [passage.speaker] : []);
     window.ryuPremiumSelectedDialogueSpeakers = priorNames.map(name => {
@@ -5255,6 +5257,8 @@
     const actions = $('ryuMultiSpeakerSelectionActions');
     if (actions) actions.hidden = false;
     window.ryuPremiumSelectedDialogueSpeakers = [];
+    window.ryuPremiumPendingDialogueId = '';
+    window.ryuPremiumPendingDialogueRevision = '';
   }
   async function ensureCharacterInActiveProject(name, preferredSeries = '', preferredProfile = '', preferredAliases = []) {
     const canonical = String(name || '').trim();
@@ -5345,6 +5349,8 @@
     }
     const result = await call('chapter.dialogue.assign',{
       dialogue_text:dialogueText,speakers,series,chapter_number:chapterNumber,start,end,
+      passage_id:String(window.ryuPremiumPendingDialogueId || ''),
+      chapter_revision:String(window.ryuPremiumPendingDialogueRevision || ''),
       mode:speakers.length > 1 ? 'chorus' : 'single',source:assignmentSource,confidence:assignmentConfidence
     });
     closeCharacterAssignmentPopover();
