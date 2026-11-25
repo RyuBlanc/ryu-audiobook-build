@@ -5923,13 +5923,15 @@ class PremiumV2Bridge(QObject):
                     })
             character_options = []
             seen_character_options = set()
-            for row in [
-                *(review_state.get("characters") or []),
-                *list_reusable_characters(review_series),
-            ]:
+            option_sources = [
+                *((row, False) for row in (review_state.get("characters") or [])),
+                *((row, False) for row in list_reusable_characters(review_series)),
+                *((row, True) for row in (plan.get("characters") or [])),
+            ]
+            for row, from_workbook_register in option_sources:
                 if not isinstance(row, dict):
                     continue
-                name = str(row.get("name") or row.get("primary_name") or "").strip()
+                name = str(row.get("name") or row.get("primary_name") or row.get("canonical_name") or "").strip()
                 option_series = str(row.get("series") or review_series or "").strip()
                 if not name or not option_series:
                     continue
@@ -5941,8 +5943,9 @@ class PremiumV2Bridge(QObject):
                     "canonical_name": name,
                     "series": option_series,
                     "identity_variant": str(row.get("identity_variant") or ""),
-                    "voice_profile": str(row.get("voice_profile") or row.get("voice_name") or row.get("voice") or ""),
+                    "voice_profile": str(row.get("voice_profile") or row.get("voice_name") or row.get("voice") or row.get("existing_voice_name") or ""),
                     "aliases": list(row.get("aliases") or []),
+                    "pending_workbook_entry": bool(from_workbook_register and not row.get("library_id")),
                 })
             character_options.sort(key=lambda row: (row["series"].casefold(), row["canonical_name"].casefold()))
             review_items.sort(key=lambda row: (
