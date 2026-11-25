@@ -342,5 +342,18 @@ class DialoguePassageIndexTests(unittest.TestCase):
             with self.subTest(source=source):
                 self.assertFalse(is_embedded_quotation_reference(source, start, end))
 
+
+    def test_ellipsis_only_quoted_silence_is_not_unassigned_dialogue(self):
+        from app.chapters.characters import is_embedded_quotation_reference
+
+        examples = ['“……”', '“…………”', '“……………”', '「……」', '"..."']
+        for source in examples:
+            start = 0
+            end = len(source)
+            with self.subTest(source=source):
+                self.assertTrue(is_embedded_quotation_reference(source, start, end))
+        vocalization = '“Zzzz…Zzzz…”'
+        self.assertFalse(is_embedded_quotation_reference(vocalization, 0, len(vocalization)))
+
 if __name__ == "__main__":
     unittest.main()
