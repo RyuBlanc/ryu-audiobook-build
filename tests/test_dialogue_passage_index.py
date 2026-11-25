@@ -367,5 +367,10 @@ class DialoguePassageIndexTests(unittest.TestCase):
         end = source.index('”', start) + 1
         self.assertTrue(is_embedded_quotation_reference(source, start, end))
 
+        in_world = 'The academy director stated: “We will begin the trial.”'
+        start = in_world.index('“')
+        end = in_world.index('”', start) + 1
+        self.assertFalse(is_embedded_quotation_reference(in_world, start, end))
+
 if __name__ == "__main__":
     unittest.main()
