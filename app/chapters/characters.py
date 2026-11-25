@@ -565,22 +565,21 @@ def is_embedded_quotation_reference(text: str, start: int, end: int) -> bool:
     paragraph_start = 0 if paragraph_break < 0 else paragraph_break + (4 if text.startswith("\r\n\r\n", paragraph_break) else 2)
     prefix = text[paragraph_start:start]
 
-    if preceding_speech_tag.search(prefix[-160:]) or following_speech_tag.search(line_suffix[:160]):
-        return False
-
     # Quotes attributed to external commentary (developer interviews, author
     # notes, guides or documentation) are narrator references, not fictional
     # character turns. This avoids requiring an unlisted real-world speaker.
     external_quote_source = re.search(
-        r"\b(?:in\s+(?:an?\s+)?interview|interview|game\s+developer|developers?|author|authors|"
-        r"creator|creators|producer|producers|director|directors|interviewer|staff|"
-        r"guide|manual|documentation|press\s+release)\b.{0,180}"
+        r"\b(?:in\s+(?:an?\s+)?interview|interview|game\s+developers?|developers?|authors?|creators?|"
+        r"game\s+director|game\s+producer|interviewer|guide|manual|documentation|press\s+release)\b.{0,180}"
         r"\b(?:said|stated|explained|remarked|noted|wrote|mentioned|described)\b"
         r"[^.!?…。！？]{0,40}[:,;]?\s*$",
         prefix[-240:], flags=re.IGNORECASE,
     )
     if external_quote_source:
         return True
+
+    if preceding_speech_tag.search(prefix[-160:]) or following_speech_tag.search(line_suffix[:160]):
+        return False
 
     # Reported utterances remain dialogue when the source explicitly introduces
     # them with a speech verb (for example, "she disclosed that …").
