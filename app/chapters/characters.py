@@ -625,7 +625,7 @@ def _all_dialogue_spans(
             if first in (0x2014, 0x2013, 0x2D):
                 dialogue = stripped[1:].strip()
                 perspective_heading = bool(re.match(
-                    r"^[—–-]\\s*[^.!?]{1,100}\\bperspective\\s*[—–-]",
+                    r"^[—–-]\s*[^.!?]{1,100}\bperspective\s*[—–-]",
                     stripped, flags=re.IGNORECASE,
                 ))
                 first_content = dialogue[:1]
