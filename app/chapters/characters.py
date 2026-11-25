@@ -534,7 +534,8 @@ def is_embedded_quotation_reference(text: str, start: int, end: int) -> bool:
         "said|asked|replied|answered|shouted|yelled|whispered|muttered|called|cried|"
         "exclaimed|continued|added|insisted|wondered|demanded|begged|groaned|sighed|"
         "laughed|snapped|stammered|murmured|screamed|announced|explained|remarked|"
-        "responded|mumbled|roared|stated|disclosed|told"
+        "responded|mumbled|roared|stated|states|state|says|say|disclosed|told|tells|explains|explain|explained|"
+        "claims|claimed|mentions|mentioned|describes|described"
     )
     preceding_speech_tag = re.compile(
         r"\b(?:" + speech_verbs + r")\b"
@@ -569,7 +570,8 @@ def is_embedded_quotation_reference(text: str, start: int, end: int) -> bool:
         r"\b(?:said|asked|replied|answered|shouted|yelled|whispered|muttered|called|cried|"
         r"exclaimed|continued|added|insisted|wondered|demanded|begged|groaned|sighed|"
         r"laughed|snapped|stammered|murmured|screamed|announced|explained|remarked|"
-        r"responded|mumbled|roared|stated|disclosed|told)\b"
+        r"responded|mumbled|roared|stated|states|state|says|say|disclosed|told|tells|explains|explain|explained|"
+        r"claims|claimed|mentions|mentioned|describes|described)\b"
         r"(?:\s+(?:me|him|her|them|us|you))?\s+(?:that\s+)?[,;:]?\s*$",
         prefix[-180:], flags=re.IGNORECASE,
     )
