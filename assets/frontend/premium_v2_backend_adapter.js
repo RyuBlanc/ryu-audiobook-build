@@ -5275,7 +5275,27 @@
       throw new Error('This character name exists in multiple series. Choose the intended series before assigning dialogue.');
     }
     const current = characterRowForName(canonical, requestedSeries);
-    if (current) return current;
+    const workbookAliases = Array.isArray(preferredAliases)
+      ? preferredAliases.map(value => String(value || '').trim()).filter(Boolean)
+      : [];
+    if (current) {
+      const mergedAliases = [...new Set([...characterAliases(current), ...workbookAliases])];
+      const currentAliases = characterAliases(current);
+      const missingAliases = mergedAliases.filter(alias =>
+        !currentAliases.some(existing => existing.toLowerCase() === alias.toLowerCase())
+      );
+      if (!missingAliases.length) return current;
+      const updatePayload = {
+        name:characterCanonical(current),
+        series:characterSeries(current),
+        aliases:mergedAliases
+      };
+      if (String(current.voice_profile || '').trim()) updatePayload.voice_profile = String(current.voice_profile).trim();
+      await call('character.create', updatePayload);
+      await refreshCharacters();
+      await refreshCharacterLibrary();
+      return characterRowForName(characterCanonical(current),characterSeries(current)) || current;
+    }
     if (!libraryCharacters.length) await refreshCharacterLibrary();
     const matchesCharacter = item => characterCanonical(item).toLowerCase() === canonical.toLowerCase() ||
       characterAliases(item).some(alias => alias.toLowerCase() === canonical.toLowerCase());
