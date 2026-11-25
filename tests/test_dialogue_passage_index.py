@@ -346,7 +346,7 @@ class DialoguePassageIndexTests(unittest.TestCase):
     def test_ellipsis_only_quoted_silence_is_not_unassigned_dialogue(self):
         from app.chapters.characters import is_embedded_quotation_reference
 
-        examples = ['“……”', '“…………”', '“……………”', '「……」', '"..."']
+        examples = ['“……”', '“…………”', '“……………”', '「……」', '"..."', '“ . . . ”']
         for source in examples:
             start = 0
             end = len(source)
