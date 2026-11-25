@@ -74,9 +74,37 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn("Import Completed Workbook", self.html)
         self.assertIn("character.workbook.import.preview", self.adapter)
         self.assertIn("character.workbook.import.commit", self.adapter)
-        self.assertIn("window.confirm(prompt)", self.adapter)
+        self.assertIn("confirmCharacterWorkbookImport(prompt)", self.adapter)
+        self.assertIn("showCharacterWorkbookPreflightDialog(preview || {})", self.adapter)
         self.assertIn("await openAiCharacterReview(item)", self.adapter)
         self.assertIn("source:'ai', confidence:topConfidence", self.adapter)
+
+    def test_workbook_preflight_review_is_scrollable_contextual_and_locks_background(self):
+        self.assertIn("function openCharacterWorkbookDialog(", self.adapter)
+        self.assertIn("overflow-y:auto", self.adapter)
+        self.assertIn("overscroll-behavior:contain", self.adapter)
+        self.assertIn("document.documentElement.style.overflow = 'hidden'", self.adapter)
+        self.assertIn("document.body.style.overflow = 'hidden'", self.adapter)
+        self.assertIn("data-workbook-review-assign", self.adapter)
+        self.assertIn("Recheck the same workbook", self.adapter)
+        self.assertIn("importCompletedCharacterWorkbook(String(preview.path))", self.adapter)
+        self.assertIn("context_before", self.host)
+        self.assertIn("context_after", self.host)
+        self.assertIn('"character_options": character_options', self.host)
+        self.assertIn('"can_manual_assign":', self.host)
+        self.assertIn('passage_id:String(item.passage_id || \'\')', self.adapter)
+        self.assertIn('chapter_revision:String(item.chapter_revision || \'\')', self.adapter)
+        self.assertIn('normalized["passage_id"] = passage_id', self.host)
+        self.assertIn('normalized["chapter_revision"] = canonical_revision', self.host)
+        self.assertIn("stale_ai_overlaps", self.host)
+        self.assertIn("saved_assignment_matches_current_passage", self.host)
+        self.assertIn("Exact manual assignments are preserved.", self.workbook)
+
+    def test_import_preview_does_not_truncate_preflight_at_twenty_issues(self):
+        self.assertNotIn('"issues": plan["issues"][:20]', self.host)
+        self.assertIn('"issues": review_issues[:1000]', self.host)
+        self.assertIn('"issues_truncated": len(review_issues) > 1000', self.host)
+        self.assertIn("All preflight messages", self.adapter)
 
     def test_workbook_actions_are_static_in_character_studio_header_and_delegated(self):
         page_start = self.html.index('<section class="page" id="characters">')

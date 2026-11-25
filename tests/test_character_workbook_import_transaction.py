@@ -39,6 +39,115 @@ class _WorkbookCommitBridge:
 
 
 class CharacterWorkbookImportTransactionTests(unittest.TestCase):
+    def test_manual_assignment_replaces_only_stale_broad_ai_span_and_persists_passage_identity(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-manual-child-assignment-") as tmp:
+            folder = Path(tmp)
+            source = '“Hello, Mira!” “How are you?”'
+            first = '“Hello, Mira!”'
+            second = '“How are you?”'
+            first_start = source.index(first)
+            second_start = source.index(second)
+            revision = "revision-current-002"
+            stale_parent = {
+                "start": first_start,
+                "end": len(source),
+                "text": source,
+                "speaker": "Legacy AI",
+                "source": "ai",
+                "confidence": 0.51,
+            }
+            chapter = SimpleNamespace(
+                number=1,
+                title="The Opening",
+                chapter_id="chapter-001",
+                text=source,
+                dialogue_assignments=[stale_parent],
+            )
+            project = SimpleNamespace(
+                folder=folder,
+                title="The Silver Archive",
+                chapters=[chapter],
+                save=Mock(),
+            )
+            state = {
+                "characters": [{
+                    "name": "Mira",
+                    "series": "Silver Archive",
+                    "aliases": ["Captain Mira"],
+                }],
+                "character_dialogue_suggestions": [],
+            }
+            passage_index = {
+                "passages": [
+                    {
+                        "passage_id": "ps-first",
+                        "chapter_id": "chapter-001",
+                        "chapter_revision": revision,
+                        "start": first_start,
+                        "end": first_start + len(first),
+                        "text": first,
+                    },
+                    {
+                        "passage_id": "ps-second",
+                        "chapter_id": "chapter-001",
+                        "chapter_revision": revision,
+                        "start": second_start,
+                        "end": second_start + len(second),
+                        "text": second,
+                    },
+                ]
+            }
+
+            class _Bridge:
+                _chapter_dialogue_assign = host.PremiumV2Bridge._chapter_dialogue_assign
+
+                def __init__(self):
+                    self._character_review_state_lock = threading.RLock()
+
+                def _active_project(self):
+                    return project
+
+                def _project_series_name(self, _project, _state=None):
+                    return "Silver Archive"
+
+                def _now(self):
+                    return "2026-11-25T17:00:00+00:00"
+
+            bridge = _Bridge()
+            with (
+                patch.object(host, "load_state", side_effect=[state, state]),
+                patch.object(host, "save_state") as save_project_state,
+                patch(
+                    "app.chapters.passage_index.load_or_build_passage_index",
+                    return_value=passage_index,
+                ),
+                patch("app.chapters.character_learning.record_assignment_feedback"),
+            ):
+                result = bridge._chapter_dialogue_assign({
+                    "dialogue_text": first,
+                    "speakers": ["Mira"],
+                    "series": "Silver Archive",
+                    "chapter_number": 1,
+                    "start": first_start,
+                    "end": first_start + len(first),
+                    "passage_id": "ps-first",
+                    "chapter_revision": revision,
+                    "mode": "single",
+                    "source": "manual",
+                    "confidence": 1.0,
+                })
+
+            self.assertTrue(result["saved"])
+            self.assertEqual(len(chapter.dialogue_assignments), 1)
+            saved = chapter.dialogue_assignments[0]
+            self.assertEqual(saved["source"], "manual")
+            self.assertEqual(saved["speaker"], "Mira")
+            self.assertEqual(saved["passage_id"], "ps-first")
+            self.assertEqual(saved["chapter_revision"], revision)
+            self.assertEqual((saved["start"], saved["end"]), (first_start, first_start + len(first)))
+            project.save.assert_called_once_with()
+            save_project_state.assert_called_once()
+
     def _fixture(self, folder: Path):
         series = "Silver Archive"
         line = "“Captain Mira, are you ready?”"
@@ -61,6 +170,7 @@ class CharacterWorkbookImportTransactionTests(unittest.TestCase):
             }],
             "assignments": [{
                 "passage_id": "passage-001", "chapter_id": "chapter-001",
+                "chapter_revision": "revision-1",
                 "start": 0, "end": len(line), "text": line,
                 "speaker": "Mira", "series": series, "confidence": 0.92,
             }],
@@ -96,6 +206,7 @@ class CharacterWorkbookImportTransactionTests(unittest.TestCase):
             })
             plan["assignments"] = [{
                 "passage_id": "passage-001::subturn-1", "chapter_id": "chapter-001",
+                "chapter_revision": "revision-1",
                 "start": 0, "end": len(line), "text": line, "speaker": "Mira",
                 "speakers": ["Mira", "Rina"], "multi_speaker_mode": "chorus",
                 "series": "Silver Archive", "confidence": 0.98,
@@ -136,6 +247,8 @@ class CharacterWorkbookImportTransactionTests(unittest.TestCase):
             self.assertEqual(saved["speaker"], "Mira")
             self.assertEqual(saved["speakers"], ["Mira", "Rina"])
             self.assertEqual(saved["multi_speaker_mode"], "chorus")
+            self.assertEqual(saved["passage_id"], "passage-001::subturn-1")
+            self.assertEqual(saved["chapter_revision"], "revision-1")
             self.assertEqual(saved["source_passage_id"], "passage-001")
             self.assertEqual(saved["source_passage_text"], line)
             self.assertEqual(saved["source_start_relative"], 0)

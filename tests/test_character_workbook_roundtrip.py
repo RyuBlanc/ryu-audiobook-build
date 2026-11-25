@@ -18,6 +18,8 @@ from app.core.character_workbook import (
     plan_complete_book_character_workbook_import,
     read_character_workbook,
     character_workbook_plan_fingerprint,
+    _normalize_workbook_confidence,
+    complete_book_gpt_prompt,
 )
 
 
@@ -53,6 +55,114 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
         path = folder / "chapter.xlsx"
         path.write_bytes(create_character_workbook_bytes(metadata, passages, text))
         return path, text, passages
+
+    def test_confidence_normalizes_decimal_and_percent_values_before_validation(self):
+        self.assertEqual(_normalize_workbook_confidence("0.86"), 0.86)
+        self.assertEqual(_normalize_workbook_confidence("86"), 0.86)
+        self.assertEqual(_normalize_workbook_confidence("86%"), 0.86)
+        self.assertEqual(_normalize_workbook_confidence(100), 1.0)
+        self.assertEqual(_normalize_workbook_confidence("0"), 0.0)
+        for invalid in ("", "101", "-1", "NaN", "Infinity", "not a number"):
+            with self.subTest(value=invalid):
+                with self.assertRaises(ValueError):
+                    _normalize_workbook_confidence(invalid)
+
+    def test_gpt_prompt_separates_perspective_narration_from_actual_speech_and_embedded_quotes(self):
+        prompt = complete_book_gpt_prompt()
+        self.assertIn("First-person narration", prompt)
+        self.assertIn("free-indirect style", prompt)
+        self.assertIn("Quotation marks alone do not prove", prompt)
+        self.assertIn("actual utterance", prompt)
+        self.assertIn("do not silently reclassify an entire narration passage", prompt)
+
+    def test_stale_ai_parent_can_be_replaced_without_overwriting_an_exact_manual_child(self):
+        source = '“Pumped?” “Yeah, see, I’m so ridiculously hyped.”'
+        first = '“Pumped?”'
+        second = '“Yeah, see, I’m so ridiculously hyped.”'
+        first_start = source.index(first)
+        second_start = source.index(second)
+        revision = "revision-manual-child"
+        document = {
+            "schema_version": 1,
+            "info": {
+                "Series Name": "Silver Archive",
+                "Book Title": "The Silver Archive",
+                "Chapter ID": "chapter-001",
+                "Chapter Revision": revision,
+            },
+            "characters": [
+                {"full_name": "Mira", "aliases": [], "version": "", "notes": "", "included_in_book": True},
+                {"full_name": "Rina", "aliases": [], "version": "", "notes": "", "included_in_book": True},
+            ],
+            "dialogue_rows": [
+                {
+                    "Passage ID": "ps-turn-one", "Chapter ID": "chapter-001",
+                    "Chapter Revision (Reference)": revision, "Passage Type": "Dialogue",
+                    "Dialogue Text": first, "GPT Assigned Character": "",
+                    "GPT Confidence (0–1)": "",
+                    "Start (Reference)": first_start, "End (Reference)": first_start + len(first),
+                },
+                {
+                    "Passage ID": "ps-turn-two", "Chapter ID": "chapter-001",
+                    "Chapter Revision (Reference)": revision, "Passage Type": "Dialogue",
+                    "Dialogue Text": second, "GPT Assigned Character": "Rina",
+                    "GPT Confidence (0–1)": "94%",
+                    "Start (Reference)": second_start, "End (Reference)": second_start + len(second),
+                },
+            ],
+        }
+        passages = [
+            {
+                "passage_id": "ps-turn-one", "chapter_id": "chapter-001",
+                "chapter_number": 1, "chapter_title": "The Opening",
+                "chapter_revision": revision, "start": first_start,
+                "end": first_start + len(first), "text": first, "kind": "character_dialogue",
+            },
+            {
+                "passage_id": "ps-turn-two", "chapter_id": "chapter-001",
+                "chapter_number": 1, "chapter_title": "The Opening",
+                "chapter_revision": revision, "start": second_start,
+                "end": second_start + len(second), "text": second, "kind": "character_dialogue",
+            },
+        ]
+        stale_parent = {
+            "start": first_start, "end": second_start + len(second),
+            "text": source, "speaker": "Legacy AI speaker", "source": "ai",
+            "confidence": 0.62,
+        }
+        manual_child = {
+            "passage_id": "ps-turn-one", "chapter_revision": revision,
+            "start": first_start, "end": first_start + len(first),
+            "text": first, "speaker": "Mira", "source": "manual",
+            "series": "Silver Archive", "confidence": 1.0,
+        }
+        plan = plan_character_workbook_import(
+            document, series="Silver Archive", book_title="The Silver Archive",
+            registry_rows=[], project_characters=[], chapter_id="chapter-001",
+            chapter_revision=revision, current_passages=passages,
+            current_assignments=[stale_parent, manual_child],
+        )
+        self.assertTrue(plan["ready"], plan["issues"])
+        self.assertEqual(len(plan["superseded_assignments"]), 1)
+        self.assertEqual(
+            (plan["superseded_assignments"][0]["start"], plan["superseded_assignments"][0]["end"]),
+            (stale_parent["start"], stale_parent["end"]),
+        )
+        self.assertEqual(len(plan["assignments"]), 1)
+        self.assertEqual(plan["assignments"][0]["passage_id"], "ps-turn-two")
+        self.assertEqual(plan["assignments"][0]["speaker"], "Rina")
+        self.assertAlmostEqual(plan["assignments"][0]["confidence"], 0.94)
+
+        stale_revision_manual = {**manual_child, "chapter_revision": "an-older-revision"}
+        blocked = plan_character_workbook_import(
+            document, series="Silver Archive", book_title="The Silver Archive",
+            registry_rows=[], project_characters=[], chapter_id="chapter-001",
+            chapter_revision=revision, current_passages=passages,
+            current_assignments=[stale_parent, stale_revision_manual],
+        )
+        self.assertFalse(blocked["ready"])
+        self.assertEqual(blocked["superseded_assignments"], [])
+        self.assertTrue(any("will not overwrite manual" in issue for issue in blocked["issues"]))
 
     def test_import_plan_imports_multiple_speakers_from_one_json_cell(self):
         source = '“We are here!”'

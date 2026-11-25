@@ -4324,6 +4324,250 @@
     if ($('editAssignedCharacter')) $('editAssignedCharacter').disabled = false;
     ensureAssignedAudioProfileControls();
   }
+  let activeCharacterWorkbookDialog = null;
+  let characterWorkbookDialogPreviousFocus = null;
+  let characterWorkbookDialogPreviousHtmlOverflow = '';
+  let characterWorkbookDialogPreviousBodyOverflow = '';
+
+  function closeCharacterWorkbookDialog() {
+    if (!activeCharacterWorkbookDialog) return;
+    const overlay = activeCharacterWorkbookDialog;
+    activeCharacterWorkbookDialog = null;
+    overlay.remove();
+    document.documentElement.style.overflow = characterWorkbookDialogPreviousHtmlOverflow;
+    document.body.style.overflow = characterWorkbookDialogPreviousBodyOverflow;
+    if (characterWorkbookDialogPreviousFocus?.isConnected) {
+      try { characterWorkbookDialogPreviousFocus.focus({preventScroll:true}); } catch (_) {}
+    }
+    characterWorkbookDialogPreviousFocus = null;
+  }
+
+  function openCharacterWorkbookDialog(title, contentHtml, actionsHtml = '') {
+    closeCharacterWorkbookDialog();
+    if (!$('ryuCharacterWorkbookDialogStyles')) {
+      const style = document.createElement('style');
+      style.id = 'ryuCharacterWorkbookDialogStyles';
+      style.textContent = [
+        '#ryuCharacterWorkbookDialog{position:fixed;inset:0;z-index:100600;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;background:rgba(3,6,12,.84);backdrop-filter:blur(8px)}',
+        '#ryuCharacterWorkbookDialog .ryu-workbook-dialog-panel{box-sizing:border-box;width:min(980px,calc(100vw - 32px));max-height:calc(100dvh - 32px);display:flex;flex-direction:column;overflow:hidden;background:#10151f;color:#f4f6fa;border:1px solid rgba(255,255,255,.16);border-radius:16px;box-shadow:0 24px 90px rgba(0,0,0,.62)}',
+        '#ryuCharacterWorkbookDialog .ryu-workbook-dialog-head,#ryuCharacterWorkbookDialog .ryu-workbook-dialog-foot{flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px 18px;background:#121a27}',
+        '#ryuCharacterWorkbookDialog .ryu-workbook-dialog-head{border-bottom:1px solid rgba(255,255,255,.1)}',
+        '#ryuCharacterWorkbookDialog .ryu-workbook-dialog-foot{justify-content:flex-end;flex-wrap:wrap;border-top:1px solid rgba(255,255,255,.1)}',
+        '#ryuCharacterWorkbookDialog .ryu-workbook-dialog-body{box-sizing:border-box;flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-gutter:stable;padding:18px;line-height:1.5}',
+        '#ryuCharacterWorkbookDialog .ryu-workbook-dialog-body pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:inherit}',
+        '#ryuCharacterWorkbookDialog .ryu-workbook-review-list{display:grid;gap:12px;margin:14px 0}',
+        '#ryuCharacterWorkbookDialog .ryu-workbook-review-card{border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:14px;background:rgba(255,255,255,.035);min-width:0}',
+        '#ryuCharacterWorkbookDialog .ryu-workbook-review-card.is-saved{border-color:rgba(58,190,130,.65);background:rgba(58,190,130,.07)}',
+        '#ryuCharacterWorkbookDialog .ryu-workbook-review-card h3{font-size:14px;margin:0 0 6px}',
+        '#ryuCharacterWorkbookDialog .ryu-workbook-review-card p{margin:7px 0;overflow-wrap:anywhere}',
+        '#ryuCharacterWorkbookDialog .ryu-workbook-context{padding:10px 12px;border-left:3px solid #64748b;background:rgba(255,255,255,.045);border-radius:5px;white-space:pre-wrap;overflow-wrap:anywhere}',
+        '#ryuCharacterWorkbookDialog .ryu-workbook-field{display:grid;gap:7px;margin-top:12px;max-width:100%}',
+        '#ryuCharacterWorkbookDialog .ryu-workbook-field select{box-sizing:border-box;width:100%;max-width:100%;min-width:0;padding:10px 12px;border-radius:9px;background:#0b111b;color:#f4f6fa;border:1px solid #465163;font:inherit}',
+        '#ryuCharacterWorkbookDialog .ryu-workbook-review-result{font-size:12px;overflow-wrap:anywhere}',
+        '#ryuCharacterWorkbookDialog .ryu-workbook-issues{border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:12px;margin-top:14px}',
+        '#ryuCharacterWorkbookDialog .ryu-workbook-issues ol{padding-left:23px;display:grid;gap:7px}',
+        '#ryuCharacterWorkbookDialog button{max-width:100%}',
+        '@media(max-width:600px){#ryuCharacterWorkbookDialog{padding:8px}#ryuCharacterWorkbookDialog .ryu-workbook-dialog-panel{width:calc(100vw - 16px);max-height:calc(100dvh - 16px)}#ryuCharacterWorkbookDialog .ryu-workbook-dialog-body{padding:12px}#ryuCharacterWorkbookDialog .ryu-workbook-dialog-head,#ryuCharacterWorkbookDialog .ryu-workbook-dialog-foot{padding:12px}}'
+      ].join('');
+      document.head.appendChild(style);
+    }
+    characterWorkbookDialogPreviousFocus = document.activeElement;
+    characterWorkbookDialogPreviousHtmlOverflow = document.documentElement.style.overflow;
+    characterWorkbookDialogPreviousBodyOverflow = document.body.style.overflow;
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+    const overlay = document.createElement('div');
+    overlay.id = 'ryuCharacterWorkbookDialog';
+    overlay.innerHTML =
+      '<section class="ryu-workbook-dialog-panel" role="dialog" aria-modal="true" aria-label="' + esc(title) + '">' +
+        '<header class="ryu-workbook-dialog-head"><div><span class="eyebrow">CHARACTER WORKBOOK REVIEW</span><h2 style="margin:3px 0 0;font-size:19px">' + esc(title) + '</h2></div>' +
+        '<button type="button" class="btn small secondary" data-workbook-dialog-close aria-label="Close dialog">Close</button></header>' +
+        '<div class="ryu-workbook-dialog-body">' + contentHtml + '</div>' +
+        (actionsHtml ? '<footer class="ryu-workbook-dialog-foot">' + actionsHtml + '</footer>' : '') +
+      '</section>';
+    overlay.addEventListener('click', event => {
+      if (event.target?.closest?.('[data-workbook-dialog-close]')) closeCharacterWorkbookDialog();
+    });
+    overlay.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeCharacterWorkbookDialog();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const focusable = [...overlay.querySelectorAll('button:not([disabled]),select:not([disabled]),input:not([disabled]),[tabindex="0"]')];
+      if (!focusable.length) return;
+      const first = focusable[0], last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault(); last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault(); first.focus();
+      }
+    });
+    document.body.appendChild(overlay);
+    activeCharacterWorkbookDialog = overlay;
+    overlay.querySelector('[data-workbook-dialog-close]')?.focus({preventScroll:true});
+    return overlay;
+  }
+
+  function showCharacterWorkbookMessageDialog(title, messageText) {
+    const content = '<pre>' + esc(String(messageText || '')) + '</pre>';
+    return openCharacterWorkbookDialog(
+      title,
+      content,
+      '<button type="button" class="btn" data-workbook-dialog-close>Done</button>'
+    );
+  }
+
+  function confirmCharacterWorkbookImport(promptText) {
+    return new Promise(resolve => {
+      let settled = false;
+      const finish = value => {
+        if (settled) return;
+        settled = true;
+        closeCharacterWorkbookDialog();
+        resolve(value);
+      };
+      const overlay = openCharacterWorkbookDialog(
+        'Confirm workbook import',
+        '<p>Review the complete plan below. Only confirmed assignments will be saved; existing manual assignments and voice profiles stay protected.</p><pre>' + esc(promptText) + '</pre>',
+        '<button type="button" class="btn secondary" data-workbook-cancel>Cancel</button><button type="button" class="btn" data-workbook-confirm>Confirm import</button>'
+      );
+      overlay.addEventListener('click', event => {
+        if (event.target?.closest?.('[data-workbook-confirm]')) finish(true);
+        else if (event.target?.closest?.('[data-workbook-cancel],[data-workbook-dialog-close]')) finish(false);
+      });
+      overlay.addEventListener('keydown', event => {
+        if (event.key === 'Escape') finish(false);
+      });
+    });
+  }
+
+  function showCharacterWorkbookPreflightDialog(preview) {
+    const reviewItems = Array.isArray(preview?.review_items) ? preview.review_items : [];
+    const options = Array.isArray(preview?.character_options) ? preview.character_options : [];
+    const issues = Array.isArray(preview?.issues) ? preview.issues : [];
+    const cards = reviewItems.map((item,index) => {
+      const isNarration = String(item.passage_type || '').toLowerCase() === 'narration';
+      const canAssign = item.can_manual_assign === true && !isNarration && options.length > 0;
+      const optionHtml = options.map((option,optionIndex) =>
+        '<option value="' + optionIndex + '">' + esc(option.canonical_name) + ' · ' + esc(option.series) +
+        (option.voice_profile ? ' · ' + esc(option.voice_profile) : ' · voice not assigned') + '</option>'
+      ).join('');
+      const reasons = (Array.isArray(item.reasons) ? item.reasons : []).map(reason => '<li>' + esc(reason) + '</li>').join('');
+      const current = Array.isArray(item.existing_speakers) && item.existing_speakers.length
+        ? '<p><b>Saved assignment:</b> ' + esc(item.existing_speakers.join(' + ')) + ' · protected</p>' : '';
+      const workbookNames = Array.isArray(item.workbook_speakers) && item.workbook_speakers.length
+        ? '<p><b>Workbook identity:</b> ' + esc(item.workbook_speakers.join(' + ')) + '</p>' : '';
+      const before = String(item.context_before || '').trim();
+      const after = String(item.context_after || '').trim();
+      return '<article class="ryu-workbook-review-card" data-workbook-review-card="' + index + '">' +
+        '<h3>Chapter ' + Number(item.chapter_number || 0) + ' · ' + esc(item.chapter_title || 'Untitled') + ' · ' + esc(item.passage_type || 'Passage') + '</h3>' +
+        '<p style="font-size:11px;color:#aab5c6">Passage ID: ' + esc(item.passage_id) + ' · Source offsets: ' +
+          Number(item.start || 0) + '–' + Number(item.end || 0) + ' · Revision: ' + esc(item.chapter_revision || 'not recorded') + '</p>' +
+        (before ? '<p class="ryu-workbook-context"><b>Before</b>\n' + esc(before) + '</p>' : '') +
+        '<p class="ryu-workbook-context"><b>Selected passage</b>\n' + esc(item.text || '') + '</p>' +
+        (after ? '<p class="ryu-workbook-context"><b>After</b>\n' + esc(after) + '</p>' : '') +
+        current + workbookNames +
+        (reasons ? '<ul>' + reasons + '</ul>' : '') +
+        (canAssign
+          ? '<div class="ryu-workbook-field"><label for="ryuWorkbookSpeaker' + index + '"><b>Confirm this speaker from saved character identities</b></label>' +
+            '<select id="ryuWorkbookSpeaker' + index + '" data-workbook-review-speaker="' + index + '"><option value="">Choose a character…</option>' + optionHtml + '</select>' +
+            '<button type="button" class="btn small secondary" data-workbook-review-assign="' + index + '">Save manual assignment</button></div>'
+          : (isNarration
+            ? '<p class="ryu-workbook-review-result">This source passage is classified as narration. It must remain Narrator; review the passage classification rather than assigning a character here.</p>'
+            : (item.can_manual_assign && !options.length
+              ? '<p class="ryu-workbook-review-result">No saved series character identity is available yet. Create or add the confirmed identity in Character Studio / Character Library, then recheck this same workbook.</p>'
+              : '<p class="ryu-workbook-review-result">This row has an existing workbook or saved identity conflict. It is protected from automatic replacement; resolve that conflict in Character Studio.</p>'))) +
+        '<p class="ryu-workbook-review-result" data-workbook-review-result="' + index + '" aria-live="polite"></p>' +
+      '</article>';
+    }).join('');
+    const issueList = issues.map(issue => '<li>' + esc(issue) + '</li>').join('');
+    const issueDetails = issues.length
+      ? '<details class="ryu-workbook-issues"><summary>All preflight messages (' + Number(preview.issue_count || issues.length) + ')</summary><ol>' +
+        issueList + '</ol>' + (preview.issues_truncated ? '<p>Only the first ' + issues.length + ' of ' + Number(preview.issue_count || 0) + ' messages are shown.</p>' : '') +
+        '</details>'
+      : '';
+    const content =
+      '<p><b>The workbook was not imported.</b> Preflight found ' + Number(preview.issue_count || issues.length) +
+      ' issue(s). No changes were committed. Review each passage below; context is taken from the active book, not inferred from the workbook alone.</p>' +
+      (reviewItems.length
+        ? '<div class="ryu-workbook-review-list">' + cards + '</div>'
+        : '<p>No passage-specific review card could be built. Expand the full preflight messages below and resolve the source or identity conflict.</p>') +
+      issueDetails +
+      '<p style="margin-top:14px;font-size:12px;color:#c2cad6">Do not edit Passage IDs, chapter IDs, source text, revisions or offsets in Excel. Manual assignments saved here are stored against the exact source passage and will not be overwritten by the workbook.</p>';
+    const overlay = openCharacterWorkbookDialog(
+      'Review unresolved speaker attribution',
+      content,
+      '<button type="button" class="btn secondary" data-workbook-dialog-close>Close</button>' +
+      '<button type="button" class="btn" data-workbook-review-retry>Recheck the same workbook</button>'
+    );
+    overlay.addEventListener('click', async event => {
+      const assignButton = event.target?.closest?.('[data-workbook-review-assign]');
+      if (assignButton) {
+        const index = Number(assignButton.getAttribute('data-workbook-review-assign'));
+        const item = reviewItems[index];
+        const select = overlay.querySelector('[data-workbook-review-speaker="' + index + '"]');
+        const result = overlay.querySelector('[data-workbook-review-result="' + index + '"]');
+        const optionIndex = Number(select?.value);
+        const selected = Number.isInteger(optionIndex) ? options[optionIndex] : null;
+        if (!item || !selected || !selected.canonical_name || !selected.series) {
+          if (result) result.textContent = 'Choose one saved character identity before saving.';
+          return;
+        }
+        assignButton.disabled = true;
+        assignButton.textContent = 'Saving…';
+        if (result) result.textContent = 'Validating exact passage ID, revision, offsets and source text…';
+        try {
+          const activeCharacter = await ensureCharacterInActiveProject(
+            selected.canonical_name, selected.series, selected.voice_profile || ''
+          );
+          await call('chapter.dialogue.assign', {
+            dialogue_text:String(item.text || ''),
+            speakers:[characterCanonical(activeCharacter)],
+            series:characterSeries(activeCharacter),
+            chapter_number:Number(item.chapter_number),
+            start:Number(item.start),
+            end:Number(item.end),
+            passage_id:String(item.passage_id || ''),
+            chapter_revision:String(item.chapter_revision || ''),
+            mode:'single',
+            source:'manual',
+            confidence:1.0
+          });
+          item.existing_speakers = [characterCanonical(activeCharacter)];
+          const card = assignButton.closest('.ryu-workbook-review-card');
+          card?.classList.add('is-saved');
+          if (select) select.disabled = true;
+          assignButton.textContent = 'Saved · protected manual assignment';
+          if (result) result.textContent = 'Saved manually to this exact passage. The workbook will not overwrite this assignment.';
+          await refreshChapters();
+          await refreshCharacters();
+          await refreshCharacterLibrary();
+          renderCharacterStudioLive();
+          renderDialogueReview();
+        } catch (error) {
+          assignButton.disabled = false;
+          assignButton.textContent = 'Save manual assignment';
+          if (result) result.textContent = error?.message || String(error);
+        }
+        return;
+      }
+      if (event.target?.closest?.('[data-workbook-review-retry]')) {
+        const retry = event.target.closest('[data-workbook-review-retry]');
+        if (!String(preview.path || '').trim()) {
+          showCharacterWorkbookMessageDialog('Workbook recheck unavailable', 'The selected workbook path was not retained. Close this review and select the completed workbook again.');
+          return;
+        }
+        retry.disabled = true;
+        retry.textContent = 'Rechecking…';
+        closeCharacterWorkbookDialog();
+        await importCompletedCharacterWorkbook(String(preview.path));
+      }
+    });
+    return overlay;
+  }
+
   async function exportSelectedCharacterWorkbook() {
     const result = await call('character.workbook.export', {scope:'book'});
     if (result?.cancelled) return;
@@ -4333,11 +4577,14 @@
       ' total passages (' + Number(result.dialogue_count || 0) + ' dialogue, ' +
       Number(result.narration_count || 0) + ' Narrator passages).';
     message(confirmation);
-    window.alert(confirmation + '\n\nThe workbook opens on the GPT Prompt sheet. Upload the whole workbook to ChatGPT, copy the prompt between BEGIN PROMPT and END PROMPT, and ask GPT to return a completed .xlsx copy. Then import that completed copy.');
+    showCharacterWorkbookMessageDialog(
+      'Workbook exported',
+      confirmation + '\n\nThe workbook opens on the GPT Prompt sheet. Upload the whole workbook to ChatGPT, copy the prompt between BEGIN PROMPT and END PROMPT, and ask GPT to return a completed .xlsx copy. Then import that completed copy.'
+    );
   }
 
-  async function importCompletedCharacterWorkbook() {
-    const preview = await call('character.workbook.import.preview');
+  async function importCompletedCharacterWorkbook(selectedPath = '') {
+    const preview = await call('character.workbook.import.preview', selectedPath ? {path:selectedPath} : {});
     if (preview?.cancelled) return;
     if (preview?.refreshed) {
       const retained = Number(preview.gpt_assignments_carried || 0);
@@ -4356,25 +4603,11 @@
         '\nCharacter Register identities preserved: ' + characterRows +
         '\n\nOpen the refreshed workbook and use its GPT Prompt sheet. Upload the entire refreshed workbook to ChatGPT, copy the prompt between BEGIN PROMPT and END PROMPT, and ask GPT to resolve every REVIEW REQUIRED row from the full Chapter Context. A new/split row is not automatically an unknown speaker: GPT must analyze each turn independently. Ask GPT to return a new completed .xlsx copy, then import that copy. The original workbook remains unchanged; passage IDs and offsets must not be edited.';
       message('Workbook refreshed safely · ' + retained + ' GPT assignments retained · ' + unresolvedRows + ' dialogue passages still need speaker confirmation.');
-      window.alert(refreshedMessage);
+      showCharacterWorkbookMessageDialog('Workbook refreshed safely', refreshedMessage);
       return;
     }
     if (!preview?.ready) {
-      const issueRows = Array.isArray(preview?.issues) ? preview.issues : [];
-      const issueCount = Math.max(issueRows.length, Number(preview?.issue_count || 0));
-      const unresolved = Number(preview?.summary?.unresolved_dialogue_passages || 0);
-      const shown = issueRows.slice(0, 12);
-      const remaining = Math.max(0, issueCount - shown.length);
-      const details = shown.join('\n• ');
-      const suffix = remaining ? '\n\n…and ' + remaining + ' more preflight issues. Review the full issue count in the workbook and resolve every affected passage.' : '';
-      const unresolvedLine = unresolved
-        ? '\nUnassigned dialogue passages: ' + unresolved + '. These must be resolved with confirmed identities; do not guess.'
-        : '';
-      window.alert(
-        'The workbook was not imported. Preflight found ' + issueCount + ' issue(s).' + unresolvedLine +
-        '\n\n' + (details ? '• ' + details : 'No issue details were returned.') + suffix +
-        '\n\nDo not change Passage IDs, chapter IDs, source text or offsets. Resolve uncertain speakers in Character Studio or fill GPT Assigned Character with a confirmed Character Register identity. Manual assignments are protected.'
-      );
+      showCharacterWorkbookPreflightDialog(preview || {});
       return;
     }
     const summary = preview.summary || {};
@@ -4423,7 +4656,7 @@
       '\n\nSpeaker assignment summary:\n' + (speakerLines.join('\n') || 'No new dialogue assignments.') +
       '\n\nCharacter identity plan:\n' + (identityLines.join('\n') || 'No character changes.') +
       '\n\nExisting character voice profiles will be preserved. New characters will be added without a voice until you choose one in Character Studio. Continue?';
-    if (!window.confirm(prompt)) return;
+    if (!await confirmCharacterWorkbookImport(prompt)) return;
     const result = await call('character.workbook.import.commit', {token:preview.token});
     await refreshChapters();
     await refreshCharacters();
@@ -4441,7 +4674,7 @@
       result.dialogue_assignments + ' dialogue assignments added · ' +
       Number(result.saved_assignments_replaced || 0) + ' stale AI/outsourced assignments replaced. Existing voice profiles and manual assignments were preserved.';
     message(confirmation);
-    window.alert(confirmation);
+    showCharacterWorkbookMessageDialog('Workbook imported successfully', confirmation);
   }
 
   function renderCharacterStudioLive() {
@@ -9689,14 +9922,21 @@ function renderProductionMetadataGate(active) {
         void Promise.resolve().then(fn).catch(error => {
           const detail = error?.message || String(error);
           message(detail, true);
-          if (errorTitle) window.alert(errorTitle + '\n\n' + detail);
+          if (errorTitle && String(errorTitle).toLowerCase().includes('workbook')) {
+            showCharacterWorkbookMessageDialog(errorTitle, detail);
+          } else if (errorTitle) {
+            window.alert(errorTitle + '\n\n' + detail);
+          }
         });
       };
       if (button.id === 'characterWorkbookHelp') {
         handle(async () => {
           const copied = await call('character.workbook.prompt.copy');
           if (!copied?.copied) throw new Error('The GPT prompt could not be copied to the clipboard.');
-          window.alert(characterWorkbookHelpText() + '\\n\\nThe complete GPT prompt (version ' + String(copied.prompt_version || '1.0') + ') has been copied. Upload your existing refreshed workbook and paste the prompt into ChatGPT.');
+          showCharacterWorkbookMessageDialog(
+            'GPT workbook instructions copied',
+            characterWorkbookHelpText() + '\n\nThe complete GPT prompt (version ' + String(copied.prompt_version || '1.0') + ') has been copied. Upload your existing refreshed workbook and paste the prompt into ChatGPT.'
+          );
         });
         return;
       }

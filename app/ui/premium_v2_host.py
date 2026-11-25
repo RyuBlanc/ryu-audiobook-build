@@ -82,6 +82,7 @@ from app.core.character_workbook import (
     refresh_complete_book_character_workbook_bytes,
     character_workbook_plan_fingerprint,
     complete_book_gpt_prompt,
+    _workbook_speaker_names,
 )
 from app.production_metadata import missing_required_metadata_fields, normalize_metadata_text
 from app.version import APP_NAME, full_version
@@ -1906,6 +1907,9 @@ class PremiumV2Bridge(QObject):
                 raise ValueError("The selected passage changed before it could be saved. Refresh the chapter and select it again.")
             passage_id = str(payload.get("passage_id") or "").strip()
             chapter_revision = str(payload.get("chapter_revision") or "").strip()
+            canonical_revision = chapter_revision
+            passage_index = None
+            canonical = None
             if passage_id or chapter_revision:
                 from app.chapters.passage_index import load_or_build_passage_index
                 passage_index = load_or_build_passage_index(
@@ -1936,13 +1940,91 @@ class PremiumV2Bridge(QObject):
                     or (chapter_revision and str(canonical.get("chapter_revision") or "") != chapter_revision)
                 ):
                     raise ValueError("The dialogue passage changed or its canonical passage ID is stale. Refresh Character Studio and select it again.")
+                canonical_revision = str(canonical.get("chapter_revision") or chapter_revision)
             from app.chapters.assignment_utils import normalize_assignment
             existing = list(getattr(chapter, "dialogue_assignments", []) or [])
             overlapping = [item for item in existing if isinstance(item, dict)
                 and isinstance(item.get("start"), int) and isinstance(item.get("end"), int)
                 and item["start"] < end and item["end"] > start
                 and not (item["start"] == start and item["end"] == end)]
-            if overlapping:
+            stale_ai_overlaps = []
+            protected_overlaps = []
+            if overlapping and passage_index is not None:
+                indexed_passages = [
+                    row for row in (passage_index.get("passages") or [])
+                    if isinstance(row, dict) and str(row.get("chapter_id") or "") == str(chapter.chapter_id)
+                ]
+
+                def saved_assignment_matches_current_passage(saved_row, source_passage):
+                    try:
+                        if int(saved_row.get("start", -1)) != int(source_passage.get("start", -2)):
+                            return False
+                        if int(saved_row.get("end", -1)) != int(source_passage.get("end", -2)):
+                            return False
+                    except (TypeError, ValueError, OverflowError):
+                        return False
+                    saved_text = str(saved_row.get("text") or "")
+                    source_text = str(source_passage.get("text") or "")
+                    if saved_text and saved_text != source_text:
+                        return False
+                    saved_id = str(saved_row.get("passage_id") or "").strip()
+                    source_id = str(source_passage.get("passage_id") or "").strip()
+                    if saved_id and saved_id != source_id:
+                        return False
+                    saved_revision = str(saved_row.get("chapter_revision") or "").strip()
+                    source_revision = str(source_passage.get("chapter_revision") or "").strip()
+                    if saved_revision and source_revision and saved_revision != source_revision:
+                        return False
+                    return bool(source_id and source_text)
+
+                for saved_row in overlapping:
+                    saved_source = str(saved_row.get("source") or "manual").strip().casefold()
+                    exact_current = any(
+                        saved_assignment_matches_current_passage(saved_row, source_passage)
+                        for source_passage in indexed_passages
+                    )
+                    if saved_source in {"ai", "outsourced"} and not exact_current:
+                        stale_ai_overlaps.append(saved_row)
+                    else:
+                        protected_overlaps.append(saved_row)
+
+                # A broad obsolete AI record can be removed only when its other
+                # intersecting manual/unknown records are exact current passages.
+                # Those exact user-confirmed records remain in the assignment list.
+                if stale_ai_overlaps and not protected_overlaps:
+                    for stale_row in stale_ai_overlaps:
+                        stale_start, stale_end = int(stale_row["start"]), int(stale_row["end"])
+                        for other in existing:
+                            if not isinstance(other, dict) or other is stale_row:
+                                continue
+                            try:
+                                other_start, other_end = int(other.get("start", -1)), int(other.get("end", -1))
+                            except (TypeError, ValueError, OverflowError):
+                                continue
+                            if other_start >= stale_end or other_end <= stale_start:
+                                continue
+                            other_source = str(other.get("source") or "manual").strip().casefold()
+                            if other_source in {"ai", "outsourced"}:
+                                continue
+                            if not any(
+                                saved_assignment_matches_current_passage(other, source_passage)
+                                for source_passage in indexed_passages
+                            ):
+                                protected_overlaps.append(other)
+                                break
+                    if not protected_overlaps:
+                        stale_ids = {id(row) for row in stale_ai_overlaps}
+                        existing = [row for row in existing if id(row) not in stale_ids]
+                        log.info(
+                            "Removed %s stale AI/outsourced assignment(s) before saving a manually confirmed exact passage %s",
+                            len(stale_ai_overlaps), passage_id,
+                        )
+                if protected_overlaps:
+                    raise ValueError(
+                        "The selected passage overlaps a confirmed manual or current source assignment. "
+                        "It was not changed; review the exact passage IDs in Character Studio."
+                    )
+            elif overlapping:
                 raise ValueError("The selected passage overlaps another saved speaker assignment. Edit or remove the existing assignment first.")
             base = next((dict(item) for item in existing if isinstance(item, dict)
                          and item.get("start") == start and item.get("end") == end),
@@ -1951,6 +2033,10 @@ class PremiumV2Bridge(QObject):
             normalized = normalize_assignment(base, speakers, mode)
             assignment_series = requested_series or default_series
             normalized.update({"source": assignment_source, "confidence": assignment_confidence, "series": assignment_series})
+            if passage_id:
+                normalized["passage_id"] = passage_id
+            if canonical_revision:
+                normalized["chapter_revision"] = canonical_revision
             chapter.dialogue_assignments = [
                 item for item in existing if not (isinstance(item, dict)
                     and item.get("start") == start and item.get("end") == end)
@@ -5687,16 +5773,34 @@ class PremiumV2Bridge(QObject):
             **summary,
         }
 
-    def _character_workbook_import_preview(self, _payload: dict[str, Any]) -> dict[str, Any]:
-        """Select a GPT-completed workbook and reconcile it without changing saved data."""
-        selected_path, _ = QFileDialog.getOpenFileName(
-            self._character_workbook_dialog_parent(), "Import GPT Character Workbook", str(Path.home()), "Excel Workbook (*.xlsx)",
-            options=QFileDialog.Option.DontUseNativeDialog,
-        )
-        if not selected_path:
-            return {"cancelled": True}
+    def _character_workbook_import_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Select or revalidate a GPT workbook without changing saved data."""
+        requested_path = str(payload.get("path") or "").strip() if isinstance(payload, dict) else ""
+        if requested_path:
+            candidate = Path(requested_path).expanduser()
+            recorded_path = str(getattr(self, "_character_workbook_review_path", "") or "")
+            if not recorded_path or candidate.resolve() != Path(recorded_path).resolve():
+                raise ValueError("This workbook was not the file selected in the active review. Select it again from the file picker.")
+            if not candidate.is_file() or candidate.suffix.casefold() != ".xlsx":
+                raise ValueError("The previously selected Character Studio workbook is no longer available. Select the completed .xlsx file again.")
+            selected_path = str(candidate.resolve())
+        else:
+            selected_path, _ = QFileDialog.getOpenFileName(
+                self._character_workbook_dialog_parent(), "Import GPT Character Workbook", str(Path.home()), "Excel Workbook (*.xlsx)",
+                options=QFileDialog.Option.DontUseNativeDialog,
+            )
+            if not selected_path:
+                return {"cancelled": True}
         document = read_character_workbook(selected_path)
         project = self._active_project()
+        if requested_path:
+            if document.get("sha256") != getattr(self, "_character_workbook_review_sha256", None):
+                raise ValueError("The selected workbook changed after the review began. Select it again and review the latest contents.")
+            if str(Path(project.folder).resolve()) != str(getattr(self, "_character_workbook_review_project_folder", "")):
+                raise ValueError("The active book changed after the review began. Reopen the workbook in its original project.")
+        self._character_workbook_review_path = str(Path(selected_path).expanduser().resolve())
+        self._character_workbook_review_sha256 = str(document.get("sha256") or "")
+        self._character_workbook_review_project_folder = str(Path(project.folder).resolve())
         try:
             state, series, chapter, plan = self._character_workbook_import_plan(project, document)
         except ValueError as exc:
@@ -5709,10 +5813,143 @@ class PremiumV2Bridge(QObject):
                 )
             raise
         if not plan["ready"]:
+            if int(document.get("schema_version") or 0) == 2:
+                review_state, review_series, review_chapters = self._character_workbook_book_snapshot(project)
+            else:
+                review_number = int(chapter.number) if chapter is not None else int(float((document.get("info") or {}).get("Chapter Number") or 0))
+                review_state, review_series, review_chapter, review_row, review_passages, review_assignments = (
+                    self._character_workbook_snapshot(project, review_number)
+                )
+                review_chapters = [{
+                    "chapter_id": str(getattr(review_chapter, "chapter_id", "") or ""),
+                    "chapter_number": int(getattr(review_chapter, "number", 0) or 0),
+                    "chapter_title": str(getattr(review_chapter, "title", "") or ""),
+                    "chapter_revision": str((review_row or {}).get("chapter_revision") or ""),
+                    "text": str(getattr(review_chapter, "text", "") or ""),
+                    "current_passages": review_passages,
+                    "current_assignments": review_assignments,
+                }]
+            workbook_rows = {
+                str(row.get("Passage ID") or "").strip(): row
+                for row in (document.get("dialogue_rows") or [])
+                if isinstance(row, dict)
+            }
+            review_issues = [str(value) for value in (plan.get("issues") or [])]
+            review_items = []
+            for active in review_chapters:
+                source_text = str(active.get("text") or "")
+                saved_rows = [row for row in (active.get("current_assignments") or []) if isinstance(row, dict)]
+                for passage in (active.get("current_passages") or []):
+                    if not isinstance(passage, dict):
+                        continue
+                    passage_id = str(passage.get("passage_id") or "").strip()
+                    if not passage_id:
+                        continue
+                    try:
+                        start, end = int(passage.get("start", -1)), int(passage.get("end", -1))
+                    except (TypeError, ValueError, OverflowError):
+                        continue
+                    if start < 0 or end <= start or end > len(source_text):
+                        continue
+                    passage_text = str(passage.get("text") or source_text[start:end])
+                    if source_text[start:end] != passage_text:
+                        continue
+                    workbook_row = workbook_rows.get(passage_id)
+                    workbook_speakers = []
+                    if isinstance(workbook_row, dict):
+                        try:
+                            workbook_speakers = _workbook_speaker_names(workbook_row)
+                        except ValueError:
+                            workbook_speakers = []
+                    exact_saved = []
+                    for saved in saved_rows:
+                        try:
+                            if int(saved.get("start", -1)) != start or int(saved.get("end", -1)) != end:
+                                continue
+                        except (TypeError, ValueError, OverflowError):
+                            continue
+                        saved_id = str(saved.get("passage_id") or "").strip()
+                        saved_revision = str(saved.get("chapter_revision") or "").strip()
+                        source_revision = str(passage.get("chapter_revision") or active.get("chapter_revision") or "").strip()
+                        saved_text = str(saved.get("text") or "")
+                        if saved_id and saved_id != passage_id:
+                            continue
+                        if saved_revision and source_revision and saved_revision != source_revision:
+                            continue
+                        if saved_text and saved_text != passage_text:
+                            continue
+                        exact_saved.append(saved)
+                    existing_speakers = []
+                    if len(exact_saved) == 1:
+                        existing = exact_saved[0].get("speakers")
+                        if not isinstance(existing, (list, tuple)):
+                            existing = [exact_saved[0].get("speaker")] if exact_saved[0].get("speaker") else []
+                        existing_speakers = [str(value).strip() for value in existing if str(value).strip()]
+                    issue_reasons = [
+                        issue for issue in review_issues
+                        if passage_id.casefold() in issue.casefold()
+                    ]
+                    is_narration = str(passage.get("kind") or "").casefold() == "narration"
+                    if not is_narration and not workbook_speakers and not existing_speakers:
+                        issue_reasons.append("No confirmed speaker is recorded for this exact dialogue passage.")
+                    if not issue_reasons:
+                        continue
+                    review_items.append({
+                        "passage_id": passage_id,
+                        "chapter_id": str(active.get("chapter_id") or passage.get("chapter_id") or ""),
+                        "chapter_number": int(active.get("chapter_number") or passage.get("chapter_number") or 0),
+                        "chapter_title": str(active.get("chapter_title") or passage.get("chapter_title") or ""),
+                        "chapter_revision": str(active.get("chapter_revision") or passage.get("chapter_revision") or ""),
+                        "passage_type": "Narration" if is_narration else "Dialogue",
+                        "start": start,
+                        "end": end,
+                        "text": passage_text,
+                        "context_before": source_text[max(0, start - 260):start],
+                        "context_after": source_text[end:min(len(source_text), end + 260)],
+                        "workbook_speakers": workbook_speakers,
+                        "existing_speakers": existing_speakers,
+                        "can_manual_assign": (
+                            not is_narration and not workbook_speakers and not existing_speakers
+                        ),
+                        "reasons": list(dict.fromkeys(issue_reasons)),
+                    })
+            character_options = []
+            seen_character_options = set()
+            for row in [
+                *(review_state.get("characters") or []),
+                *list_reusable_characters(review_series),
+            ]:
+                if not isinstance(row, dict):
+                    continue
+                name = str(row.get("name") or row.get("primary_name") or "").strip()
+                option_series = str(row.get("series") or review_series or "").strip()
+                if not name or not option_series:
+                    continue
+                key = (name.casefold(), option_series.casefold())
+                if key in seen_character_options:
+                    continue
+                seen_character_options.add(key)
+                character_options.append({
+                    "canonical_name": name,
+                    "series": option_series,
+                    "identity_variant": str(row.get("identity_variant") or ""),
+                    "voice_profile": str(row.get("voice_profile") or row.get("voice_name") or row.get("voice") or ""),
+                    "aliases": list(row.get("aliases") or []),
+                })
+            character_options.sort(key=lambda row: (row["series"].casefold(), row["canonical_name"].casefold()))
+            review_items.sort(key=lambda row: (
+                int(row.get("chapter_number") or 0),
+                int(row.get("start") or 0),
+                row.get("passage_id", ""),
+            ))
             return {
                 "cancelled": False, "ready": False,
-                "issues": plan["issues"][:20],
-                "issue_count": len(plan["issues"]),
+                "path": str(Path(selected_path).expanduser().resolve()),
+                "issues": review_issues[:1000],
+                "issue_count": len(review_issues),
+                "issues_truncated": len(review_issues) > 1000,
+                "review_items": review_items,
+                "character_options": character_options,
                 "summary": plan["summary"],
                 "scope": plan.get("scope", "chapter"),
                 "chapter_count": len(plan.get("chapters") or []) or 1,
@@ -5771,6 +6008,7 @@ class PremiumV2Bridge(QObject):
             }]
         return {
             "cancelled": False, "ready": True, "token": token,
+            "path": str(Path(selected_path).expanduser().resolve()),
             "book_title": str(getattr(project, "title", "") or ""),
             "series": series,
             "scope": plan.get("scope", "chapter"),
@@ -5967,6 +6205,7 @@ class PremiumV2Bridge(QObject):
                         **{
                             key: imported[key]
                             for key in (
+                                "passage_id", "chapter_revision",
                                 "source_passage_id", "source_passage_text",
                                 "source_passage_start", "source_passage_end",
                                 "source_context_before", "source_context_after",

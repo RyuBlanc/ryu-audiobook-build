@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 import json
+import math
 import posixpath, re, unicodedata, uuid, zipfile
 from xml.etree import ElementTree as ET
 from xml.sax.saxutils import escape
@@ -27,6 +28,27 @@ ET.register_namespace("r", REL)
 def _t(name): return "{%s}%s" % (MAIN, name)
 def _clean(value): return unicodedata.normalize("NFC", str(value or "")).strip()
 def _key(value): return _clean(value).casefold()
+
+
+def _normalize_workbook_confidence(value):
+    """Normalize decimal and percentage-style GPT confidence to the 0..1 scale."""
+    raw = _clean(value)
+    if not raw:
+        raise ValueError("confidence is blank")
+    explicit_percent = raw.endswith("%")
+    numeric_text = raw[:-1].strip() if explicit_percent else raw
+    try:
+        confidence = float(numeric_text)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("confidence must be a number from 0 to 1 or a percentage from 0 to 100") from exc
+    if not math.isfinite(confidence) or confidence < 0 or confidence > 100:
+        raise ValueError("confidence must be finite and within 0 to 1 (or 0 to 100 percent)")
+    if explicit_percent or confidence > 1.0:
+        confidence /= 100.0
+    if not 0.0 <= confidence <= 1.0:
+        raise ValueError("confidence must normalize to the 0 to 1 range")
+    return confidence
+
 
 def _workbook_speaker_names(row):
     """Read a legacy single speaker or a JSON/comma-separated list of canonical names."""
@@ -356,6 +378,9 @@ def complete_book_gpt_prompt() -> str:
         "Do not leave a row blank merely because it has no explicit 'X said' tag. Use the complete scene, conversational sequence, and consistent identities to make a well-supported contextual attribution when there is one clear answer.",
         "Treat each Dialogue Assignment row as one app-defined source passage. If two adjacent rows are separate turns, analyze them separately even when the old workbook had them combined.",
         "If one row itself contains two or more distinct turns by different speakers, do not force one name onto it and do not split, duplicate, delete, or rewrite the row. Leave its assignment blank and write 'STRUCTURAL SPLIT REQUIRED' in Evidence / Notes (GPT), identifying the exact sub-turns and the likely speaker of each for a later app-side segmentation correction.",
+        "Distinguish the narrator's perspective from a character's spoken voice. First-person narration, third-person limited narration, free-indirect style, internal thought, memory, and a character's perception of events remain Narrator unless the source clearly presents aloud-spoken words as a dialogue turn. A viewpoint character is not automatically the speaker of the narration.",
+        "Quotation marks alone do not prove that a passage is dialogue. A quoted word, nickname, title, idiom, remembered phrase, scare quote, or phrase embedded grammatically inside narration remains Narrator when it is being mentioned or described rather than spoken aloud. A verbatim quotation reported in narration is dialogue only when the scene clearly represents an actual utterance and identifies the utterer from a speech tag, action beat, or unmistakable turn-taking context.",
+        "For an actual spoken quotation embedded in a longer narrative sentence, use the app's current Passage Type and exact passage boundaries; do not silently reclassify an entire narration passage as dialogue or turn narrative framing into a speaker assignment. Explain any mismatch for human review.",
         "Do not classify thoughts, emphasized words, quoted terms, or quotations embedded in narration as spoken dialogue. Narration rows remain Narrator; do not assign a character to them or change Passage Type.",
         "",
         "CHARACTER IDENTITY AND REGISTER",
@@ -1438,7 +1463,41 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
     }
 
     by_id = {_clean(x.get("passage_id")):x for x in current_passages if isinstance(x,dict) and _clean(x.get("passage_id"))}
-    by_span = {(int(x.get("start",-1)),int(x.get("end",-1))):x for x in current_assignments if isinstance(x,dict)}
+    assignments_by_span = {}
+    for saved in current_assignments:
+        if not isinstance(saved, dict):
+            continue
+        try:
+            span_key = (int(saved.get("start", -1)), int(saved.get("end", -1)))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        assignments_by_span.setdefault(span_key, []).append(saved)
+
+    def exact_saved_assignment_for_passage(passage):
+        """Resolve one current assignment using passage identity, revision, offsets and exact text."""
+        if not isinstance(passage, dict):
+            return None
+        try:
+            span_key = (int(passage.get("start", -1)), int(passage.get("end", -1)))
+        except (TypeError, ValueError, OverflowError):
+            return None
+        passage_id = _clean(passage.get("passage_id"))
+        expected_revision = _clean(passage.get("chapter_revision")) or _clean(chapter_revision)
+        expected_text = str(passage.get("text") or "")
+        matches = []
+        for saved in assignments_by_span.get(span_key, []):
+            saved_id = _clean(saved.get("passage_id"))
+            saved_revision = _clean(saved.get("chapter_revision"))
+            saved_text = str(saved.get("text") or "")
+            if saved_id and saved_id != passage_id:
+                continue
+            if saved_revision and expected_revision and saved_revision != expected_revision:
+                continue
+            if saved_text and saved_text != expected_text:
+                continue
+            matches.append(saved)
+        return matches[0] if len(matches) == 1 else None
+
     assignments, seen = [], set()
     superseded_assignments = {}
     workbook_rows = [row for row in (document.get("dialogue_rows") or []) if isinstance(row, dict)]
@@ -1589,9 +1648,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                 continue
             try:
                 mode = _workbook_multi_speaker_mode(correction, len(canonical_names))
-                confidence = float(_clean(correction.get("GPT Confidence (0–1)")))
-                if not (0.0 <= confidence <= 1.0):
-                    raise ValueError("confidence outside 0–1")
+                confidence = _normalize_workbook_confidence(correction.get("GPT Confidence (0–1)"))
             except (TypeError, ValueError, OverflowError) as exc:
                 issues.append("%s has an invalid multi-speaker mode or GPT Confidence: %s." % (label, exc))
                 valid_group = False
@@ -1604,6 +1661,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                 "source_context_after": source_context_after,
                 "source_start_relative": rel_start, "source_end_relative": rel_end,
                 "chapter_id": _clean(chapter_id),
+                "chapter_revision": _clean(parent_passage.get("chapter_revision")) or _clean(chapter_revision),
                 "start": parent_start + rel_start, "end": parent_start + rel_end,
                 "text": str(correction.get("Exact Source Text") or ""),
                 "speaker": canonical_names[0], "speakers": canonical_names,
@@ -1714,7 +1772,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
         if str(current.get("assignment_state") or "").casefold() == "conflict":
             issues.append("Passage %s already has conflicting saved assignments. Resolve it in Character Studio before import." % pid)
             continue
-        old = by_span.get((start, end), {})
+        old = exact_saved_assignment_for_passage(current) or {}
         speakers = old.get("speakers")
         if not isinstance(speakers, (list, tuple)):
             speakers = [old.get("speaker")] if old.get("speaker") else []
@@ -1732,10 +1790,22 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                 saved_start, saved_end = int(saved.get("start", -1)), int(saved.get("end", -1))
             except (TypeError, ValueError, OverflowError):
                 continue
-            if saved_start >= end or saved_end <= start or (saved_start, saved_end) == (start, end):
+            if saved_start >= end or saved_end <= start or saved is old:
                 continue
             saved_source = _clean(saved.get("source") or "manual").casefold()
             if saved_source not in {"ai", "outsourced"}:
+                # A manual/unknown-source assignment is safe only when it belongs
+                # to one exact current passage with the same source offsets/text
+                # and (when recorded) the same passage ID and chapter revision.
+                exact_manual_passage = next((
+                    item for item in current_passages
+                    if isinstance(item, dict)
+                    and int(item.get("start", -1)) == saved_start
+                    and int(item.get("end", -1)) == saved_end
+                    and exact_saved_assignment_for_passage(item) is saved
+                ), None)
+                if exact_manual_passage is not None:
+                    continue
                 issues.append(
                     "Passage %s (Chapter %s, %s:%s) overlaps a saved %s assignment at %s:%s. "
                     "Review that existing assignment in Character Studio; workbook import will not overwrite manual or unknown-source assignments."
@@ -1749,9 +1819,8 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                 and int(item.get("start", -1)) < saved_end
                 and int(item.get("end", -1)) > saved_start
             ]
-            impacted_rows = [
-                workbook_row_by_id.get(_clean(item.get("passage_id")))
-                for item in impacted_passages
+            impacted_dialogue = [
+                item for item in impacted_passages
                 if _key(item.get("kind")) != "narration"
             ]
             blocking_narration = any(
@@ -1759,16 +1828,42 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                 and _clean(item.get("source")) != "automatic_embedded_quote"
                 for item in impacted_passages
             )
+            unresolved_impacts = []
+            for impacted in impacted_dialogue:
+                impacted_id = _clean(impacted.get("passage_id"))
+                workbook_row = workbook_row_by_id.get(impacted_id)
+                workbook_speakers = []
+                if isinstance(workbook_row, dict):
+                    try:
+                        workbook_speakers = _workbook_speaker_names(workbook_row)
+                    except ValueError:
+                        workbook_speakers = []
+                exact_saved = exact_saved_assignment_for_passage(impacted)
+                exact_saved_speakers = exact_saved.get("speakers") if isinstance(exact_saved, dict) else []
+                if not isinstance(exact_saved_speakers, (list, tuple)):
+                    exact_saved_speakers = [exact_saved.get("speaker")] if isinstance(exact_saved, dict) and exact_saved.get("speaker") else []
+                has_exact_manual_identity = (
+                    isinstance(exact_saved, dict)
+                    and _clean(exact_saved.get("source") or "manual").casefold() == "manual"
+                    and any(_clean(value) for value in exact_saved_speakers)
+                )
+                if not workbook_speakers and not has_exact_manual_identity:
+                    unresolved_impacts.append(impacted_id or "an unidentified passage")
+            only_embedded_narration = bool(impacted_passages) and all(
+                _key(item.get("kind")) == "narration"
+                and _clean(item.get("source")) == "automatic_embedded_quote"
+                for item in impacted_passages
+            )
             if (
                 not impacted_passages
                 or blocking_narration
-                or not impacted_rows
-                or any(not isinstance(item, dict) or not _workbook_speaker_names(item) for item in impacted_rows)
+                or (not impacted_dialogue and not only_embedded_narration)
+                or unresolved_impacts
             ):
                 issues.append(
-                    "Passage %s overlaps a stale AI assignment at %s:%s, but not every impacted dialogue passage "
-                    "has a confirmed workbook character. Resolve all affected rows before replacing it."
-                    % (pid, saved_start, saved_end)
+                    "Passage %s overlaps a stale AI assignment at %s:%s, but these affected dialogue passages "
+                    "still need confirmed identities: %s. Exact manual assignments are preserved."
+                    % (pid, saved_start, saved_end, ", ".join(unresolved_impacts[:8]) or "source classification conflict")
                 )
                 overlap_blocked = True
                 continue
@@ -1859,15 +1954,17 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             issues.append("Passage %s requires an explicit GPT Confidence value from 0.0 to 1.0; blank confidence is not accepted." % pid)
             continue
         try:
-            confidence = float(raw_confidence)
-        except (TypeError, ValueError, OverflowError):
-            issues.append("Passage %s has an invalid GPT Confidence value; use a number from 0.0 to 1.0." % pid)
-            continue
-        if not 0.0 <= confidence <= 1.0:
-            issues.append("Passage %s GPT Confidence must be between 0.0 and 1.0." % pid)
+            confidence = _normalize_workbook_confidence(raw_confidence)
+        except (TypeError, ValueError, OverflowError) as exc:
+            issues.append(
+                "Passage %s has invalid GPT Confidence (%s); use a decimal from 0.0 to 1.0 or a percentage from 0 to 100."
+                % (pid, exc)
+            )
             continue
         assignments.append({
-            "passage_id": pid, "chapter_id": chapter_id, "start": start, "end": end,
+            "passage_id": pid, "chapter_id": chapter_id,
+            "chapter_revision": _clean(current.get("chapter_revision")) or _clean(chapter_revision),
+            "start": start, "end": end,
             "text": str(current.get("text") or ""), "speaker": canonical_speakers[0],
             "speakers": canonical_speakers, "multi_speaker_mode": multi_mode,
             "series": active_series, "confidence": confidence,
