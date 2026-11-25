@@ -3457,8 +3457,23 @@
         }
         if (selectedNarrator || selectedSpeaker) {
           const sourceBox = $('ryuChapterDialogueCheckSource');
-          const start = Number(sourceBox?.selectionStart), end = Number(sourceBox?.selectionEnd);
-          const textValue = sourceBox && end > start ? sourceBox.value.slice(start,end) : '';
+          const displayStart = Number(sourceBox?.selectionStart), displayEnd = Number(sourceBox?.selectionEnd);
+          if (!sourceBox || !Number.isInteger(displayStart) || !Number.isInteger(displayEnd) || displayEnd <= displayStart) {
+            showCharacterWorkbookMessageDialog('Select source text first','Highlight the exact sentence fragment or spoken turn in the chapter source, then choose a correction.');
+            return;
+          }
+          const sourceOffset = displayOffset => {
+            let shown = 0, original = 0;
+            const raw = String(chapter.text || '');
+            while (original < raw.length && shown < displayOffset) {
+              if (raw[original] === '\r' && raw[original + 1] === '\n') original += 2;
+              else original += 1;
+              shown += 1;
+            }
+            return original;
+          };
+          const start = sourceOffset(displayStart), end = sourceOffset(displayEnd);
+          const textValue = String(chapter.text || '').slice(start,end);
           if (!textValue.trim()) {
             showCharacterWorkbookMessageDialog('Select source text first','Highlight the exact sentence fragment or spoken turn in the chapter source, then choose a correction.');
             return;
@@ -5290,7 +5305,6 @@
         series:characterSeries(current),
         aliases:mergedAliases
       };
-      if (String(current.voice_profile || '').trim()) updatePayload.voice_profile = String(current.voice_profile).trim();
       await call('character.create', updatePayload);
       await refreshCharacters();
       await refreshCharacterLibrary();
