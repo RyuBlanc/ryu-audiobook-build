@@ -566,11 +566,11 @@ def is_embedded_quotation_reference(text: str, start: int, end: int) -> bool:
     # Reported utterances remain dialogue when the source explicitly introduces
     # them with a speech verb (for example, "she disclosed that …").
     reported_speech_intro = re.search(
-        r"\\b(?:said|asked|replied|answered|shouted|yelled|whispered|muttered|called|cried|"
+        r"\b(?:said|asked|replied|answered|shouted|yelled|whispered|muttered|called|cried|"
         r"exclaimed|continued|added|insisted|wondered|demanded|begged|groaned|sighed|"
         r"laughed|snapped|stammered|murmured|screamed|announced|explained|remarked|"
-        r"responded|mumbled|roared|stated|disclosed|told)\\b"
-        r"(?:\\s+(?:me|him|her|them|us|you))?\\s+(?:that\\s+)?[,;:]?\\s*$",
+        r"responded|mumbled|roared|stated|disclosed|told)\b"
+        r"(?:\s+(?:me|him|her|them|us|you))?\s+(?:that\s+)?[,;:]?\s*$",
         prefix[-180:], flags=re.IGNORECASE,
     )
     if reported_speech_intro:
@@ -579,8 +579,8 @@ def is_embedded_quotation_reference(text: str, start: int, end: int) -> bool:
     # Quoted proverbs, summaries, terms and examples are narrator references,
     # not a new voice merely because the quotation happens to end a sentence.
     narrative_introduction = re.search(
-        r"\\b(?:proverb|motto|summary|phrase|term|word|idiom|example|quotation|quote|"
-        r"thought|memory|one-sentence summary)\\s*:\\s*$",
+        r"\b(?:proverb|motto|summary|phrase|term|word|idiom|example|quotation|quote|"
+        r"thought|memory|one-sentence summary)\s*:\s*$",
         prefix[-180:], flags=re.IGNORECASE,
     )
     if narrative_introduction:
@@ -598,7 +598,7 @@ def is_embedded_quotation_reference(text: str, start: int, end: int) -> bool:
     # A quotation inside an unfinished sentence is a referenced word, phrase,
     # remembered wording or thought, even when the quote itself contains a full
     # stop (for example: "the protagonist went far beyond \"some issues.\"").
-    if prefix.strip() and not re.search(r"[.!?…。！？][\\"”’']?\\s*$", prefix[-120:]):
+    if prefix.strip() and not re.search(r"[.!?…。！？][\"”’']?\s*$", prefix[-120:]):
         return True
 
     # A quoted term can also begin a sentence ("Accidents" were common).
