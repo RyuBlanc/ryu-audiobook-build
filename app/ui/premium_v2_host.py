@@ -1853,17 +1853,22 @@ class PremiumV2Bridge(QObject):
                     ambiguous_keys.add(key)
                 else:
                     canonical_by_name[key] = name
-        speakers = []
-        for raw_name in raw_speakers:
-            name = str(raw_name or "").strip()
-            key = name.casefold()
-            if key in ambiguous_keys:
-                raise ValueError(f"'{name}' matches more than one saved character. Select the character in the correct series first.")
-            canonical = canonical_by_name.get(key)
-            if not canonical:
-                raise ValueError(f"'{name or 'Unknown'}' is not in the saved character list for the selected series. Run analysis or select a saved character.")
-            if canonical not in speakers:
-                speakers.append(canonical)
+        narrator_only = (
+            len(raw_speakers) == 1
+            and str(raw_speakers[0] or "").strip().casefold() == "narrator"
+        )
+        speakers = ["Narrator"] if narrator_only else []
+        if not narrator_only:
+            for raw_name in raw_speakers:
+                name = str(raw_name or "").strip()
+                key = name.casefold()
+                if key in ambiguous_keys:
+                    raise ValueError(f"'{name}' matches more than one saved character. Select the character in the correct series first.")
+                canonical = canonical_by_name.get(key)
+                if not canonical:
+                    raise ValueError(f"'{name or 'Unknown'}' is not in the saved character list for the selected series. Run analysis or select a saved character.")
+                if canonical not in speakers:
+                    speakers.append(canonical)
         if not speakers:
             raise ValueError("Select at least one saved character.")
         chapter_number = payload.get("chapter_number")
@@ -1880,6 +1885,10 @@ class PremiumV2Bridge(QObject):
             raise ValueError(
                 "Dialogue assignment source must be manual or ai; outsourced is also accepted."
             )
+        if narrator_only and assignment_source != "manual":
+            raise ValueError("Narrator classification is an explicit manual review action.")
+        if narrator_only and mode != "single":
+            raise ValueError("Narrator classification must be a single protected narration role.")
         if assignment_source in {"ai", "outsourced"}:
             confidence_label = "AI confidence" if assignment_source == "ai" else "Outsourced confidence"
             try:
@@ -1891,6 +1900,8 @@ class PremiumV2Bridge(QObject):
         else:
             assignment_confidence = 1.0
         has_offsets = "start" in payload or "end" in payload
+        if narrator_only and not has_offsets:
+            raise ValueError("Select an exact source passage before marking it as Narrator.")
         if has_offsets:
             try:
                 start = int(payload.get("start"))
@@ -2081,7 +2092,7 @@ class PremiumV2Bridge(QObject):
         # A saved speaker choice is explicit user feedback. Store it in that
         # character's selected series so similarly named characters in different
         # series never share training examples by accident.
-        if len(speakers) == 1:
+        if len(speakers) == 1 and speakers[0].casefold() != "narrator":
             try:
                 from app.chapters.character_learning import record_assignment_feedback
                 saved_number = int(result["chapter_number"])
