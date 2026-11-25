@@ -595,6 +595,25 @@ def is_embedded_quotation_reference(text: str, start: int, end: int) -> bool:
         if len(label) > 60 or re.search(r"[.!?…。！？]", label):
             return True
 
+    # A standalone character-name line immediately before a quoted turn is a
+    # speaker label, not an unfinished narrator sentence. Require a short label
+    # with name-like capitalization (or non-Latin script) to avoid mistaking
+    # ordinary lowercase continuation prose for a speaker.
+    if prefix.endswith(("\n", "\r")):
+        prior_line = prefix.rstrip("\r\n").splitlines()[-1].strip()
+        prior_words = prior_line.split()
+        prior_is_non_latin = not any(char.isascii() and char.isalpha() for char in prior_line)
+        prior_is_name_like = bool(prior_words) and all(
+            not word[0].isascii() or not word[0].isalpha() or word[0].isupper()
+            for word in prior_words
+        )
+        if (
+            prior_line and len(prior_line) <= 60 and len(prior_words) <= 5
+            and not re.search(r"[.!?…。！？]", prior_line)
+            and (prior_is_non_latin or prior_is_name_like)
+        ):
+            return False
+
     # A quotation inside an unfinished sentence is a referenced word, phrase,
     # remembered wording or thought, even when the quote itself contains a full
     # stop (for example: "the protagonist went far beyond \"some issues.\"").
