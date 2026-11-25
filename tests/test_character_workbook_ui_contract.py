@@ -428,13 +428,13 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn("data-chapter-check-selection-speaker", self.adapter)
         self.assertIn("Mark as Narrator", self.adapter)
         self.assertIn("No overlapping offsets", self.adapter)
-        self.assertIn("passage_id:String(window.ryuPremiumPendingDialogueId || '')", self.adapter)
+        self.assertIn("passage_id:String(window.ryuPremiumPendingDialogueCanonicalId || '')", self.adapter)
         self.assertIn("chapter_revision:String(window.ryuPremiumPendingDialogueRevision || '')", self.adapter)
         self.assertIn("narrator_only", self.host)
         self.assertIn("Narrator classification is an explicit manual review action.", self.host)
 
     def test_workbook_preflight_options_include_register_only_characters_and_keep_aliases(self):
-        self.assertIn("plan.get(\\"characters\\") or []", self.host)
+        self.assertIn('plan.get("characters") or []', self.host)
         self.assertIn("pending_workbook_entry", self.host)
         self.assertIn("from this workbook’s Character Register", self.adapter)
         self.assertIn("selected.aliases || []", self.adapter)
