@@ -3341,8 +3341,8 @@
       const conflict = row.assignment_state === 'conflict';
       const status = conflict ? 'Saved assignment conflict' :
         (speakers.length ? (savedManual ? 'Manual · protected' : (type + ' · ' + speakers.join(' + '))) : type);
-      const canNarrator = !savedManual && row.kind !== 'narration';
-      const canSpeaker = row.kind === 'narration' || row.kind === 'needs_speaker_review' || !speakers.length;
+      const canNarrator = !conflict && !savedManual && row.kind !== 'narration';
+      const canSpeaker = !conflict && (row.kind === 'narration' || row.kind === 'needs_speaker_review' || !speakers.length);
       return '<article class="ryu-workbook-review-card" data-chapter-check-card="' + index + '">' +
         '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">' +
           '<b>' + esc(type) + '</b><span style="font-size:11px;color:#aab5c6">' + esc(status) + '</span></div>' +
@@ -3407,6 +3407,7 @@
         if (speakerAction) {
           closeCharacterWorkbookDialog();
           await openCharacterAssignmentPopover({
+            id:'check-' + Number(chapter.number) + '-' + start + '-' + end,
             canonical_passage_id:passageId, chapter_revision:revision,
             chapter_number:Number(chapter.number), chapter_title:String(chapter.title || ''),
             start,end,text:textValue
@@ -5223,7 +5224,8 @@
     window.ryuPremiumPendingDialogueChapter = Number(passage.chapter_number);
     window.ryuPremiumPendingDialogueStart = Number(passage.start);
     window.ryuPremiumPendingDialogueEnd = Number(passage.end);
-    window.ryuPremiumPendingDialogueId = String(passage.canonical_passage_id || '');
+    window.ryuPremiumPendingDialogueId = String(passage.id || '');
+    window.ryuPremiumPendingDialogueCanonicalId = String(passage.canonical_passage_id || '');
     window.ryuPremiumPendingDialogueRevision = String(passage.chapter_revision || '');
     window.__ryuCharacterAssignmentAnchor = {x:Number(x || 0),y:Number(y || 0)};
     const priorNames = Array.isArray(passage.speakers) ? passage.speakers : (passage.speaker ? [passage.speaker] : []);
@@ -5258,6 +5260,7 @@
     if (actions) actions.hidden = false;
     window.ryuPremiumSelectedDialogueSpeakers = [];
     window.ryuPremiumPendingDialogueId = '';
+    window.ryuPremiumPendingDialogueCanonicalId = '';
     window.ryuPremiumPendingDialogueRevision = '';
   }
   async function ensureCharacterInActiveProject(name, preferredSeries = '', preferredProfile = '', preferredAliases = []) {
@@ -5349,7 +5352,7 @@
     }
     const result = await call('chapter.dialogue.assign',{
       dialogue_text:dialogueText,speakers,series,chapter_number:chapterNumber,start,end,
-      passage_id:String(window.ryuPremiumPendingDialogueId || ''),
+      passage_id:String(window.ryuPremiumPendingDialogueCanonicalId || ''),
       chapter_revision:String(window.ryuPremiumPendingDialogueRevision || ''),
       mode:speakers.length > 1 ? 'chorus' : 'single',source:assignmentSource,confidence:assignmentConfidence
     });
