@@ -211,8 +211,8 @@ class DialoguePassageIndexTests(unittest.TestCase):
             path.write_text(json.dumps(saved), encoding="utf-8")
 
             rebuilt = load_or_build_passage_index(folder, [chapter])
-            self.assertEqual(INDEX_SCHEMA_VERSION, 2)
-            self.assertEqual(rebuilt["schema_version"], 2)
+            self.assertEqual(INDEX_SCHEMA_VERSION, 3)
+            self.assertEqual(rebuilt["schema_version"], 3)
             self.assertTrue(any(
                 row["text"] == "“accident”"
                 and row["kind"] == "narration"
