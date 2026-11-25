@@ -327,5 +327,20 @@ class DialoguePassageIndexTests(unittest.TestCase):
         self.assertEqual(segments[0].kind, "needs_speaker_review")
 
 
+
+    def test_reported_speech_after_explains_and_states_remains_dialogue(self):
+        from app.chapters.characters import is_embedded_quotation_reference
+
+        examples = [
+            'she explains that “Everything I said back then was a front…”',
+            'she states, “But now things are different, because I have you…”',
+            'she says that “I was left behind in the dungeon.”',
+        ]
+        for source in examples:
+            start = source.index("“")
+            end = source.index("”", start) + 1
+            with self.subTest(source=source):
+                self.assertFalse(is_embedded_quotation_reference(source, start, end))
+
 if __name__ == "__main__":
     unittest.main()
