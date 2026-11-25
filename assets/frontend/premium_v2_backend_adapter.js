@@ -3273,6 +3273,201 @@
         ? 'At least one chapter must remain in the project.'
         : 'Delete the currently open chapter';
     }
+    const checkButton = $('ryuCheckChapterDialogues');
+    if (checkButton) checkButton.disabled = !selectedChapter();
+  }
+
+  async function fetchChapterDialogueCheck(chapter) {
+    if (!chapter) throw new Error('Open a chapter in Chapter Studio before checking its dialogue.');
+    const rows = [];
+    let offset = 0, total = 0, pages = 0;
+    do {
+      const page = await call('character.dialogue.index.get', {
+        chapter_number:Number(chapter.number), offset, limit:500, include_passages:true
+      });
+      if (!page || !Array.isArray(page.passages)) {
+        throw new Error('The source-backed dialogue index is unavailable. Refresh Character Studio and retry.');
+      }
+      if (pages === 0) total = Number(page.total_passages || page.passages.length);
+      rows.push(...page.passages);
+      offset += page.passages.length;
+      pages += 1;
+      if (!page.has_more || !page.passages.length || pages > 100) break;
+    } while (rows.length < total);
+    const source = String(chapter.text || '');
+    const ordered = rows.slice().sort((a,b) => Number(a.start) - Number(b.start) || Number(b.end) - Number(a.end));
+    const overlaps = [], invalid = [], uncovered = [];
+    let cursor = 0, previous = null;
+    for (const row of ordered) {
+      const start = Number(row.start), end = Number(row.end);
+      if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start || end > source.length ||
+          source.slice(start,end) !== String(row.text || '')) {
+        invalid.push(row);
+        continue;
+      }
+      if (start < cursor) overlaps.push({previous,current:row});
+      else if (start > cursor && source.slice(cursor,start).trim()) {
+        uncovered.push({start:cursor,end:start,text:source.slice(cursor,start)});
+      }
+      if (!previous || end > cursor) {
+        cursor = Math.max(cursor,end);
+        previous = row;
+      }
+    }
+    if (cursor < source.length && source.slice(cursor).trim()) {
+      uncovered.push({start:cursor,end:source.length,text:source.slice(cursor)});
+    }
+    const counts = {
+      total:ordered.length,
+      dialogue:ordered.filter(row => row.kind === 'character_dialogue').length,
+      pending:ordered.filter(row => row.kind === 'needs_speaker_review').length,
+      narrator:ordered.filter(row => row.kind === 'narration').length,
+      conflicts:ordered.filter(row => row.assignment_state === 'conflict').length,
+      overlaps:overlaps.length,
+      invalid:invalid.length,
+      uncovered:uncovered.length
+    };
+    return {chapter,source,rows:ordered,overlaps,invalid,uncovered,counts};
+  }
+
+  function chapterDialogueCheckMarkup(report) {
+    const {chapter,source,rows,overlaps,invalid,uncovered,counts} = report;
+    const cards = rows.map((row,index) => {
+      const type = row.kind === 'narration' ? 'Narrator' :
+        (row.kind === 'character_dialogue' ? 'Dialogue' : 'Needs speaker review');
+      const speakers = Array.isArray(row.speakers) ? row.speakers.filter(Boolean) :
+        (row.speaker ? [String(row.speaker)] : []);
+      const savedManual = String(row.source || '').toLowerCase() === 'manual' && speakers.length > 0;
+      const conflict = row.assignment_state === 'conflict';
+      const status = conflict ? 'Saved assignment conflict' :
+        (speakers.length ? (savedManual ? 'Manual · protected' : (type + ' · ' + speakers.join(' + '))) : type);
+      const canNarrator = !savedManual && row.kind !== 'narration';
+      const canSpeaker = row.kind === 'narration' || row.kind === 'needs_speaker_review' || !speakers.length;
+      return '<article class="ryu-workbook-review-card" data-chapter-check-card="' + index + '">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">' +
+          '<b>' + esc(type) + '</b><span style="font-size:11px;color:#aab5c6">' + esc(status) + '</span></div>' +
+        '<p style="font-size:11px;color:#aab5c6">Passage ID: ' + esc(row.passage_id || 'not assigned') +
+          ' · ' + Number(row.start) + '–' + Number(row.end) + ' · ' + esc(row.assignment_state || 'unassigned') + '</p>' +
+        '<p class="ryu-workbook-context">' + esc(row.text || '') + '</p>' +
+        (conflict ? '<p class="ryu-workbook-review-result">Conflicting saved assignments must be resolved before this span can be changed.</p>' : '') +
+        '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:9px">' +
+          (canNarrator ? '<button type="button" class="btn small secondary" data-chapter-check-narrator="' + index + '">Mark as Narrator</button>' : '') +
+          (canSpeaker ? '<button type="button" class="btn small secondary" data-chapter-check-speaker="' + index + '">Assign speaker</button>' : '') +
+        '</div></article>';
+    }).join('');
+    const issueRows = [
+      ...overlaps.map(item => 'Overlapping source ranges near offsets ' + Number(item.current.start) + '–' + Number(item.current.end) + '.'),
+      ...invalid.map(item => 'Invalid or stale source range at passage ' + String(item.passage_id || 'unknown') + '.'),
+      ...uncovered.map(item => 'Unclassified source text at offsets ' + item.start + '–' + item.end + ': ' + item.text.slice(0,120))
+    ];
+    const summary = [
+      counts.total + ' source passages',
+      counts.dialogue + ' assigned dialogue',
+      counts.pending + ' passages needing speaker review',
+      counts.narrator + ' narrator passages',
+      counts.conflicts + ' saved conflicts',
+      counts.overlaps + ' overlaps',
+      counts.invalid + ' stale/invalid ranges',
+      counts.uncovered + ' unclassified gaps'
+    ];
+    return '<p>Check the saved chapter segmentation against its exact source text. Dialogue and narrator spans are shown separately; source offsets are validated and overlapping or uncovered text is flagged. Nothing is changed until you choose a correction.</p>' +
+      '<p><b>' + esc(summary.join(' · ')) + '</b></p>' +
+      (issueRows.length ? '<div class="ryu-workbook-review-card"><b>Structural issues</b><ul>' +
+        issueRows.map(value => '<li>' + esc(value) + '</li>').join('') + '</ul></div>' :
+        '<p class="ryu-workbook-review-result">No overlapping offsets, stale spans or uncovered source text were detected by the index check.</p>') +
+      '<div class="ryu-workbook-field"><label><b>Full chapter source · select an exact phrase/turn to classify or assign</b></label>' +
+        '<textarea id="ryuChapterDialogueCheckSource" readonly rows="9" style="box-sizing:border-box;width:100%;max-width:100%;min-height:150px;resize:vertical;padding:10px;border:1px solid #465163;border-radius:9px;background:#0b111b;color:#f4f6fa;font:inherit;white-space:pre-wrap">' +
+        esc(source) + '</textarea><div style="display:flex;gap:7px;flex-wrap:wrap">' +
+        '<button type="button" class="btn small secondary" data-chapter-check-selection-narrator>Mark selected as Narrator</button>' +
+        '<button type="button" class="btn small secondary" data-chapter-check-selection-speaker>Assign selected as speaker</button></div>' +
+        '<small>Select the exact words only, not the surrounding sentence. Selection offsets are stored against the active chapter source.</small></div>' +
+      '<div class="ryu-workbook-review-list">' + cards + '</div>';
+  }
+
+  async function openChapterDialogueCheck() {
+    const chapter = selectedChapter();
+    if (!chapter) {
+      message('Open a chapter in Chapter Studio first.', true);
+      return;
+    }
+    try {
+      await flushChapterDraftBeforeSwitch();
+      const report = await fetchChapterDialogueCheck(chapter);
+      const title = 'Check dialogues · Chapter ' + Number(chapter.number);
+      const overlay = openCharacterWorkbookDialog(
+        title,
+        chapterDialogueCheckMarkup(report),
+        '<button type="button" class="btn secondary" data-workbook-dialog-close>Close</button>' +
+        '<button type="button" class="btn" data-chapter-check-refresh>Recheck chapter</button>'
+      );
+      const apply = async (start,end,textValue,passageId='',revision='',speakerAction=false) => {
+        if (!textValue || start < 0 || end <= start || String(chapter.text || '').slice(start,end) !== textValue) {
+          throw new Error('The selected source range is no longer exact. Refresh Chapter Studio and select it again.');
+        }
+        if (speakerAction) {
+          closeCharacterWorkbookDialog();
+          await openCharacterAssignmentPopover({
+            id:passageId, chapter_number:Number(chapter.number), chapter_title:String(chapter.title || ''),
+            start,end,text:textValue
+          }, window.innerWidth / 2, window.innerHeight / 2);
+          return;
+        }
+        await call('chapter.dialogue.assign', {
+          dialogue_text:textValue, speakers:['Narrator'], series:activeCharacterProjectSeries(),
+          chapter_number:Number(chapter.number), start,end, passage_id:passageId,
+          chapter_revision:revision, mode:'single', source:'manual', confidence:1.0
+        });
+        await refreshChapters();
+        await refreshCharacters();
+        await refreshCharacterLibrary();
+        await refreshCharacterDialogueReview?.();
+        await renderCharacterStudioLive();
+        await renderDialogueReview();
+        message('Marked the exact source range as Narrator.');
+        await openChapterDialogueCheck();
+      };
+      overlay.addEventListener('click', async event => {
+        const target = event.target;
+        const narratorButton = target?.closest?.('[data-chapter-check-narrator]');
+        const speakerButton = target?.closest?.('[data-chapter-check-speaker]');
+        const selectedNarrator = target?.closest?.('[data-chapter-check-selection-narrator]');
+        const selectedSpeaker = target?.closest?.('[data-chapter-check-selection-speaker]');
+        const refreshButton = target?.closest?.('[data-chapter-check-refresh]');
+        if (refreshButton) {
+          refreshButton.disabled = true;
+          closeCharacterWorkbookDialog();
+          await openChapterDialogueCheck();
+          return;
+        }
+        if (narratorButton || speakerButton) {
+          const index = Number((narratorButton || speakerButton).getAttribute(
+            narratorButton ? 'data-chapter-check-narrator' : 'data-chapter-check-speaker'
+          ));
+          const row = report.rows[index];
+          if (!row) return;
+          if (speakerButton) {
+            await apply(Number(row.start),Number(row.end),String(row.text || ''),
+              String(row.passage_id || ''),String(row.chapter_revision || ''),true);
+          } else {
+            await apply(Number(row.start),Number(row.end),String(row.text || ''),
+              String(row.passage_id || ''),String(row.chapter_revision || ''),false);
+          }
+          return;
+        }
+        if (selectedNarrator || selectedSpeaker) {
+          const sourceBox = $('ryuChapterDialogueCheckSource');
+          const start = Number(sourceBox?.selectionStart), end = Number(sourceBox?.selectionEnd);
+          const textValue = sourceBox && end > start ? sourceBox.value.slice(start,end) : '';
+          if (!textValue.trim()) {
+            showCharacterWorkbookMessageDialog('Select source text first','Highlight the exact sentence fragment or spoken turn in the chapter source, then choose a correction.');
+            return;
+          }
+          await apply(start,end,textValue,'','',Boolean(selectedSpeaker));
+        }
+      });
+    } catch (error) {
+      showCharacterWorkbookMessageDialog('Dialogue check unavailable', error?.message || String(error));
+    }
   }
 
   function ensureChapterDeleteControls(list) {
@@ -3302,6 +3497,12 @@
         const current = selectedChapter();
         if (current) deleteChapterNumbers([current.number], 'current');
       });
+      const checkButton = document.createElement('button');
+      checkButton.id = 'ryuCheckChapterDialogues';
+      checkButton.type = 'button';
+      checkButton.textContent = 'Check dialogues';
+      checkButton.title = 'Review dialogue/narrator segmentation and exact source boundaries for the open chapter';
+      checkButton.addEventListener('click', () => openChapterDialogueCheck());
       const selectedButton = document.createElement('button');
       selectedButton.id = 'ryuDeleteSelectedChapters';
       selectedButton.type = 'button';
@@ -3310,7 +3511,7 @@
       selectedButton.addEventListener('click', () => {
         deleteChapterNumbers([...chapterDeleteSelection()], 'selected');
       });
-      toolbar.append(currentButton, selectedButton);
+      toolbar.append(currentButton, checkButton, selectedButton);
     }
     if (toolbar.parentElement !== list.parentElement || toolbar.nextElementSibling !== list) {
       list.insertAdjacentElement('beforebegin', toolbar);
