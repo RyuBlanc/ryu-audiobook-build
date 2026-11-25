@@ -5796,11 +5796,19 @@ class PremiumV2Bridge(QObject):
         if requested_path:
             if document.get("sha256") != getattr(self, "_character_workbook_review_sha256", None):
                 raise ValueError("The selected workbook changed after the review began. Select it again and review the latest contents.")
-            if str(Path(project.folder).resolve()) != str(getattr(self, "_character_workbook_review_project_folder", "")):
+            active_project_folder = getattr(project, "folder", None)
+            if (
+                not active_project_folder
+                or str(Path(active_project_folder).resolve())
+                != str(getattr(self, "_character_workbook_review_project_folder", ""))
+            ):
                 raise ValueError("The active book changed after the review began. Reopen the workbook in its original project.")
         self._character_workbook_review_path = str(Path(selected_path).expanduser().resolve())
         self._character_workbook_review_sha256 = str(document.get("sha256") or "")
-        self._character_workbook_review_project_folder = str(Path(project.folder).resolve())
+        active_project_folder = getattr(project, "folder", None)
+        self._character_workbook_review_project_folder = (
+            str(Path(active_project_folder).resolve()) if active_project_folder else ""
+        )
         try:
             state, series, chapter, plan = self._character_workbook_import_plan(project, document)
         except ValueError as exc:
