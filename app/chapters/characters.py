@@ -568,6 +568,20 @@ def is_embedded_quotation_reference(text: str, start: int, end: int) -> bool:
     if preceding_speech_tag.search(prefix[-160:]) or following_speech_tag.search(line_suffix[:160]):
         return False
 
+    # Quotes attributed to external commentary (developer interviews, author
+    # notes, guides or documentation) are narrator references, not fictional
+    # character turns. This avoids requiring an unlisted real-world speaker.
+    external_quote_source = re.search(
+        r"\b(?:in\s+(?:an?\s+)?interview|interview|game\s+developer|developers?|author|authors|"
+        r"creator|creators|producer|producers|director|directors|interviewer|staff|"
+        r"guide|manual|documentation|press\s+release)\b.{0,180}"
+        r"\b(?:said|stated|explained|remarked|noted|wrote|mentioned|described)\b"
+        r"[^.!?…。！？]{0,40}[:,;]?\s*$",
+        prefix[-240:], flags=re.IGNORECASE,
+    )
+    if external_quote_source:
+        return True
+
     # Reported utterances remain dialogue when the source explicitly introduces
     # them with a speech verb (for example, "she disclosed that …").
     reported_speech_intro = re.search(
