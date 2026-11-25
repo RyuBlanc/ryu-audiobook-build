@@ -1823,11 +1823,6 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                 item for item in impacted_passages
                 if _key(item.get("kind")) != "narration"
             ]
-            blocking_narration = any(
-                _key(item.get("kind")) == "narration"
-                and _clean(item.get("source")) != "automatic_embedded_quote"
-                for item in impacted_passages
-            )
             unresolved_impacts = []
             for impacted in impacted_dialogue:
                 impacted_id = _clean(impacted.get("passage_id"))
@@ -1856,7 +1851,6 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             )
             if (
                 not impacted_passages
-                or blocking_narration
                 or (not impacted_dialogue and not only_embedded_narration)
                 or unresolved_impacts
             ):
