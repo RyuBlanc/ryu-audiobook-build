@@ -19,7 +19,7 @@ from app.chapters.detector import Chapter
 from app.chapters.speaker_segmentation import segment_chapter_speakers
 
 
-INDEX_SCHEMA_VERSION = 2
+INDEX_SCHEMA_VERSION = 3
 INDEX_FILENAME = "dialogue_passage_index.json"
 
 _LOCKS_GUARD = threading.RLock()
