@@ -4756,7 +4756,7 @@
         reclassifications.map(row =>
           '<li>Chapter ' + Number(row.chapter_number || 0) + ' · ' + esc(row.chapter_title || 'Untitled') +
           ' · ' + esc(row.passage_id || '') + '<p class="ryu-workbook-context">' + esc(row.source_text || '') + '</p></li>'
-        ).join('') + '</ol><p>The active book's Narrator classification is retained because the source text and offsets match exactly.</p></details>'
+        ).join('') + '</ol><p>The active book’s Narrator classification is retained because the source text and offsets match exactly.</p></details>'
       : '';
     const issueList = issues.map(issue => '<li>' + esc(issue) + '</li>').join('');
     const issueDetails = issues.length
