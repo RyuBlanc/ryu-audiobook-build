@@ -52,6 +52,53 @@ class DialogueAssignmentPersistenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "overlaps"):
             assign_dialogue_to_chapters([chapter], "“I understand.”", ["Rias"])
 
+
+    def test_reserved_third_person_is_not_exposed_as_a_saved_character(self):
+        from app.chapters.assignment_utils import build_book_character_registry
+
+        chapter = Chapter(1, "Market", '“Move back!” “Mira, this way!”')
+        chapter.dialogue_assignments = [
+            {
+                "start": 0, "end": len('“Move back!”'), "text": '“Move back!”',
+                "speaker": "Third Person", "speakers": ["Third Person"],
+                "source": "outsourced", "third_person_pending": True,
+            },
+            {
+                "start": len('“Move back!” '), "end": len(chapter.text),
+                "text": '“Mira, this way!”', "speaker": "Mira", "speakers": ["Mira"],
+                "source": "manual",
+            },
+        ]
+        registry = build_book_character_registry([chapter])
+        self.assertIn("mira", registry)
+        self.assertNotIn("third person", registry)
+        self.assertNotIn("narrator", registry)
+
+    def test_third_person_dialogue_routes_to_global_fallback_voice(self):
+        from app.tts.cast_provider import CastAwareProvider
+
+        class DummyProvider:
+            recommended_chunk_chars = 1400
+            recommended_chunk_sentences = 2
+
+            def synthesize(self, text, output_path, voice=None):
+                return output_path
+
+        source = '“Move back!”'
+        start, end = 0, len(source)
+        cast = CastAwareProvider(
+            DummyProvider(), "Narrator",
+            profiles={}, assignments={},
+            unassigned_voice="Third Person Global Voice",
+        )
+        parts = cast.split_for_cast(source, "Narrator", dialogue_assignments=[{
+            "start": start, "end": end, "text": source[start:end],
+            "speaker": "Third Person", "speakers": ["Third Person"],
+            "source": "outsourced", "third_person_pending": True,
+        }])
+        self.assertEqual(parts, [("Move back!", "Third Person Global Voice")])
+        cast.close()
+
     def test_multi_speaker_assignments_keep_legacy_and_new_fields(self):
         chapter = Chapter(1, "One", "“We stand together.”")
         assign_dialogue_to_chapters([chapter], "“We stand together.”", ["Rimuru", "Benimaru"], mode="chorus")
