@@ -1286,7 +1286,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             self.assertEqual(document["info"]["Publication Year"], "2024")
             self.assertEqual(document["info"]["Series Volume"], "Volume 2")
             self.assertIn("GPT Prompt", document["info"]["Instructions"])
-            self.assertEqual(document["info"]["GPT Prompt Version"], "2.0")
+            self.assertEqual(document["info"]["GPT Prompt Version"], "2.1")
             self.assertEqual(len(document["chapter_references"]), 2)
             self.assertEqual(len(document["dialogue_rows"]), len(passages))
             self.assertEqual(document["chapter_references"][0]["chapter_number"], 1)
