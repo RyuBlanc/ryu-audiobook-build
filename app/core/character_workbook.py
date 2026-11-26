@@ -857,6 +857,8 @@ def refresh_complete_book_character_workbook_bytes(
                 "evidence": _clean(row.get("Evidence / Notes (GPT)")),
                 "assigned_speakers": _workbook_speaker_names(row),
                 "multi_speaker_mode": _clean(row.get("GPT Multi-Speaker Mode")),
+                "proposed_source_text": str(row.get("GPT Proposed Source Text") or ""),
+                "text_correction_reason": str(row.get("GPT Text Correction Reason") or ""),
             })
 
     refreshed_passages = []
@@ -886,6 +888,10 @@ def refresh_complete_book_character_workbook_bytes(
         if narration:
             if any(old["kind"] == "dialogue" for old in exact):
                 reclassified_as_narration += 1
+            exact_old = [old for old in exact if len(exact) == 1]
+            if len(exact_old) == 1:
+                row["gpt_proposed_source_text"] = exact_old[0].get("proposed_source_text") or ""
+                row["gpt_text_correction_reason"] = exact_old[0].get("text_correction_reason") or ""
             refreshed_passages.append(row)
             continue
 
@@ -897,6 +903,8 @@ def refresh_complete_book_character_workbook_bytes(
             row["gpt_evidence"] = old["evidence"]
             row["gpt_assigned_characters"] = list(old.get("assigned_speakers") or ([old["assigned"]] if old["assigned"] else []))
             row["gpt_multi_speaker_mode"] = old.get("multi_speaker_mode") or ""
+            row["gpt_proposed_source_text"] = old.get("proposed_source_text") or ""
+            row["gpt_text_correction_reason"] = old.get("text_correction_reason") or ""
             exact_rows_carried += 1
             if old["assigned"] or old.get("assigned_speakers"):
                 assignments_carried += 1
