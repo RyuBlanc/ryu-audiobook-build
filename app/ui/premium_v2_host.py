@@ -5500,6 +5500,41 @@ class PremiumV2Bridge(QObject):
                 })
                 export_rows.append(item)
 
+        character_register = []
+        seen_register_identities = set()
+        for character in (state.get("characters") or []):
+            if not isinstance(character, dict):
+                continue
+            character_series = str(character.get("series") or series).strip()
+            if character_series.casefold() != series.casefold():
+                continue
+            canonical_name = str(
+                character.get("name") or character.get("primary_name")
+                or character.get("canonical_name") or ""
+            ).strip()
+            if not canonical_name or canonical_name.casefold() in {"narrator", "third person"}:
+                continue
+            identity_variant = str(character.get("identity_variant") or "").strip()
+            register_key = (canonical_name.casefold(), identity_variant.casefold())
+            if register_key in seen_register_identities:
+                continue
+            seen_register_identities.add(register_key)
+            raw_aliases = character.get("aliases") or []
+            if isinstance(raw_aliases, str):
+                raw_aliases = [raw_aliases]
+            aliases = [
+                str(value).strip() for value in raw_aliases
+                if str(value or "").strip()
+                and str(value).strip().casefold() not in {canonical_name.casefold(), "narrator", "third person"}
+            ] if isinstance(raw_aliases, (list, tuple)) else []
+            character_register.append({
+                "full_name": canonical_name,
+                "aliases": list(dict.fromkeys(aliases)),
+                "version": identity_variant,
+                "notes": str(character.get("notes") or ""),
+                "included_in_book": True,
+            })
+
         metadata = {
             "project_title": str(getattr(project, "title", "") or ""),
             "author": str(state.get("author") or ""),
@@ -5510,6 +5545,7 @@ class PremiumV2Bridge(QObject):
             "series_name": series,
             "series_volume": str(state.get("series_volume") or ""),
             "series_character_reference": series_character_reference,
+            "character_register": character_register,
         }
         workbook_bytes = create_complete_book_character_workbook_bytes(
             metadata, book_chapters, export_rows
