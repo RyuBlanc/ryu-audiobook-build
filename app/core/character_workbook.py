@@ -1999,7 +1999,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                             "speakers": [_clean(value) for value in speakers_value if _clean(value)],
                             "text": str(saved.get("text") or ""),
                         })
-            if not legacy_inline_quote and _key(assigned) != "narrator":
+            if not legacy_inline_quote and assigned and _key(assigned) != "narrator":
                 issues.append("Narration passage %s must retain the protected Narrator assignment." % pid)
             continue
 
