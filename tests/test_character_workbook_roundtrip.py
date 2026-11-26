@@ -1286,7 +1286,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             self.assertEqual(document["info"]["Publication Year"], "2024")
             self.assertEqual(document["info"]["Series Volume"], "Volume 2")
             self.assertIn("GPT Prompt", document["info"]["Instructions"])
-            self.assertEqual(document["info"]["GPT Prompt Version"], "2.1")
+            self.assertEqual(document["info"]["GPT Prompt Version"], "2.2")
             self.assertEqual(len(document["chapter_references"]), 2)
             self.assertEqual(len(document["dialogue_rows"]), len(passages))
             self.assertEqual(document["chapter_references"][0]["chapter_number"], 1)
@@ -2012,6 +2012,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
         self.assertIn("GPT Proposed Source Text", prompt)
         self.assertIn("GPT Text Correction Reason", prompt)
         self.assertIn("Narrator paragraphs", prompt)
+        self.assertIn("Source Correction History", prompt)
         self.assertIn("only after the user explicitly confirms", prompt)
 
     def test_import_plan_accepts_reserved_third_person_without_character_register_entry(self):
@@ -2205,7 +2206,16 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             },
         ]
         payload = create_complete_book_character_workbook_bytes(
-            {"project_title": "The Silver Archive", "series_name": "Silver Archive"},
+            {
+                "project_title": "The Silver Archive",
+                "series_name": "Silver Archive",
+                "source_correction_history": [{
+                    "chapter_id": "chapter-001", "chapter_number": 1,
+                    "chapter_title": "The Arrival", "passage_id": "old-passage-id",
+                    "source_text": "“Helo, Mira!”", "approved_text": "“Hello, Mira!”",
+                    "reason": "Corrected an obvious typo.", "applied_at": "2026-11-26T21:00:00+05:30",
+                }],
+            },
             chapters, passages,
         )
         with tempfile.TemporaryDirectory() as tmp:
@@ -2217,6 +2227,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
         self.assertIn("GPT Text Correction Reason", dialogue_row)
         self.assertEqual(parsed["speaker_roles"][0]["Canonical Value"], "Third Person")
         self.assertIn("uses the user's global Third Person fallback voice", parsed["speaker_roles"][0]["Application Routing"])
+        self.assertEqual(parsed["source_correction_history"][0]["User-Approved Source Text"], "“Hello, Mira!”")
 
 
 if __name__ == "__main__":
