@@ -5941,7 +5941,9 @@ class PremiumV2Bridge(QObject):
                         source_revision = str(passage.get("chapter_revision") or active.get("chapter_revision") or "").strip()
                         saved_text = str(saved.get("text") or "")
                         if saved_id and saved_id != passage_id:
-                            continue
+                            saved_source = str(saved.get("source") or "manual").strip().casefold()
+                            if saved_source != "manual" or saved_text != passage_text:
+                                continue
                         if saved_revision and source_revision and saved_revision != source_revision:
                             continue
                         if saved_text and saved_text != passage_text:
