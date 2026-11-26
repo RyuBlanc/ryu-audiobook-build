@@ -268,6 +268,82 @@ class CharacterWorkbookImportTransactionTests(unittest.TestCase):
             self.assertNotIn("chapter_revision", saved)
             project.save.assert_called_once_with()
 
+
+    def test_commit_rebases_incoming_gpt_assignment_when_source_text_is_corrected(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-workbook-correction-with-gpt-speaker-") as tmp:
+            folder = Path(tmp)
+            bridge, project, chapter, _state, plan, document = self._fixture(folder)
+            original_text = str(chapter.text)
+            corrected_text = "“Mira, are you ready?”"
+            chapter.dialogue_assignments = []
+            plan["characters"] = [{
+                "canonical_name": "Mira", "identity_base_name": "Mira",
+                "identity_variant": "", "aliases": [], "aliases_to_add": [],
+                "notes": "Confirmed speaker", "library_id": "",
+                "existing_voice_name": "", "action": "create",
+                "series": "Silver Archive",
+            }]
+            plan["assignments"] = [{
+                "passage_id": "old-passage-id", "chapter_id": "chapter-001",
+                "chapter_revision": "revision-1", "chapter_number": 1,
+                "start": 0, "end": len(original_text), "text": original_text,
+                "speaker": "Mira", "speakers": ["Mira"],
+                "multi_speaker_mode": "single", "series": "Silver Archive",
+                "confidence": 0.98,
+            }]
+            plan["superseded_assignments"] = []
+            plan["text_corrections"] = [{
+                "passage_id": "old-passage-id", "chapter_id": "chapter-001",
+                "chapter_number": 1, "chapter_title": "The Arrival",
+                "chapter_revision": "revision-1", "passage_type": "Dialogue",
+                "start": 0, "end": len(original_text),
+                "source_text": original_text, "proposed_text": corrected_text,
+                "reason": "Corrected a transcription typo while preserving the speaker.",
+            }]
+            plan["passage_reclassifications"] = []
+            plan["summary"].update({
+                "matched_characters": 0, "new_characters": 1,
+                "aliases_to_merge": 0, "dialogue_assignments": 1,
+                "saved_assignments_replaced": 0, "passage_reclassifications": 0,
+                "text_corrections": 1, "third_person_assignments": 0,
+            })
+            bridge._character_workbook_import_sessions["preview-token"]["plan_sha256"] = (
+                character_workbook_plan_fingerprint(plan)
+            )
+            library = folder / "character-library.json"
+            library.write_text(json.dumps({"version": 1, "active": [], "deleted": []}), encoding="utf-8")
+
+            def save_project():
+                (folder / "project.json").write_text("project saved", encoding="utf-8")
+                (folder / "chapters.json").write_text("chapters saved", encoding="utf-8")
+
+            project.save = Mock(side_effect=save_project)
+
+            def save_project_state(project_folder, payload):
+                (Path(project_folder) / "state.json").write_text(
+                    json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8"
+                )
+
+            with (
+                patch.object(host, "reusable_character_library_path", return_value=library),
+                patch.object(host, "read_character_workbook", return_value=document),
+                patch.object(host, "save_state", side_effect=save_project_state),
+            ):
+                result = bridge._character_workbook_import_commit({"token": "preview-token"})
+
+            self.assertTrue(result["imported"])
+            self.assertEqual(result["text_corrections_applied"], 1)
+            self.assertEqual(chapter.text, corrected_text)
+            self.assertEqual(len(chapter.dialogue_assignments), 1)
+            imported = chapter.dialogue_assignments[0]
+            self.assertEqual(imported["speaker"], "Mira")
+            self.assertEqual(imported["speakers"], ["Mira"])
+            self.assertEqual(imported["source"], "outsourced")
+            self.assertEqual(imported["text"], corrected_text)
+            self.assertEqual((imported["start"], imported["end"]), (0, len(corrected_text)))
+            self.assertNotIn("passage_id", imported)
+            self.assertNotIn("chapter_revision", imported)
+
     def test_commit_persists_multiple_speakers_and_split_source_metadata(self):
         with tempfile.TemporaryDirectory(prefix="ryu-workbook-multi-speaker-commit-") as tmp:
             folder = Path(tmp)
