@@ -1869,10 +1869,6 @@ class PremiumV2Bridge(QObject):
                     if "Third Person" not in speakers:
                         speakers.append("Third Person")
                     continue
-                if key == "third person":
-                    if "Third Person" not in speakers:
-                        speakers.append("Third Person")
-                    continue
                 if key in ambiguous_keys:
                     raise ValueError(f"'{name}' matches more than one saved character. Select the character in the correct series first.")
                 canonical = canonical_by_name.get(key)
