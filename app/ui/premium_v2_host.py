@@ -1869,6 +1869,10 @@ class PremiumV2Bridge(QObject):
                     if "Third Person" not in speakers:
                         speakers.append("Third Person")
                     continue
+                if key == "third person":
+                    if "Third Person" not in speakers:
+                        speakers.append("Third Person")
+                    continue
                 if key in ambiguous_keys:
                     raise ValueError(f"'{name}' matches more than one saved character. Select the character in the correct series first.")
                 canonical = canonical_by_name.get(key)
@@ -2051,6 +2055,9 @@ class PremiumV2Bridge(QObject):
             normalized = normalize_assignment(base, speakers, mode)
             assignment_series = requested_series or default_series
             normalized.update({"source": assignment_source, "confidence": assignment_confidence, "series": assignment_series})
+            if any(str(name).strip().casefold() == "third person" for name in speakers):
+                normalized["third_person_pending"] = True
+                normalized["speaker_identity_status"] = "needs_user_identification"
             if passage_id:
                 normalized["passage_id"] = passage_id
             if canonical_revision:
@@ -2089,6 +2096,9 @@ class PremiumV2Bridge(QObject):
                 "confidence": assignment_confidence,
                 "series": assignment_series,
             })
+            if any(str(name).strip().casefold() == "third person" for name in speakers):
+                saved_assignment["third_person_pending"] = True
+                saved_assignment["speaker_identity_status"] = "needs_user_identification"
             assignments[matching[0]] = saved_assignment
             saved_chapter.dialogue_assignments = assignments
             result["series"] = assignment_series
@@ -2099,7 +2109,7 @@ class PremiumV2Bridge(QObject):
         # A saved speaker choice is explicit user feedback. Store it in that
         # character's selected series so similarly named characters in different
         # series never share training examples by accident.
-        if len(speakers) == 1 and speakers[0].casefold() != "narrator":
+        if len(speakers) == 1 and speakers[0].casefold() not in {"narrator", "third person"}:
             try:
                 from app.chapters.character_learning import record_assignment_feedback
                 saved_number = int(result["chapter_number"])
@@ -6566,6 +6576,9 @@ class PremiumV2Bridge(QObject):
                             if key in imported_row and not (chapter_corrections and key in {"passage_id", "chapter_revision"})
                         },
                     })
+                    if any(str(name).strip().casefold() == "third person" for name in imported_speakers):
+                        normalized["third_person_pending"] = True
+                        normalized["speaker_identity_status"] = "needs_user_identification"
                     assignments_by_chapter[chapter_id] = [
                         row for row in assignments_by_chapter[chapter_id]
                         if not (
