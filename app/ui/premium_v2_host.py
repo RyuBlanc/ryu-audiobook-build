@@ -6178,7 +6178,7 @@ class PremiumV2Bridge(QObject):
                 "unmatched_workbook_rows_truncated": len(unmatched_workbook_review_rows) > 50000,
                 "text_corrections": list(plan.get("text_corrections") or [])[:50000],
                 "text_corrections_truncated": len(plan.get("text_corrections") or []) > 50000,
-                "passage_reclassifications": list(plan.get("passage_reclassifications") or [])[:300],
+                "passage_reclassifications": list(plan.get("passage_reclassifications") or [])[:50000],
                 "summary": plan["summary"],
                 "scope": plan.get("scope", "chapter"),
                 "chapter_count": len(plan.get("chapters") or []) or 1,
