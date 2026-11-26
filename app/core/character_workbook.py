@@ -2058,6 +2058,17 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                     )
                     if not workbook_speakers and not has_exact_manual_identity:
                         unresolved_impacts.append(impacted_id or "an unidentified passage")
+                saved_text = str(saved.get("text") or "")
+                active_saved_text = (
+                    active_chapter_text[saved_start:saved_end]
+                    if active_chapter_text and 0 <= saved_start < saved_end <= len(active_chapter_text)
+                    else ""
+                )
+                exact_saved_text = not saved_text or not active_saved_text or saved_text == active_saved_text
+                exact_narrator_span = (
+                    saved_start == quote_start and saved_end == quote_end
+                    and exact_saved_text
+                )
                 only_embedded_narration = bool(impacted_passages) and all(
                     _key(item.get("kind")) == "narration"
                     and _clean(item.get("source")) == "automatic_embedded_quote"
@@ -2065,7 +2076,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                 )
                 if (
                     not impacted_passages
-                    or (not impacted_dialogue and not only_embedded_narration)
+                    or (not impacted_dialogue and not only_embedded_narration and not exact_narrator_span)
                     or unresolved_impacts
                 ):
                     issues.append(
