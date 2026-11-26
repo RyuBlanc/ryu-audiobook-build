@@ -933,6 +933,40 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             self.assertEqual(plan["passage_rebases"][0]["workbook_passage_id"], "retired-dialogue-passage")
             self.assertEqual(plan["passage_rebases"][0]["current_passage_id"], "ps_dialogue")
 
+    def test_import_plan_preserves_exact_manual_assignment_when_passage_id_is_reissued(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, _text, passages = self._export(Path(tmp))
+            document = read_character_workbook(path)
+            document["characters"] = [{
+                "full_name": "Mira", "aliases": [], "version": "", "notes": "",
+            }]
+            dialogue_row = document["dialogue_rows"][1]
+            dialogue_row["Passage ID"] = "retired-dialogue-passage"
+            dialogue_row["GPT Assigned Character"] = ""
+            dialogue_row["GPT Confidence (0–1)"] = ""
+            existing_manual = {
+                "passage_id": "retired-dialogue-passage",
+                "chapter_revision": "revision-abc",
+                "start": passages[1]["start"],
+                "end": passages[1]["end"],
+                "text": passages[1]["text"],
+                "speaker": "Mira",
+                "speakers": ["Mira"],
+                "source": "manual",
+                "series": "Silver Archive",
+            }
+
+            plan = plan_character_workbook_import(
+                document, series="Silver Archive", registry_rows=[],
+                project_characters=[], chapter_id="chapter-001",
+                chapter_revision="revision-abc", current_passages=passages,
+                current_assignments=[existing_manual],
+            )
+
+            self.assertTrue(plan["ready"], plan["issues"])
+            self.assertEqual(plan["assignments"], [])
+            self.assertEqual(plan["passage_rebases"][0]["current_passage_id"], "ps_dialogue")
+
     def test_import_plan_keeps_existing_assignment_that_uses_an_alias(self):
         with tempfile.TemporaryDirectory() as tmp:
             path, _text, passages = self._export(Path(tmp))
