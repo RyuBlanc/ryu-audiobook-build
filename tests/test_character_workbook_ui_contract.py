@@ -53,7 +53,7 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
             response = json.loads(bridge.dispatch("character.workbook.prompt.copy", "{}"))
         self.assertTrue(response.get("success"), response)
         self.assertTrue(response["data"]["copied"])
-        self.assertEqual(response["data"]["prompt_version"], "2.1")
+        self.assertEqual(response["data"]["prompt_version"], "2.2")
         clipboard.setText.assert_called_once_with(host.complete_book_gpt_prompt())
 
     def test_workbook_manual_assignment_endpoint_accepts_sequential_multi_voice_mode(self):
@@ -122,6 +122,10 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn("GPT source-text corrections to apply after confirmation", self.adapter)
         self.assertIn("rebase_rows_for_text_corrections", self.host)
         self.assertIn("text_corrections_applied", self.host)
+        self.assertIn("character_workbook_source_correction_history", self.host)
+        self.assertIn("source_correction_history", self.workbook)
+        self.assertIn("Source Correction History", self.workbook)
+        self.assertIn("Source Correction History", self.adapter)
         self.assertIn("Third Person", self.workbook)
         self.assertIn("reserved_placeholder", self.host)
         self.assertIn("third_person_pending", self.host)
