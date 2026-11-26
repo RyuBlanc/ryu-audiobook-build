@@ -2227,7 +2227,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
         self.assertIn("GPT Proposed Source Text", dialogue_row)
         self.assertIn("GPT Text Correction Reason", dialogue_row)
         self.assertEqual(parsed["speaker_roles"][0]["Canonical Value"], "Third Person")
-        self.assertIn("global Third Person fallback voice", parsed["speaker_roles"][0]["Application Routing"].casefold())
+        self.assertIn("global third person fallback voice", parsed["speaker_roles"][0]["Application Routing"].casefold())
         self.assertEqual(parsed["source_correction_history"][0]["User-Approved Source Text"], "“Hello, Mira!”")
 
 
