@@ -364,8 +364,9 @@ def complete_book_gpt_prompt() -> str:
         "",
         "SOURCE FIRST — READ THE WHOLE BOOK",
         "1. Read every row in Chapter Context. Reassemble each chapter by Chapter ID and ascending Context Part; do not skip later chunks or chapters.",
-        "2. Read Workbook Info, all Character Register rows, and the complete Series Character Reference. Build a book-wide cast and alias map before assigning any dialogue.",
-        "3. Use the workbook's chapter text as the primary source. Use an additionally attached original novel only to clarify text that is genuinely missing or corrupted; never invent missing source wording.",
+        "2. Read Source Correction History and treat its entries as examples of corrections already explicitly accepted by the user. Use them to understand recurring transcription/wording issues, but only apply a similar correction when the current source context independently supports it; never copy an earlier corrected line blindly.",
+        "3. Read Workbook Info, all Character Register rows, and the complete Series Character Reference. Build a book-wide cast and alias map before assigning any dialogue.",
+        "4. Use the workbook's chapter text as the primary source. Use an additionally attached original novel only to clarify text that is genuinely missing or corrupted; never invent missing source wording.",
         "",
         "CRITICAL MEANING OF REVIEW REQUIRED",
         "A REVIEW REQUIRED note means the app could not safely carry an old GPT answer onto a changed or newly split passage. It does NOT mean the speaker is unknowable, and it is NOT a reason to leave the row blank without investigation.",
@@ -424,7 +425,7 @@ def complete_book_gpt_prompt() -> str:
         "Do not use Dialogue Split Corrections for a correctly segmented single turn or a same-word chorus; use the multi-speaker JSON cell instead.",
         "",
         "DO NOT DAMAGE THE SOURCE OR WORKBOOK",
-        "Do not change Passage ID, Chapter ID, chapter number/title/revision, Passage Type, Dialogue Text, Start/End offsets, Chapter Register, Chapter Context, Series Character Reference, Speaker Roles, Workbook Info, or existing dialogue rows.",
+        "Do not change Passage ID, Chapter ID, chapter number/title/revision, Passage Type, Dialogue Text, Start/End offsets, Chapter Register, Chapter Context, Series Character Reference, Speaker Roles, Source Correction History, Workbook Info, or existing dialogue rows.",
         "Do not add, delete, duplicate, merge, split, reorder, or rewrite Dialogue Assignment rows. The app applies validated subturn corrections from Dialogue Split Corrections while preserving the original source passage.",
         "Only fill GPT answer columns, add source-supported Character Register identities, and add validated Dialogue Split Corrections rows. Preserve all other sheets, rows and references.",
         "Save the completed workbook as a NEW .xlsx copy. Never overwrite the original exported or refreshed workbook.",
@@ -657,6 +658,31 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
             if len(reference_rows) - 1 > MAX_ROWS:
                 raise ValueError("The Series Character Reference exceeds the 50,000-row workbook limit.")
 
+    source_correction_rows = [[
+        "Chapter ID", "Chapter Number", "Chapter Title",
+        "Source Passage ID (Before Correction)", "Original Source Text",
+        "User-Approved Source Text", "Correction Reason", "Applied At",
+    ]]
+    for record in metadata.get("source_correction_history") or []:
+        if not isinstance(record, dict):
+            continue
+        source_value = str(record.get("source_text") or "")
+        approved_value = str(record.get("approved_text") or "")
+        if not source_value or not approved_value or source_value == approved_value:
+            continue
+        source_correction_rows.append([
+            _clean(record.get("chapter_id")),
+            record.get("chapter_number", ""),
+            _clean(record.get("chapter_title")),
+            _clean(record.get("passage_id")),
+            source_value,
+            approved_value,
+            str(record.get("reason") or ""),
+            _clean(record.get("applied_at")),
+        ])
+        if len(source_correction_rows) - 1 > MAX_ROWS:
+            raise ValueError("Source Correction History exceeds the 50,000-row workbook limit.")
+
     info = [
         ["Field", "Value"],
         ["Workbook Schema", "ryu.character-studio-workbook"],
@@ -675,11 +701,11 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
         ["Series Volume", _clean(metadata.get("series_volume"))],
         ["Book Revision", book_revision],
         ["Exported At (UTC)", datetime.now(timezone.utc).isoformat(timespec="seconds")],
-        ["GPT Prompt Version", "2.1"],
+        ["GPT Prompt Version", "2.2"],
         ["Instructions",
          "This is a COMPLETE-BOOK workbook. Start with the GPT Prompt tab: it contains the full ready-to-copy task prompt and explains how to analyze every chapter, resolve newly split dialogue turns, assign canonical identities, calibrate confidence, and preserve source references. " 
          "A REVIEW REQUIRED note means an old answer was not copied across a changed passage; it does not mean the speaker is unknowable. Use the full Chapter Context to re-identify each changed turn independently. " 
-         "Use GPT Assigned Characters (JSON) for multiple characters speaking the same words together. Use Dialogue Split Corrections for a genuinely merged passage containing different consecutive turns. Use GPT Proposed Source Text and GPT Text Correction Reason for dialogue-line or Narrator-paragraph wording corrections; the app applies proposals only after explicit user confirmation. Use the reserved Third Person identity only for actual speech by an unidentified background speaker, never for narration or reported speech. Do not alter original passage rows or reference columns; return a new workbook copy. Unresolved speakers must remain explicit and will block import until confirmed."],
+         "Use GPT Assigned Characters (JSON) for multiple characters speaking the same words together. Use Dialogue Split Corrections for a genuinely merged passage containing different consecutive turns. Use GPT Proposed Source Text and GPT Text Correction Reason for dialogue-line or Narrator-paragraph wording corrections; the app applies proposals only after explicit user confirmation. Use the reserved Third Person identity only for actual speech by an unidentified background speaker, never for narration or reported speech. Use Source Correction History as read-only examples of corrections the user already accepted; preserve it and do not reuse an old correction unless the current passage independently supports the same fix. Do not alter original passage rows or reference columns; return a new workbook copy. Unresolved speakers must remain explicit and will block import until confirmed."],
     ]
 
     split_headers = [
@@ -724,6 +750,7 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
             ["Narration", "Narrator", "Narrative paragraphs, internal thought, free-indirect style, and reported speech that is not a live dialogue turn.", "A person actively speaking words as a dialogue turn.", "Uses the book/series narrator voice.", "No character identity is created."],
             ["Known speaker", "Canonical Character Register name", "The speaker is identified by source text or clear whole-book context.", "Do not infer the speaker from an addressee's name or proximity alone.", "Uses the saved character voice profile when one is assigned.", "Preserve canonical name and aliases."],
         ], [30,26,72,66,70,56], set(range(1,7))),
+        ("Source Correction History", source_correction_rows, [24,14,32,38,72,72,72,30], set(range(1,9))),
         ("Chapter Register", chapter_register, [38,14,32,42,22,20,66], set(range(1,8))),
         ("Chapter Context", context, [38,14,32,14,14,100], {6}),
         ("Series Character Reference", reference_rows, [38,34,38,26,56,64,32], {1,2,3,4,5,6,7}),
@@ -782,7 +809,7 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
                 "xl/worksheets/sheet%d.xml" % number,
                 _sheet(
                     rows, widths, wrap,
-                    protect=name in {"Chapter Register", "Chapter Context", "Series Character Reference", "Speaker Roles", "Workbook Info"},
+                    protect=name in {"Chapter Register", "Chapter Context", "Series Character Reference", "Speaker Roles", "Source Correction History", "Workbook Info"},
                     auto_filter=name != "GPT Prompt",
                 ),
             )
@@ -962,6 +989,7 @@ def refresh_complete_book_character_workbook_bytes(
         if 0 <= rel_start < rel_end <= len(parent_text) and str(correction.get("Exact Source Text") or "") == parent_text[rel_start:rel_end]:
             safe_split_corrections.append(dict(correction))
     refreshed_metadata["dialogue_split_corrections"] = safe_split_corrections
+    refreshed_metadata["source_correction_history"] = list(document.get("source_correction_history") or [])
     unresolved_dialogue = 0
     for row in refreshed_passages:
         if _key(row.get("kind")) == "narration":
@@ -1072,7 +1100,7 @@ def read_character_workbook(path):
                 ss = ET.fromstring(z.read("xl/sharedStrings.xml"))
                 shared = ["".join(n.text or "" for n in x.iter(_t("t"))) for x in ss.findall(_t("si"))]
             sheets = {name: _read_sheet(z, targets[name], shared) for name in required}
-            for optional_sheet in ("Series Character Reference", "Chapter Register", "Dialogue Split Corrections", "Speaker Roles"):
+            for optional_sheet in ("Series Character Reference", "Chapter Register", "Dialogue Split Corrections", "Speaker Roles", "Source Correction History"):
                 if optional_sheet in targets:
                     sheets[optional_sheet] = _read_sheet(z, targets[optional_sheet], shared)
             split_rows = _records(sheets.get("Dialogue Split Corrections", []))
@@ -1323,6 +1351,7 @@ def read_character_workbook(path):
         "chapter_references": chapter_references,
         "dialogue_split_corrections": _records(sheets.get("Dialogue Split Corrections", [])),
         "speaker_roles": _records(sheets.get("Speaker Roles", [])),
+        "source_correction_history": _records(sheets.get("Source Correction History", [])),
         "schema_version": workbook_version,
         "path": str(source.resolve()),
         "sha256": sha256(source.read_bytes()).hexdigest(),
