@@ -385,6 +385,13 @@ def complete_book_gpt_prompt() -> str:
         "",
         "CHARACTER IDENTITY AND REGISTER",
         "For each identifiable speaker, use the exact canonical Full Name from Character Register. If the same person already exists in Series Character Reference, reuse that canonical identity and preserve its known aliases; do not create a duplicate.",
+        "",
+        "RESERVED SYSTEM ROLE — THIRD PERSON",
+        "Use the exact canonical speaker value 'Third Person' only when the text clearly contains an actual spoken dialogue turn by an unidentified background bystander, standby, extra, or crowd member, and no reliable personal name or consistently identifiable recurring role can be established from whole-book context.",
+        "Do not invent one-off names such as 'Unnamed Male Onlooker 1' or 'Unnamed Female Student 2' for anonymous background speakers. Use 'Third Person' for those unknown live speakers instead. A recurring, text-supported role such as a consistently identifiable classroom teacher or desk clerk may retain its stable role identity.",
+        "'Third Person' is a reserved application role, not a real character identity: do not add it to Character Register, do not give it aliases or an age/version, and do not assign it a character-specific voice. The application routes it to the user's global Third Person voice profile and marks it for later user identification.",
+        "Never use 'Third Person' for narration, internal thoughts, free-indirect narration, reported or remembered quotations, quoted references, sleep sounds, sound effects, or any passage that is not an actual spoken turn. Use Narrator for narration and reported/internal material.",
+        "When assigning 'Third Person', record in Evidence / Notes (GPT): 'Unidentified background speaker; routed to Third Person fallback; user identification required.' Do not guess a personal name.",
         "If a real character appears in this book but is missing from Character Register, add a row with a source-supported canonical name, confirmed aliases, useful notes, and Included in This Book? = YES. Do not add characters merely mentioned in metadata or chapter titles.",
         "A nickname, title, surname, honorific, or spelling variant is an alias only when the book confirms it refers to the same person. Do not turn an addressee or descriptive phrase into a character.",
         "If the source gives no personal name but consistently identifies a speaker by a role (for example, an unnamed classroom teacher), use a clear role identity such as 'Unnamed Classroom Teacher'. State in Character Notes that this is an unnamed role, not a supplied personal name, and reuse it only when the text supports the same individual.",
@@ -394,12 +401,20 @@ def complete_book_gpt_prompt() -> str:
         "",
         "FILL THE WORKBOOK",
         "For every Dialogue row with a supported speaker, fill GPT Assigned Character with the first canonical Full Name, GPT Assigned Characters (JSON) with a JSON array of every character who speaks those exact same words, GPT Multi-Speaker Mode when more than one character is assigned, GPT Confidence (0–1) with a numeric value from 0.75 to 1.00, and Evidence / Notes (GPT) with a concise source-based reason.",
+        "For an actual but unidentified background speaker, use 'Third Person' exactly as defined above. It is valid in the speaker fields without being listed in Character Register; do not create a fake character record for it.",
         'Use one JSON array cell, for example ["Rias Gremory", "Akeno Himejima"]; do not create one column per character. JSON is preferred to comma-separated names because it safely preserves commas inside names. For simultaneous same-word delivery use chorus (the default); use sequential only when the exact same line should be repeated once per character; use alternating only when specifically supported by the scene.',
         "A chorus is one dialogue passage with multiple speakers, not multiple split corrections. Assign all clearly identified simultaneous speakers to the same row.",
         "Calibrate confidence: 0.95–1.00 for explicit attribution; 0.85–0.94 for clear action-beat or strong scene evidence; 0.75–0.84 for a strong contextual inference with no credible competing speaker. Do not use low confidence to disguise a guess.",
         "If whole-book context still cannot establish a defensible speaker, leave speaker cells blank and explain why. Do not invent a person, guess from an honorific, or use Narrator to bypass unresolved speech. Such rows require human review and block import.",
         "Evidence should identify the chapter and actual clue (speech tag, action beat, response pattern, or prior identity reference). Distinguish direct evidence from contextual inference.",
         "Do not overwrite a clearly confirmed existing manual assignment. If workbook evidence and a manual assignment conflict, explain the conflict and leave the row for human review.",
+        "",
+        "PROPOSE LINE-BY-LINE SOURCE TEXT CORRECTIONS",
+        "Read every Dialogue Assignment row against its surrounding Chapter Context. If the original Dialogue Text contains an evident transcription, OCR, punctuation, missing-word, duplication, or wording error, you may propose corrected source wording in the separate 'GPT Proposed Source Text' column and explain the reason in 'GPT Text Correction Reason'. You may propose corrections for dialogue lines and for Narrator paragraphs; do not limit review to dialogue.",
+        "The proposed text may differ from the original Dialogue Text, but preserve the source meaning, character identity, point of view, scene facts, authorial tone, and intended dialogue. Do not invent events, speakers, names, or motivations. Prefer minimal corrections that solve the identified problem; do not rewrite merely for stylistic preference.",
+        "Never change the original Dialogue Text or any Passage ID, Chapter ID, Passage Type, revision, or reference offset. The two GPT proposal columns are the only place to put replacement wording. Leave both proposal columns blank when no correction is needed. Whenever proposed text is supplied, provide a specific reason. The application will show each proposed change and apply it to the book only after the user explicitly confirms the import.",
+        "Do not change the speaker or character identity just because wording is corrected. Keep GPT Assigned Character / JSON tied to the same actual speaker. If the correction changes who is speaking or where a turn begins or ends, use Dialogue Split Corrections only when the original parent boundaries still support exact relative spans; otherwise leave a structural review note rather than guessing.",
+        "Do not combine a whole-passage text replacement and Dialogue Split Corrections for the same parent passage. Resolve the wording proposal first, then export a fresh workbook before proposing structural subturns.",
         "",
         "CORRECT A PASSAGE THAT THE APP MERGED FROM DIFFERENT SPEAKERS",
         "If one Dialogue Assignment row contains two or more consecutive turns by different speakers, do not edit or split the original row. Add one row per turn to the separate Dialogue Split Corrections sheet.",
@@ -415,7 +430,7 @@ def complete_book_gpt_prompt() -> str:
         "Save the completed workbook as a NEW .xlsx copy. Never overwrite the original exported or refreshed workbook.",
         "",
         "FINAL CHECK BEFORE RETURNING THE FILE",
-        "Check every Dialogue row across every chapter, especially REVIEW REQUIRED rows and adjacent newly split turns. Confirm that each assigned name exists as a canonical Character Register identity or its confirmed alias, each confidence is numeric and within range, narration remains Narrator, and no reference columns or passage rows were changed.",
+        "Check every Dialogue row across every chapter, especially REVIEW REQUIRED rows and adjacent newly split turns. Confirm that each assigned name exists as a canonical Character Register identity or its confirmed alias, except the reserved 'Third Person' placeholder; each confidence is numeric and within range; narration remains Narrator; every proposed wording correction has a clear reason; and no original reference columns or passage rows were changed.",
         "Return the completed .xlsx file and a short summary with: dialogue rows assigned; unresolved rows (with Passage IDs and reasons); new Character Register identities; aliases added; structural-split issues; and any manual-assignment conflicts. Do not claim full completion when unresolved rows remain.",
     ])
 
@@ -456,6 +471,7 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
         "Assignment Source (Reference)", "Confidence (Reference)", "Start (Reference)",
         "End (Reference)", "Chapter Revision (Reference)", "Evidence / Notes (GPT)",
         "GPT Assigned Characters (JSON)", "GPT Multi-Speaker Mode",
+        "GPT Proposed Source Text", "GPT Text Correction Reason",
     ]
     dialogue = [dialogue_headers]
     seen_passages = set()
@@ -514,6 +530,8 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
             json.dumps(list(dict.fromkeys(_clean(value) for value in gpt_speakers if _clean(value))), ensure_ascii=False)
             if not narration and gpt_speakers else "",
             _clean(row.get("gpt_multi_speaker_mode") or row.get("GPT Multi-Speaker Mode")),
+            str(row.get("gpt_proposed_source_text") or row.get("GPT Proposed Source Text") or ""),
+            str(row.get("gpt_text_correction_reason") or row.get("GPT Text Correction Reason") or ""),
         ])
         chapter["passage_count"] += 1
     if len(dialogue) - 1 > MAX_ROWS:
@@ -657,11 +675,11 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
         ["Series Volume", _clean(metadata.get("series_volume"))],
         ["Book Revision", book_revision],
         ["Exported At (UTC)", datetime.now(timezone.utc).isoformat(timespec="seconds")],
-        ["GPT Prompt Version", "2.0"],
+        ["GPT Prompt Version", "2.1"],
         ["Instructions",
          "This is a COMPLETE-BOOK workbook. Start with the GPT Prompt tab: it contains the full ready-to-copy task prompt and explains how to analyze every chapter, resolve newly split dialogue turns, assign canonical identities, calibrate confidence, and preserve source references. " 
          "A REVIEW REQUIRED note means an old answer was not copied across a changed passage; it does not mean the speaker is unknowable. Use the full Chapter Context to re-identify each changed turn independently. " 
-         "Use GPT Assigned Characters (JSON) for multiple characters speaking the same words together. Use Dialogue Split Corrections for a genuinely merged passage containing different consecutive turns. Do not alter original passage rows or reference columns; return a new workbook copy. Unresolved speakers must remain explicit and will block import until confirmed."],
+         "Use GPT Assigned Characters (JSON) for multiple characters speaking the same words together. Use Dialogue Split Corrections for a genuinely merged passage containing different consecutive turns. Use GPT Proposed Source Text and GPT Text Correction Reason for dialogue-line or Narrator-paragraph wording corrections; the app applies proposals only after explicit user confirmation. Use the reserved Third Person identity only for actual speech by an unidentified background speaker, never for narration or reported speech. Do not alter original passage rows or reference columns; return a new workbook copy. Unresolved speakers must remain explicit and will block import until confirmed."],
     ]
 
     split_headers = [
@@ -697,9 +715,15 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
 
     sheets = [
         ("GPT Prompt", gpt_prompt_rows, [120], {1}),
-        ("Dialogue Assignment", dialogue, [38,38,14,32,16,72,34,18,34,22,18,14,14,42,46,58,24], {6,8,9,14,15,16,17}),
+        ("Dialogue Assignment", dialogue, [38,38,14,32,16,72,34,18,34,22,18,14,14,42,46,58,24,72,64], {6,8,9,14,15,16,17,18,19}),
         ("Dialogue Split Corrections", split_rows, [38,38,14,18,18,72,34,58,24,20,70], set(range(1,12))),
         ("Character Register", characters, [34] + [24] * alias_column_count + [26,48,24], set(range(1, alias_column_count + 5))),
+        ("Speaker Roles", [
+            ["Role Type", "Canonical Value", "Use When", "Do Not Use When", "Application Routing", "Follow-up"],
+            ["Reserved unidentified speaker", "Third Person", "An actual spoken dialogue turn by an unidentified background bystander, standby, extra, or crowd member when no reliable personal or recurring role identity can be established.", "Narration, internal thought, reported or remembered quotations, quoted references, sleep sounds, or sound effects.", "Uses the user's global Third Person fallback voice; it is not a Character Register member and has no character-specific voice.", "User may replace the placeholder with a confirmed identity later."],
+            ["Narration", "Narrator", "Narrative paragraphs, internal thought, free-indirect style, and reported speech that is not a live dialogue turn.", "A person actively speaking words as a dialogue turn.", "Uses the book/series narrator voice.", "No character identity is created."],
+            ["Known speaker", "Canonical Character Register name", "The speaker is identified by source text or clear whole-book context.", "Do not infer the speaker from an addressee's name or proximity alone.", "Uses the saved character voice profile when one is assigned.", "Preserve canonical name and aliases."],
+        ], [30,26,72,66,70,56], set(range(1,7))),
         ("Chapter Register", chapter_register, [38,14,32,42,22,20,66], set(range(1,8))),
         ("Chapter Context", context, [38,14,32,14,14,100], {6}),
         ("Series Character Reference", reference_rows, [38,34,38,26,56,64,32], {1,2,3,4,5,6,7}),
@@ -1040,7 +1064,7 @@ def read_character_workbook(path):
                 ss = ET.fromstring(z.read("xl/sharedStrings.xml"))
                 shared = ["".join(n.text or "" for n in x.iter(_t("t"))) for x in ss.findall(_t("si"))]
             sheets = {name: _read_sheet(z, targets[name], shared) for name in required}
-            for optional_sheet in ("Series Character Reference", "Chapter Register", "Dialogue Split Corrections"):
+            for optional_sheet in ("Series Character Reference", "Chapter Register", "Dialogue Split Corrections", "Speaker Roles"):
                 if optional_sheet in targets:
                     sheets[optional_sheet] = _read_sheet(z, targets[optional_sheet], shared)
             split_rows = _records(sheets.get("Dialogue Split Corrections", []))
@@ -1290,6 +1314,7 @@ def read_character_workbook(path):
         "series_character_reference": series_character_reference,
         "chapter_references": chapter_references,
         "dialogue_split_corrections": _records(sheets.get("Dialogue Split Corrections", [])),
+        "speaker_roles": _records(sheets.get("Speaker Roles", [])),
         "schema_version": workbook_version,
         "path": str(source.resolve()),
         "sha256": sha256(source.read_bytes()).hexdigest(),
