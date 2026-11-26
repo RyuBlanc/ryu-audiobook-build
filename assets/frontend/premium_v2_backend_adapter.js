@@ -3339,10 +3339,16 @@
         (row.speaker ? [String(row.speaker)] : []);
       const savedManual = String(row.source || '').toLowerCase() === 'manual' && speakers.length > 0;
       const conflict = row.assignment_state === 'conflict';
+      const thirdPersonPending = Boolean(row.third_person_pending) ||
+        speakers.some(name => String(name || '').trim().toLowerCase() === 'third person');
       const status = conflict ? 'Saved assignment conflict' :
-        (speakers.length ? (savedManual ? 'Manual · protected' : (type + ' · ' + speakers.join(' + '))) : type);
+        (thirdPersonPending ? 'Third Person · needs user identification' :
+          (speakers.length ? (savedManual ? 'Manual · protected' : (type + ' · ' + speakers.join(' + '))) : type));
       const canNarrator = !conflict && !savedManual && row.kind !== 'narration';
-      const canSpeaker = !conflict && (row.kind === 'narration' || row.kind === 'needs_speaker_review' || !speakers.length);
+      const canSpeaker = !conflict && (
+        thirdPersonPending || row.kind === 'narration'
+        || row.kind === 'needs_speaker_review' || !speakers.length
+      );
       return '<article class="ryu-workbook-review-card" data-chapter-check-card="' + index + '">' +
         '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">' +
           '<b>' + esc(type) + '</b><span style="font-size:11px;color:#aab5c6">' + esc(status) + '</span></div>' +
