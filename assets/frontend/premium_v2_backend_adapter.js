@@ -4579,7 +4579,9 @@
         '#ryuCharacterWorkbookDialog .ryu-workbook-review-card p{margin:7px 0;overflow-wrap:anywhere}',
         '#ryuCharacterWorkbookDialog .ryu-workbook-context{padding:10px 12px;border-left:3px solid #64748b;background:rgba(255,255,255,.045);border-radius:5px;white-space:pre-wrap;overflow-wrap:anywhere}',
         '#ryuCharacterWorkbookDialog .ryu-workbook-field{display:grid;gap:7px;margin-top:12px;max-width:100%}',
-        '#ryuCharacterWorkbookDialog .ryu-workbook-field select{box-sizing:border-box;width:100%;max-width:100%;min-width:0;padding:10px 12px;border-radius:9px;background:#0b111b;color:#f4f6fa;border:1px solid #465163;font:inherit}',
+        '#ryuCharacterWorkbookDialog .ryu-workbook-field select{box-sizing:border-box;width:100%;max-width:100%;min-width:0;padding:10px 12px;border-radius:9px;background:#0b111b;color:#f4f6fa;border:1px solid #465163;font:inherit;appearance:auto;pointer-events:auto!important;cursor:pointer;position:relative;z-index:1;opacity:1}',
+        '#ryuCharacterWorkbookDialog .ryu-workbook-field select:focus{outline:2px solid #e6b75b;outline-offset:2px;border-color:#e6b75b}',
+        '#ryuCharacterWorkbookDialog .ryu-workbook-field select:disabled{opacity:.72;cursor:not-allowed}',
         '#ryuCharacterWorkbookDialog .ryu-workbook-review-result{font-size:12px;overflow-wrap:anywhere}',
         '#ryuCharacterWorkbookDialog .ryu-workbook-issues{border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:12px;margin-top:14px}',
         '#ryuCharacterWorkbookDialog .ryu-workbook-issues ol{padding-left:23px;display:grid;gap:7px}',
@@ -4676,7 +4678,12 @@
       const current = Array.isArray(item.existing_speakers) && item.existing_speakers.length
         ? '<p><b>Saved assignment:</b> ' + esc(item.existing_speakers.join(' + ')) + ' · protected</p>' : '';
       const workbookNames = Array.isArray(item.workbook_speakers) && item.workbook_speakers.length
-        ? '<p><b>Workbook identity:</b> ' + esc(item.workbook_speakers.join(' + ')) + '</p>' : '';
+        ? '<p><b>Workbook identity:</b> ' + esc(item.workbook_speakers.join(' + ')) +
+          (item.rebased_from_passage_id ? ' · exact source match from retired Passage ID ' + esc(item.rebased_from_passage_id) : '') + '</p>' : '';
+      const oldWorkbookNames = Array.isArray(item.unmatched_workbook_speakers) && item.unmatched_workbook_speakers.length
+        ? '<p class="ryu-workbook-review-result"><b>Older GPT workbook suggestion — not applied:</b> ' +
+          esc(item.unmatched_workbook_speakers.join(' + ')) +
+          ' · source boundaries changed; confirm the speaker for this current passage below.</p>' : '';
       const before = String(item.context_before || '').trim();
       const after = String(item.context_after || '').trim();
       return '<article class="ryu-workbook-review-card" data-workbook-review-card="' + index + '">' +
@@ -4686,7 +4693,7 @@
         (before ? '<p class="ryu-workbook-context"><b>Before</b>\n' + esc(before) + '</p>' : '') +
         '<p class="ryu-workbook-context"><b>Selected passage</b>\n' + esc(item.text || '') + '</p>' +
         (after ? '<p class="ryu-workbook-context"><b>After</b>\n' + esc(after) + '</p>' : '') +
-        current + workbookNames +
+        current + workbookNames + oldWorkbookNames +
         (reasons ? '<ul>' + reasons + '</ul>' : '') +
         (canAssign
           ? '<div class="ryu-workbook-field"><label for="ryuWorkbookSpeaker' + index + '"><b>Confirm this speaker from saved character identities</b></label>' +
@@ -4713,13 +4720,27 @@
         ? '<div class="ryu-workbook-review-list">' + cards + '</div>'
         : '<p>No passage-specific review card could be built. Expand the full preflight messages below and resolve the source or identity conflict.</p>') +
       issueDetails +
-      '<p style="margin-top:14px;font-size:12px;color:#c2cad6">Do not edit Passage IDs, chapter IDs, source text, revisions or offsets in Excel. Manual assignments saved here are stored against the exact source passage and will not be overwritten by the workbook.</p>';
+      '<p style="margin-top:14px;font-size:12px;color:#c2cad6">Do not edit Passage IDs, chapter IDs, source text, revisions or offsets in Excel. Manual assignments saved here are stored against the exact current source passage and will not be overwritten by the workbook.</p>' +
+      '<p style="font-size:12px;color:#aab5c6">This review temporarily locks the rest of the app to prevent changes behind the dialog. The character selectors inside the review remain active; choose a character and press Save manual assignment. Press Done or Close to return to the rest of the app. Done closes the review; it does not bypass preflight or import the workbook.</p>';
     const overlay = openCharacterWorkbookDialog(
       'Review unresolved speaker attribution',
       content,
-      '<button type="button" class="btn secondary" data-workbook-dialog-close>Close</button>' +
+      '<button type="button" class="btn secondary" data-workbook-dialog-close>Done</button>' +
       '<button type="button" class="btn" data-workbook-review-retry>Recheck the same workbook</button>'
     );
+    overlay.querySelectorAll('[data-workbook-review-speaker]').forEach(select => {
+      select.addEventListener('change', () => {
+        const index = Number(select.getAttribute('data-workbook-review-speaker'));
+        const result = overlay.querySelector('[data-workbook-review-result="' + index + '"]');
+        const selectedValue = String(select.value || '');
+        const selectedOption = selectedValue === '' ? null : options[Number(selectedValue)];
+        if (result) {
+          result.textContent = selectedOption
+            ? 'Selected ' + selectedOption.canonical_name + '. Press Save manual assignment to store this choice on the exact source passage.'
+            : 'No character selected. Choose a saved character before saving.';
+        }
+      });
+    });
     overlay.addEventListener('click', async event => {
       const assignButton = event.target?.closest?.('[data-workbook-review-assign]');
       if (assignButton) {
@@ -4727,8 +4748,10 @@
         const item = reviewItems[index];
         const select = overlay.querySelector('[data-workbook-review-speaker="' + index + '"]');
         const result = overlay.querySelector('[data-workbook-review-result="' + index + '"]');
-        const optionIndex = Number(select?.value);
-        const selected = Number.isInteger(optionIndex) ? options[optionIndex] : null;
+        const selectedValue = String(select?.value ?? '').trim();
+        const optionIndex = selectedValue === '' ? -1 : Number(selectedValue);
+        const selected = selectedValue !== '' && Number.isInteger(optionIndex) && optionIndex >= 0 && optionIndex < options.length
+          ? options[optionIndex] : null;
         if (!item || !selected || !selected.canonical_name || !selected.series) {
           if (result) result.textContent = 'Choose one saved character identity before saving.';
           return;
@@ -4758,7 +4781,7 @@
           card?.classList.add('is-saved');
           if (select) select.disabled = true;
           assignButton.textContent = 'Saved · protected manual assignment';
-          if (result) result.textContent = 'Saved manually to this exact passage. The workbook will not overwrite this assignment.';
+          if (result) result.textContent = '✓ Assigned and saved manually to this exact passage. This assignment is now protected from workbook replacement. Use Done to close this review or Recheck the same workbook to run preflight again.';
           await refreshChapters();
           await refreshCharacters();
           await refreshCharacterLibrary();
