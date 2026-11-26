@@ -1510,6 +1510,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
     workbook_row_by_source_id = {}
     workbook_source_to_current = {}
     passage_rebases = []
+    passage_mappings = []
     unmatched_workbook_rows = []
     active_chapter_text = str(document.get("_active_chapter_text") or "")
 
@@ -1628,6 +1629,14 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
         if source_id:
             workbook_row_by_source_id[source_id] = row
             workbook_source_to_current[source_id] = current_id
+            passage_mappings.append({
+                "workbook_passage_id": source_id,
+                "current_passage_id": current_id,
+                "chapter_id": _clean(chapter_id),
+                "start": int(current.get("start", -1)),
+                "end": int(current.get("end", -1)),
+                "text": str(current.get("text") or ""),
+            })
         if resolution == "rebased":
             passage_rebases.append({
                 "workbook_passage_id": source_id,
@@ -2123,6 +2132,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
         "assignments": assignments,
         "superseded_assignments": list(superseded_assignments.values()),
         "passage_rebases": passage_rebases,
+        "passage_mappings": passage_mappings,
         "summary": {
             "matched_characters": sum(x["action"] == "merge" for x in planned),
             "new_characters": sum(x["action"] == "create" for x in planned),
@@ -2184,6 +2194,7 @@ def plan_complete_book_character_workbook_import(
     chapter_plans, issues = [], []
     superseded_assignments = []
     passage_rebases = []
+    passage_mappings = []
     identity_plan_json = None
     identity_plan = []
     for reference in sorted(references, key=lambda item: (int(item["chapter_number"]), item["chapter_id"])):
@@ -2239,6 +2250,10 @@ def plan_complete_book_character_workbook_import(
         elif identity_plan_json != identity_json:
             issues.append("The character merge plan changed between chapters. Resolve the series identity conflict before importing.")
         issues.extend(plan.get("issues") or [])
+        for mapping in plan.get("passage_mappings") or []:
+            item = dict(mapping)
+            item["chapter_number"] = int(reference["chapter_number"])
+            passage_mappings.append(item)
         for rebase in plan.get("passage_rebases") or []:
             item = dict(rebase)
             item["chapter_number"] = int(reference["chapter_number"])
@@ -2299,6 +2314,7 @@ def plan_complete_book_character_workbook_import(
         "assignments": assignments,
         "superseded_assignments": superseded_assignments,
         "passage_rebases": passage_rebases,
+        "passage_mappings": passage_mappings,
         "summary": summary,
     }
 
@@ -2310,7 +2326,7 @@ def character_workbook_plan_fingerprint(plan: dict) -> str:
         raise ValueError("A valid character workbook plan is required.")
     reviewed = {
         key: plan.get(key)
-        for key in ("ready", "issues", "scope", "book_revision", "chapters", "chapter_assignments", "characters", "assignments", "superseded_assignments", "passage_rebases", "summary")
+        for key in ("ready", "issues", "scope", "book_revision", "chapters", "chapter_assignments", "characters", "assignments", "superseded_assignments", "passage_rebases", "passage_mappings", "summary")
     }
     try:
         encoded = json.dumps(
