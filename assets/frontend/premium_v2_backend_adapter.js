@@ -4666,6 +4666,27 @@
     const reviewItems = Array.isArray(preview?.review_items) ? preview.review_items : [];
     const options = Array.isArray(preview?.character_options) ? preview.character_options : [];
     const issues = Array.isArray(preview?.issues) ? preview.issues : [];
+    const unmatchedWorkbookRows = Array.isArray(preview?.unmatched_workbook_rows)
+      ? preview.unmatched_workbook_rows : [];
+    const unmatchedWorkbookHtml = unmatchedWorkbookRows.length
+      ? '<details class="ryu-workbook-issues" open><summary>GPT workbook rows needing source reconciliation (' +
+        Number(unmatchedWorkbookRows.length) + (preview.unmatched_workbook_rows_truncated ? '+' : '') + ')</summary><ol>' +
+        unmatchedWorkbookRows.map(row => {
+          const speakers = Array.isArray(row.speakers) && row.speakers.length
+            ? row.speakers.join(' + ') : 'No GPT speaker identity entered';
+          const excerpt = String(row.source_excerpt || row.text || '').trim();
+          return '<li><b>Chapter ' + Number(row.chapter_number || 0) + ' · ' + esc(row.chapter_title || 'Untitled') +
+            '</b><br>Old Passage ID: ' + esc(row.passage_id || '(missing)') +
+            ' · offsets: ' + Number(row.start || 0) + '–' + Number(row.end || 0) +
+            '<br><b>GPT suggestion — NOT APPLIED:</b> ' + esc(speakers) +
+            '<br><span>' + esc(row.reason || 'The old workbook row could not be mapped safely.') + '</span>' +
+            (excerpt ? '<p class="ryu-workbook-context">' + esc(excerpt) + '</p>' : '') +
+            '</li>';
+        }).join('') + '</ol>' +
+        (preview.unmatched_workbook_rows_truncated
+          ? '<p>Only the first ' + unmatchedWorkbookRows.length + ' unmatched rows are shown. The workbook itself remains unchanged.</p>' : '') +
+        '</details>'
+      : '';
     const cards = reviewItems.map((item,index) => {
       const isNarration = String(item.passage_type || '').toLowerCase() === 'narration';
       const canAssign = item.can_manual_assign === true && !isNarration && options.length > 0;
@@ -4718,7 +4739,10 @@
       ' issue(s). No changes were committed. Review each passage below; context is taken from the active book, not inferred from the workbook alone.</p>' +
       (reviewItems.length
         ? '<div class="ryu-workbook-review-list">' + cards + '</div>'
-        : '<p>No passage-specific review card could be built. Expand the full preflight messages below and resolve the source or identity conflict.</p>') +
+        : (unmatchedWorkbookRows.length
+          ? '<p>No current passage could be matched safely to one or more older workbook rows. The saved GPT suggestions are listed below for reference only; they have not been applied. Use Chapter Studio → Check dialogues to inspect the current source passages and assign them explicitly.</p>'
+          : '<p>No passage-specific review card could be built. Expand the full preflight messages below and resolve the source or identity conflict.</p>')) +
+      unmatchedWorkbookHtml +
       issueDetails +
       '<p style="margin-top:14px;font-size:12px;color:#c2cad6">Do not edit Passage IDs, chapter IDs, source text, revisions or offsets in Excel. Manual assignments saved here are stored against the exact current source passage and will not be overwritten by the workbook.</p>' +
       '<p style="font-size:12px;color:#aab5c6">This review temporarily locks the rest of the app to prevent changes behind the dialog. The character selectors inside the review remain active; choose a character and press Save manual assignment. Press Done or Close to return to the rest of the app. Done closes the review; it does not bypass preflight or import the workbook.</p>';
