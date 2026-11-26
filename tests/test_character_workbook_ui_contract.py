@@ -20,6 +20,7 @@ REGISTRY = ROOT / "app" / "core" / "character_library.py"
 WORKBOOK = ROOT / "app" / "core" / "character_workbook.py"
 HTML = ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html"
 CHAPTER_EDITOR = ROOT / "app" / "ui" / "chapter_editor.py"
+DIALOGUE_MANAGER = ROOT / "app" / "ui" / "dialogue_manager.py"
 
 
 class CharacterWorkbookUiContractTests(unittest.TestCase):
@@ -31,6 +32,7 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         cls.workbook = WORKBOOK.read_text(encoding="utf-8")
         cls.html = HTML.read_text(encoding="utf-8")
         cls.chapter_editor = CHAPTER_EDITOR.read_text(encoding="utf-8")
+        cls.dialogue_manager = DIALOGUE_MANAGER.read_text(encoding="utf-8")
         cls.qt_app = QApplication.instance() or QApplication([])
 
     def test_workbook_commands_are_registered_and_advertised(self):
@@ -478,6 +480,10 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn("chapter_revision:String(window.ryuPremiumPendingDialogueRevision || '')", self.adapter)
         self.assertIn("narrator_only", self.host)
         self.assertIn("Narrator classification is an explicit manual review action.", self.host)
+        self.assertIn("thirdPersonPending", self.adapter)
+        self.assertIn("needs user identification", self.adapter)
+        self.assertIn("third_person_pending", self.dialogue_manager)
+        self.assertIn("Third Person · needs user identification", self.dialogue_manager)
         self.assertIn('if key == "third person":', self.host)
         self.assertIn('"third_person_pending"] = True', self.host)
         self.assertIn('speakers[0].casefold() not in {"narrator", "third person"}', self.host)
