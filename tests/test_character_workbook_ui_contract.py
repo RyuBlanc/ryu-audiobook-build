@@ -19,6 +19,7 @@ ADAPTER = ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
 REGISTRY = ROOT / "app" / "core" / "character_library.py"
 WORKBOOK = ROOT / "app" / "core" / "character_workbook.py"
 HTML = ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html"
+CHAPTER_EDITOR = ROOT / "app" / "ui" / "chapter_editor.py"
 
 
 class CharacterWorkbookUiContractTests(unittest.TestCase):
@@ -29,6 +30,7 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         cls.registry = REGISTRY.read_text(encoding="utf-8")
         cls.workbook = WORKBOOK.read_text(encoding="utf-8")
         cls.html = HTML.read_text(encoding="utf-8")
+        cls.chapter_editor = CHAPTER_EDITOR.read_text(encoding="utf-8")
         cls.qt_app = QApplication.instance() or QApplication([])
 
     def test_workbook_commands_are_registered_and_advertised(self):
@@ -99,6 +101,20 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn("stale_ai_overlaps", self.host)
         self.assertIn("saved_assignment_matches_current_passage", self.host)
         self.assertIn("Exact manual assignments are preserved.", self.workbook)
+        self.assertIn("def resolve_workbook_passage", self.workbook)
+        self.assertIn('"passage_rebases": passage_rebases', self.workbook)
+        self.assertIn("workbook_rows_by_current_id", self.host)
+        self.assertIn("unmatched_workbook_speakers", self.host)
+        self.assertIn("data-workbook-dialog-close>Done", self.adapter)
+        self.assertIn("item.unmatched_workbook_speakers", self.adapter)
+        self.assertIn("selectedValue !== '' && Number.isInteger(optionIndex)", self.adapter)
+        self.assertIn("pointer-events:auto!important", self.adapter)
+
+    def test_native_chapter_studio_exposes_check_dialogues_action(self):
+        self.assertIn('QPushButton("Check dialogues")', self.chapter_editor)
+        self.assertIn("check_dialogues_button.clicked.connect(self.check_dialogues)", self.chapter_editor)
+        self.assertIn("def check_dialogues(self) -> None:", self.chapter_editor)
+        self.assertIn('dialog.setWindowTitle("Check dialogues — speaker review")', self.chapter_editor)
 
     def test_import_preview_does_not_truncate_preflight_at_twenty_issues(self):
         self.assertNotIn('"issues": plan["issues"][:20]', self.host)
