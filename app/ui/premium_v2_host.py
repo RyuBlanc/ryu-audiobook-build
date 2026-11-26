@@ -5848,11 +5848,31 @@ class PremiumV2Bridge(QObject):
                     "current_passages": review_passages,
                     "current_assignments": review_assignments,
                 }]
-            workbook_rows = {
-                str(row.get("Passage ID") or "").strip(): row
-                for row in (document.get("dialogue_rows") or [])
+            source_workbook_rows = [
+                row for row in (document.get("dialogue_rows") or [])
                 if isinstance(row, dict)
+            ]
+            workbook_rows_by_source_id = {
+                str(row.get("Passage ID") or "").strip(): row
+                for row in source_workbook_rows
+                if str(row.get("Passage ID") or "").strip()
             }
+            rebase_by_source_id = {
+                str(row.get("workbook_passage_id") or "").strip(): row
+                for row in (plan.get("passage_rebases") or [])
+                if isinstance(row, dict) and str(row.get("workbook_passage_id") or "").strip()
+            }
+            workbook_rows_by_current_id = {}
+            mapped_workbook_source_ids = set()
+            for source_id, row in workbook_rows_by_source_id.items():
+                current_id = str(rebase_by_source_id.get(source_id, {}).get("current_passage_id") or source_id).strip()
+                if current_id and current_id not in workbook_rows_by_current_id:
+                    workbook_rows_by_current_id[current_id] = row
+                    mapped_workbook_source_ids.add(source_id)
+            unmatched_workbook_rows = [
+                row for row in source_workbook_rows
+                if str(row.get("Passage ID") or "").strip() not in mapped_workbook_source_ids
+            ]
             review_issues = [str(value) for value in (plan.get("issues") or [])]
             review_items = []
             for active in review_chapters:
@@ -5873,13 +5893,42 @@ class PremiumV2Bridge(QObject):
                     passage_text = str(passage.get("text") or source_text[start:end])
                     if source_text[start:end] != passage_text:
                         continue
-                    workbook_row = workbook_rows.get(passage_id)
+                    workbook_row = workbook_rows_by_current_id.get(passage_id)
                     workbook_speakers = []
                     if isinstance(workbook_row, dict):
                         try:
                             workbook_speakers = _workbook_speaker_names(workbook_row)
                         except ValueError:
                             workbook_speakers = []
+                    source_workbook_id = str(workbook_row.get("Passage ID") or "").strip() if isinstance(workbook_row, dict) else ""
+                    rebased_from_id = source_workbook_id if source_workbook_id and source_workbook_id != passage_id else ""
+                    # If one old workbook turn now covers several current turns, do
+                    # not apply its GPT speaker to all of them. Surface it as an
+                    # untrusted suggestion on each intersecting current source span.
+                    overlapping_workbook_rows = []
+                    for stale_row in unmatched_workbook_rows:
+                        if str(stale_row.get("Chapter ID") or "").strip() != str(active.get("chapter_id") or passage.get("chapter_id") or "").strip():
+                            continue
+                        try:
+                            stale_start = int(float(stale_row.get("Start (Reference)")))
+                            stale_end = int(float(stale_row.get("End (Reference)")))
+                        except (TypeError, ValueError, OverflowError):
+                            continue
+                        if stale_start < end and stale_end > start:
+                            overlapping_workbook_rows.append(stale_row)
+                    unmatched_workbook_speakers = []
+                    unmatched_workbook_ids = []
+                    for stale_row in overlapping_workbook_rows:
+                        try:
+                            names = _workbook_speaker_names(stale_row)
+                        except ValueError:
+                            names = []
+                        for name in names:
+                            if name not in unmatched_workbook_speakers:
+                                unmatched_workbook_speakers.append(name)
+                        stale_id = str(stale_row.get("Passage ID") or "").strip()
+                        if stale_id and stale_id not in unmatched_workbook_ids:
+                            unmatched_workbook_ids.append(stale_id)
                     exact_saved = []
                     for saved in saved_rows:
                         try:
@@ -5911,6 +5960,17 @@ class PremiumV2Bridge(QObject):
                     is_narration = str(passage.get("kind") or "").casefold() == "narration"
                     if not is_narration and not workbook_speakers and not existing_speakers:
                         issue_reasons.append("No confirmed speaker is recorded for this exact dialogue passage.")
+                    if unmatched_workbook_speakers:
+                        issue_reasons.append(
+                            "An older workbook row overlaps this current passage but its source boundaries/ID no longer match. "
+                            "GPT suggestion(s) are shown for reference only and were not automatically assigned: %s."
+                            % " + ".join(unmatched_workbook_speakers)
+                        )
+                    if rebased_from_id:
+                        issue_reasons.append(
+                            "Workbook speaker row was safely matched from retired Passage ID %s using exact chapter, source text and offsets."
+                            % rebased_from_id
+                        )
                     if not issue_reasons:
                         continue
                     review_items.append({
@@ -5926,6 +5986,10 @@ class PremiumV2Bridge(QObject):
                         "context_before": source_text[max(0, start - 260):start],
                         "context_after": source_text[end:min(len(source_text), end + 260)],
                         "workbook_speakers": workbook_speakers,
+                        "workbook_source_passage_id": source_workbook_id,
+                        "rebased_from_passage_id": rebased_from_id,
+                        "unmatched_workbook_speakers": unmatched_workbook_speakers,
+                        "unmatched_workbook_passage_ids": unmatched_workbook_ids,
                         "existing_speakers": existing_speakers,
                         "can_manual_assign": (
                             not is_narration and not workbook_speakers and not existing_speakers
