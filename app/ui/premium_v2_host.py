@@ -6045,6 +6045,56 @@ class PremiumV2Bridge(QObject):
                 int(row.get("start") or 0),
                 row.get("passage_id", ""),
             ))
+            active_chapters_by_id = {
+                str(active.get("chapter_id") or "").strip(): active
+                for active in review_chapters
+                if isinstance(active, dict) and str(active.get("chapter_id") or "").strip()
+            }
+            unmatched_workbook_review_rows = []
+            for stale_row in unmatched_workbook_rows:
+                if not isinstance(stale_row, dict):
+                    continue
+                stale_chapter_id = str(stale_row.get("Chapter ID") or "").strip()
+                active = active_chapters_by_id.get(stale_chapter_id)
+                if active is None:
+                    continue
+                try:
+                    stale_names = _workbook_speaker_names(stale_row)
+                except ValueError:
+                    stale_names = []
+                try:
+                    raw_start = float(stale_row.get("Start (Reference)"))
+                    raw_end = float(stale_row.get("End (Reference)"))
+                    stale_start, stale_end = int(raw_start), int(raw_end)
+                    if raw_start != stale_start or raw_end != stale_end:
+                        stale_start = stale_end = -1
+                except (TypeError, ValueError, OverflowError):
+                    stale_start = stale_end = -1
+                stale_text = str(stale_row.get("Dialogue Text") or "")
+                active_text = str(active.get("text") or "")
+                if 0 <= stale_start < stale_end <= len(active_text):
+                    source_excerpt = active_text[max(0, stale_start - 180):min(len(active_text), stale_end + 180)]
+                    actual_source_match = active_text[stale_start:stale_end] == stale_text
+                else:
+                    source_excerpt = stale_text[:420]
+                    actual_source_match = False
+                unmatched_workbook_review_rows.append({
+                    "passage_id": str(stale_row.get("Passage ID") or "").strip(),
+                    "chapter_id": stale_chapter_id,
+                    "chapter_number": int(active.get("chapter_number") or 0),
+                    "chapter_title": str(active.get("chapter_title") or ""),
+                    "start": stale_start,
+                    "end": stale_end,
+                    "passage_type": str(stale_row.get("Passage Type") or "Dialogue"),
+                    "text": stale_text[:1000],
+                    "source_excerpt": source_excerpt[:900],
+                    "speakers": stale_names,
+                    "source_text_matches": bool(actual_source_match),
+                    "reason": (
+                        "This workbook row did not map to exactly one current passage. Its GPT speaker suggestion "
+                        "is preserved for review only and has not been applied."
+                    ),
+                })
             return {
                 "cancelled": False, "ready": False,
                 "path": str(Path(selected_path).expanduser().resolve()),
@@ -6053,6 +6103,8 @@ class PremiumV2Bridge(QObject):
                 "issues_truncated": len(review_issues) > 1000,
                 "review_items": review_items,
                 "character_options": character_options,
+                "unmatched_workbook_rows": unmatched_workbook_review_rows[:300],
+                "unmatched_workbook_rows_truncated": len(unmatched_workbook_review_rows) > 300,
                 "summary": plan["summary"],
                 "scope": plan.get("scope", "chapter"),
                 "chapter_count": len(plan.get("chapters") or []) or 1,
