@@ -1369,6 +1369,33 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 character_workbook_plan_fingerprint(plan),
             )
 
+    def test_complete_book_import_rebases_retired_ids_only_when_source_spans_are_exact(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _path, chapters, _passages, document = self._complete_book_fixture(Path(tmp))
+            document["characters"] = [{
+                "full_name": "Mira", "aliases": ["Captain Mira"], "version": "",
+                "notes": "Confirmed by source context.", "included_in_book": True,
+            }]
+            for row in document["dialogue_rows"]:
+                if row["Passage Type"] == "Dialogue":
+                    row["GPT Assigned Character"] = "Mira"
+                    row["GPT Confidence (0–1)"] = "0.97"
+            first_row = next(row for row in document["dialogue_rows"] if row["Passage ID"] == "p1-dialogue")
+            first_row["Passage ID"] = "retired-p1-dialogue"
+            plan = plan_complete_book_character_workbook_import(
+                document, series="Silver Archive", book_title="The Silver Archive",
+                registry_rows=[], project_characters=[], current_chapters=chapters,
+            )
+            self.assertTrue(plan["ready"], plan["issues"])
+            self.assertEqual(
+                [(row["chapter_id"], row["passage_id"], row["speaker"]) for row in plan["assignments"]],
+                [("chapter-001", "p1-dialogue", "Mira"), ("chapter-002", "p2-dialogue", "Mira")],
+            )
+            self.assertEqual(
+                [(row["workbook_passage_id"], row["current_passage_id"]) for row in plan["passage_rebases"]],
+                [("retired-p1-dialogue", "p1-dialogue")],
+            )
+
     def test_complete_book_import_reconciles_stale_ai_overlap_only_when_all_impacted_rows_are_confirmed(self):
         with tempfile.TemporaryDirectory() as tmp:
             _path, chapters, _passages, document = self._complete_book_fixture(Path(tmp))
