@@ -2002,54 +2002,12 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                     continue
                 saved_source = _clean(saved.get("source") or "manual").casefold()
                 try:
-                    saved_start = int(saved.get("start", -1))
-                    saved_end = int(saved.get("end", -1))
+                    saved_start, saved_end = int(saved.get("start", -1)), int(saved.get("end", -1))
                 except (TypeError, ValueError, OverflowError):
                     continue
                 if saved_start >= quote_end or saved_end <= quote_start:
                     continue
-                impacted = [
-                    item for item in current_passages
-                    if isinstance(item, dict)
-                    and int(item.get("start", -1)) < saved_end
-                    and int(item.get("end", -1)) > saved_start
-                ]
-                only_narration = bool(impacted) and all(
-                    _key(item.get("kind")) == "narration"
-                    for item in impacted
-                )
-                saved_text = str(saved.get("text") or "")
-                active_saved_text = (
-                    active_chapter_text[saved_start:saved_end]
-                    if active_chapter_text and 0 <= saved_start < saved_end <= len(active_chapter_text)
-                    else ""
-                )
-                exact_saved_text = not saved_text or not active_saved_text or saved_text == active_saved_text
-                exact_narrator_span = (
-                    saved_start == quote_start and saved_end == quote_end
-                    and exact_saved_text
-                )
-                if saved_source in {"ai", "outsourced"}:
-                    if exact_narrator_span or (only_narration and exact_saved_text):
-                        speakers_value = saved.get("speakers")
-                        if not isinstance(speakers_value, (list, tuple)):
-                            speakers_value = [saved.get("speaker")] if saved.get("speaker") else []
-                        key = (saved_start, saved_end, saved_source)
-                        superseded_assignments.setdefault(key, {
-                            "chapter_id": _clean(chapter_id),
-                            "start": saved_start,
-                            "end": saved_end,
-                            "source": saved_source,
-                            "speakers": [_clean(value) for value in speakers_value if _clean(value)],
-                            "text": saved_text,
-                        })
-                    else:
-                        issues.append(
-                            "Narration passage %s overlaps an older AI/outsourced speaker assignment at %s:%s "
-                            "that cannot be safely removed by exact source matching. Review it in Check dialogues."
-                            % (pid, saved_start, saved_end)
-                        )
-                else:
+                if saved_source not in {"ai", "outsourced"}:
                     saved_speakers = saved.get("speakers")
                     if not isinstance(saved_speakers, (list, tuple)):
                         saved_speakers = [saved.get("speaker")] if saved.get("speaker") else []
@@ -2059,6 +2017,75 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                             "The assignment was not overwritten; resolve the source classification in Check dialogues."
                             % (pid, saved_start, saved_end)
                         )
+                    continue
+
+                # Preserve the established safety rule for broad stale AI spans:
+                # the old record can be removed only when every impacted current
+                # dialogue turn already has an explicit workbook identity or an
+                # exact saved manual identity. Narration is safe; unknown dialogue
+                # remains a blocking issue.
+                impacted_passages = [
+                    item for item in current_passages
+                    if isinstance(item, dict)
+                    and int(item.get("start", -1)) < saved_end
+                    and int(item.get("end", -1)) > saved_start
+                ]
+                impacted_dialogue = [
+                    item for item in impacted_passages
+                    if _key(item.get("kind")) != "narration"
+                ]
+                unresolved_impacts = []
+                for impacted in impacted_dialogue:
+                    impacted_id = _clean(impacted.get("passage_id"))
+                    workbook_row = workbook_row_by_id.get(impacted_id)
+                    workbook_speakers = []
+                    if isinstance(workbook_row, dict):
+                        try:
+                            workbook_speakers = _workbook_speaker_names(workbook_row)
+                        except ValueError:
+                            workbook_speakers = []
+                    exact_saved = exact_saved_assignment_for_passage(impacted)
+                    exact_saved_speakers = exact_saved.get("speakers") if isinstance(exact_saved, dict) else []
+                    if not isinstance(exact_saved_speakers, (list, tuple)):
+                        exact_saved_speakers = (
+                            [exact_saved.get("speaker")]
+                            if isinstance(exact_saved, dict) and exact_saved.get("speaker") else []
+                        )
+                    has_exact_manual_identity = (
+                        isinstance(exact_saved, dict)
+                        and _clean(exact_saved.get("source") or "manual").casefold() == "manual"
+                        and any(_clean(value) for value in exact_saved_speakers)
+                    )
+                    if not workbook_speakers and not has_exact_manual_identity:
+                        unresolved_impacts.append(impacted_id or "an unidentified passage")
+                only_embedded_narration = bool(impacted_passages) and all(
+                    _key(item.get("kind")) == "narration"
+                    and _clean(item.get("source")) == "automatic_embedded_quote"
+                    for item in impacted_passages
+                )
+                if (
+                    not impacted_passages
+                    or (not impacted_dialogue and not only_embedded_narration)
+                    or unresolved_impacts
+                ):
+                    issues.append(
+                        "Passage %s overlaps a stale AI assignment at %s:%s, but these affected dialogue passages "
+                        "still need confirmed identities: %s. Exact manual assignments are preserved."
+                        % (pid, saved_start, saved_end, ", ".join(unresolved_impacts[:8]) or "source classification conflict")
+                    )
+                    continue
+                speakers_value = saved.get("speakers")
+                if not isinstance(speakers_value, (list, tuple)):
+                    speakers_value = [saved.get("speaker")] if saved.get("speaker") else []
+                key = (saved_start, saved_end, saved_source)
+                superseded_assignments.setdefault(key, {
+                    "chapter_id": _clean(chapter_id),
+                    "start": saved_start,
+                    "end": saved_end,
+                    "source": saved_source,
+                    "speakers": [_clean(value) for value in speakers_value if _clean(value)],
+                    "text": str(saved.get("text") or ""),
+                })
             if not legacy_inline_quote and assigned and _key(assigned) != "narrator":
                 issues.append("Narration passage %s must retain the protected Narrator assignment." % pid)
             continue
