@@ -1404,6 +1404,9 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
         if _key(name) == "narrator":
             issues.append("Narrator is a protected automatic narration role and cannot be added to Character Register.")
             continue
+        if _key(name) == "third person":
+            issues.append("'Third Person' is a reserved fallback speaker role and must not be added to Character Register.")
+            continue
         canonical = name if not version or name.casefold().endswith((" (" + version + ")").casefold()) else "%s (%s)" % (name, version)
         aliases = []
         alias_too_long = False
@@ -1415,6 +1418,9 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                 continue
             if _key(alias) == "narrator":
                 issues.append("Narrator is a protected role and cannot be used as a character alias.")
+                continue
+            if _key(alias) == "third person":
+                issues.append("'Third Person' is a reserved fallback speaker role and cannot be used as a character alias.")
                 continue
             if alias and _key(alias) not in {_key(name),_key(canonical)} and _key(alias) not in {_key(x) for x in aliases}:
                 aliases.append(alias)
@@ -1536,6 +1542,8 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
     workbook_source_to_current = {}
     passage_rebases = []
     passage_mappings = []
+    passage_reclassifications = []
+    text_corrections = []
     unmatched_workbook_rows = []
     active_chapter_text = str(document.get("_active_chapter_text") or "")
 
@@ -1702,6 +1710,10 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             return []
         canonical_names, identity_keys = [], set()
         for name in names:
+            if _key(name) == "third person":
+                if "third person" not in {_key(value) for value in canonical_names}:
+                    canonical_names.append("Third Person")
+                continue
             matches = token_map.get(_key(name), set())
             if len(matches) != 1:
                 issues.append("%s speaker '%s' is missing or ambiguous. Add it to Character Register or resolve its alias." % (label, name))
@@ -1888,19 +1900,64 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             and _clean(current.get("source")) == "automatic_embedded_quote"
             and workbook_type == "dialogue"
         )
-        if (
-            workbook_type not in {"dialogue", "narration"}
-            or ((workbook_type == "narration") != source_is_narration and not legacy_inline_quote)
-        ):
-            issues.append("Passage %s has an edited or invalid Passage Type. Export the chapter again." % pid)
-            continue
-        narration = source_is_narration
         try:
             assigned_names = _workbook_speaker_names(row)
         except ValueError as exc:
             issues.append("Passage %s: %s" % (pid, exc))
             continue
         assigned = assigned_names[0] if assigned_names else ""
+        # If the active source index has safely reclassified an unchanged,
+        # unassigned Dialogue row as Narration, keep the active Narrator
+        # classification and do not reject the entire workbook. Never discard
+        # a real character speaker decision during this reconciliation.
+        if (
+            workbook_type == "dialogue"
+            and source_is_narration
+            and not legacy_inline_quote
+            and all(_key(name) == "narrator" for name in assigned_names)
+        ):
+            passage_reclassifications.append({
+                "passage_id": pid, "chapter_id": _clean(chapter_id),
+                "chapter_number": int(current.get("chapter_number") or 0),
+                "chapter_title": _clean(current.get("chapter_title")),
+                "start": int(current.get("start", -1)), "end": int(current.get("end", -1)),
+                "source_text": str(current.get("text") or ""),
+                "from_type": "Dialogue", "to_type": "Narration",
+            })
+        elif (
+            workbook_type not in {"dialogue", "narration"}
+            or ((workbook_type == "narration") != source_is_narration and not legacy_inline_quote)
+        ):
+            issues.append("Passage %s has a Passage Type conflict. The active book classifies this exact source span as %s; resolve it in Check dialogues before importing." % (pid, "Narration" if source_is_narration else "Dialogue"))
+            continue
+        narration = source_is_narration
+
+        proposed_text = row.get("GPT Proposed Source Text")
+        proposed_text = "" if proposed_text is None else str(proposed_text)
+        correction_reason = str(row.get("GPT Text Correction Reason") or "").strip()
+        original_text = str(current.get("text") or "")
+        if proposed_text and proposed_text != original_text:
+            if not correction_reason:
+                issues.append("Passage %s has GPT Proposed Source Text but no GPT Text Correction Reason. Explain the source-based correction." % pid)
+            elif len(proposed_text.encode("utf-16-le")) // 2 > 32767:
+                issues.append("Passage %s proposed text exceeds Excel's 32,767-character cell limit." % pid)
+            elif pid in split_parent_ids:
+                issues.append("Passage %s cannot have both a whole-passage text correction and Dialogue Split Corrections. Resolve the wording first, then export again for subturn corrections." % pid)
+            elif not proposed_text.strip():
+                issues.append("Passage %s proposed source text cannot be blank. Leave both proposal columns empty when no correction is needed." % pid)
+            else:
+                text_corrections.append({
+                    "passage_id": pid, "chapter_id": _clean(chapter_id),
+                    "chapter_number": int(current.get("chapter_number") or 0),
+                    "chapter_title": _clean(current.get("chapter_title")),
+                    "chapter_revision": _clean(current.get("chapter_revision") or chapter_revision),
+                    "passage_type": "Narration" if narration else "Dialogue",
+                    "start": int(current.get("start", -1)), "end": int(current.get("end", -1)),
+                    "source_text": original_text, "proposed_text": proposed_text,
+                    "reason": correction_reason,
+                })
+        elif correction_reason and not proposed_text:
+            issues.append("Passage %s has a GPT Text Correction Reason but no GPT Proposed Source Text.")
         if narration:
             if _clean(current.get("source")) == "automatic_embedded_quote":
                 quote_start, quote_end = int(current.get("start", -1)), int(current.get("end", -1))
@@ -2089,6 +2146,10 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
         canonical_speakers, incoming_keys = [], set()
         invalid_speaker = False
         for assigned_name in assigned_names:
+            if _key(assigned_name) == "third person":
+                if "third person" not in {_key(value) for value in canonical_speakers}:
+                    canonical_speakers.append("Third Person")
+                continue
             matches = token_map.get(_key(assigned_name), set())
             if len(matches) != 1:
                 issues.append("'%s' is missing or ambiguous. Add it to Character Register or resolve its alias." % assigned_name)
@@ -2158,6 +2219,8 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
         "superseded_assignments": list(superseded_assignments.values()),
         "passage_rebases": passage_rebases,
         "passage_mappings": passage_mappings,
+        "passage_reclassifications": passage_reclassifications,
+        "text_corrections": text_corrections,
         "summary": {
             "matched_characters": sum(x["action"] == "merge" for x in planned),
             "new_characters": sum(x["action"] == "create" for x in planned),
@@ -2166,6 +2229,12 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             "characters_in_register": len(planned),
             "unresolved_dialogue_passages": sum("no confirmed character assignment" in issue for issue in unique_issues),
             "saved_assignments_replaced": len(superseded_assignments),
+            "passage_reclassifications": len(passage_reclassifications),
+            "text_corrections": len(text_corrections),
+            "third_person_assignments": sum(
+                1 for row in assignments
+                if any(_key(name) == "third person" for name in row.get("speakers", []))
+            ),
         },
     }
 
@@ -2220,6 +2289,8 @@ def plan_complete_book_character_workbook_import(
     superseded_assignments = []
     passage_rebases = []
     passage_mappings = []
+    passage_reclassifications = []
+    text_corrections = []
     identity_plan_json = None
     identity_plan = []
     for reference in sorted(references, key=lambda item: (int(item["chapter_number"]), item["chapter_id"])):
@@ -2283,6 +2354,14 @@ def plan_complete_book_character_workbook_import(
             item = dict(rebase)
             item["chapter_number"] = int(reference["chapter_number"])
             passage_rebases.append(item)
+        for reclassification in plan.get("passage_reclassifications") or []:
+            item = dict(reclassification)
+            item["chapter_number"] = int(reference["chapter_number"])
+            passage_reclassifications.append(item)
+        for correction in plan.get("text_corrections") or []:
+            item = dict(correction)
+            item["chapter_number"] = int(reference["chapter_number"])
+            text_corrections.append(item)
         for saved_assignment in plan.get("superseded_assignments") or []:
             item = dict(saved_assignment)
             item["chapter_id"] = chapter_id
@@ -2327,6 +2406,12 @@ def plan_complete_book_character_workbook_import(
         "chapters": len(chapter_plans),
         "unresolved_dialogue_passages": sum("no confirmed character assignment" in issue for issue in issues),
         "saved_assignments_replaced": len(superseded_assignments),
+        "passage_reclassifications": len(passage_reclassifications),
+        "text_corrections": len(text_corrections),
+        "third_person_assignments": sum(
+            1 for row in assignments
+            if any(_key(name) == "third person" for name in row.get("speakers", []))
+        ),
     }
     return {
         "ready": not issues,
@@ -2340,6 +2425,8 @@ def plan_complete_book_character_workbook_import(
         "superseded_assignments": superseded_assignments,
         "passage_rebases": passage_rebases,
         "passage_mappings": passage_mappings,
+        "passage_reclassifications": passage_reclassifications,
+        "text_corrections": text_corrections,
         "summary": summary,
     }
 
@@ -2351,7 +2438,7 @@ def character_workbook_plan_fingerprint(plan: dict) -> str:
         raise ValueError("A valid character workbook plan is required.")
     reviewed = {
         key: plan.get(key)
-        for key in ("ready", "issues", "scope", "book_revision", "chapters", "chapter_assignments", "characters", "assignments", "superseded_assignments", "passage_rebases", "passage_mappings", "summary")
+        for key in ("ready", "issues", "scope", "book_revision", "chapters", "chapter_assignments", "characters", "assignments", "superseded_assignments", "passage_rebases", "passage_mappings", "passage_reclassifications", "text_corrections", "summary")
     }
     try:
         encoded = json.dumps(
