@@ -6249,7 +6249,10 @@ class PremiumV2Bridge(QObject):
             backups = {path: (path.read_bytes() if path.is_file() else None) for path in backup_paths}
             from copy import deepcopy
             chapter_memory_backup = [
-                (item, int(item.number), deepcopy(list(getattr(item, "dialogue_assignments", []) or [])))
+                (
+                    item, int(item.number), str(getattr(item, "text", "") or ""),
+                    deepcopy(list(getattr(item, "dialogue_assignments", []) or [])),
+                )
                 for item in project.chapters
             ]
 
@@ -6349,6 +6352,160 @@ class PremiumV2Bridge(QObject):
                         continue
                     saved_chapter_id = str(saved_assignment.get("chapter_id") or "")
                     superseded_by_chapter.setdefault(saved_chapter_id, []).append(saved_assignment)
+
+                corrections_by_chapter: dict[str, list[dict[str, Any]]] = {}
+                for correction in plan.get("text_corrections") or []:
+                    if not isinstance(correction, dict):
+                        raise ValueError("The workbook contains an invalid GPT text correction.")
+                    correction_chapter_id = str(correction.get("chapter_id") or "").strip()
+                    if correction_chapter_id not in active_chapters:
+                        raise ValueError("A GPT text correction references a chapter that is no longer in the active book.")
+                    corrections_by_chapter.setdefault(correction_chapter_id, []).append(dict(correction))
+                text_corrections_applied = 0
+
+                def rebase_rows_for_text_corrections(rows, corrections, *, invalidate_passage_identity=False):
+                    """Move saved spans with approved source replacements without changing speaker identities."""
+                    result_rows = []
+                    ordered_corrections = sorted(corrections, key=lambda row: (int(row["start"]), int(row["end"])))
+                    for raw_row in rows:
+                        if not isinstance(raw_row, dict):
+                            result_rows.append(raw_row)
+                            continue
+                        item = dict(raw_row)
+                        try:
+                            item_start, item_end = int(item.get("start", -1)), int(item.get("end", -1))
+                        except (TypeError, ValueError, OverflowError):
+                            raise ValueError("A saved dialogue assignment has invalid offsets and cannot be rebased safely.")
+                        cumulative_shift = 0
+                        for correction in ordered_corrections:
+                            old_start = int(correction["start"])
+                            old_end = int(correction["end"])
+                            source_value = str(correction["source_text"])
+                            proposed_value = str(correction["proposed_text"])
+                            current_start = old_start + cumulative_shift
+                            current_end = old_end + cumulative_shift
+                            delta = len(proposed_value) - len(source_value)
+                            if item_end <= current_start:
+                                pass
+                            elif item_start >= current_end:
+                                item_start += delta
+                                item_end += delta
+                            elif (
+                                item_start == current_start
+                                and item_end == current_end
+                                and str(item.get("text") or "") == source_value
+                            ):
+                                item["text"] = proposed_value
+                                item_end = current_start + len(proposed_value)
+                            else:
+                                raise ValueError(
+                                    "A GPT text correction overlaps a saved or imported dialogue assignment that is not an exact whole-passage match. "
+                                    "Resolve that span in Check dialogues before importing; no source text was changed."
+                                )
+
+                            parent_start_value = item.get("source_passage_start")
+                            parent_end_value = item.get("source_passage_end")
+                            if parent_start_value not in (None, "") or parent_end_value not in (None, ""):
+                                try:
+                                    parent_start = int(parent_start_value)
+                                    parent_end = int(parent_end_value)
+                                except (TypeError, ValueError, OverflowError):
+                                    raise ValueError("A saved split-turn parent has invalid source offsets and cannot be rebased safely.")
+                                if parent_end <= current_start:
+                                    pass
+                                elif parent_start >= current_end:
+                                    parent_start += delta
+                                    parent_end += delta
+                                    item["source_passage_start"] = parent_start
+                                    item["source_passage_end"] = parent_end
+                                else:
+                                    raise ValueError(
+                                        "A GPT text correction overlaps a saved Dialogue Split Corrections parent. "
+                                        "Apply the wording correction before creating or reviewing subturn assignments."
+                                    )
+                            cumulative_shift += delta
+
+                        item["start"], item["end"] = item_start, item_end
+                        if invalidate_passage_identity:
+                            item.pop("passage_id", None)
+                            item.pop("chapter_revision", None)
+                        result_rows.append(item)
+                    return result_rows
+
+                for correction_chapter_id, corrections in corrections_by_chapter.items():
+                    target_chapter = active_chapters[correction_chapter_id]
+                    original_chapter_text = str(target_chapter.text or "")
+                    ordered = sorted(corrections, key=lambda row: (int(row["start"]), int(row["end"])))
+                    previous_end = -1
+                    for correction in ordered:
+                        correction_start = int(correction.get("start", -1))
+                        correction_end = int(correction.get("end", -1))
+                        source_value = str(correction.get("source_text") or "")
+                        proposed_value = str(correction.get("proposed_text") or "")
+                        if (
+                            correction_start < 0 or correction_end <= correction_start
+                            or correction_end > len(original_chapter_text)
+                            or original_chapter_text[correction_start:correction_end] != source_value
+                            or not proposed_value.strip()
+                        ):
+                            raise ValueError(
+                                "A GPT text correction no longer matches its exact original chapter source span. "
+                                "Re-export and review the workbook again."
+                            )
+                        if correction_start < previous_end:
+                            raise ValueError("GPT text corrections overlap. Resolve the overlapping source spans before importing.")
+                        previous_end = correction_end
+
+                    updated_chapter_text = original_chapter_text
+                    cumulative_shift = 0
+                    for correction in ordered:
+                        correction_start = int(correction["start"]) + cumulative_shift
+                        correction_end = int(correction["end"]) + cumulative_shift
+                        source_value = str(correction["source_text"])
+                        proposed_value = str(correction["proposed_text"])
+                        if updated_chapter_text[correction_start:correction_end] != source_value:
+                            raise ValueError("A GPT text correction could not be rebased against the current chapter. No text was changed.")
+                        updated_chapter_text = (
+                            updated_chapter_text[:correction_start]
+                            + proposed_value
+                            + updated_chapter_text[correction_end:]
+                        )
+                        cumulative_shift += len(proposed_value) - len(source_value)
+
+                    existing_rows = list(getattr(target_chapter, "dialogue_assignments", []) or [])
+                    stale_rows = superseded_by_chapter.get(correction_chapter_id, [])
+                    if stale_rows:
+                        existing_rows = [
+                            row for row in existing_rows
+                            if not any(
+                                isinstance(row, dict)
+                                and int(row.get("start", -1)) == int(stale.get("start", -2))
+                                and int(row.get("end", -1)) == int(stale.get("end", -2))
+                                and str(row.get("source") or "manual").strip().casefold()
+                                    == str(stale.get("source") or "manual").strip().casefold()
+                                for stale in stale_rows
+                            )
+                        ]
+                    target_chapter.dialogue_assignments = rebase_rows_for_text_corrections(
+                        existing_rows, ordered, invalidate_passage_identity=True
+                    )
+                    target_chapter.text = updated_chapter_text
+                    # Split-turn parent context is still valid when its parent did
+                    # not overlap a corrected span; refresh the context window after
+                    # any earlier/later source-length shifts.
+                    for assignment in target_chapter.dialogue_assignments:
+                        if not isinstance(assignment, dict):
+                            continue
+                        try:
+                            parent_start = int(assignment.get("source_passage_start", -1))
+                            parent_end = int(assignment.get("source_passage_end", -1))
+                        except (TypeError, ValueError, OverflowError):
+                            continue
+                        if 0 <= parent_start < parent_end <= len(updated_chapter_text):
+                            assignment["source_context_before"] = updated_chapter_text[max(0, parent_start - 160):parent_start]
+                            assignment["source_context_after"] = updated_chapter_text[parent_end:min(len(updated_chapter_text), parent_end + 160)]
+                    text_corrections_applied += len(ordered)
+
                 for imported in plan["assignments"]:
                     chapter_id = str(imported.get("chapter_id") or getattr(chapter, "chapter_id", "") or "")
                     target_chapter = active_chapters.get(chapter_id)
@@ -6356,7 +6513,13 @@ class PremiumV2Bridge(QObject):
                         raise ValueError("An imported passage belongs to a chapter that is no longer in the active book.")
                     if imported.get("chapter_number") not in (None, "") and int(imported["chapter_number"]) != int(target_chapter.number):
                         raise ValueError("A chapter number changed during import. No changes were retained.")
-                    start, end = int(imported["start"]), int(imported["end"])
+                    imported_row = dict(imported)
+                    chapter_corrections = corrections_by_chapter.get(chapter_id, [])
+                    if chapter_corrections:
+                        imported_row = rebase_rows_for_text_corrections(
+                            [imported_row], chapter_corrections, invalidate_passage_identity=True
+                        )[0]
+                    start, end = int(imported_row["start"]), int(imported_row["end"])
                     exact = str(target_chapter.text or "")[start:end]
                     if exact != str(imported["text"]):
                         raise ValueError("A dialogue passage changed during import. No changes were retained.")
@@ -6378,14 +6541,14 @@ class PremiumV2Bridge(QObject):
                             ]
                         assignments_by_chapter[chapter_id] = existing_assignments
                     base = {"start": start, "end": end, "text": exact, "source": "outsourced"}
-                    imported_speakers = imported.get("speakers") or [str(imported["speaker"])]
-                    imported_mode = str(imported.get("multi_speaker_mode") or ("chorus" if len(imported_speakers) > 1 else "single"))
+                    imported_speakers = imported_row.get("speakers") or [str(imported_row["speaker"])]
+                    imported_mode = str(imported_row.get("multi_speaker_mode") or ("chorus" if len(imported_speakers) > 1 else "single"))
                     normalized = normalize_assignment(base, [str(name) for name in imported_speakers], imported_mode)
                     normalized.update({
-                        "source": "outsourced", "confidence": float(imported["confidence"]),
+                        "source": "outsourced", "confidence": float(imported_row["confidence"]),
                         "series": series,
                         **{
-                            key: imported[key]
+                            key: imported_row[key]
                             for key in (
                                 "passage_id", "chapter_revision",
                                 "source_passage_id", "source_passage_text",
@@ -6393,7 +6556,7 @@ class PremiumV2Bridge(QObject):
                                 "source_context_before", "source_context_after",
                                 "source_start_relative", "source_end_relative",
                             )
-                            if key in imported
+                            if key in imported_row and not (chapter_corrections and key in {"passage_id", "chapter_revision"})
                         },
                     })
                     assignments_by_chapter[chapter_id] = [
@@ -6447,8 +6610,9 @@ class PremiumV2Bridge(QObject):
                 # Restore the live Project object as well as its files. A failed
                 # save_state after project.save() must not leave uncommitted dialogue
                 # assignments in memory for a later refresh/save to persist.
-                for item, chapter_number, assignments in chapter_memory_backup:
+                for item, chapter_number, chapter_text, assignments in chapter_memory_backup:
                     item.number = chapter_number
+                    item.text = chapter_text
                     item.dialogue_assignments = assignments
                 rollback_errors = []
                 for backup_path, content in backups.items():
@@ -6477,6 +6641,9 @@ class PremiumV2Bridge(QObject):
                 "characters_created": int(plan["summary"]["new_characters"]),
                 "dialogue_assignments": len(plan["assignments"]),
                 "saved_assignments_replaced": len(plan.get("superseded_assignments") or []),
+                "text_corrections_applied": text_corrections_applied,
+                "passage_reclassifications": len(plan.get("passage_reclassifications") or []),
+                "third_person_assignments": int(plan["summary"].get("third_person_assignments") or 0),
                 "aliases_merged": int(plan["summary"]["aliases_to_merge"]),
             }
 
