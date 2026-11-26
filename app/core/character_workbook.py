@@ -2310,7 +2310,7 @@ def character_workbook_plan_fingerprint(plan: dict) -> str:
         raise ValueError("A valid character workbook plan is required.")
     reviewed = {
         key: plan.get(key)
-        for key in ("ready", "issues", "scope", "book_revision", "chapters", "chapter_assignments", "characters", "assignments", "superseded_assignments", "summary")
+        for key in ("ready", "issues", "scope", "book_revision", "chapters", "chapter_assignments", "characters", "assignments", "superseded_assignments", "passage_rebases", "summary")
     }
     try:
         encoded = json.dumps(
