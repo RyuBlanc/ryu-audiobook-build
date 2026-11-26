@@ -2086,17 +2086,37 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             "end": len(source), "text": source, "kind": "narration",
             "source": "automatic_non_dialogue",
         }]
+        stale_ai = {
+            "start": 0, "end": len(source), "text": source,
+            "speaker": "Legacy GPT speaker", "source": "ai",
+        }
         plan = plan_character_workbook_import(
             document, series="Silver Archive", book_title="The Silver Archive",
             registry_rows=[], project_characters=[], chapter_id="chapter-001",
             chapter_revision="revision-abc", current_passages=passages,
-            current_assignments=[],
+            current_assignments=[stale_ai],
         )
         self.assertTrue(plan["ready"], plan["issues"])
         self.assertEqual(plan["assignments"], [])
         self.assertEqual(len(plan["passage_reclassifications"]), 1)
         self.assertEqual(plan["passage_reclassifications"][0]["passage_id"], "current-narrator-id")
         self.assertEqual(plan["passage_reclassifications"][0]["to_type"], "Narration")
+        self.assertEqual(len(plan["superseded_assignments"]), 1)
+        self.assertEqual(plan["superseded_assignments"][0]["source"], "ai")
+
+        protected_manual = {
+            "start": 0, "end": len(source), "text": source,
+            "speaker": "Mira", "source": "manual",
+        }
+        blocked = plan_character_workbook_import(
+            document, series="Silver Archive", book_title="The Silver Archive",
+            registry_rows=[], project_characters=[], chapter_id="chapter-001",
+            chapter_revision="revision-abc", current_passages=passages,
+            current_assignments=[protected_manual],
+        )
+        self.assertFalse(blocked["ready"])
+        self.assertEqual(blocked["superseded_assignments"], [])
+        self.assertTrue(any("protected manual" in issue for issue in blocked["issues"]))
 
     def test_import_plan_accepts_changed_gpt_wording_as_a_separate_user_confirmed_proposal(self):
         original = "“Helo, Mira!”"
