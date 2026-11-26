@@ -424,7 +424,7 @@ def complete_book_gpt_prompt() -> str:
         "Do not use Dialogue Split Corrections for a correctly segmented single turn or a same-word chorus; use the multi-speaker JSON cell instead.",
         "",
         "DO NOT DAMAGE THE SOURCE OR WORKBOOK",
-        "Do not change Passage ID, Chapter ID, chapter number/title/revision, Passage Type, Dialogue Text, Start/End offsets, Chapter Register, Chapter Context, Series Character Reference, Workbook Info, or existing dialogue rows.",
+        "Do not change Passage ID, Chapter ID, chapter number/title/revision, Passage Type, Dialogue Text, Start/End offsets, Chapter Register, Chapter Context, Series Character Reference, Speaker Roles, Workbook Info, or existing dialogue rows.",
         "Do not add, delete, duplicate, merge, split, reorder, or rewrite Dialogue Assignment rows. The app applies validated subturn corrections from Dialogue Split Corrections while preserving the original source passage.",
         "Only fill GPT answer columns, add source-supported Character Register identities, and add validated Dialogue Split Corrections rows. Preserve all other sheets, rows and references.",
         "Save the completed workbook as a NEW .xlsx copy. Never overwrite the original exported or refreshed workbook.",
@@ -782,7 +782,7 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
                 "xl/worksheets/sheet%d.xml" % number,
                 _sheet(
                     rows, widths, wrap,
-                    protect=name in {"Chapter Register", "Chapter Context", "Series Character Reference", "Workbook Info"},
+                    protect=name in {"Chapter Register", "Chapter Context", "Series Character Reference", "Speaker Roles", "Workbook Info"},
                     auto_filter=name != "GPT Prompt",
                 ),
             )
