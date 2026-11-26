@@ -6048,6 +6048,17 @@ class PremiumV2Bridge(QObject):
                     "voice_profile": str(row.get("voice_profile") or row.get("voice_name") or row.get("voice") or row.get("existing_voice_name") or ""),
                     "aliases": list(row.get("aliases") or []),
                     "pending_workbook_entry": bool(from_workbook_register and not row.get("library_id")),
+                    "reserved_placeholder": False,
+                })
+            if not any(str(row.get("canonical_name") or "").strip().casefold() == "third person" for row in character_options):
+                character_options.append({
+                    "canonical_name": "Third Person",
+                    "series": review_series,
+                    "identity_variant": "",
+                    "voice_profile": "Global Third Person fallback",
+                    "aliases": [],
+                    "pending_workbook_entry": False,
+                    "reserved_placeholder": True,
                 })
             character_options.sort(key=lambda row: (row["series"].casefold(), row["canonical_name"].casefold()))
             review_items.sort(key=lambda row: (
@@ -6115,6 +6126,9 @@ class PremiumV2Bridge(QObject):
                 "character_options": character_options,
                 "unmatched_workbook_rows": unmatched_workbook_review_rows[:300],
                 "unmatched_workbook_rows_truncated": len(unmatched_workbook_review_rows) > 300,
+                "text_corrections": list(plan.get("text_corrections") or [])[:200],
+                "text_corrections_truncated": len(plan.get("text_corrections") or []) > 200,
+                "passage_reclassifications": list(plan.get("passage_reclassifications") or [])[:300],
                 "summary": plan["summary"],
                 "scope": plan.get("scope", "chapter"),
                 "chapter_count": len(plan.get("chapters") or []) or 1,
@@ -6195,6 +6209,9 @@ class PremiumV2Bridge(QObject):
                 }
                 for row in plan.get("characters", [])[:40]
             ],
+            "text_corrections": list(plan.get("text_corrections") or [])[:200],
+            "text_corrections_truncated": len(plan.get("text_corrections") or []) > 200,
+            "passage_reclassifications": list(plan.get("passage_reclassifications") or [])[:300],
         }
 
     @_serialize_character_identity_state
