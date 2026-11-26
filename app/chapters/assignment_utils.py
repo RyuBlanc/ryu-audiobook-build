@@ -94,7 +94,7 @@ def build_book_character_registry(chapters, project_folder: Path | None = None) 
 
     def add(name: str, chapter_number: int | None = None, source: str = "") -> None:
         clean = str(name or "").strip()
-        if not clean:
+        if not clean or clean.casefold() in {"narrator", "third person"}:
             return
         key = clean.casefold()
         entry = registry.setdefault(
