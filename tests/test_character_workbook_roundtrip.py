@@ -2003,5 +2003,201 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
         self.assertEqual(protected["superseded_assignments"], [])
 
 
+
+    def test_gpt_prompt_supports_third_person_and_line_by_line_source_corrections(self):
+        prompt = complete_book_gpt_prompt()
+        self.assertIn("RESERVED SYSTEM ROLE — THIRD PERSON", prompt)
+        self.assertIn("Use the exact canonical speaker value 'Third Person'", prompt)
+        self.assertIn("do not add it to Character Register", prompt)
+        self.assertIn("GPT Proposed Source Text", prompt)
+        self.assertIn("GPT Text Correction Reason", prompt)
+        self.assertIn("Narrator paragraphs", prompt)
+        self.assertIn("only after the user explicitly confirms", prompt)
+
+    def test_import_plan_accepts_reserved_third_person_without_character_register_entry(self):
+        source = "“Someone near the gate shouted, ‘Stop!’”"
+        document = {
+            "schema_version": 1,
+            "info": {
+                "Series Name": "Silver Archive",
+                "Book Title": "The Silver Archive",
+                "Chapter ID": "chapter-001",
+                "Chapter Revision": "revision-abc",
+            },
+            "characters": [],
+            "dialogue_rows": [{
+                "Passage ID": "ps-third-person",
+                "Chapter ID": "chapter-001",
+                "Chapter Revision (Reference)": "revision-abc",
+                "Passage Type": "Dialogue",
+                "Dialogue Text": source,
+                "GPT Assigned Character": "Third Person",
+                "GPT Confidence (0–1)": "0.88",
+                "Start (Reference)": 0,
+                "End (Reference)": len(source),
+            }],
+        }
+        passages = [{
+            "passage_id": "ps-third-person", "chapter_id": "chapter-001",
+            "chapter_number": 1, "chapter_title": "The Arrival",
+            "chapter_revision": "revision-abc", "start": 0,
+            "end": len(source), "text": source, "kind": "character_dialogue",
+        }]
+        plan = plan_character_workbook_import(
+            document, series="Silver Archive", book_title="The Silver Archive",
+            registry_rows=[], project_characters=[], chapter_id="chapter-001",
+            chapter_revision="revision-abc", current_passages=passages,
+            current_assignments=[], deleted_registry_rows=[],
+        )
+        self.assertTrue(plan["ready"], plan["issues"])
+        self.assertEqual(plan["characters"], [])
+        self.assertEqual(plan["assignments"][0]["speaker"], "Third Person")
+        self.assertEqual(plan["assignments"][0]["speakers"], ["Third Person"])
+        self.assertEqual(plan["summary"]["third_person_assignments"], 1)
+
+    def test_import_plan_accepts_exact_unchanged_dialogue_to_narrator_reclassification(self):
+        source = "She remembered the words: “You must leave before dawn.”"
+        document = {
+            "schema_version": 1,
+            "info": {
+                "Series Name": "Silver Archive",
+                "Book Title": "The Silver Archive",
+                "Chapter ID": "chapter-001",
+                "Chapter Revision": "revision-abc",
+            },
+            "characters": [],
+            "dialogue_rows": [{
+                "Passage ID": "retired-dialogue-id",
+                "Chapter ID": "chapter-001",
+                "Chapter Revision (Reference)": "revision-abc",
+                "Passage Type": "Dialogue",
+                "Dialogue Text": source,
+                "GPT Assigned Character": "",
+                "GPT Confidence (0–1)": "",
+                "Start (Reference)": 0,
+                "End (Reference)": len(source),
+            }],
+            "_active_chapter_text": source,
+        }
+        passages = [{
+            "passage_id": "current-narrator-id", "chapter_id": "chapter-001",
+            "chapter_number": 1, "chapter_title": "The Arrival",
+            "chapter_revision": "revision-abc", "start": 0,
+            "end": len(source), "text": source, "kind": "narration",
+            "source": "automatic_non_dialogue",
+        }]
+        plan = plan_character_workbook_import(
+            document, series="Silver Archive", book_title="The Silver Archive",
+            registry_rows=[], project_characters=[], chapter_id="chapter-001",
+            chapter_revision="revision-abc", current_passages=passages,
+            current_assignments=[],
+        )
+        self.assertTrue(plan["ready"], plan["issues"])
+        self.assertEqual(plan["assignments"], [])
+        self.assertEqual(len(plan["passage_reclassifications"]), 1)
+        self.assertEqual(plan["passage_reclassifications"][0]["passage_id"], "current-narrator-id")
+        self.assertEqual(plan["passage_reclassifications"][0]["to_type"], "Narration")
+
+    def test_import_plan_accepts_changed_gpt_wording_as_a_separate_user_confirmed_proposal(self):
+        original = "“Helo, Mira!”"
+        proposed = "“Hello, Mira!”"
+        document = {
+            "schema_version": 1,
+            "info": {
+                "Series Name": "Silver Archive",
+                "Book Title": "The Silver Archive",
+                "Chapter ID": "chapter-001",
+                "Chapter Revision": "revision-abc",
+            },
+            "characters": [{
+                "full_name": "Mira", "aliases": [], "version": "",
+                "notes": "", "included_in_book": True,
+            }],
+            "dialogue_rows": [{
+                "Passage ID": "ps-mira",
+                "Chapter ID": "chapter-001",
+                "Chapter Revision (Reference)": "revision-abc",
+                "Passage Type": "Dialogue",
+                "Dialogue Text": original,
+                "GPT Assigned Character": "Mira",
+                "GPT Confidence (0–1)": "0.98",
+                "Start (Reference)": 0,
+                "End (Reference)": len(original),
+                "GPT Proposed Source Text": proposed,
+                "GPT Text Correction Reason": "Corrected an obvious transcription typo; the same character is speaking.",
+            }],
+            "_active_chapter_text": original,
+        }
+        passages = [{
+            "passage_id": "ps-mira", "chapter_id": "chapter-001",
+            "chapter_number": 1, "chapter_title": "The Arrival",
+            "chapter_revision": "revision-abc", "start": 0,
+            "end": len(original), "text": original, "kind": "character_dialogue",
+        }]
+        plan = plan_character_workbook_import(
+            document, series="Silver Archive", book_title="The Silver Archive",
+            registry_rows=[], project_characters=[], chapter_id="chapter-001",
+            chapter_revision="revision-abc", current_passages=passages,
+            current_assignments=[],
+        )
+        self.assertTrue(plan["ready"], plan["issues"])
+        self.assertEqual(plan["assignments"][0]["speaker"], "Mira")
+        self.assertEqual(plan["assignments"][0]["text"], original)
+        self.assertEqual(len(plan["text_corrections"]), 1)
+        self.assertEqual(plan["text_corrections"][0]["source_text"], original)
+        self.assertEqual(plan["text_corrections"][0]["proposed_text"], proposed)
+
+        invalid = dict(document)
+        invalid["dialogue_rows"] = [dict(document["dialogue_rows"][0])]
+        invalid["dialogue_rows"][0]["GPT Text Correction Reason"] = ""
+        blocked = plan_character_workbook_import(
+            invalid, series="Silver Archive", book_title="The Silver Archive",
+            registry_rows=[], project_characters=[], chapter_id="chapter-001",
+            chapter_revision="revision-abc", current_passages=passages,
+            current_assignments=[],
+        )
+        self.assertFalse(blocked["ready"])
+        self.assertTrue(any("no GPT Text Correction Reason" in issue for issue in blocked["issues"]))
+
+    def test_complete_book_export_includes_text_proposal_columns_and_speaker_roles_sheet(self):
+        source = "Narration introduces Mira. “Helo, Mira!”"
+        dialogue = "“Helo, Mira!”"
+        start = source.index(dialogue)
+        chapters = [{
+            "chapter_id": "chapter-001", "chapter_number": 1,
+            "chapter_title": "The Arrival", "chapter_revision": "revision-abc",
+            "text": source,
+        }]
+        passages = [
+            {
+                "passage_id": "ps-narration", "chapter_id": "chapter-001",
+                "chapter_number": 1, "chapter_title": "The Arrival",
+                "chapter_revision": "revision-abc", "start": 0,
+                "end": source.index(" “"), "text": "Narration introduces Mira.",
+                "kind": "narration",
+            },
+            {
+                "passage_id": "ps-dialogue", "chapter_id": "chapter-001",
+                "chapter_number": 1, "chapter_title": "The Arrival",
+                "chapter_revision": "revision-abc", "start": start,
+                "end": start + len(dialogue), "text": dialogue,
+                "kind": "character_dialogue",
+            },
+        ]
+        payload = create_complete_book_character_workbook_bytes(
+            {"project_title": "The Silver Archive", "series_name": "Silver Archive"},
+            chapters, passages,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "complete-book.xlsx"
+            path.write_bytes(payload)
+            parsed = read_character_workbook(path)
+        dialogue_row = next(row for row in parsed["dialogue_rows"] if row["Passage ID"] == "ps-dialogue")
+        self.assertIn("GPT Proposed Source Text", dialogue_row)
+        self.assertIn("GPT Text Correction Reason", dialogue_row)
+        self.assertEqual(parsed["speaker_roles"][0]["Canonical Value"], "Third Person")
+        self.assertIn("uses the user's global Third Person fallback voice", parsed["speaker_roles"][0]["Application Routing"])
+
+
 if __name__ == "__main__":
     unittest.main()
