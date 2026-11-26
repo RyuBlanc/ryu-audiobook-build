@@ -53,7 +53,7 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
             response = json.loads(bridge.dispatch("character.workbook.prompt.copy", "{}"))
         self.assertTrue(response.get("success"), response)
         self.assertTrue(response["data"]["copied"])
-        self.assertEqual(response["data"]["prompt_version"], "2.0")
+        self.assertEqual(response["data"]["prompt_version"], "2.1")
         clipboard.setText.assert_called_once_with(host.complete_book_gpt_prompt())
 
     def test_workbook_manual_assignment_endpoint_accepts_sequential_multi_voice_mode(self):
@@ -117,6 +117,18 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn("item.unmatched_workbook_speakers", self.adapter)
         self.assertIn("selectedValue !== '' && Number.isInteger(optionIndex)", self.adapter)
         self.assertIn("pointer-events:auto!important", self.adapter)
+        self.assertIn("GPT Proposed Source Text", self.workbook)
+        self.assertIn("GPT Text Correction Reason", self.workbook)
+        self.assertIn("GPT source-text corrections to apply after confirmation", self.adapter)
+        self.assertIn("rebase_rows_for_text_corrections", self.host)
+        self.assertIn("text_corrections_applied", self.host)
+        self.assertIn("Third Person", self.workbook)
+        self.assertIn("reserved_placeholder", self.host)
+        self.assertIn("third_person_pending", self.host)
+        self.assertIn("needs_user_identification", self.host)
+        self.assertIn("Speaker Roles", self.workbook)
+        self.assertIn("passage_reclassifications", self.host)
+        self.assertIn("Exact source reclassifications", self.adapter)
 
     def test_native_chapter_studio_exposes_check_dialogues_action(self):
         self.assertIn('QPushButton("Check dialogues")', self.chapter_editor)
