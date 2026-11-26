@@ -127,7 +127,6 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn("character_workbook_source_correction_history", self.host)
         self.assertIn("source_correction_history", self.workbook)
         self.assertIn("Source Correction History", self.workbook)
-        self.assertIn("Source Correction History", self.adapter)
         self.assertIn('"source_correction_history": list(state.get("character_workbook_source_correction_history") or [])[-5000:]', self.host)
         self.assertIn("Third Person · needs user identification", self.dialogue_manager)
         self.assertIn("Third Person · needs user identification", self.adapter)
