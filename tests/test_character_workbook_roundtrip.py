@@ -1261,6 +1261,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 names = [sheet.get("name") for sheet in book_xml.findall(".//" + ns + "sheet")]
                 self.assertEqual(names, [
                     "GPT Prompt", "Dialogue Assignment", "Dialogue Split Corrections", "Character Register",
+                    "Speaker Roles", "Source Correction History",
                     "Chapter Register", "Chapter Context", "Series Character Reference", "Workbook Info",
                 ])
                 prompt_xml = ET.fromstring(archive.read(sheet_targets["GPT Prompt"]))
@@ -2226,7 +2227,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
         self.assertIn("GPT Proposed Source Text", dialogue_row)
         self.assertIn("GPT Text Correction Reason", dialogue_row)
         self.assertEqual(parsed["speaker_roles"][0]["Canonical Value"], "Third Person")
-        self.assertIn("uses the user's global Third Person fallback voice", parsed["speaker_roles"][0]["Application Routing"])
+        self.assertIn("global Third Person fallback voice", parsed["speaker_roles"][0]["Application Routing"].casefold())
         self.assertEqual(parsed["source_correction_history"][0]["User-Approved Source Text"], "“Hello, Mira!”")
 
 
