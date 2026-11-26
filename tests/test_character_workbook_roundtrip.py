@@ -979,6 +979,13 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             self.assertEqual(len(plan["passage_rebases"]), 1)
             self.assertEqual(plan["passage_rebases"][0]["workbook_passage_id"], "retired-dialogue-passage")
             self.assertEqual(plan["passage_rebases"][0]["current_passage_id"], "ps_dialogue")
+            self.assertIn(
+                ("retired-dialogue-passage", "ps_dialogue"),
+                [
+                    (row["workbook_passage_id"], row["current_passage_id"])
+                    for row in plan["passage_mappings"]
+                ],
+            )
 
     def test_import_plan_preserves_exact_manual_assignment_when_passage_id_is_reissued(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1442,6 +1449,12 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 [(row["workbook_passage_id"], row["current_passage_id"]) for row in plan["passage_rebases"]],
                 [("retired-p1-dialogue", "p1-dialogue")],
             )
+            verified_mappings = [
+                (row["workbook_passage_id"], row["current_passage_id"])
+                for row in plan["passage_mappings"]
+            ]
+            self.assertIn(("retired-p1-dialogue", "p1-dialogue"), verified_mappings)
+            self.assertIn(("p2-dialogue", "p2-dialogue"), verified_mappings)
 
     def test_complete_book_import_reconciles_stale_ai_overlap_only_when_all_impacted_rows_are_confirmed(self):
         with tempfile.TemporaryDirectory() as tmp:
