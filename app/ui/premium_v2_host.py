@@ -5913,8 +5913,23 @@ class PremiumV2Bridge(QObject):
                             stale_start = int(float(stale_row.get("Start (Reference)")))
                             stale_end = int(float(stale_row.get("End (Reference)")))
                         except (TypeError, ValueError, OverflowError):
-                            continue
-                        if stale_start < end and stale_end > start:
+                            stale_start = stale_end = -1
+                        overlaps_saved_offsets = (
+                            stale_start >= 0 and stale_end > stale_start
+                            and stale_start < end and stale_end > start
+                        )
+                        stale_text = str(stale_row.get("Dialogue Text") or "")
+                        unique_text_start = -1
+                        if stale_text:
+                            first_text_match = source_text.find(stale_text)
+                            if first_text_match >= 0 and source_text.find(stale_text, first_text_match + 1) < 0:
+                                unique_text_start = first_text_match
+                        overlaps_unique_text = (
+                            unique_text_start >= 0
+                            and unique_text_start < end
+                            and unique_text_start + len(stale_text) > start
+                        )
+                        if overlaps_saved_offsets or overlaps_unique_text:
                             overlapping_workbook_rows.append(stale_row)
                     unmatched_workbook_speakers = []
                     unmatched_workbook_ids = []
