@@ -198,7 +198,7 @@ class CharacterWorkbookImportTransactionTests(unittest.TestCase):
     def test_commit_applies_gpt_source_text_proposal_and_rebases_manual_speaker_assignment(self):
         with tempfile.TemporaryDirectory(prefix="ryu-workbook-text-correction-commit-") as tmp:
             folder = Path(tmp)
-            bridge, project, chapter, _state, plan, document = self._fixture(folder)
+            bridge, project, chapter, state, plan, document = self._fixture(folder)
             original_text = str(chapter.text)
             corrected_text = "“Mira, are you ready?”"
             chapter.dialogue_assignments = [{
@@ -252,6 +252,11 @@ class CharacterWorkbookImportTransactionTests(unittest.TestCase):
             self.assertTrue(result["imported"])
             self.assertEqual(result["text_corrections_applied"], 1)
             self.assertEqual(chapter.text, corrected_text)
+            history = state["character_workbook_source_correction_history"]
+            self.assertEqual(len(history), 1)
+            self.assertEqual(history[0]["source_text"], original_text)
+            self.assertEqual(history[0]["approved_text"], corrected_text)
+            self.assertEqual(history[0]["reason"], plan["text_corrections"][0]["reason"])
             self.assertEqual(len(chapter.dialogue_assignments), 1)
             saved = chapter.dialogue_assignments[0]
             self.assertEqual(saved["speaker"], "Mira")
