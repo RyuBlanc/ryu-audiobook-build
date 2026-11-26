@@ -1862,6 +1862,13 @@ class PremiumV2Bridge(QObject):
             for raw_name in raw_speakers:
                 name = str(raw_name or "").strip()
                 key = name.casefold()
+                # Third Person is a reserved system speaker, not a Character
+                # Library/project-cast identity. It routes through the existing
+                # global Third Person fallback voice and remains user-identifiable.
+                if key == "third person":
+                    if "Third Person" not in speakers:
+                        speakers.append("Third Person")
+                    continue
                 if key in ambiguous_keys:
                     raise ValueError(f"'{name}' matches more than one saved character. Select the character in the correct series first.")
                 canonical = canonical_by_name.get(key)
