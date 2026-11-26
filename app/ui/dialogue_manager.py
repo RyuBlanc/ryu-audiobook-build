@@ -217,8 +217,12 @@ class DialogueAssignmentManagerDialog(QDialog):
                     assigned = assignment_speakers(assignment)
                     break
 
+            third_person_pending = any(name.casefold() == "third person" for name in assigned)
             prefix = "✓" if assigned else "○"
-            speakers = ", ".join(assigned) if assigned else "Unassigned"
+            speakers = (
+                "Third Person · needs user identification"
+                if third_person_pending else (", ".join(assigned) if assigned else "Unassigned")
+            )
             display = f"{prefix}  {index + 1}. {clean[:150]}"
             if len(clean) > 150:
                 display += "…"
@@ -230,7 +234,11 @@ class DialogueAssignmentManagerDialog(QDialog):
                 font = QFont(item.font())
                 font.setBold(True)
                 item.setFont(font)
-                item.setToolTip(f"Assigned to: {speakers}")
+                item.setToolTip(
+                    "Third Person is a reserved unidentified-speaker placeholder. "
+                    "Replace it with a confirmed book character when the identity becomes known."
+                    if third_person_pending else f"Assigned to: {speakers}"
+                )
             else:
                 item.setToolTip("Not assigned yet.")
             self.dialogue_list.addItem(item)
