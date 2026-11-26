@@ -1967,34 +1967,41 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
         elif correction_reason and not proposed_text:
             issues.append("Passage %s has a GPT Text Correction Reason but no GPT Proposed Source Text.")
         if narration:
-            if _clean(current.get("source")) == "automatic_embedded_quote":
-                quote_start, quote_end = int(current.get("start", -1)), int(current.get("end", -1))
-                for saved in current_assignments:
-                    if not isinstance(saved, dict):
-                        continue
-                    saved_source = _clean(saved.get("source") or "manual").casefold()
-                    if saved_source not in {"ai", "outsourced"}:
-                        continue
-                    try:
-                        saved_start = int(saved.get("start", -1))
-                        saved_end = int(saved.get("end", -1))
-                    except (TypeError, ValueError, OverflowError):
-                        continue
-                    if saved_start >= quote_end or saved_end <= quote_start:
-                        continue
-                    impacted = [
-                        item for item in current_passages
-                        if isinstance(item, dict)
-                        and int(item.get("start", -1)) < saved_end
-                        and int(item.get("end", -1)) > saved_start
-                    ]
-                    exact_quote = saved_start == quote_start and saved_end == quote_end
-                    only_embedded_narration = bool(impacted) and all(
-                        _key(item.get("kind")) == "narration"
-                        and _clean(item.get("source")) == "automatic_embedded_quote"
-                        for item in impacted
-                    )
-                    if exact_quote or only_embedded_narration:
+            quote_start, quote_end = int(current.get("start", -1)), int(current.get("end", -1))
+            for saved in current_assignments:
+                if not isinstance(saved, dict):
+                    continue
+                saved_source = _clean(saved.get("source") or "manual").casefold()
+                try:
+                    saved_start = int(saved.get("start", -1))
+                    saved_end = int(saved.get("end", -1))
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if saved_start >= quote_end or saved_end <= quote_start:
+                    continue
+                impacted = [
+                    item for item in current_passages
+                    if isinstance(item, dict)
+                    and int(item.get("start", -1)) < saved_end
+                    and int(item.get("end", -1)) > saved_start
+                ]
+                only_narration = bool(impacted) and all(
+                    _key(item.get("kind")) == "narration"
+                    for item in impacted
+                )
+                saved_text = str(saved.get("text") or "")
+                active_saved_text = (
+                    active_chapter_text[saved_start:saved_end]
+                    if active_chapter_text and 0 <= saved_start < saved_end <= len(active_chapter_text)
+                    else ""
+                )
+                exact_saved_text = not saved_text or not active_saved_text or saved_text == active_saved_text
+                exact_narrator_span = (
+                    saved_start == quote_start and saved_end == quote_end
+                    and exact_saved_text
+                )
+                if saved_source in {"ai", "outsourced"}:
+                    if exact_narrator_span or (only_narration and exact_saved_text):
                         speakers_value = saved.get("speakers")
                         if not isinstance(speakers_value, (list, tuple)):
                             speakers_value = [saved.get("speaker")] if saved.get("speaker") else []
@@ -2005,8 +2012,24 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                             "end": saved_end,
                             "source": saved_source,
                             "speakers": [_clean(value) for value in speakers_value if _clean(value)],
-                            "text": str(saved.get("text") or ""),
+                            "text": saved_text,
                         })
+                    else:
+                        issues.append(
+                            "Narration passage %s overlaps an older AI/outsourced speaker assignment at %s:%s "
+                            "that cannot be safely removed by exact source matching. Review it in Check dialogues."
+                            % (pid, saved_start, saved_end)
+                        )
+                else:
+                    saved_speakers = saved.get("speakers")
+                    if not isinstance(saved_speakers, (list, tuple)):
+                        saved_speakers = [saved.get("speaker")] if saved.get("speaker") else []
+                    if any(_key(value) != "narrator" for value in saved_speakers if _clean(value)):
+                        issues.append(
+                            "Narration passage %s overlaps a protected manual/unknown speaker assignment at %s:%s. "
+                            "The assignment was not overwritten; resolve the source classification in Check dialogues."
+                            % (pid, saved_start, saved_end)
+                        )
             if not legacy_inline_quote and assigned and _key(assigned) != "narrator":
                 issues.append("Narration passage %s must retain the protected Narrator assignment." % pid)
             continue
