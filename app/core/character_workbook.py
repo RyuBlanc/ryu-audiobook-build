@@ -2139,6 +2139,9 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                 continue
             old_identity_keys, unresolved_old_names = set(), []
             for old_name in old_names:
+                if _key(old_name) == "third person":
+                    old_identity_keys.add("third person|reserved")
+                    continue
                 old_matches = token_map.get(_key(old_name), set())
                 if len(old_matches) != 1:
                     unresolved_old_names.append(old_name)
@@ -2157,6 +2160,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             if _key(assigned_name) == "third person":
                 if "third person" not in {_key(value) for value in canonical_speakers}:
                     canonical_speakers.append("Third Person")
+                incoming_keys.add("third person|reserved")
                 continue
             matches = token_map.get(_key(assigned_name), set())
             if len(matches) != 1:
@@ -2181,11 +2185,20 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
 
         old_keys, unresolved_old_names = set(), []
         for old_name in old_names:
+            if _key(old_name) == "third person":
+                old_keys.add("third person|reserved")
+                continue
             old_matches = token_map.get(_key(old_name), set())
             if len(old_matches) != 1:
                 unresolved_old_names.append(old_name)
             else:
                 old_keys.update(old_matches)
+        if "third person|reserved" in old_keys and old_keys != incoming_keys:
+            issues.append(
+                "Passage %s already uses the reserved Third Person placeholder. GPT cannot silently replace or expand this unidentified speaker; confirm a named identity manually in Check dialogues."
+                % pid
+            )
+            continue
         old_source = _clean(old.get("source") or "manual").casefold()
         old_mode = _clean(old.get("multi_speaker_mode")).casefold() or ("chorus" if len(old_names) > 1 else "single")
         if old_names and not unresolved_old_names and old_keys == incoming_keys and old_mode == multi_mode:
