@@ -1501,10 +1501,159 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
     assignments, seen = [], set()
     superseded_assignments = {}
     workbook_rows = [row for row in (document.get("dialogue_rows") or []) if isinstance(row, dict)]
-    workbook_row_by_id = {_clean(row.get("Passage ID")): row for row in workbook_rows}
-    workbook_ids = {_clean(row.get("Passage ID")) for row in workbook_rows}
-    if workbook_ids != set(by_id):
-        issues.append("The workbook does not contain the complete set of chapter passages. Export the active book again after source passage structure changes.")
+    workbook_row_by_id = {}
+    workbook_row_by_source_id = {}
+    workbook_source_to_current = {}
+    passage_rebases = []
+    unmatched_workbook_rows = []
+    active_chapter_text = str(document.get("_active_chapter_text") or "")
+
+    # Passage IDs are generated from the detected dialogue/narration structure.
+    # A classifier update can legitimately replace an ID without changing the
+    # chapter text. Rebase only when the workbook's chapter, full source text,
+    # and absolute source offsets identify exactly one current passage.
+    current_by_span_text = {}
+    for passage in current_passages:
+        if not isinstance(passage, dict):
+            continue
+        try:
+            passage_start = int(passage.get("start", -1))
+            passage_end = int(passage.get("end", -1))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        passage_text = str(passage.get("text") or "")
+        if passage_start < 0 or passage_end <= passage_start or not passage_text:
+            continue
+        if active_chapter_text and active_chapter_text[passage_start:passage_end] != passage_text:
+            continue
+        current_by_span_text.setdefault((passage_start, passage_end, passage_text), []).append(passage)
+
+    def workbook_reference_span(row):
+        try:
+            start_value = row.get("Start (Reference)")
+            end_value = row.get("End (Reference)")
+            if isinstance(start_value, bool) or isinstance(end_value, bool):
+                raise ValueError("Boolean source offset")
+            raw_start = float(start_value) if start_value not in (None, "") else -1
+            raw_end = float(end_value) if end_value not in (None, "") else -1
+            start_ref, end_ref = int(raw_start), int(raw_end)
+            if raw_start != start_ref or raw_end != end_ref:
+                raise ValueError("Non-integer source offset")
+            return start_ref, end_ref
+        except (TypeError, ValueError, OverflowError):
+            return -1, -1
+
+    def resolve_workbook_passage(row):
+        source_id = _clean(row.get("Passage ID"))
+        row_chapter_id = _clean(row.get("Chapter ID"))
+        row_revision = _clean(row.get("Chapter Revision (Reference)"))
+        start_ref, end_ref = workbook_reference_span(row)
+        source_text = str(row.get("Dialogue Text") or "")
+        if row_chapter_id != _clean(chapter_id):
+            return None, "belongs to a different chapter"
+        if row_revision != _clean(chapter_revision):
+            return None, "references a different chapter revision"
+        if start_ref < 0 or end_ref <= start_ref or not source_text:
+            return None, "has invalid source text or absolute offsets"
+        if active_chapter_text and active_chapter_text[start_ref:end_ref] != source_text:
+            return None, "does not match the active chapter's exact source text at its recorded offsets"
+
+        current = by_id.get(source_id)
+        if current is not None:
+            try:
+                exact_current = (
+                    int(current.get("start", -1)) == start_ref
+                    and int(current.get("end", -1)) == end_ref
+                    and str(current.get("text") or "") == source_text
+                    and _clean(current.get("chapter_id") or chapter_id) == _clean(chapter_id)
+                )
+            except (TypeError, ValueError, OverflowError):
+                exact_current = False
+            if exact_current:
+                return current, ""
+            return None, "has a current Passage ID but its source text or offsets do not match"
+
+        candidates = current_by_span_text.get((start_ref, end_ref, source_text), [])
+        candidates = [
+            candidate for candidate in candidates
+            if _clean(candidate.get("chapter_id") or chapter_id) == _clean(chapter_id)
+        ]
+        if len(candidates) == 1:
+            current = candidates[0]
+            current_id = _clean(current.get("passage_id"))
+            if not current_id:
+                return None, "matches a source span that has no stable current Passage ID"
+            return current, "rebased"
+        if len(candidates) > 1:
+            return None, "matches more than one current passage at the same source offsets; automatic rebasing is ambiguous"
+        return None, "no current passage has the same exact source text and offsets"
+
+    seen_source_ids = set()
+    for row in workbook_rows:
+        source_id = _clean(row.get("Passage ID"))
+        if source_id and source_id in seen_source_ids:
+            issues.append("Duplicate workbook Passage ID %s." % source_id)
+            unmatched_workbook_rows.append(row)
+            continue
+        if source_id:
+            seen_source_ids.add(source_id)
+        current, resolution = resolve_workbook_passage(row)
+        if current is None:
+            unmatched_workbook_rows.append(row)
+            try:
+                assigned_names = _workbook_speaker_names(row)
+            except ValueError:
+                assigned_names = []
+            if _clean(row.get("Passage Type")).casefold() == "dialogue" or assigned_names:
+                issues.append(
+                    "Workbook passage %s could not be safely matched to the active chapter (%s). "
+                    "Its GPT speaker assignment was not applied; review the current source passage(s) instead."
+                    % (source_id or "(missing ID)", resolution)
+                )
+            continue
+        current_id = _clean(current.get("passage_id"))
+        if current_id in workbook_row_by_id:
+            issues.append(
+                "More than one workbook row maps to current passage %s. Resolve the duplicate source span before importing."
+                % current_id
+            )
+            unmatched_workbook_rows.append(row)
+            continue
+        workbook_row_by_id[current_id] = row
+        if source_id:
+            workbook_row_by_source_id[source_id] = row
+            workbook_source_to_current[source_id] = current_id
+        if resolution == "rebased":
+            passage_rebases.append({
+                "workbook_passage_id": source_id,
+                "current_passage_id": current_id,
+                "chapter_id": _clean(chapter_id),
+                "start": int(current.get("start", -1)),
+                "end": int(current.get("end", -1)),
+            })
+
+    # A current dialogue passage may be absent from an older workbook after
+    # resegmentation. Preserve an exact manual assignment, but never silently
+    # accept an unassigned new passage or a stale AI-only assignment.
+    for passage in current_passages:
+        if not isinstance(passage, dict):
+            continue
+        current_id = _clean(passage.get("passage_id"))
+        if not current_id or current_id in workbook_row_by_id or _key(passage.get("kind")) == "narration":
+            continue
+        saved = exact_saved_assignment_for_passage(passage)
+        saved_speakers = saved.get("speakers") if isinstance(saved, dict) else []
+        if not isinstance(saved_speakers, (list, tuple)):
+            saved_speakers = [saved.get("speaker")] if isinstance(saved, dict) and saved.get("speaker") else []
+        saved_source = _clean(saved.get("source") or "manual").casefold() if isinstance(saved, dict) else ""
+        if saved and saved_source == "manual" and any(_clean(value) for value in saved_speakers):
+            continue
+        excerpt = re.sub(r"\\s+", " ", str(passage.get("text") or "")).strip()[:120]
+        issues.append(
+            "Current dialogue passage %s is missing from the workbook and has no exact saved manual assignment: %s. "
+            "Review this current passage before importing."
+            % (current_id, excerpt)
+        )
 
     def resolve_workbook_names(raw_row, label):
         try:
@@ -1539,12 +1688,15 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
         split_groups.setdefault(parent_id, []).append(correction)
 
     split_parent_ids = set()
-    active_chapter_text = str(document.get("_active_chapter_text") or "")
     for parent_id, correction_rows in split_groups.items():
-        parent_row = workbook_row_by_id.get(parent_id)
-        parent_passage = by_id.get(parent_id)
+        parent_current_id = workbook_source_to_current.get(parent_id, parent_id if parent_id in by_id else "")
+        parent_row = workbook_row_by_id.get(parent_current_id)
+        parent_passage = by_id.get(parent_current_id)
         if not parent_row or not parent_passage:
-            issues.append("Dialogue Split Corrections references missing parent passage '%s'." % parent_id)
+            issues.append(
+                "Dialogue Split Corrections references parent passage '%s', which could not be matched to one exact current source passage."
+                % parent_id
+            )
             continue
         if (_clean(parent_row.get("Chapter ID")) != _clean(chapter_id)
             or _clean(parent_passage.get("chapter_id")) != _clean(chapter_id)
@@ -1654,8 +1806,8 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                 valid_group = False
                 continue
             added.append({
-                "passage_id": "%s::subturn-%d" % (parent_id, index),
-                "source_passage_id": parent_id, "source_passage_text": parent_text,
+                "passage_id": "%s::subturn-%d" % (parent_current_id, index),
+                "source_passage_id": parent_current_id, "source_passage_text": parent_text,
                 "source_passage_start": parent_start, "source_passage_end": parent_end,
                 "source_context_before": source_context_before,
                 "source_context_after": source_context_after,
@@ -1669,32 +1821,27 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             })
         if valid_group and len(added) == len(ordered):
             assignments.extend(added)
-            split_parent_ids.add(parent_id)
+            split_parent_ids.add(parent_current_id)
 
     for row in document.get("dialogue_rows") or []:
         if not isinstance(row, dict):
             issues.append("The workbook contains an invalid dialogue row.")
             continue
-        pid = _clean(row.get("Passage ID"))
-        if pid in seen: issues.append("Duplicate Passage ID %s." % pid); continue
+        source_pid = _clean(row.get("Passage ID"))
+        pid = workbook_source_to_current.get(source_pid, source_pid if source_pid in by_id else "")
+        if not pid:
+            # The mapping failure is recorded during the preflight pass above.
+            continue
+        if pid in seen:
+            issues.append("Duplicate workbook rows resolve to current Passage ID %s." % pid)
+            continue
         seen.add(pid)
         current = by_id.get(pid)
-        if not current: issues.append("Passage %s is no longer in this chapter." % pid); continue
-        try:
-            start_value = row.get("Start (Reference)")
-            end_value = row.get("End (Reference)")
-            raw_start = float(start_value) if start_value not in (None, "") else -1
-            raw_end = float(end_value) if end_value not in (None, "") else -1
-            start_ref, end_ref = int(raw_start), int(raw_end)
-            if raw_start != start_ref or raw_end != end_ref:
-                raise ValueError("Non-integer source offset")
-        except (TypeError, ValueError, OverflowError):
-            start_ref = end_ref = -1
-        if (str(row.get("Dialogue Text") or "") != str(current.get("text") or "")
-            or int(current.get("start",-1)) != start_ref or int(current.get("end",-1)) != end_ref
-            or _clean(row.get("Chapter ID")) != _clean(chapter_id)
-            or _clean(row.get("Chapter Revision (Reference)")) != _clean(chapter_revision)):
-            issues.append("Passage %s text, offsets or source revision changed. Export again." % pid); continue
+        if not current:
+            issues.append("Current passage %s disappeared during workbook preflight." % pid)
+            continue
+        # resolve_workbook_passage() already verified chapter, revision, exact
+        # source text and absolute offsets before the row reached this loop.
         workbook_type = _clean(row.get("Passage Type")).casefold()
         source_is_narration = _key(current.get("kind")) == "narration"
         legacy_inline_quote = (
@@ -1970,6 +2117,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
         "characters": planned,
         "assignments": assignments,
         "superseded_assignments": list(superseded_assignments.values()),
+        "passage_rebases": passage_rebases,
         "summary": {
             "matched_characters": sum(x["action"] == "merge" for x in planned),
             "new_characters": sum(x["action"] == "create" for x in planned),
@@ -2030,6 +2178,7 @@ def plan_complete_book_character_workbook_import(
 
     chapter_plans, issues = [], []
     superseded_assignments = []
+    passage_rebases = []
     identity_plan_json = None
     identity_plan = []
     for reference in sorted(references, key=lambda item: (int(item["chapter_number"]), item["chapter_id"])):
@@ -2041,15 +2190,9 @@ def plan_complete_book_character_workbook_import(
             raise ValueError("Chapter %s changed after export. Export the complete book again." % reference["chapter_number"])
         passages = list(active.get("current_passages") or [])
         assignments = list(active.get("current_assignments") or [])
-        exported_passage_count = int(reference.get("passage_count") or 0)
-        if len(passages) != exported_passage_count:
-            raise ValueError(
-                "Chapter %s dialogue/narration segmentation changed after workbook export "
-                "(workbook: %s passages; active project: %s). A previously combined turn may now be split "
-                "into separate speakers. Export a fresh complete-book workbook before importing; the original "
-                "GPT workbook remains unchanged."
-                % (reference["chapter_number"], exported_passage_count, len(passages))
-            )
+        # Passage IDs/counts can change when dialogue classification is corrected.
+        # The chapter text hash and revision below still must match exactly; each
+        # workbook row is then rebased only by its unique exact text + source span.
         active_text = str(active.get("text") or "")
         if sha256(active_text.encode("utf-8")).hexdigest() != _clean(reference.get("context_sha256")):
             raise ValueError("Chapter %s context does not match the active source text. Export the complete book again." % reference["chapter_number"])
@@ -2091,6 +2234,10 @@ def plan_complete_book_character_workbook_import(
         elif identity_plan_json != identity_json:
             issues.append("The character merge plan changed between chapters. Resolve the series identity conflict before importing.")
         issues.extend(plan.get("issues") or [])
+        for rebase in plan.get("passage_rebases") or []:
+            item = dict(rebase)
+            item["chapter_number"] = int(reference["chapter_number"])
+            passage_rebases.append(item)
         for saved_assignment in plan.get("superseded_assignments") or []:
             item = dict(saved_assignment)
             item["chapter_id"] = chapter_id
@@ -2101,7 +2248,7 @@ def plan_complete_book_character_workbook_import(
             "chapter_number": int(reference["chapter_number"]),
             "chapter_title": _clean(reference.get("chapter_title")),
             "chapter_revision": _clean(reference.get("chapter_revision")),
-            "passage_count": int(reference.get("passage_count") or 0),
+            "passage_count": len(passages),
             "assignments": [],
         }
         for assignment in plan.get("assignments") or []:
@@ -2146,6 +2293,7 @@ def plan_complete_book_character_workbook_import(
         "characters": identity_plan,
         "assignments": assignments,
         "superseded_assignments": superseded_assignments,
+        "passage_rebases": passage_rebases,
         "summary": summary,
     }
 
