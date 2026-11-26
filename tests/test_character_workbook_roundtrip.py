@@ -904,7 +904,34 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 current_passages=passages, current_assignments=[],
             )
             self.assertFalse(plan["ready"])
-            self.assertTrue(any("complete set" in issue for issue in plan["issues"]))
+            self.assertTrue(any("missing from the workbook" in issue for issue in plan["issues"]))
+
+    def test_import_plan_rebases_retired_passage_id_using_exact_current_text_and_offsets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, _text, passages = self._export(Path(tmp))
+            document = read_character_workbook(path)
+            document["characters"] = [{
+                "full_name": "Mira", "aliases": [], "version": "", "notes": "",
+            }]
+            dialogue_row = document["dialogue_rows"][1]
+            dialogue_row["Passage ID"] = "retired-dialogue-passage"
+            dialogue_row["GPT Assigned Character"] = "Mira"
+            dialogue_row["GPT Confidence (0–1)"] = "0.97"
+
+            plan = plan_character_workbook_import(
+                document, series="Silver Archive", registry_rows=[],
+                project_characters=[], chapter_id="chapter-001",
+                chapter_revision="revision-abc", current_passages=passages,
+                current_assignments=[],
+            )
+
+            self.assertTrue(plan["ready"], plan["issues"])
+            self.assertEqual(len(plan["assignments"]), 1)
+            self.assertEqual(plan["assignments"][0]["passage_id"], "ps_dialogue")
+            self.assertEqual(plan["assignments"][0]["speaker"], "Mira")
+            self.assertEqual(len(plan["passage_rebases"]), 1)
+            self.assertEqual(plan["passage_rebases"][0]["workbook_passage_id"], "retired-dialogue-passage")
+            self.assertEqual(plan["passage_rebases"][0]["current_passage_id"], "ps_dialogue")
 
     def test_import_plan_keeps_existing_assignment_that_uses_an_alias(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1692,24 +1719,39 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 for issue in plan["issues"]
             ))
 
-    def test_complete_book_import_explicitly_rejects_changed_dialogue_segmentation(self):
+    def test_complete_book_import_blocks_changed_dialogue_segmentation_without_losing_gpt_rows(self):
         with tempfile.TemporaryDirectory() as tmp:
             _path, chapters, _passages, document = self._complete_book_fixture(Path(tmp))
             changed = [dict(row) for row in chapters]
             changed[0] = dict(changed[0])
-            changed[0]["current_passages"] = [
-                *changed[0]["current_passages"],
+            current_rows = list(changed[0]["current_passages"])
+            dialogue = next(row for row in current_rows if row.get("kind") != "narration")
+            split_at = int(dialogue["start"]) + max(1, (int(dialogue["end"]) - int(dialogue["start"])) // 2)
+            original_text = str(dialogue["text"])
+            current_rows.remove(dialogue)
+            current_rows.extend([
                 {
-                    **changed[0]["current_passages"][0],
-                    "passage_id": "new-split-passage",
-                    "start": changed[0]["current_passages"][0]["start"] + 1,
+                    **dialogue,
+                    "passage_id": "new-split-passage-a",
+                    "end": split_at,
+                    "text": original_text[:split_at - int(dialogue["start"])],
                 },
-            ]
-            with self.assertRaisesRegex(ValueError, "segmentation changed after workbook export"):
-                plan_complete_book_character_workbook_import(
-                    document, series="Silver Archive", book_title="The Silver Archive",
-                    registry_rows=[], project_characters=[], current_chapters=changed,
-                )
+                {
+                    **dialogue,
+                    "passage_id": "new-split-passage-b",
+                    "start": split_at,
+                    "text": original_text[split_at - int(dialogue["start"]):],
+                },
+            ])
+            changed[0]["current_passages"] = current_rows
+            plan = plan_complete_book_character_workbook_import(
+                document, series="Silver Archive", book_title="The Silver Archive",
+                registry_rows=[], project_characters=[], current_chapters=changed,
+            )
+            self.assertFalse(plan["ready"])
+            self.assertEqual(plan["assignments"], [])
+            self.assertTrue(any("could not be safely matched" in issue for issue in plan["issues"]))
+            self.assertTrue(any("missing from the workbook" in issue for issue in plan["issues"]))
 
     def test_complete_book_import_rejects_stale_chapter_context_or_missing_chapter(self):
         with tempfile.TemporaryDirectory() as tmp:
