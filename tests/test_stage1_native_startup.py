@@ -125,8 +125,16 @@ class Stage1NativeStartupAcceptanceTests(unittest.TestCase):
     def test_windows_smoke_waits_for_frontend_ready_instead_of_only_process_liveness(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("RYU_STARTUP_SMOKE_MARKER", workflow)
-        self.assertIn("startup smoke did not reach Premium V2 readiness", workflow)
-        self.assertIn("The Premium V2 startup smoke reported failure", workflow)
+        self.assertIn("The Premium V2 startup smoke failed after three packaged launches.", workflow)
+        self.assertIn("$startupAttemptFailures += $attemptFailure", workflow)
+        self.assertIn(
+            'Write-Warning "$attemptFailure The process will be restarted for the next startup attempt."',
+            workflow,
+        )
+        self.assertIn(
+            'throw "The Premium V2 startup smoke reported failure on launch',
+            workflow,
+        )
         self.assertNotIn("Start-Sleep -Seconds 12", workflow)
 
     def test_packaged_startup_smoke_uses_the_environment_free_default_ui_mode(self):
