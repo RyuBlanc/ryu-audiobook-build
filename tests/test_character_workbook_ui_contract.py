@@ -192,6 +192,10 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn("Export Complete-Book GPT Workbook", self.html)
         self.assertIn("GPT Prompt Version", self.workbook)
         self.assertIn("complete_book_gpt_prompt()", self.workbook)
+        self.assertIn('"character_register": character_register', self.host)
+        self.assertIn('character.get("aliases")', self.host)
+        self.assertIn('"full_name": canonical_name', self.host)
+        self.assertIn('character_series.casefold() != series.casefold()', self.host)
 
 
 
@@ -470,6 +474,9 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn("chapter_revision:String(window.ryuPremiumPendingDialogueRevision || '')", self.adapter)
         self.assertIn("narrator_only", self.host)
         self.assertIn("Narrator classification is an explicit manual review action.", self.host)
+        self.assertIn('if key == "third person":', self.host)
+        self.assertIn('"third_person_pending"] = True', self.host)
+        self.assertIn('speakers[0].casefold() not in {"narrator", "third person"}', self.host)
 
     def test_workbook_preflight_options_include_register_only_characters_and_keep_aliases(self):
         self.assertIn('plan.get("characters") or []', self.host)
