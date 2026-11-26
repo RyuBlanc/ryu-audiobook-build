@@ -219,6 +219,12 @@ class ChapterEditorPage(QWidget):
         hint.setObjectName("muted")
         chapter_text_header.addWidget(hint)
         chapter_text_header.addStretch(1)
+        check_dialogues_button = QPushButton("Check dialogues")
+        check_dialogues_button.setToolTip(
+            "Review saved speakers and assign dialogue cues across the active book"
+        )
+        check_dialogues_button.clicked.connect(self.check_dialogues)
+        chapter_text_header.addWidget(check_dialogues_button)
         assignment_manager_button = QPushButton("Assignments")
         assignment_manager_button.setToolTip("Open the full dialogue assignment manager")
         assignment_manager_button.clicked.connect(self.open_dialogue_manager)
@@ -899,6 +905,31 @@ class ChapterEditorPage(QWidget):
         dialog.exec()
         self.refresh(self.list.currentRow())
         self.load_selected(self.list.currentRow())
+
+    def check_dialogues(self) -> None:
+        """Open the persistent dialogue review from the Chapter Text toolbar."""
+        if not self._save_silently():
+            return
+        index = self.list.currentRow()
+        if index < 0 or not self.editor.chapters:
+            QMessageBox.information(
+                self, "Check dialogues",
+                "Select a chapter before reviewing dialogue assignments.",
+            )
+            return
+        dialog = DialogueAssignmentManagerDialog(
+            self.editor.chapters,
+            project_folder=self.project_folder,
+            on_save=self.on_save,
+            parent=self,
+        )
+        dialog.setWindowTitle("Check dialogues — speaker review")
+        dialog.exec()
+        self.refresh(index)
+        self.load_selected(index)
+        self.save_status.setText(
+            "Dialogue review closed. Saved speaker assignments remain attached to their source passages."
+        )
 
     def assign_selected_dialogue(self) -> None:
         if not self._save_silently():
