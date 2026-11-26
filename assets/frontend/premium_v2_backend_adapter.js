@@ -4692,6 +4692,7 @@
       const canAssign = item.can_manual_assign === true && !isNarration && options.length > 0;
       const optionHtml = options.map((option,optionIndex) =>
         '<option value="' + optionIndex + '">' + esc(option.canonical_name) + ' · ' + esc(option.series) +
+        (option.reserved_placeholder ? ' · reserved unidentified speaker; user confirmation required' : '') +
         (option.pending_workbook_entry ? ' · from this workbook’s Character Register' : '') +
         (option.voice_profile ? ' · ' + esc(option.voice_profile) : ' · voice not assigned') + '</option>'
       ).join('');
@@ -4728,6 +4729,29 @@
         '<p class="ryu-workbook-review-result" data-workbook-review-result="' + index + '" aria-live="polite"></p>' +
       '</article>';
     }).join('');
+    const textCorrections = Array.isArray(preview?.text_corrections) ? preview.text_corrections : [];
+    const textCorrectionsHtml = textCorrections.length
+      ? '<details class="ryu-workbook-issues" open><summary>GPT proposed source-text corrections (' +
+        Number(textCorrections.length) + (preview.text_corrections_truncated ? '+' : '') + ')</summary><ol>' +
+        textCorrections.map(row =>
+          '<li><b>Chapter ' + Number(row.chapter_number || 0) + ' · ' + esc(row.chapter_title || 'Untitled') +
+          '</b><br>Passage ID: ' + esc(row.passage_id || '(missing)') +
+          '<p class="ryu-workbook-context"><b>Original (protected reference)</b>\n' + esc(row.source_text || '') + '</p>' +
+          '<p class="ryu-workbook-context"><b>GPT proposal (not applied yet)</b>\n' + esc(row.proposed_text || '') + '</p>' +
+          '<p><b>Reason:</b> ' + esc(row.reason || 'No reason supplied') + '</p></li>'
+        ).join('') + '</ol>' +
+        (preview.text_corrections_truncated ? '<p>Only the first ' + textCorrections.length + ' proposed corrections are shown.</p>' : '') +
+        '<p>Proposed wording is applied only by a successful, explicitly confirmed workbook import. Existing speaker identities are preserved.</p></details>'
+      : '';
+    const reclassifications = Array.isArray(preview?.passage_reclassifications) ? preview.passage_reclassifications : [];
+    const reclassificationsHtml = reclassifications.length
+      ? '<details class="ryu-workbook-issues"><summary>Exact source spans now classified as Narrator (' +
+        Number(reclassifications.length) + ')</summary><ol>' +
+        reclassifications.map(row =>
+          '<li>Chapter ' + Number(row.chapter_number || 0) + ' · ' + esc(row.chapter_title || 'Untitled') +
+          ' · ' + esc(row.passage_id || '') + '<p class="ryu-workbook-context">' + esc(row.source_text || '') + '</p></li>'
+        ).join('') + '</ol><p>The active book's Narrator classification is retained because the source text and offsets match exactly.</p></details>'
+      : '';
     const issueList = issues.map(issue => '<li>' + esc(issue) + '</li>').join('');
     const issueDetails = issues.length
       ? '<details class="ryu-workbook-issues"><summary>All preflight messages (' + Number(preview.issue_count || issues.length) + ')</summary><ol>' +
@@ -4743,6 +4767,8 @@
           ? '<p>No current passage could be matched safely to one or more older workbook rows. The saved GPT suggestions are listed below for reference only; they have not been applied. Use Chapter Studio → Check dialogues to inspect the current source passages and assign them explicitly.</p>'
           : '<p>No passage-specific review card could be built. Expand the full preflight messages below and resolve the source or identity conflict.</p>')) +
       unmatchedWorkbookHtml +
+      textCorrectionsHtml +
+      reclassificationsHtml +
       issueDetails +
       '<p style="margin-top:14px;font-size:12px;color:#c2cad6">Do not edit Passage IDs, chapter IDs, source text, revisions or offsets in Excel. Manual assignments saved here are stored against the exact current source passage and will not be overwritten by the workbook.</p>' +
       '<p style="font-size:12px;color:#aab5c6">This review temporarily locks the rest of the app to prevent changes behind the dialog. The character selectors inside the review remain active; choose a character and press Save manual assignment. Press Done or Close to return to the rest of the app. Done closes the review; it does not bypass preflight or import the workbook.</p>';
@@ -4784,13 +4810,19 @@
         assignButton.textContent = 'Saving…';
         if (result) result.textContent = 'Validating exact passage ID, revision, offsets and source text…';
         try {
-          const activeCharacter = await ensureCharacterInActiveProject(
-            selected.canonical_name, selected.series, selected.voice_profile || '', selected.aliases || []
-          );
+          const activeCharacter = selected.reserved_placeholder
+            ? {name:'Third Person', series:String(selected.series || activeCharacterProjectSeries())}
+            : await ensureCharacterInActiveProject(
+                selected.canonical_name, selected.series, selected.voice_profile || '', selected.aliases || []
+              );
+          const assignedCanonicalName = selected.reserved_placeholder
+            ? 'Third Person' : characterCanonical(activeCharacter);
+          const assignedSeries = selected.reserved_placeholder
+            ? String(selected.series || activeCharacterProjectSeries()) : characterSeries(activeCharacter);
           await call('chapter.dialogue.assign', {
             dialogue_text:String(item.text || ''),
-            speakers:[characterCanonical(activeCharacter)],
-            series:characterSeries(activeCharacter),
+            speakers:[assignedCanonicalName],
+            series:assignedSeries,
             chapter_number:Number(item.chapter_number),
             start:Number(item.start),
             end:Number(item.end),
@@ -4800,12 +4832,14 @@
             source:'manual',
             confidence:1.0
           });
-          item.existing_speakers = [characterCanonical(activeCharacter)];
+          item.existing_speakers = [assignedCanonicalName];
           const card = assignButton.closest('.ryu-workbook-review-card');
           card?.classList.add('is-saved');
           if (select) select.disabled = true;
           assignButton.textContent = 'Saved · protected manual assignment';
-          if (result) result.textContent = '✓ Assigned and saved manually to this exact passage. This assignment is now protected from workbook replacement. Use Done to close this review or Recheck the same workbook to run preflight again.';
+          if (result) result.textContent = selected.reserved_placeholder
+            ? '✓ Assigned and saved as Third Person. This is a reserved unidentified-speaker placeholder routed to the global Third Person voice; the user can replace it with a confirmed identity later.'
+            : '✓ Assigned and saved manually to this exact passage. This assignment is now protected from workbook replacement. Use Done to close this review or Recheck the same workbook to run preflight again.';
           await refreshChapters();
           await refreshCharacters();
           await refreshCharacterLibrary();
@@ -4909,14 +4943,33 @@
       ' dialogue assignments across ' + Number(row.chapter_count || 0) + ' chapters');
     const extraSpeakers = Math.max(0, Number(preview.assignment_summary?.length || 0) - speakerLines.length);
     if (extraSpeakers) speakerLines.push('…and ' + extraSpeakers + ' more characters.');
+    const proposedCorrections = Array.isArray(preview.text_corrections) ? preview.text_corrections : [];
+    const correctionLines = proposedCorrections.slice(0, 30).map(row =>
+      'Chapter ' + Number(row.chapter_number || 0) + ' · ' + String(row.chapter_title || 'Untitled') +
+      ' · ' + String(row.passage_id || '') + '\nOriginal: ' + String(row.source_text || '').slice(0, 240) +
+      '\nProposed: ' + String(row.proposed_text || '').slice(0, 240) +
+      '\nReason: ' + String(row.reason || '')
+    );
+    const extraCorrections = Math.max(0, proposedCorrections.length - correctionLines.length);
+    if (extraCorrections) correctionLines.push('…and ' + extraCorrections + ' more proposed source-text corrections.');
+    const reclassifications = Array.isArray(preview.passage_reclassifications) ? preview.passage_reclassifications : [];
+    const reclassificationLines = reclassifications.slice(0, 30).map(row =>
+      'Chapter ' + Number(row.chapter_number || 0) + ' · ' + String(row.chapter_title || 'Untitled') +
+      ' · ' + String(row.passage_id || '') + ' Dialogue → Narration (exact source span)'
+    );
     const prompt = 'Import the completed GPT workbook into Series "' + preview.series +
       '" · ' + importScope + '?\n\n' +
       'Existing characters to merge: ' + Number(summary.matched_characters || 0) + '\n' +
       'New series characters: ' + Number(summary.new_characters || 0) + '\n' +
       'Aliases to reconcile: ' + Number(summary.aliases_to_merge || 0) + '\n' +
       'Dialogue assignments to add: ' + Number(summary.dialogue_assignments || 0) + '\n' +
-      'Previously saved AI/outsourced assignment records to replace: ' + Number(summary.saved_assignments_replaced || 0) +
+      'Previously saved AI/outsourced assignment records to replace: ' + Number(summary.saved_assignments_replaced || 0) + '\n' +
+      'GPT source-text corrections to apply after confirmation: ' + proposedCorrections.length + '\n' +
+      'Exact Dialogue → Narration reclassifications retained: ' + reclassifications.length +
       '\n\nOnly stale AI/outsourced records listed in the reviewed plan may be replaced. Manual and unknown-source assignments are protected.' +
+      '\n\nGPT wording corrections (the original source remains protected until you confirm this import):\n' +
+      (correctionLines.join('\n\n') || 'No GPT source-text corrections.') +
+      '\n\nExact source reclassifications:\n' + (reclassificationLines.join('\n') || 'No source reclassifications.') +
       '\n\nChapter coverage:\n' + (chapterLines.join('\n') || 'No chapter coverage returned.') +
       '\n\nSpeaker assignment summary:\n' + (speakerLines.join('\n') || 'No new dialogue assignments.') +
       '\n\nCharacter identity plan:\n' + (identityLines.join('\n') || 'No character changes.') +
@@ -4937,7 +4990,8 @@
       result.characters_merged + ' identities merged · ' + result.characters_created +
       ' new identities · ' + result.aliases_merged + ' aliases reconciled · ' +
       result.dialogue_assignments + ' dialogue assignments added · ' +
-      Number(result.saved_assignments_replaced || 0) + ' stale AI/outsourced assignments replaced. Existing voice profiles and manual assignments were preserved.';
+      Number(result.saved_assignments_replaced || 0) + ' stale AI/outsourced assignments replaced · ' +
+      Number(result.text_corrections_applied || 0) + ' GPT source-text corrections applied. Existing voice profiles and manual assignments were preserved.';
     message(confirmation);
     showCharacterWorkbookMessageDialog('Workbook imported successfully', confirmation);
   }
