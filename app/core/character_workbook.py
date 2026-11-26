@@ -1490,7 +1490,12 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             saved_revision = _clean(saved.get("chapter_revision"))
             saved_text = str(saved.get("text") or "")
             if saved_id and saved_id != passage_id:
-                continue
+                # A manually confirmed assignment can survive a Passage ID
+                # regeneration only when its exact original text and absolute
+                # offsets still identify this unique current source span.
+                saved_source = _clean(saved.get("source") or "manual").casefold()
+                if saved_source != "manual" or saved_text != expected_text:
+                    continue
             if saved_revision and expected_revision and saved_revision != expected_revision:
                 continue
             if saved_text and saved_text != expected_text:
