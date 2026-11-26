@@ -5546,6 +5546,7 @@ class PremiumV2Bridge(QObject):
             "series_volume": str(state.get("series_volume") or ""),
             "series_character_reference": series_character_reference,
             "character_register": character_register,
+            "source_correction_history": list(state.get("character_workbook_source_correction_history") or [])[-5000:],
         }
         workbook_bytes = create_complete_book_character_workbook_bytes(
             metadata, book_chapters, export_rows
@@ -6557,6 +6558,22 @@ class PremiumV2Bridge(QObject):
                         if 0 <= parent_start < parent_end <= len(updated_chapter_text):
                             assignment["source_context_before"] = updated_chapter_text[max(0, parent_start - 160):parent_start]
                             assignment["source_context_after"] = updated_chapter_text[parent_end:min(len(updated_chapter_text), parent_end + 160)]
+                    history = state.get("character_workbook_source_correction_history")
+                    if not isinstance(history, list):
+                        history = []
+                    applied_at = self._now()
+                    for correction in ordered:
+                        history.append({
+                            "chapter_id": correction_chapter_id,
+                            "chapter_number": int(getattr(target_chapter, "number", correction.get("chapter_number") or 0)),
+                            "chapter_title": str(getattr(target_chapter, "title", "") or correction.get("chapter_title") or ""),
+                            "passage_id": str(correction.get("passage_id") or ""),
+                            "source_text": str(correction.get("source_text") or ""),
+                            "approved_text": str(correction.get("proposed_text") or ""),
+                            "reason": str(correction.get("reason") or ""),
+                            "applied_at": applied_at,
+                        })
+                    state["character_workbook_source_correction_history"] = history[-5000:]
                     text_corrections_applied += len(ordered)
 
                 for imported in plan["assignments"]:
