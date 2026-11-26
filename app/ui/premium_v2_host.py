@@ -6591,7 +6591,7 @@ class PremiumV2Bridge(QObject):
                         )[0]
                     start, end = int(imported_row["start"]), int(imported_row["end"])
                     exact = str(target_chapter.text or "")[start:end]
-                    if exact != str(imported["text"]):
+                    if exact != str(imported_row["text"]):
                         raise ValueError("A dialogue passage changed during import. No changes were retained.")
                     if chapter_id not in assignments_by_chapter:
                         existing_assignments = list(
