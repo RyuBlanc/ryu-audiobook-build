@@ -4950,16 +4950,17 @@
     const extraSpeakers = Math.max(0, Number(preview.assignment_summary?.length || 0) - speakerLines.length);
     if (extraSpeakers) speakerLines.push('…and ' + extraSpeakers + ' more characters.');
     const proposedCorrections = Array.isArray(preview.text_corrections) ? preview.text_corrections : [];
-    const correctionLines = proposedCorrections.slice(0, 30).map(row =>
+    const correctionLines = proposedCorrections.map(row =>
       'Chapter ' + Number(row.chapter_number || 0) + ' · ' + String(row.chapter_title || 'Untitled') +
-      ' · ' + String(row.passage_id || '') + '\nOriginal: ' + String(row.source_text || '').slice(0, 240) +
-      '\nProposed: ' + String(row.proposed_text || '').slice(0, 240) +
+      ' · ' + String(row.passage_id || '') + '\nOriginal: ' + String(row.source_text || '') +
+      '\nProposed: ' + String(row.proposed_text || '') +
       '\nReason: ' + String(row.reason || '')
     );
-    const extraCorrections = Math.max(0, proposedCorrections.length - correctionLines.length);
-    if (extraCorrections) correctionLines.push('…and ' + extraCorrections + ' more proposed source-text corrections.');
+    if (preview.text_corrections_truncated) {
+      correctionLines.push('Additional source-text corrections exist beyond the preview limit. Do not confirm this import until all proposals have been reviewed.');
+    }
     const reclassifications = Array.isArray(preview.passage_reclassifications) ? preview.passage_reclassifications : [];
-    const reclassificationLines = reclassifications.slice(0, 30).map(row =>
+    const reclassificationLines = reclassifications.map(row =>
       'Chapter ' + Number(row.chapter_number || 0) + ' · ' + String(row.chapter_title || 'Untitled') +
       ' · ' + String(row.passage_id || '') + ' Dialogue → Narration (exact source span)'
     );
