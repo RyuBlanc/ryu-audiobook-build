@@ -833,6 +833,29 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             "assignments": [{**plan["assignments"][0], "speaker": "Ren"}],
         }
         self.assertNotEqual(fingerprint, character_workbook_plan_fingerprint(changed_assignment))
+        plan_with_rebase = {
+            **plan,
+            "passage_rebases": [{
+                "workbook_passage_id": "retired-p1",
+                "current_passage_id": "p1",
+                "chapter_id": "chapter-001",
+                "start": 18,
+                "end": 42,
+            }],
+        }
+        rebase_fingerprint = character_workbook_plan_fingerprint(plan_with_rebase)
+        changed_rebase = {
+            **plan_with_rebase,
+            "passage_rebases": [{
+                **plan_with_rebase["passage_rebases"][0],
+                "current_passage_id": "different-current-passage",
+            }],
+        }
+        self.assertNotEqual(
+            rebase_fingerprint,
+            character_workbook_plan_fingerprint(changed_rebase),
+            "The reviewed token must cover the exact source-to-current Passage ID mapping.",
+        )
 
     def test_dialogue_speaker_must_appear_in_character_register(self):
         with tempfile.TemporaryDirectory() as tmp:
