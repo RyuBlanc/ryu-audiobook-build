@@ -5857,21 +5857,31 @@ class PremiumV2Bridge(QObject):
                 for row in source_workbook_rows
                 if str(row.get("Passage ID") or "").strip()
             }
-            rebase_by_source_id = {
+            source_id_counts = {}
+            for row in source_workbook_rows:
+                source_id = str(row.get("Passage ID") or "").strip()
+                source_id_counts[source_id] = source_id_counts.get(source_id, 0) + 1
+            verified_mapping_by_source_id = {
                 str(row.get("workbook_passage_id") or "").strip(): row
-                for row in (plan.get("passage_rebases") or [])
+                for row in (plan.get("passage_mappings") or [])
                 if isinstance(row, dict) and str(row.get("workbook_passage_id") or "").strip()
             }
             workbook_rows_by_current_id = {}
             mapped_workbook_source_ids = set()
             for source_id, row in workbook_rows_by_source_id.items():
-                current_id = str(rebase_by_source_id.get(source_id, {}).get("current_passage_id") or source_id).strip()
+                mapping = verified_mapping_by_source_id.get(source_id)
+                if source_id_counts.get(source_id) != 1 or not isinstance(mapping, dict):
+                    continue
+                current_id = str(mapping.get("current_passage_id") or "").strip()
                 if current_id and current_id not in workbook_rows_by_current_id:
                     workbook_rows_by_current_id[current_id] = row
                     mapped_workbook_source_ids.add(source_id)
             unmatched_workbook_rows = [
                 row for row in source_workbook_rows
-                if str(row.get("Passage ID") or "").strip() not in mapped_workbook_source_ids
+                if (
+                    source_id_counts.get(str(row.get("Passage ID") or "").strip()) != 1
+                    or str(row.get("Passage ID") or "").strip() not in mapped_workbook_source_ids
+                )
             ]
             review_issues = [str(value) for value in (plan.get("issues") or [])]
             review_items = []
