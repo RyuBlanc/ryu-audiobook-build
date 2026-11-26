@@ -886,6 +886,8 @@ jobs:
           Remove-Item -Force $marker -ErrorAction SilentlyContinue
           Write-Host 'Frozen EXE offline synthesis self-test PASSED.'
 
+          $startupReady = $false
+          $startupAttemptFailures = @()
           for ($launchAttempt = 1; $launchAttempt -le 3; $launchAttempt++) {
             $marker = Join-Path $env:TEMP "RyuAudiobookStartupSmoke-$env:GITHUB_RUN_ID-$launchAttempt.json"
             Remove-Item -Force $marker -ErrorAction SilentlyContinue
@@ -925,6 +927,7 @@ jobs:
                       throw "Startup marker for launch $launchAttempt/3 reported an unexpected build number. Expected build number $expectedBuild; actual metadata: '$($startup.version)'."
                     }
                     $ready = $true
+                    $startupReady = $true
                     Write-Host "Premium V2 startup readiness PASSED for launch $launchAttempt/3. Version=$($startup.version)"
                     break
                   }
@@ -937,7 +940,9 @@ jobs:
                 } else {
                   'No startup-ready marker was written by the running application.'
                 }
-                throw "The Premium V2 startup smoke did not reach Premium V2 readiness on launch $launchAttempt/3 within 90 seconds. $detail"
+                $attemptFailure = "Launch $launchAttempt/3 did not reach Premium V2 readiness within 90 seconds: $detail"
+                $startupAttemptFailures += $attemptFailure
+                Write-Warning "$attemptFailure The process will be restarted for the next startup attempt."
               }
             } finally {
               if ($null -ne $proc) {
@@ -948,6 +953,9 @@ jobs:
               Remove-Item Env:RYU_STARTUP_SMOKE_MARKER -ErrorAction SilentlyContinue
               Remove-Item Env:RYU_UI_MODE -ErrorAction SilentlyContinue
             }
+          }
+          if (-not $startupReady) {
+            throw "The Premium V2 startup smoke failed after three packaged launches. " + ($startupAttemptFailures -join " | ")
           }
 
       - name: Verify bundled voice assets and critical modules
