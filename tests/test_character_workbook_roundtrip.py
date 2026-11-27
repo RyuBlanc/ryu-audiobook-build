@@ -90,6 +90,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 "Chapter ID": "chapter-001",
                 "Chapter Revision": revision,
             },
+            "_active_chapter_text": source,
             "characters": [
                 {"full_name": "Mira", "aliases": [], "version": "", "notes": "", "included_in_book": True},
                 {"full_name": "Rina", "aliases": [], "version": "", "notes": "", "included_in_book": True},
@@ -208,6 +209,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             "schema_version": 1,
             "info": {"Series Name": "Silver Archive", "Book Title": "The Silver Archive",
                      "Chapter ID": "chapter-001", "Chapter Revision": "revision-abc"},
+            "_active_chapter_text": source,
             "characters": [
                 {"full_name": "Kousuke Takioto", "aliases": [], "version": "", "notes": "", "included_in_book": True},
                 {"full_name": "Iori Hijiri", "aliases": [], "version": "", "notes": "", "included_in_book": True},
@@ -1512,6 +1514,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 "Chapter ID": "chapter-001",
                 "Chapter Revision": "revision-001",
             },
+            "_active_chapter_text": source,
             "characters": [],
             "dialogue_rows": [{
                 "Passage ID": "ps_embedded_quote",
@@ -1561,6 +1564,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 "Series Name": "Silver Archive", "Book Title": "The Silver Archive",
                 "Chapter ID": "chapter-001", "Chapter Revision": "revision-001",
             },
+            "_active_chapter_text": source,
             "characters": [{
                 "full_name": "Mira", "aliases": [], "version": "",
                 "notes": "Confirmed in the source.", "included_in_book": True,
@@ -1636,6 +1640,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 "Chapter ID": "chapter-001",
                 "Chapter Revision": "revision-001",
             },
+            "_active_chapter_text": source,
             "characters": [],
             "dialogue_rows": [{
                 "Passage ID": "ps_legacy_inline_quote",
@@ -1928,7 +1933,166 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
 
 
 
-    def test_broad_stale_ai_span_can_be_replaced_when_confirmed_dialogue_also_overlaps_ordinary_narration(self):
+    def test_stale_ai_span_overlapping_only_split_ordinary_narration_is_retired_once(self):
+        source = 'The word “ranking” remained part of the narrator sentence.'
+        word_start = source.index("ranking")
+        split = word_start + 3
+        first = source[:split]
+        second = source[split + 1:]
+        first_end = split
+        second_start = split + 1
+        stale_start = word_start + 1
+        stale_end = word_start + 7
+        document = {
+            "schema_version": 1,
+            "info": {
+                "Series Name": "Silver Archive", "Book Title": "The Silver Archive",
+                "Chapter ID": "chapter-001", "Chapter Revision": "revision-001",
+            },
+            "characters": [],
+            "_active_chapter_text": source,
+            "dialogue_rows": [
+                {"Passage ID": "ps-narration-one", "Chapter ID": "chapter-001",
+                 "Chapter Revision (Reference)": "revision-001", "Passage Type": "Narration",
+                 "Dialogue Text": first, "GPT Assigned Character": "Narrator",
+                 "Start (Reference)": 0, "End (Reference)": first_end},
+                {"Passage ID": "ps-narration-two", "Chapter ID": "chapter-001",
+                 "Chapter Revision (Reference)": "revision-001", "Passage Type": "Narration",
+                 "Dialogue Text": second, "GPT Assigned Character": "Narrator",
+                 "Start (Reference)": second_start, "End (Reference)": len(source)},
+            ],
+        }
+        passages = [
+            {"passage_id": "ps-narration-one", "chapter_id": "chapter-001",
+             "chapter_number": 1, "chapter_title": "The Opening", "chapter_revision": "revision-001",
+             "start": 0, "end": first_end, "text": first, "kind": "narration",
+             "source": "automatic_non_dialogue"},
+            {"passage_id": "ps-narration-two", "chapter_id": "chapter-001",
+             "chapter_number": 1, "chapter_title": "The Opening", "chapter_revision": "revision-001",
+             "start": second_start, "end": len(source), "text": second, "kind": "narration",
+             "source": "automatic_non_dialogue"},
+        ]
+        stale = {"start": stale_start, "end": stale_end, "text": source[stale_start:stale_end],
+                 "speaker": "Legacy AI speaker", "source": "ai"}
+        plan = plan_character_workbook_import(
+            document, series="Silver Archive", book_title="The Silver Archive",
+            registry_rows=[], project_characters=[], chapter_id="chapter-001",
+            chapter_revision="revision-001", current_passages=passages, current_assignments=[stale],
+        )
+        self.assertTrue(plan["ready"], plan["issues"])
+        self.assertEqual(plan["assignments"], [])
+        self.assertEqual(plan["summary"]["dialogue_assignments"], 0)
+        self.assertEqual(len(plan["superseded_assignments"]), 1)
+        self.assertEqual(plan["superseded_assignments"][0]["start"], stale_start)
+        self.assertEqual(plan["superseded_assignments"][0]["end"], stale_end)
+
+    def test_stale_ai_overlap_does_not_hide_unconfirmed_dialogue_inside_narration_span(self):
+        source = '“Mira, listen.” She walked away.'
+        dialogue = '“Mira, listen.”'
+        dialogue_end = len(dialogue)
+        narration = source[dialogue_end:]
+        document = {
+            "schema_version": 1,
+            "info": {"Series Name": "Silver Archive", "Book Title": "The Silver Archive",
+                     "Chapter ID": "chapter-001", "Chapter Revision": "revision-001"},
+            "characters": [{"full_name": "Mira", "aliases": [], "version": "",
+                            "notes": "Source-backed identity.", "included_in_book": True}],
+            "_active_chapter_text": source,
+            "dialogue_rows": [
+                {"Passage ID": "ps-dialogue", "Chapter ID": "chapter-001",
+                 "Chapter Revision (Reference)": "revision-001", "Passage Type": "Dialogue",
+                 "Dialogue Text": dialogue, "GPT Assigned Character": "",
+                 "GPT Confidence (0–1)": "", "Start (Reference)": 0, "End (Reference)": dialogue_end},
+                {"Passage ID": "ps-narration", "Chapter ID": "chapter-001",
+                 "Chapter Revision (Reference)": "revision-001", "Passage Type": "Narration",
+                 "Dialogue Text": narration, "GPT Assigned Character": "Narrator",
+                 "Start (Reference)": dialogue_end, "End (Reference)": len(source)},
+            ],
+        }
+        passages = [
+            {"passage_id": "ps-dialogue", "chapter_id": "chapter-001", "chapter_number": 1,
+             "chapter_title": "The Opening", "chapter_revision": "revision-001", "start": 0,
+             "end": dialogue_end, "text": dialogue, "kind": "character_dialogue"},
+            {"passage_id": "ps-narration", "chapter_id": "chapter-001", "chapter_number": 1,
+             "chapter_title": "The Opening", "chapter_revision": "revision-001", "start": dialogue_end,
+             "end": len(source), "text": narration, "kind": "narration", "source": "automatic_non_dialogue"},
+        ]
+        stale = {"start": 0, "end": len(source), "text": source,
+                 "speaker": "Legacy AI speaker", "source": "ai"}
+        plan = plan_character_workbook_import(
+            document, series="Silver Archive", book_title="The Silver Archive",
+            registry_rows=[], project_characters=[], chapter_id="chapter-001",
+            chapter_revision="revision-001", current_passages=passages, current_assignments=[stale],
+        )
+        self.assertFalse(plan["ready"])
+        self.assertEqual(plan["superseded_assignments"], [])
+        self.assertTrue(any("Dialogue passages without confirmed speakers: ps-dialogue" in issue for issue in plan["issues"]))
+
+    def test_stale_ai_narration_cleanup_fails_closed_when_saved_text_is_not_current(self):
+        source = "The narrator describes the old scene."
+        document = {
+            "schema_version": 1,
+            "info": {"Series Name": "Silver Archive", "Book Title": "The Silver Archive",
+                     "Chapter ID": "chapter-001", "Chapter Revision": "revision-001"},
+            "characters": [], "_active_chapter_text": source,
+            "dialogue_rows": [{
+                "Passage ID": "ps-narration", "Chapter ID": "chapter-001",
+                "Chapter Revision (Reference)": "revision-001", "Passage Type": "Narration",
+                "Dialogue Text": source, "GPT Assigned Character": "Narrator",
+                "Start (Reference)": 0, "End (Reference)": len(source),
+            }],
+        }
+        passages = [{
+            "passage_id": "ps-narration", "chapter_id": "chapter-001", "chapter_number": 1,
+            "chapter_title": "The Opening", "chapter_revision": "revision-001",
+            "start": 0, "end": len(source), "text": source, "kind": "narration",
+            "source": "automatic_non_dialogue",
+        }]
+        plan = plan_character_workbook_import(
+            document, series="Silver Archive", book_title="The Silver Archive",
+            registry_rows=[], project_characters=[], chapter_id="chapter-001",
+            chapter_revision="revision-001", current_passages=passages,
+            current_assignments=[{"start": 0, "end": len(source), "text": "different stale text",
+                                  "speaker": "Legacy AI speaker", "source": "ai"}],
+        )
+        self.assertFalse(plan["ready"])
+        self.assertEqual(plan["superseded_assignments"], [])
+        self.assertTrue(any("does not match the exact active chapter source" in issue for issue in plan["issues"]))
+
+    def test_manual_and_unknown_source_assignments_are_never_retired_as_stale_ai(self):
+        source = "The narrator describes the quiet room."
+        document = {
+            "schema_version": 1,
+            "info": {"Series Name": "Silver Archive", "Book Title": "The Silver Archive",
+                     "Chapter ID": "chapter-001", "Chapter Revision": "revision-001"},
+            "characters": [], "_active_chapter_text": source,
+            "dialogue_rows": [{
+                "Passage ID": "ps-narration", "Chapter ID": "chapter-001",
+                "Chapter Revision (Reference)": "revision-001", "Passage Type": "Narration",
+                "Dialogue Text": source, "GPT Assigned Character": "Narrator",
+                "Start (Reference)": 0, "End (Reference)": len(source),
+            }],
+        }
+        passages = [{
+            "passage_id": "ps-narration", "chapter_id": "chapter-001", "chapter_number": 1,
+            "chapter_title": "The Opening", "chapter_revision": "revision-001",
+            "start": 0, "end": len(source), "text": source, "kind": "narration",
+            "source": "automatic_non_dialogue",
+        }]
+        for source_name in ("manual", "legacy-unknown"):
+            with self.subTest(source=source_name):
+                plan = plan_character_workbook_import(
+                    document, series="Silver Archive", book_title="The Silver Archive",
+                    registry_rows=[], project_characters=[], chapter_id="chapter-001",
+                    chapter_revision="revision-001", current_passages=passages,
+                    current_assignments=[{"start": 0, "end": len(source), "text": source,
+                                          "speaker": "Mira", "source": source_name}],
+                )
+                self.assertFalse(plan["ready"])
+                self.assertEqual(plan["superseded_assignments"], [])
+                self.assertTrue(any("protected manual/unknown speaker assignment" in issue for issue in plan["issues"]))
+
+
         source = '“Mira, I heard you.” Then she walked away and checked the door.'
         dialogue = '“Mira, I heard you.”'
         dialogue_start = source.index(dialogue)
@@ -1941,6 +2105,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 "Series Name": "Silver Archive", "Book Title": "The Silver Archive",
                 "Chapter ID": "chapter-001", "Chapter Revision": "revision-001",
             },
+            "_active_chapter_text": source,
             "characters": [{
                 "full_name": "Mira", "aliases": [], "version": "",
                 "notes": "Confirmed in the source.", "included_in_book": True,

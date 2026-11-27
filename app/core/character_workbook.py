@@ -1583,6 +1583,35 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
     text_corrections = []
     unmatched_workbook_rows = []
     active_chapter_text = str(document.get("_active_chapter_text") or "")
+    stale_assignment_reviewed = set()
+
+    def stale_ai_assignment_source_matches(start, end, source):
+        """Require every duplicate AI record for a stale span to match the active chapter source."""
+        if not active_chapter_text or start < 0 or end <= start or end > len(active_chapter_text):
+            return False
+        exact_source = active_chapter_text[start:end]
+        candidates = [
+            row for row in assignments_by_span.get((start, end), [])
+            if _clean(row.get("source") or "manual").casefold() == source
+        ]
+        if not candidates:
+            return False
+        for candidate in candidates:
+            saved_text = str(candidate.get("text") or "")
+            if saved_text and saved_text != exact_source:
+                return False
+            saved_revision = _clean(candidate.get("chapter_revision"))
+            if not saved_text and saved_revision and _clean(chapter_revision) and saved_revision != _clean(chapter_revision):
+                return False
+        return True
+
+    def claim_stale_assignment_review(start, end, source):
+        """Review one stale span once even when several current passages overlap it."""
+        key = (start, end, source)
+        if key in stale_assignment_reviewed:
+            return False
+        stale_assignment_reviewed.add(key)
+        return True
 
     # Passage IDs are generated from the detected dialogue/narration structure.
     # A classifier update can legitimately replace an ID without changing the
@@ -2023,11 +2052,20 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                         )
                     continue
 
-                # Preserve the established safety rule for broad stale AI spans:
-                # the old record can be removed only when every impacted current
-                # dialogue turn already has an explicit workbook identity or an
-                # exact saved manual identity. Narration is safe; unknown dialogue
-                # remains a blocking issue.
+                if not claim_stale_assignment_review(saved_start, saved_end, saved_source):
+                    continue
+                if not stale_ai_assignment_source_matches(saved_start, saved_end, saved_source):
+                    issues.append(
+                        "Stale AI/outsourced assignment at %s:%s does not match the exact active chapter source. "
+                        "It was preserved; refresh the source review before importing."
+                        % (saved_start, saved_end)
+                    )
+                    continue
+
+                # A stale AI/outsourced span may be retired when every current
+                # passage it touches is Narration. If it also touches Dialogue,
+                # every affected Dialogue passage must have an explicit workbook
+                # identity or an exact saved manual identity.
                 impacted_passages = [
                     item for item in current_passages
                     if isinstance(item, dict)
@@ -2062,31 +2100,18 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                     )
                     if not workbook_speakers and not has_exact_manual_identity:
                         unresolved_impacts.append(impacted_id or "an unidentified passage")
-                saved_text = str(saved.get("text") or "")
-                active_saved_text = (
-                    active_chapter_text[saved_start:saved_end]
-                    if active_chapter_text and 0 <= saved_start < saved_end <= len(active_chapter_text)
-                    else ""
-                )
-                exact_saved_text = not saved_text or not active_saved_text or saved_text == active_saved_text
-                exact_narrator_span = (
-                    saved_start == quote_start and saved_end == quote_end
-                    and exact_saved_text
-                )
-                only_embedded_narration = bool(impacted_passages) and all(
-                    _key(item.get("kind")) == "narration"
-                    and _clean(item.get("source")) == "automatic_embedded_quote"
-                    for item in impacted_passages
-                )
-                if (
-                    not impacted_passages
-                    or (not impacted_dialogue and not only_embedded_narration and not exact_narrator_span)
-                    or unresolved_impacts
-                ):
+                if not impacted_passages:
                     issues.append(
-                        "Passage %s overlaps a stale AI assignment at %s:%s, but these affected dialogue passages "
-                        "still need confirmed identities: %s. Exact manual assignments are preserved."
-                        % (pid, saved_start, saved_end, ", ".join(unresolved_impacts[:8]) or "source classification conflict")
+                        "Stale AI/outsourced assignment at %s:%s no longer maps to a current source passage. "
+                        "It was preserved; refresh the workbook and source review."
+                        % (saved_start, saved_end)
+                    )
+                    continue
+                if unresolved_impacts:
+                    issues.append(
+                        "Stale AI/outsourced assignment at %s:%s also overlaps Dialogue passages without confirmed speakers: %s. "
+                        "The stale assignment was preserved; resolve those Dialogue identities before importing."
+                        % (saved_start, saved_end, ", ".join(unresolved_impacts[:8]))
                     )
                     continue
                 speakers_value = saved.get("speakers")
@@ -2158,6 +2183,16 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                 )
                 overlap_blocked = True
                 continue
+            if not claim_stale_assignment_review(saved_start, saved_end, saved_source):
+                continue
+            if not stale_ai_assignment_source_matches(saved_start, saved_end, saved_source):
+                issues.append(
+                    "Stale AI/outsourced assignment at %s:%s does not match the exact active chapter source. "
+                    "It was preserved; refresh the source review before importing."
+                    % (saved_start, saved_end)
+                )
+                overlap_blocked = True
+                continue
             impacted_passages = [
                 item for item in current_passages
                 if isinstance(item, dict)
@@ -2189,20 +2224,19 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                 )
                 if not workbook_speakers and not has_exact_manual_identity:
                     unresolved_impacts.append(impacted_id or "an unidentified passage")
-            only_embedded_narration = bool(impacted_passages) and all(
-                _key(item.get("kind")) == "narration"
-                and _clean(item.get("source")) == "automatic_embedded_quote"
-                for item in impacted_passages
-            )
-            if (
-                not impacted_passages
-                or (not impacted_dialogue and not only_embedded_narration)
-                or unresolved_impacts
-            ):
+            if not impacted_passages:
                 issues.append(
-                    "Passage %s overlaps a stale AI assignment at %s:%s, but these affected dialogue passages "
-                    "still need confirmed identities: %s. Exact manual assignments are preserved."
-                    % (pid, saved_start, saved_end, ", ".join(unresolved_impacts[:8]) or "source classification conflict")
+                    "Stale AI/outsourced assignment at %s:%s no longer maps to a current source passage. "
+                    "It was preserved; refresh the workbook and source review."
+                    % (saved_start, saved_end)
+                )
+                overlap_blocked = True
+                continue
+            if unresolved_impacts:
+                issues.append(
+                    "Stale AI/outsourced assignment at %s:%s also overlaps Dialogue passages without confirmed speakers: %s. "
+                    "The stale assignment was preserved; resolve those Dialogue identities before importing."
+                    % (saved_start, saved_end, ", ".join(unresolved_impacts[:8]))
                 )
                 overlap_blocked = True
                 continue

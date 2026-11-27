@@ -5732,6 +5732,7 @@ class PremiumV2Bridge(QObject):
         state, series, chapter, chapter_row, passages, assignments = self._character_workbook_snapshot(
             project, chapter_number
         )
+        document["_active_chapter_text"] = str(getattr(chapter, "text", "") or "")
         plan = plan_character_workbook_import(
             document,
             series=series,
