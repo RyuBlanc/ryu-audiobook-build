@@ -2092,6 +2092,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 self.assertEqual(plan["superseded_assignments"], [])
                 self.assertTrue(any("protected manual/unknown speaker assignment" in issue for issue in plan["issues"]))
 
+    def test_broad_stale_ai_span_can_be_replaced_when_confirmed_dialogue_also_overlaps_ordinary_narration(self):
 
         source = '“Mira, I heard you.” Then she walked away and checked the door.'
         dialogue = '“Mira, I heard you.”'
