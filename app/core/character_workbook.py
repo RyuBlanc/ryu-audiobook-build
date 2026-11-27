@@ -2110,7 +2110,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                 if unresolved_impacts:
                     issues.append(
                         "Stale AI/outsourced assignment at %s:%s also overlaps Dialogue passages without confirmed speakers: %s. "
-                        "The stale assignment was preserved; resolve those Dialogue identities before importing."
+                        "The stale assignment was preserved; resolve those Dialogue identities before importing. Exact manual assignments are preserved."
                         % (saved_start, saved_end, ", ".join(unresolved_impacts[:8]))
                     )
                     continue
@@ -2235,7 +2235,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             if unresolved_impacts:
                 issues.append(
                     "Stale AI/outsourced assignment at %s:%s also overlaps Dialogue passages without confirmed speakers: %s. "
-                    "The stale assignment was preserved; resolve those Dialogue identities before importing."
+                    "The stale assignment was preserved; resolve those Dialogue identities before importing. Exact manual assignments are preserved."
                     % (saved_start, saved_end, ", ".join(unresolved_impacts[:8]))
                 )
                 overlap_blocked = True
