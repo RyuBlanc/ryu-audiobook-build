@@ -2016,6 +2016,44 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
         self.assertIn("Source Correction History", prompt)
         self.assertIn("only after the user explicitly confirms", prompt)
 
+    def test_legacy_reserved_roles_and_aliases_do_not_collide_with_real_character_identities(self):
+        source = "“Ghost, you made it.”"
+        document = {
+            "schema_version": 1,
+            "info": {
+                "Series Name": "Silver Archive", "Book Title": "The Silver Archive",
+                "Chapter ID": "chapter-001", "Chapter Revision": "revision-abc",
+            },
+            "characters": [{
+                "full_name": "Ghost", "aliases": [], "version": "", "notes": "", "included_in_book": True,
+            }],
+            "dialogue_rows": [{
+                "Passage ID": "ps-ghost", "Chapter ID": "chapter-001",
+                "Chapter Revision (Reference)": "revision-abc", "Passage Type": "Dialogue",
+                "Dialogue Text": source, "GPT Assigned Character": "Ghost",
+                "GPT Confidence (0–1)": "0.96", "Start (Reference)": 0, "End (Reference)": len(source),
+            }],
+        }
+        passages = [{
+            "passage_id": "ps-ghost", "chapter_id": "chapter-001", "chapter_number": 1,
+            "chapter_title": "The Arrival", "chapter_revision": "revision-abc",
+            "start": 0, "end": len(source), "text": source, "kind": "character_dialogue",
+        }]
+        plan = plan_character_workbook_import(
+            document, series="Silver Archive", book_title="The Silver Archive",
+            registry_rows=[{
+                "primary_name": "Third Person", "series": "Silver Archive", "aliases": ["Ghost"],
+            }],
+            project_characters=[{
+                "name": "Narrator", "series": "Silver Archive", "aliases": ["Ghost"],
+            }],
+            chapter_id="chapter-001", chapter_revision="revision-abc",
+            current_passages=passages, current_assignments=[], deleted_registry_rows=[],
+        )
+        self.assertTrue(plan["ready"], plan["issues"])
+        self.assertEqual([row["canonical_name"] for row in plan["characters"]], ["Ghost"])
+        self.assertEqual(plan["assignments"][0]["speaker"], "Ghost")
+
     def test_import_plan_accepts_reserved_third_person_without_character_register_entry(self):
         source = "“Someone near the gate shouted, ‘Stop!’”"
         document = {

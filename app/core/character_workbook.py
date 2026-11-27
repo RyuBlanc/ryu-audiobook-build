@@ -1391,7 +1391,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
     for row, is_library in sources:
         if _key(row.get("series") or active_series) != _key(active_series): continue
         name = _clean(row.get("primary_name") or row.get("name"))
-        if not name: continue
+        if not name or _key(name) in {"narrator", "third person"}: continue
         version = _clean(row.get("identity_variant"))
         key = _key(name) + "|" + _key(version)
         entry = existing.setdefault(key, {"canonical_name":name, "identity_variant":version,
@@ -1401,7 +1401,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
         if isinstance(aliases, str): aliases = [aliases]
         for alias in aliases if isinstance(aliases,(list,tuple)) else []:
             alias = _clean(alias)
-            if alias and _key(alias) != _key(name) and _key(alias) not in {_key(x) for x in entry["aliases"]}:
+            if alias and _key(alias) not in {"narrator", "third person"} and _key(alias) != _key(name) and _key(alias) not in {_key(x) for x in entry["aliases"]}:
                 entry["aliases"].append(alias)
         if is_library:
             incoming_id = _clean(row.get("id"))
@@ -1680,10 +1680,14 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                 assigned_names = _workbook_speaker_names(row)
             except ValueError:
                 assigned_names = []
-            if _clean(row.get("Passage Type")).casefold() == "dialogue" or assigned_names:
+            has_source_text_proposal = bool(
+                str(row.get("GPT Proposed Source Text") or "").strip()
+                or str(row.get("GPT Text Correction Reason") or "").strip()
+            )
+            if _clean(row.get("Passage Type")).casefold() == "dialogue" or assigned_names or has_source_text_proposal:
                 issues.append(
                     "Workbook passage %s could not be safely matched to the active chapter (%s). "
-                    "Its GPT speaker assignment was not applied; review the current source passage(s) instead."
+                    "Its GPT speaker assignment and/or source-text correction was not applied; review the current source passage(s) instead."
                     % (source_id or "(missing ID)", resolution)
                 )
             continue

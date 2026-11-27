@@ -103,6 +103,28 @@ def _serialize_character_identity_state(method):
 
 
 
+_RESERVED_CHARACTER_WORKBOOK_ROLES = frozenset({"narrator", "third person"})
+
+
+def _is_reserved_character_workbook_role(value: Any) -> bool:
+    return unicodedata.normalize("NFC", str(value or "")).strip().casefold() in _RESERVED_CHARACTER_WORKBOOK_ROLES
+
+
+def _character_workbook_export_aliases(value: Any) -> list[str]:
+    values = [value] if isinstance(value, str) else value
+    if not isinstance(values, (list, tuple, set)):
+        return []
+    result, seen = [], set()
+    for raw in values:
+        alias = unicodedata.normalize("NFC", str(raw or "")).strip()
+        key = alias.casefold()
+        if not alias or _is_reserved_character_workbook_role(alias) or key in seen:
+            continue
+        seen.add(key)
+        result.append(alias)
+    return result
+
+
 def _character_library_export_document(records: list[dict[str, Any]], series: str = "") -> dict[str, Any]:
     """Build a portable, versioned series-cast document with no local voice/model references."""
     def safe_count(value, default=0, maximum=None):
@@ -5459,7 +5481,7 @@ class PremiumV2Bridge(QObject):
         series_character_reference = [
             {
                 "primary_name": str(row.get("primary_name") or row.get("name") or ""),
-                "aliases": list(row.get("aliases") or []),
+                "aliases": _character_workbook_export_aliases(row.get("aliases")),
                 "identity_base_name": str(row.get("identity_base_name") or row.get("primary_name") or row.get("name") or ""),
                 "identity_variant": str(row.get("identity_variant") or ""),
                 "notes": str(row.get("notes") or ""),
@@ -5468,6 +5490,7 @@ class PremiumV2Bridge(QObject):
             }
             for row in list_reusable_characters(series)
             if isinstance(row, dict)
+            and not _is_reserved_character_workbook_role(row.get("primary_name") or row.get("name"))
         ]
         export_rows = []
         for chapter in book_chapters:
@@ -5612,12 +5635,13 @@ class PremiumV2Bridge(QObject):
         series_character_reference = [
             {
                 "primary_name": str(row.get("primary_name") or row.get("name") or ""),
-                "aliases": list(row.get("aliases") or []),
+                "aliases": _character_workbook_export_aliases(row.get("aliases")),
                 "identity_base_name": str(row.get("identity_base_name") or row.get("primary_name") or row.get("name") or ""),
                 "identity_variant": str(row.get("identity_variant") or ""),
             }
             for row in list_reusable_characters(series)
             if isinstance(row, dict)
+            and not _is_reserved_character_workbook_role(row.get("primary_name") or row.get("name"))
         ]
         export_rows = []
         for row in passages:
@@ -5731,7 +5755,7 @@ class PremiumV2Bridge(QObject):
         series_character_reference = [
             {
                 "primary_name": str(row.get("primary_name") or row.get("name") or ""),
-                "aliases": list(row.get("aliases") or []),
+                "aliases": _character_workbook_export_aliases(row.get("aliases")),
                 "identity_base_name": str(row.get("identity_base_name") or row.get("primary_name") or row.get("name") or ""),
                 "identity_variant": str(row.get("identity_variant") or ""),
                 "notes": str(row.get("notes") or ""),
@@ -5740,6 +5764,7 @@ class PremiumV2Bridge(QObject):
             }
             for row in list_reusable_characters(series)
             if isinstance(row, dict)
+            and not _is_reserved_character_workbook_role(row.get("primary_name") or row.get("name"))
         ]
         export_rows = []
         for chapter in book_chapters:
@@ -6085,7 +6110,11 @@ class PremiumV2Bridge(QObject):
                     continue
                 name = str(row.get("name") or row.get("primary_name") or row.get("canonical_name") or "").strip()
                 option_series = str(row.get("series") or review_series or "").strip()
-                if not name or not option_series:
+                if (
+                    not name or not option_series
+                    or _is_reserved_character_workbook_role(name)
+                    or option_series.casefold() != review_series.casefold()
+                ):
                     continue
                 key = (name.casefold(), option_series.casefold())
                 if key in seen_character_options:
@@ -6096,7 +6125,7 @@ class PremiumV2Bridge(QObject):
                     "series": option_series,
                     "identity_variant": str(row.get("identity_variant") or ""),
                     "voice_profile": str(row.get("voice_profile") or row.get("voice_name") or row.get("voice") or row.get("existing_voice_name") or ""),
-                    "aliases": list(row.get("aliases") or []),
+                    "aliases": _character_workbook_export_aliases(row.get("aliases")),
                     "pending_workbook_entry": bool(from_workbook_register and not row.get("library_id")),
                     "reserved_placeholder": False,
                 })
@@ -6158,6 +6187,9 @@ class PremiumV2Bridge(QObject):
                     "end": stale_end,
                     "passage_type": str(stale_row.get("Passage Type") or "Dialogue"),
                     "text": stale_text[:1000],
+                    "source_text": stale_text,
+                    "proposed_text": str(stale_row.get("GPT Proposed Source Text") or ""),
+                    "correction_reason": str(stale_row.get("GPT Text Correction Reason") or ""),
                     "source_excerpt": source_excerpt[:900],
                     "speakers": stale_names,
                     "source_text_matches": bool(actual_source_match),
@@ -6202,15 +6234,17 @@ class PremiumV2Bridge(QObject):
         }
         assignment_groups: dict[str, dict[str, Any]] = {}
         for assignment in plan.get("assignments") or []:
-            speaker = str(assignment.get("speaker") or "").strip()
-            if not speaker:
-                continue
-            entry = assignment_groups.setdefault(speaker, {"dialogue_assignments": 0, "chapters": set()})
-            entry["dialogue_assignments"] += 1
-            try:
-                entry["chapters"].add(int(assignment.get("chapter_number") or getattr(chapter, "number", 0)))
-            except (TypeError, ValueError, OverflowError):
-                pass
+            raw_speakers = assignment.get("speakers")
+            if not isinstance(raw_speakers, (list, tuple)):
+                raw_speakers = [assignment.get("speaker")] if assignment.get("speaker") else []
+            speaker_names = list(dict.fromkeys(str(value).strip() for value in raw_speakers if str(value or "").strip()))
+            for speaker in speaker_names:
+                entry = assignment_groups.setdefault(speaker, {"dialogue_assignments": 0, "chapters": set()})
+                entry["dialogue_assignments"] += 1
+                try:
+                    entry["chapters"].add(int(assignment.get("chapter_number") or getattr(chapter, "number", 0)))
+                except (TypeError, ValueError, OverflowError):
+                    pass
         assignment_summary = [
             {
                 "canonical_name": name,
@@ -6247,21 +6281,22 @@ class PremiumV2Bridge(QObject):
             "chapters": chapter_preview,
             "assignment_summary": assignment_summary,
             "character_plan_total": len(plan.get("characters") or []),
-            "character_plan_truncated": len(plan.get("characters") or []) > 40,
+            "character_plan_truncated": False,
             "characters": [
                 {
                     "canonical_name": str(row.get("canonical_name") or ""),
                     "identity_variant": str(row.get("identity_variant") or ""),
                     "action": str(row.get("action") or ""),
-                    "aliases_to_add": list(row.get("aliases_to_add") or [])[:12],
+                    "aliases_to_add": list(row.get("aliases_to_add") or []),
                     "aliases_to_add_total": len(row.get("aliases_to_add") or []),
                     "existing_voice_name": str(row.get("existing_voice_name") or ""),
                 }
-                for row in plan.get("characters", [])[:40]
+                for row in plan.get("characters", [])
             ],
-            "text_corrections": list(plan.get("text_corrections") or [])[:200],
-            "text_corrections_truncated": len(plan.get("text_corrections") or []) > 200,
-            "passage_reclassifications": list(plan.get("passage_reclassifications") or [])[:300],
+            "text_corrections": list(plan.get("text_corrections") or []),
+            "text_corrections_truncated": False,
+            "passage_reclassifications": list(plan.get("passage_reclassifications") or []),
+            "passage_reclassifications_truncated": False,
         }
 
     @_serialize_character_identity_state

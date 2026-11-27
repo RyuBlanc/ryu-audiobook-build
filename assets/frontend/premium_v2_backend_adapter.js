@@ -4681,12 +4681,21 @@
           const speakers = Array.isArray(row.speakers) && row.speakers.length
             ? row.speakers.join(' + ') : 'No GPT speaker identity entered';
           const excerpt = String(row.source_excerpt || row.text || '').trim();
+          const proposedText = String(row.proposed_text || '');
+          const correctionReason = String(row.correction_reason || '');
+          const correctionHtml = proposedText || correctionReason
+            ? '<div class="ryu-workbook-review-result"><b>GPT source-text correction — NOT APPLIED</b>' +
+              '<p><b>Original workbook text</b>\n' + esc(row.source_text || row.text || '') + '</p>' +
+              '<p><b>GPT proposed text</b>\n' + esc(proposedText || '(no proposed text supplied)') + '</p>' +
+              '<p><b>Reason</b>\n' + esc(correctionReason || 'No correction reason supplied') + '</p></div>'
+            : '';
           return '<li><b>Chapter ' + Number(row.chapter_number || 0) + ' · ' + esc(row.chapter_title || 'Untitled') +
             '</b><br>Old Passage ID: ' + esc(row.passage_id || '(missing)') +
             ' · offsets: ' + Number(row.start || 0) + '–' + Number(row.end || 0) +
             '<br><b>GPT suggestion — NOT APPLIED:</b> ' + esc(speakers) +
             '<br><span>' + esc(row.reason || 'The old workbook row could not be mapped safely.') + '</span>' +
             (excerpt ? '<p class="ryu-workbook-context">' + esc(excerpt) + '</p>' : '') +
+             correctionHtml +
             '</li>';
         }).join('') + '</ol>' +
         (preview.unmatched_workbook_rows_truncated
@@ -4915,9 +4924,19 @@
       showCharacterWorkbookPreflightDialog(preview || {});
       return;
     }
+    if (
+      preview.character_plan_truncated || preview.text_corrections_truncated ||
+      preview.passage_reclassifications_truncated
+    ) {
+      showCharacterWorkbookMessageDialog(
+        "Import preview incomplete",
+        "The import has not started. The backend reported that one or more character identities, source corrections or source reclassifications were omitted from the review. No changes were committed. Re-export or split the workbook so every proposed change can be reviewed before importing."
+      );
+      return;
+    }
     const summary = preview.summary || {};
     const characterPlan = Array.isArray(preview.characters) ? preview.characters : [];
-    const identityLines = characterPlan.slice(0, 24).map(row => {
+    const identityLines = characterPlan.map(row => {
       const action = row.action === 'merge' ? 'MERGE' : 'CREATE';
       const variant = String(row.identity_variant || '').trim();
       const aliases = (Array.isArray(row.aliases_to_add) ? row.aliases_to_add : [])
@@ -4939,12 +4958,12 @@
     const importScope = preview.scope === 'book'
       ? 'Complete book · ' + Number(preview.chapter_count || 0) + ' chapters'
       : 'Chapter ' + preview.chapter_number;
-    const chapterLines = (Array.isArray(preview.chapters) ? preview.chapters : []).slice(0, 20).map(row =>
+    const chapterLines = (Array.isArray(preview.chapters) ? preview.chapters : []).map(row =>
       'Chapter ' + Number(row.chapter_number || 0) + ' · ' + String(row.chapter_title || 'Untitled') +
       ' — ' + Number(row.assignment_count || 0) + ' assignments / ' + Number(row.passage_count || 0) + ' passages');
     const extraChapters = Math.max(0, Number(preview.chapters?.length || 0) - chapterLines.length);
     if (extraChapters) chapterLines.push('…and ' + extraChapters + ' more chapters.');
-    const speakerLines = (Array.isArray(preview.assignment_summary) ? preview.assignment_summary : []).slice(0, 20).map(row =>
+    const speakerLines = (Array.isArray(preview.assignment_summary) ? preview.assignment_summary : []).map(row =>
       String(row.canonical_name || 'Unknown character') + ' — ' + Number(row.dialogue_assignments || 0) +
       ' dialogue assignments across ' + Number(row.chapter_count || 0) + ' chapters');
     const extraSpeakers = Math.max(0, Number(preview.assignment_summary?.length || 0) - speakerLines.length);
