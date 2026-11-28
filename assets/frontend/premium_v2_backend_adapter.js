@@ -4952,6 +4952,7 @@
         mergeSpeakerButton.disabled = true;
         mergeSpeakerButton.textContent = 'Saving speaker set…';
         if (result) result.textContent = 'Validating the active passage and preserving saved manual speakers…';
+        let speakerAssignmentSaved = false;
         try {
           const resolvedSpeakers = [];
           for (const speaker of selected) {
@@ -4986,6 +4987,7 @@
             preserve_existing_manual:true,
             visual_source:'outsourced'
           });
+          speakerAssignmentSaved = true;
           await refreshChapters();
           await refreshCharacters();
           await refreshCharacterLibrary();
@@ -4998,9 +5000,20 @@
             await importCompletedCharacterWorkbook(String(preview.path));
           }
         } catch (error) {
-          mergeSpeakerButton.disabled = false;
-          mergeSpeakerButton.textContent = 'Confirm speaker set · preserve manual speakers';
-          if (result) result.textContent = error?.message || String(error);
+          const reason = error?.message || String(error);
+          if (speakerAssignmentSaved) {
+            mergeSpeakerButton.disabled = true;
+            mergeSpeakerButton.textContent = 'Speaker assignment saved · workbook recheck required';
+            const detail = 'The confirmed speaker assignment was saved to the exact passage, but the remaining refresh or workbook recheck did not complete. ' +
+              reason + '\\n\\nThe saved manual assignment remains protected. Recheck the same workbook before continuing.';
+            message(detail, true);
+            showCharacterWorkbookMessageDialog('Speaker saved; workbook recheck needs attention', detail);
+          } else {
+            mergeSpeakerButton.disabled = false;
+            mergeSpeakerButton.textContent = 'Confirm speaker set · preserve manual speakers';
+            if (result) result.textContent = reason;
+            message(reason, true);
+          }
         }
         return;
       }
@@ -5074,7 +5087,13 @@
         retry.disabled = true;
         retry.textContent = 'Rechecking…';
         closeCharacterWorkbookDialog();
-        await importCompletedCharacterWorkbook(String(preview.path));
+        try {
+          await importCompletedCharacterWorkbook(String(preview.path));
+        } catch (error) {
+          const reason = error?.message || String(error);
+          message(reason, true);
+          showCharacterWorkbookMessageDialog('Workbook recheck failed', reason + '\\n\\nNo workbook changes were committed by this recheck. Reopen the completed workbook and review the latest preflight report.');
+        }
       }
     });
     return overlay;
@@ -5986,6 +6005,15 @@
       voice.disabled = voice.options.length <= 1;
     }
   }
+  function showCharacterRecoveryError(error) {
+    const reason = error?.message || String(error);
+    const feedback = $('characterRecoveryMessage');
+    if (feedback) {
+      feedback.textContent = reason;
+      feedback.style.display = 'block';
+    }
+    message(reason, true);
+  }
   function ensureCharacterRecoveryButton() {
     if ($('openCharacterRecoveryBin')) return;
     const importButton = $('importCharacterLibrary');
@@ -6017,13 +6045,21 @@
       if (selectAllDeleted) {
         for (const row of libraryDeletedCharacters) characterRecoverySelection.add(String(row.id || ''));
         updateCharacterRecoverySelectionControls();
-        await openCharacterRecoveryBin();
+        try {
+          await openCharacterRecoveryBin();
+        } catch (error) {
+          showCharacterRecoveryError(error);
+        }
         return;
       }
       const clearDeletedSelection = event.target.closest('[data-clear-deleted-selection]');
       if (clearDeletedSelection) {
         characterRecoverySelection.clear();
-        await openCharacterRecoveryBin();
+        try {
+          await openCharacterRecoveryBin();
+        } catch (error) {
+          showCharacterRecoveryError(error);
+        }
         return;
       }
       const purgeSelected = event.target.closest('[data-purge-selected-characters]');
@@ -6053,12 +6089,7 @@
           : 'Restored ' + (record?.name || 'character') + ' to the reusable Character Library.');
         await openCharacterRecoveryBin();
       } catch (error) {
-        const reason = error?.message || String(error);
-        if (feedback) {
-          feedback.textContent = reason;
-          feedback.style.display = 'block';
-        }
-        message(reason, true);
+        showCharacterRecoveryError(error);
       } finally {
         restore.disabled = false;
       }
@@ -6123,6 +6154,8 @@
       await refreshCharacterIdentityViews();
       await openCharacterRecoveryBin();
       message('Permanently cleared ' + Number(result?.purged || ids.length) + ' character record(s) from Recovery.');
+    } catch (error) {
+      showCharacterRecoveryError(error);
     } finally {
       updateCharacterRecoverySelectionControls();
     }
