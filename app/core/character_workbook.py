@@ -2319,7 +2319,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                     )
                 ):
                     issues.append(
-                        "Stale AI/outsourced assignment at %s:%s is not fully covered by exact current source passages. "
+                        "Stale AI/outsourced assignment at %s:%s does not match the exact active chapter source or is not fully covered by exact current source passages. "
                         "It was preserved; resolve the source mapping before importing."
                         % (saved_start, saved_end)
                     )
@@ -2474,7 +2474,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                 )
             ):
                 issues.append(
-                    "Stale AI/outsourced assignment at %s:%s is not fully covered by exact current source passages. "
+                    "Stale AI/outsourced assignment at %s:%s does not match the exact active chapter source or is not fully covered by exact current source passages. "
                     "It was preserved; resolve the source mapping before importing."
                     % (saved_start, saved_end)
                 )
