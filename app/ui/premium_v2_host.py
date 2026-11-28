@@ -83,6 +83,7 @@ from app.core.character_workbook import (
     character_workbook_plan_fingerprint,
     complete_book_gpt_prompt,
     _workbook_speaker_names,
+    character_workbook_assignment_diagnostics,
 )
 from app.production_metadata import missing_required_metadata_fields, normalize_metadata_text
 from app.version import APP_NAME, full_version
@@ -5667,7 +5668,7 @@ class PremiumV2Bridge(QObject):
         if clipboard is None:
             raise RuntimeError("The system clipboard is unavailable. Open a complete-book workbook and copy the prompt from its GPT Prompt sheet.")
         clipboard.setText(prompt)
-        return {"copied": True, "prompt_version": "2.2", "characters": len(prompt)}
+        return {"copied": True, "prompt_version": "2.3", "characters": len(prompt)}
 
     def _character_workbook_export(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Export a complete-book GPT workbook, retaining chapter export compatibility."""
@@ -5957,6 +5958,7 @@ class PremiumV2Bridge(QObject):
                     project, document, selected_path
                 )
             raise
+        assignment_diagnostics = character_workbook_assignment_diagnostics(document, plan)
         if not plan["ready"]:
             if int(document.get("schema_version") or 0) == 2:
                 review_state, review_series, review_chapters = self._character_workbook_book_snapshot(project)
@@ -6367,6 +6369,7 @@ class PremiumV2Bridge(QObject):
                 "partial_ready": bool(plan.get("partial_ready")),
                 "token": partial_token,
                 "partial_summary": dict(plan.get("partial_summary") or {}),
+                "assignment_diagnostics": assignment_diagnostics,
                 "path": str(Path(selected_path).expanduser().resolve()),
                 "issues": review_issues[:1000],
                 "issue_count": len(review_issues),
@@ -6446,6 +6449,7 @@ class PremiumV2Bridge(QObject):
             "chapter_number": int(chapter.number) if chapter is not None else None,
             "chapter_count": len(plan.get("chapters") or []) or 1,
             "summary": plan["summary"],
+            "assignment_diagnostics": assignment_diagnostics,
             "chapters": chapter_preview,
             "assignment_summary": assignment_summary,
             "character_plan_total": len(plan.get("characters") or []),
