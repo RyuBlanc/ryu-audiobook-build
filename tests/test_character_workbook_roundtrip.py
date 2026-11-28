@@ -57,6 +57,16 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
         path.write_bytes(create_character_workbook_bytes(metadata, passages, text))
         return path, text, passages
 
+    def test_single_chapter_export_has_separate_safe_narration_proposal_column(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, _source, _passages = self._export(Path(tmp))
+            document = read_character_workbook(path)
+            dialogue = next(row for row in document["dialogue_rows"] if row["Passage Type"] == "Dialogue")
+            narration = next(row for row in document["dialogue_rows"] if row["Passage Type"] == "Narration")
+            self.assertIn("GPT Proposed Passage Type", dialogue)
+            self.assertEqual(dialogue["GPT Proposed Passage Type"], "")
+            self.assertEqual(narration["GPT Proposed Passage Type"], "")
+
     def test_confidence_normalizes_decimal_and_percent_values_before_validation(self):
         self.assertEqual(_normalize_workbook_confidence("0.86"), 0.86)
         self.assertEqual(_normalize_workbook_confidence("86"), 0.86)
@@ -1395,7 +1405,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             self.assertEqual(document["info"]["Publication Year"], "2024")
             self.assertEqual(document["info"]["Series Volume"], "Volume 2")
             self.assertIn("GPT Prompt", document["info"]["Instructions"])
-            self.assertEqual(document["info"]["GPT Prompt Version"], "2.4")
+            self.assertEqual(document["info"]["GPT Prompt Version"], "2.5")
             self.assertEqual(len(document["chapter_references"]), 2)
             self.assertEqual(len(document["dialogue_rows"]), len(passages))
             self.assertEqual(document["chapter_references"][0]["chapter_number"], 1)
@@ -1942,6 +1952,51 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             self.assertEqual(summary["character_register_entries_preserved"], 2)
             self.assertEqual(original_path.read_bytes(), original_bytes)
 
+    def test_refresh_preserves_narration_proposal_without_turning_it_into_a_character_assignment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _path, chapters, passages, document = self._complete_book_fixture(Path(tmp))
+            row = next(item for item in document["dialogue_rows"] if item["Passage ID"] == "p2-dialogue")
+            evidence = "Reported speech within narration; the passage is not a live dialogue turn."
+            row["GPT Assigned Character"] = "Narrator"
+            row["GPT Confidence (0–1)"] = ""
+            row["GPT Assigned Characters (JSON)"] = ""
+            row["GPT Multi-Speaker Mode"] = ""
+            row["Evidence / Notes (GPT)"] = evidence
+            row["GPT Proposed Passage Type"] = "Narration"
+            metadata = {
+                "project_title": document["info"]["Book Title"],
+                "series_name": document["info"]["Series Name"],
+                "author": document["info"]["Author"],
+                "publisher": document["info"]["Publisher"],
+                "language": document["info"]["Language"],
+                "genre": document["info"]["Genre"],
+                "year": document["info"]["Publication Year"],
+                "series_volume": document["info"]["Series Volume"],
+                "series_character_reference": document["series_character_reference"],
+            }
+            workbook_bytes, summary = refresh_complete_book_character_workbook_bytes(
+                document,
+                metadata=metadata,
+                chapters=chapters,
+                passages=passages,
+            )
+            refreshed_path = Path(tmp) / "narration-proposal-refreshed.xlsx"
+            refreshed_path.write_bytes(workbook_bytes)
+            refreshed = read_character_workbook(refreshed_path)
+            carried = next(
+                item for item in refreshed["dialogue_rows"]
+                if item["Passage ID"] == "p2-dialogue"
+            )
+            self.assertEqual(carried["Passage Type"], "Dialogue")
+            self.assertEqual(carried["GPT Proposed Passage Type"], "Narration")
+            self.assertEqual(carried["GPT Assigned Character"], "Narrator")
+            self.assertEqual(carried["GPT Confidence (0–1)"], "")
+            self.assertEqual(carried["GPT Assigned Characters (JSON)"], "")
+            self.assertEqual(carried["Evidence / Notes (GPT)"], evidence)
+            self.assertEqual(summary["gpt_assignments_carried"], 0)
+            self.assertEqual(summary["proposed_narration_reclassifications"], 1)
+            self.assertEqual(summary["unresolved_dialogue_passages"], 1)
+
     def test_refresh_preserves_source_correction_history_with_excel_header_names(self):
         with tempfile.TemporaryDirectory() as tmp:
             _path, chapters, passages, document = self._complete_book_fixture(Path(tmp))
@@ -2453,6 +2508,11 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
         self.assertIn("GPT Text Correction Reason", prompt)
         self.assertIn("Narrator paragraphs", prompt)
         self.assertIn("Source Correction History", prompt)
+        self.assertIn("GPT Proposed Passage Type", prompt)
+        self.assertIn("only supported nonblank value is Narration", prompt)
+        self.assertIn("leave GPT Confidence and GPT Assigned Characters (JSON) blank", prompt)
+        self.assertIn("actual spoken rows you filled with a character or Third Person", prompt)
+        self.assertIn("non-spoken rows you proposed as Narration with Narrator", prompt)
         self.assertIn("only after the user explicitly confirms", prompt)
 
     def test_legacy_reserved_roles_and_aliases_do_not_collide_with_real_character_identities(self):
@@ -2533,6 +2593,136 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
         self.assertEqual(plan["assignments"][0]["speaker"], "Third Person")
         self.assertEqual(plan["assignments"][0]["speakers"], ["Third Person"])
         self.assertEqual(plan["summary"]["third_person_assignments"], 1)
+
+    def test_gpt_can_reclassify_exact_nonspoken_dialogue_as_narration_without_using_third_person(self):
+        source = "“I don’t even care about the game,” the narrator recalled."
+        evidence = "Reported quotation embedded in the narrator’s account; it is not a live utterance in the active scene."
+        document = {
+            "schema_version": 1,
+            "info": {
+                "Series Name": "Silver Archive",
+                "Book Title": "The Silver Archive",
+                "Chapter ID": "chapter-001",
+                "Chapter Revision": "revision-narration-proposal",
+            },
+            "_active_chapter_text": source,
+            "characters": [],
+            "dialogue_rows": [{
+                "Passage ID": "ps-reported-quote",
+                "Chapter ID": "chapter-001",
+                "Chapter Revision (Reference)": "revision-narration-proposal",
+                "Passage Type": "Dialogue",
+                "Dialogue Text": source,
+                "GPT Assigned Character": "Narrator",
+                "GPT Confidence (0–1)": "",
+                "GPT Assigned Characters (JSON)": "",
+                "Evidence / Notes (GPT)": evidence,
+                "GPT Proposed Passage Type": "Narration",
+                "Start (Reference)": 0,
+                "End (Reference)": len(source),
+            }],
+        }
+        passage = {
+            "passage_id": "ps-reported-quote",
+            "chapter_id": "chapter-001",
+            "chapter_number": 1,
+            "chapter_title": "The Arrival",
+            "chapter_revision": "revision-narration-proposal",
+            "start": 0,
+            "end": len(source),
+            "text": source,
+            "kind": "needs_speaker_review",
+        }
+        plan = plan_character_workbook_import(
+            document,
+            series="Silver Archive",
+            book_title="The Silver Archive",
+            registry_rows=[],
+            project_characters=[],
+            chapter_id="chapter-001",
+            chapter_revision="revision-narration-proposal",
+            current_passages=[passage],
+            current_assignments=[],
+        )
+        self.assertTrue(plan["ready"], plan["issues"])
+        self.assertTrue(plan["partial_ready"])
+        self.assertEqual(plan["assignments"][0]["speaker"], "Narrator")
+        self.assertTrue(plan["assignments"][0]["classification_only"])
+        self.assertEqual(plan["summary"]["dialogue_assignments"], 0)
+        self.assertEqual(plan["summary"]["narration_reclassifications"], 1)
+        self.assertEqual(plan["passage_reclassifications"][0]["reason"], evidence)
+        diagnostics = character_workbook_assignment_diagnostics(document, plan)
+        self.assertEqual(diagnostics["verified_dialogue_assignments"], 0)
+        self.assertEqual(diagnostics["verified_narration_reclassifications"], 1)
+
+        manual = {
+            "start": 0,
+            "end": len(source),
+            "text": source,
+            "speaker": "Mira",
+            "speakers": ["Mira"],
+            "source": "manual",
+        }
+        protected = plan_character_workbook_import(
+            document,
+            series="Silver Archive",
+            book_title="The Silver Archive",
+            registry_rows=[],
+            project_characters=[],
+            chapter_id="chapter-001",
+            chapter_revision="revision-narration-proposal",
+            current_passages=[passage],
+            current_assignments=[manual],
+        )
+        self.assertFalse(protected["ready"])
+        self.assertEqual(protected["assignments"], [])
+        self.assertEqual(protected["superseded_assignments"], [])
+        self.assertTrue(any("protected manual/unknown speaker assignment" in issue for issue in protected["issues"]))
+
+        for incorrect_speaker in ("Third Person", "Mira"):
+            invalid_document = {
+                **document,
+                "dialogue_rows": [{
+                    **document["dialogue_rows"][0],
+                    "GPT Assigned Character": incorrect_speaker,
+                }],
+            }
+            invalid = plan_character_workbook_import(
+                invalid_document,
+                series="Silver Archive",
+                book_title="The Silver Archive",
+                registry_rows=[],
+                project_characters=[],
+                chapter_id="chapter-001",
+                chapter_revision="revision-narration-proposal",
+                current_passages=[passage],
+                current_assignments=[],
+            )
+            self.assertFalse(invalid["ready"])
+            self.assertEqual(invalid["assignments"], [])
+            self.assertTrue(any("proposes Narration" in issue for issue in invalid["issues"]))
+
+        stale_document = {
+            **document,
+            "dialogue_rows": [{
+                **document["dialogue_rows"][0],
+                "Dialogue Text": "A different line with the same workbook identity.",
+            }],
+        }
+        stale = plan_character_workbook_import(
+            stale_document,
+            series="Silver Archive",
+            book_title="The Silver Archive",
+            registry_rows=[],
+            project_characters=[],
+            chapter_id="chapter-001",
+            chapter_revision="revision-narration-proposal",
+            current_passages=[passage],
+            current_assignments=[],
+        )
+        self.assertFalse(stale["ready"])
+        self.assertEqual(stale["assignments"], [])
+        self.assertTrue(any("could not be safely matched" in issue for issue in stale["issues"]))
 
     def test_import_plan_accepts_exact_unchanged_dialogue_to_narrator_reclassification(self):
         source = "She remembered the words: “You must leave before dawn.”"

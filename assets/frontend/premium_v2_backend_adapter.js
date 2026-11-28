@@ -4679,32 +4679,44 @@
     const assignmentDiagnostics = preview?.assignment_diagnostics && typeof preview.assignment_diagnostics === 'object'
       ? preview.assignment_diagnostics : {};
     const verifiedAssignments = Number(assignmentDiagnostics.verified_dialogue_assignments ?? partialSummary.dialogue_assignments ?? 0);
+    const proposedNarrationReclassifications = Number(assignmentDiagnostics.proposed_narration_reclassifications || partialSummary.narration_reclassifications || 0);
+    const verifiedNarrationReclassifications = Number(assignmentDiagnostics.verified_narration_reclassifications || partialSummary.narration_reclassifications || 0);
     const gptSpeakerRows = Number(assignmentDiagnostics.dialogue_rows_with_gpt_speakers || 0);
     const mappedSpeakerRows = Number(assignmentDiagnostics.speaker_rows_exactly_mapped || 0);
     const unmappedSpeakerRows = Number(assignmentDiagnostics.speaker_rows_unmapped || 0);
     const workbookDialogueRows = Number(assignmentDiagnostics.dialogue_rows || 0);
     const registerEntries = Number(assignmentDiagnostics.character_register_entries ?? partialSummary.characters ?? 0);
-    const canPartialImport = preview?.partial_ready === true && verifiedAssignments > 0 && Boolean(String(preview?.token || '').trim());
+    const canPartialImport = preview?.partial_ready === true &&
+      (verifiedAssignments > 0 || verifiedNarrationReclassifications > 0) &&
+      Boolean(String(preview?.token || '').trim());
     const partialImportButton = canPartialImport
       ? '<button type="button" class="btn" data-workbook-import-partial>Assign the GPT characters · ' +
-        Number(partialSummary.dialogue_assignments || 0) + ' verified assignments · ' +
+        Number(partialSummary.dialogue_assignments || 0) + ' speaker assignments · ' +
+        Number(partialSummary.narration_reclassifications || 0) + ' narration reclassifications · ' +
         Number(partialSummary.characters || 0) + ' identities</button>'
       : '';
-    const assignmentDiagnosticsMessage = gptSpeakerRows === 0
-      ? 'The Excel workbook was read successfully, but its Dialogue Assignment sheet contains zero GPT Assigned Character values. ' +
-        registerEntries + ' Character Register entries are only a cast list; they do not assign dialogue. GPT has not filled the speaker cells, so there are zero dialogue assignments to save. Return the workbook to GPT and fill GPT Assigned Character on each supported Dialogue row (and GPT Assigned Characters (JSON) for simultaneous speakers). Do not only populate Character Register.'
-      : verifiedAssignments === 0
-        ? 'The workbook contains ' + gptSpeakerRows + ' dialogue rows with GPT speaker names, but none passed the source, identity and confidence checks for assignment. ' +
-          'The Character Register has ' + registerEntries + ' entries; those entries alone cannot assign passages.'
-        : 'The workbook contains ' + workbookDialogueRows + ' dialogue rows; GPT speaker names were found in ' + gptSpeakerRows +
-          ', exact source mapping passed for ' + mappedSpeakerRows + ', and ' + verifiedAssignments +
-          ' dialogue assignments are ready to save. Character Register entries: ' + registerEntries + '.';
+    const assignmentDiagnosticsMessage = gptSpeakerRows === 0 && proposedNarrationReclassifications === 0
+      ? 'The Excel workbook was read successfully, but its Dialogue Assignment sheet contains zero GPT speaker assignments or Narration classification proposals. ' +
+        registerEntries + ' Character Register entries are only a cast list; they do not assign dialogue. Return the workbook to GPT and fill GPT Assigned Character on each actual spoken Dialogue row, or propose Narration for a source-verified non-spoken row. Do not only populate Character Register.'
+      : verifiedAssignments === 0 && verifiedNarrationReclassifications > 0
+        ? 'No character speaker assignments are being applied, but ' + verifiedNarrationReclassifications +
+          ' exact-source Dialogue rows are explicitly classified as Narration. These rows will be saved as Narrator, not Third Person or a new character. Character Register entries: ' + registerEntries + '.'
+        : verifiedAssignments === 0 && proposedNarrationReclassifications > 0 && verifiedNarrationReclassifications === 0
+          ? 'The workbook contains ' + proposedNarrationReclassifications + ' proposed Dialogue → Narration classifications, but none passed exact-source, Narrator-role and evidence validation. Those passages will remain unchanged until corrected.'
+          : verifiedAssignments === 0
+            ? 'The workbook contains ' + gptSpeakerRows + ' dialogue rows with GPT speaker names, but none passed the source, identity and confidence checks for assignment. ' +
+              'The Character Register has ' + registerEntries + ' entries; those entries alone cannot assign passages.'
+            : 'The workbook contains ' + workbookDialogueRows + ' dialogue rows; GPT speaker names were found in ' + gptSpeakerRows +
+            ', exact source mapping passed for ' + mappedSpeakerRows + ', and ' + verifiedAssignments +
+            ' actual speaker assignments are ready to save, with ' + verifiedNarrationReclassifications +
+            ' verified Dialogue → Narration reclassifications. Character Register entries: ' + registerEntries + '.';
     const assignmentDiagnosticsHtml = '<div class="ryu-workbook-review-result"><b>Workbook → speaker assignment check</b><p>' +
       esc(assignmentDiagnosticsMessage) + '</p><p>Dialogue rows: ' + workbookDialogueRows +
       ' · GPT speaker rows: ' + gptSpeakerRows +
       ' · Exact source-mapped speaker rows: ' + mappedSpeakerRows +
       ' · Unmapped speaker rows: ' + unmappedSpeakerRows +
-      ' · Verified assignments: ' + verifiedAssignments +
+      ' · Verified speaker assignments: ' + verifiedAssignments +
+      ' · Verified Narration reclassifications: ' + verifiedNarrationReclassifications +
       ' · Character Register entries: ' + registerEntries + '</p></div>';
     const unmatchedWorkbookHtml = unmatchedWorkbookRows.length
       ? '<details class="ryu-workbook-issues" open><summary>GPT workbook rows needing source reconciliation (' +
@@ -4867,7 +4879,8 @@
         const prompt =
           'Import only the verified entries from this workbook?\n\n' +
           'Character identities to merge/create: ' + Number(safe.characters || 0) + '\n' +
-          'Exact dialogue assignments to add: ' + Number(safe.dialogue_assignments || 0) + '\n' +
+          'Exact dialogue speaker assignments to add: ' + Number(safe.dialogue_assignments || 0) + '\n' +
+          'Source-verified Dialogue → Narration reclassifications: ' + Number(safe.narration_reclassifications || 0) + '\n' +
           'Source-verified stale AI records to retire: ' + Number(safe.stale_assignments_to_retire || 0) + '\n' +
           'Source-verified wording corrections: ' + Number(safe.text_corrections || 0) + '\n' +
           'Unresolved items to leave unchanged: ' + Number(safe.skipped_issues || preview.issue_count || 0) +
@@ -4895,7 +4908,8 @@
               : ' into Chapter ' + Number(result.chapter_number || 0)) +
             ' · ' + Number(result.characters_merged || 0) + ' identities merged · ' +
             Number(result.characters_created || 0) + ' new identities · ' +
-            Number(result.dialogue_assignments || 0) + ' dialogue assignments added. ' +
+            Number(result.dialogue_assignments || 0) + ' dialogue speaker assignments added · ' +
+            Number(result.narration_reclassifications || 0) + ' Dialogue → Narration reclassifications applied. ' +
             skipped + ' unresolved item(s) were skipped and left unchanged. Existing manual assignments and voice profiles were preserved.';
           message(confirmation);
           const skippedLines = (Array.isArray(result.skipped_issues) ? result.skipped_issues : [])
@@ -5165,14 +5179,16 @@
     const reclassifications = Array.isArray(preview.passage_reclassifications) ? preview.passage_reclassifications : [];
     const reclassificationLines = reclassifications.map(row =>
       'Chapter ' + Number(row.chapter_number || 0) + ' · ' + String(row.chapter_title || 'Untitled') +
-      ' · ' + String(row.passage_id || '') + ' Dialogue → Narration (exact source span)'
+      ' · ' + String(row.passage_id || '') + ' Dialogue → Narration (exact source span)' +
+      (String(row.reason || '').trim() ? '\\nReason: ' + String(row.reason).trim() : '')
     );
     const assignmentDiagnostics = preview.assignment_diagnostics || {};
     const assignmentCheck =
       'Dialogue rows in workbook: ' + Number(assignmentDiagnostics.dialogue_rows || 0) + '\n' +
       'Rows with GPT speaker values: ' + Number(assignmentDiagnostics.dialogue_rows_with_gpt_speakers || 0) + '\n' +
       'Speaker rows mapped to exact source passages: ' + Number(assignmentDiagnostics.speaker_rows_exactly_mapped || 0) + '\n' +
-      'Verified dialogue assignments to save: ' + Number(assignmentDiagnostics.verified_dialogue_assignments || summary.dialogue_assignments || 0) + '\n' +
+      'Verified dialogue speaker assignments to save: ' + Number(assignmentDiagnostics.verified_dialogue_assignments || summary.dialogue_assignments || 0) + '\n' +
+      'Verified Dialogue → Narration reclassifications to save: ' + Number(assignmentDiagnostics.verified_narration_reclassifications || summary.narration_reclassifications || 0) + '\n' +
       'Character Register identities: ' + Number(assignmentDiagnostics.character_register_entries || summary.characters_in_register || 0);
     const prompt = 'Assign the GPT characters in Series "' + preview.series +
       '" · ' + importScope + '?\n\n' + assignmentCheck + '\n\n' +
@@ -5206,7 +5222,8 @@
     const confirmation = 'GPT characters assigned to the Series Character Library and novel' + importedScope + ' · ' +
       result.characters_merged + ' identities merged · ' + result.characters_created +
       ' new identities · ' + result.aliases_merged + ' aliases reconciled · ' +
-      result.dialogue_assignments + ' dialogue assignments added · ' +
+      result.dialogue_assignments + ' dialogue speaker assignments added · ' +
+      Number(result.narration_reclassifications || 0) + ' Dialogue → Narration reclassifications applied · ' +
       Number(result.saved_assignments_replaced || 0) + ' stale AI/outsourced assignments replaced · ' +
       Number(result.text_corrections_applied || 0) + ' GPT source-text corrections applied. Existing voice profiles and manual assignments were preserved.';
     message(confirmation);

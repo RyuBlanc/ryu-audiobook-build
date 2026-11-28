@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 from zipfile import ZIP_DEFLATED, ZipFile
 from xml.etree import ElementTree as ET
 
+from app.chapters.speaker_segmentation import segment_chapter_speakers
 from app.core.character_library import list_characters
 from app.core.character_workbook import (
     character_workbook_plan_fingerprint,
@@ -989,8 +990,9 @@ class CharacterWorkbookImportTransactionTests(unittest.TestCase):
             folder = Path(tmp)
             first_dialogue = "“Mira, listen!”"
             second_dialogue = "“Captain Mira, wait!”"
+            reported_quote = "“I don’t even care about the sex scenes or whatever”"
             first_text = first_dialogue + "\nThe corridor was silent."
-            second_text = second_dialogue + "\nShe turned back."
+            second_text = second_dialogue + "\n" + reported_quote + "\nShe turned back."
 
             def make_passage(passage_id, chapter_id, number, title, revision, source, text, kind):
                 start = text.index(source)
@@ -1016,6 +1018,8 @@ class CharacterWorkbookImportTransactionTests(unittest.TestCase):
             second_passages = [
                 make_passage("p2-dialogue", "chapter-002", 2, "The Warning", "revision-002",
                              second_dialogue, second_text, "character_dialogue"),
+                make_passage("p2-reported-quote", "chapter-002", 2, "The Warning", "revision-002",
+                             reported_quote, second_text, "needs_speaker_review"),
                 make_passage("p2-narration", "chapter-002", 2, "The Warning", "revision-002",
                              "She turned back.", second_text, "narration"),
             ]
@@ -1096,6 +1100,17 @@ class CharacterWorkbookImportTransactionTests(unittest.TestCase):
                             set_inline_cell(sheet, row_number, "G%d" % row_number, speaker)
                             set_inline_cell(sheet, row_number, "H%d" % row_number, confidence)
                             set_inline_cell(sheet, row_number, "O%d" % row_number, evidence)
+                        # Row 5 is a reported quotation, not an independently spoken turn.
+                        # GPT proposes Narration in its separate answer column; all source
+                        # identity, text, type and offsets remain untouched.
+                        set_inline_cell(
+                            sheet, 5, "G5", "Narrator",
+                        )
+                        set_inline_cell(
+                            sheet, 5, "O5",
+                            "Reported general statement embedded in the narrator's explanation; not a live utterance by a character.",
+                        )
+                        set_inline_cell(sheet, 5, "T5", "Narration")
                         data = ET.tostring(sheet, encoding="utf-8", xml_declaration=True)
                     elif item.filename == sheet_targets["Character Register"]:
                         sheet = ET.fromstring(data)
@@ -1107,7 +1122,14 @@ class CharacterWorkbookImportTransactionTests(unittest.TestCase):
 
             # Exercise the real XLSX reader and complete-book planner, not a handcrafted plan.
             document = read_character_workbook(completed_path)
-            self.assertEqual(len(document["dialogue_rows"]), 4)
+            self.assertEqual(len(document["dialogue_rows"]), 5)
+            reported_row = next(
+                row for row in document["dialogue_rows"]
+                if row["Passage ID"] == "p2-reported-quote"
+            )
+            self.assertEqual(reported_row["Passage Type"], "Dialogue")
+            self.assertEqual(reported_row["GPT Proposed Passage Type"], "Narration")
+            self.assertEqual(reported_row["GPT Assigned Character"], "Narrator")
             self.assertEqual(document["characters"][0]["full_name"], "Mira")
             self.assertEqual(document["characters"][0]["aliases"], ["Captain Mira"])
             plan = plan_complete_book_character_workbook_import(
@@ -1124,9 +1146,11 @@ class CharacterWorkbookImportTransactionTests(unittest.TestCase):
                 [
                     ("chapter-001", "p1-dialogue", "Third Person"),
                     ("chapter-002", "p2-dialogue", "Mira"),
+                    ("chapter-002", "p2-reported-quote", "Narrator"),
                 ],
             )
             self.assertEqual(plan["summary"]["dialogue_assignments"], 2)
+            self.assertEqual(plan["summary"]["narration_reclassifications"], 1)
             self.assertEqual(plan["summary"]["third_person_assignments"], 1)
 
             first_live = SimpleNamespace(
@@ -1192,17 +1216,33 @@ class CharacterWorkbookImportTransactionTests(unittest.TestCase):
             self.assertEqual(result["chapter_count"], 2)
             self.assertEqual(result["chapters_updated"], 2)
             self.assertEqual(result["dialogue_assignments"], 2)
+            self.assertEqual(result["narration_reclassifications"], 1)
             self.assertEqual(len(first_live.dialogue_assignments), 1)
-            self.assertEqual(len(second_live.dialogue_assignments), 1)
+            self.assertEqual(len(second_live.dialogue_assignments), 2)
             self.assertEqual(first_live.dialogue_assignments[0]["speaker"], "Third Person")
             self.assertTrue(first_live.dialogue_assignments[0]["third_person_pending"])
-            self.assertEqual(second_live.dialogue_assignments[0]["speaker"], "Mira")
+            self.assertEqual(
+                [row["speaker"] for row in second_live.dialogue_assignments],
+                ["Mira", "Narrator"],
+            )
             self.assertEqual(first_live.dialogue_assignments[0]["source"], "outsourced")
-            self.assertEqual(second_live.dialogue_assignments[0]["source"], "outsourced")
+            self.assertTrue(all(row["source"] == "outsourced" for row in second_live.dialogue_assignments))
+            narrator_segments = [
+                row for row in segment_chapter_speakers(second_live)
+                if row.start == second_text.index(reported_quote)
+                and row.end == second_text.index(reported_quote) + len(reported_quote)
+            ]
+            self.assertEqual(len(narrator_segments), 1)
+            self.assertEqual(narrator_segments[0].kind, "narration")
+            self.assertEqual(narrator_segments[0].speaker, "Narrator")
             saved_chapters = json.loads((folder / "chapters.json").read_text(encoding="utf-8"))
             self.assertEqual(
-                [row["dialogue_assignments"][0]["speaker"] for row in saved_chapters],
-                ["Third Person", "Mira"],
+                [row["speaker"] for row in saved_chapters[0]["dialogue_assignments"]],
+                ["Third Person"],
+            )
+            self.assertEqual(
+                [row["speaker"] for row in saved_chapters[1]["dialogue_assignments"]],
+                ["Mira", "Narrator"],
             )
             self.assertEqual(len(state["characters"]), 1)
             self.assertEqual(

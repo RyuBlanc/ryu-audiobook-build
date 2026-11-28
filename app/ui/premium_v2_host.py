@@ -5668,7 +5668,7 @@ class PremiumV2Bridge(QObject):
         if clipboard is None:
             raise RuntimeError("The system clipboard is unavailable. Open a complete-book workbook and copy the prompt from its GPT Prompt sheet.")
         clipboard.setText(prompt)
-        return {"copied": True, "prompt_version": "2.4", "characters": len(prompt)}
+        return {"copied": True, "prompt_version": "2.5", "characters": len(prompt)}
 
     def _character_workbook_export(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Export a complete-book GPT workbook, retaining chapter export compatibility."""
@@ -6428,8 +6428,17 @@ class PremiumV2Bridge(QObject):
             "plan_sha256": character_workbook_plan_fingerprint(plan),
             "partial_allowed": False,
         }
+        def is_narrator_only_assignment(assignment: dict[str, Any]) -> bool:
+            raw = assignment.get("speakers")
+            if not isinstance(raw, (list, tuple)):
+                raw = [assignment.get("speaker")] if assignment.get("speaker") else []
+            names = [str(value).strip() for value in raw if str(value or "").strip()]
+            return bool(names) and all(name.casefold() == "narrator" for name in names)
+
         assignment_groups: dict[str, dict[str, Any]] = {}
         for assignment in plan.get("assignments") or []:
+            if is_narrator_only_assignment(assignment):
+                continue
             raw_speakers = assignment.get("speakers")
             if not isinstance(raw_speakers, (list, tuple)):
                 raw_speakers = [assignment.get("speaker")] if assignment.get("speaker") else []
@@ -6454,7 +6463,10 @@ class PremiumV2Bridge(QObject):
                 "chapter_number": int(row.get("chapter_number") or 0),
                 "chapter_title": str(row.get("chapter_title") or ""),
                 "passage_count": int(row.get("passage_count") or 0),
-                "assignment_count": len(row.get("assignments") or []),
+                "assignment_count": sum(
+                    1 for assignment in (row.get("assignments") or [])
+                    if not is_narrator_only_assignment(assignment)
+                ),
             }
             for row in plan.get("chapter_assignments", [])
         ]
@@ -6463,7 +6475,10 @@ class PremiumV2Bridge(QObject):
                 "chapter_number": int(chapter.number),
                 "chapter_title": str(chapter.title or ""),
                 "passage_count": len(document.get("dialogue_rows") or []),
-                "assignment_count": len(plan.get("assignments") or []),
+                "assignment_count": sum(
+                    1 for assignment in (plan.get("assignments") or [])
+                    if not is_narrator_only_assignment(assignment)
+                ),
             }]
         return {
             "cancelled": False, "ready": True, "token": token,
@@ -6982,7 +6997,15 @@ class PremiumV2Bridge(QObject):
                 "chapters_updated": len(assignments_by_chapter),
                 "characters_merged": int(plan["summary"]["matched_characters"]),
                 "characters_created": int(plan["summary"]["new_characters"]),
-                "dialogue_assignments": len(plan["assignments"]),
+                "dialogue_assignments": sum(
+                    1 for row in (plan.get("assignments") or [])
+                    if not all(
+                        str(name).strip().casefold() == "narrator"
+                        for name in (row.get("speakers") or [row.get("speaker")])
+                        if str(name or "").strip()
+                    )
+                ),
+                "narration_reclassifications": len(plan.get("passage_reclassifications") or []),
                 "saved_assignments_replaced": len(plan.get("superseded_assignments") or []),
                 "text_corrections_applied": text_corrections_applied,
                 "passage_reclassifications": len(plan.get("passage_reclassifications") or []),
