@@ -1694,26 +1694,6 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
     active_chapter_text = str(document.get("_active_chapter_text") or "")
     stale_assignment_reviewed = set()
 
-    def stale_ai_assignment_source_matches(start, end, source):
-        """Require every duplicate AI record for a stale span to match the active chapter source."""
-        if not active_chapter_text or start < 0 or end <= start or end > len(active_chapter_text):
-            return False
-        exact_source = active_chapter_text[start:end]
-        candidates = [
-            row for row in assignments_by_span.get((start, end), [])
-            if _clean(row.get("source") or "manual").casefold() == source
-        ]
-        if not candidates:
-            return False
-        for candidate in candidates:
-            saved_text = str(candidate.get("text") or "")
-            if saved_text and saved_text != exact_source:
-                return False
-            saved_revision = _clean(candidate.get("chapter_revision"))
-            if not saved_text and saved_revision and _clean(chapter_revision) and saved_revision != _clean(chapter_revision):
-                return False
-        return True
-
     def stale_ai_span_has_complete_current_coverage(start, end, impacted_passages):
         """Prove that current, source-exact passages cover a legacy AI span before retiring it."""
         if not active_chapter_text or start < 0 or end <= start or end > len(active_chapter_text):
@@ -2261,10 +2241,9 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
 
                 if not claim_stale_assignment_review(saved_start, saved_end, saved_source):
                     continue
-                # A stale AI/outsourced span may be retired only after its
-                # complete range is covered by current source-exact passages and
-                # every impacted Dialogue passage has a verified identity below.
-                # A stale stored snippet alone is not a reason to block safe rebasing.
+                # A stale AI/outsourced span may be retired only after its entire
+                # range is covered by current source-exact passages. The saved AI
+                # snippet may be obsolete; exact current coverage is authoritative.
 
                 # A stale AI/outsourced span may be retired when every current
                 # passage it touches is Narration. If it also touches Dialogue,
@@ -2311,13 +2290,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                         % (saved_start, saved_end)
                     )
                     continue
-                if (
-                    not stale_ai_assignment_source_matches(saved_start, saved_end, saved_source)
-                    and (
-                        not impacted_dialogue
-                        or not stale_ai_span_has_complete_current_coverage(saved_start, saved_end, impacted_passages)
-                    )
-                ):
+                if not stale_ai_span_has_complete_current_coverage(saved_start, saved_end, impacted_passages):
                     issues.append(
                         "Stale AI/outsourced assignment at %s:%s does not match the exact active chapter source or is not fully covered by exact current source passages. "
                         "It was preserved; resolve the source mapping before importing."
@@ -2466,13 +2439,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                 )
                 overlap_blocked = True
                 continue
-            if (
-                not stale_ai_assignment_source_matches(saved_start, saved_end, saved_source)
-                and (
-                    not impacted_dialogue
-                    or not stale_ai_span_has_complete_current_coverage(saved_start, saved_end, impacted_passages)
-                )
-            ):
+            if not stale_ai_span_has_complete_current_coverage(saved_start, saved_end, impacted_passages):
                 issues.append(
                     "Stale AI/outsourced assignment at %s:%s does not match the exact active chapter source or is not fully covered by exact current source passages. "
                     "It was preserved; resolve the source mapping before importing."

@@ -2357,8 +2357,8 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
         self.assertEqual(plan["superseded_assignments"], [])
         self.assertTrue(any("Dialogue passages without confirmed speakers: ps-dialogue" in issue for issue in plan["issues"]))
 
-    def test_stale_ai_narration_cleanup_fails_closed_when_saved_text_is_not_current(self):
-        source = "The narrator describes the old scene."
+    def test_stale_ai_narration_cleanup_retires_mismatched_saved_text_when_exact_coverage_exists(self):
+        source = "The narrator describes the current scene."
         document = {
             "schema_version": 1,
             "info": {"Series Name": "Silver Archive", "Book Title": "The Silver Archive",
@@ -2377,16 +2377,54 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             "start": 0, "end": len(source), "text": source, "kind": "narration",
             "source": "automatic_non_dialogue",
         }]
+        # The old saved snippet is obsolete, but the entire old source range is
+        # covered by the exact current Narration passage.
+        stale = {"start": 0, "end": len(source), "text": "obsolete saved AI text",
+                 "speaker": "Legacy AI speaker", "source": "ai"}
         plan = plan_character_workbook_import(
             document, series="Silver Archive", book_title="The Silver Archive",
             registry_rows=[], project_characters=[], chapter_id="chapter-001",
             chapter_revision="revision-001", current_passages=passages,
-            current_assignments=[{"start": 0, "end": len(source), "text": "different stale text",
-                                  "speaker": "Legacy AI speaker", "source": "ai"}],
+            current_assignments=[stale],
+        )
+        self.assertTrue(plan["ready"], plan["issues"])
+        self.assertEqual(plan["assignments"], [])
+        self.assertEqual(len(plan["superseded_assignments"]), 1)
+        self.assertEqual(plan["superseded_assignments"][0]["start"], 0)
+        self.assertEqual(plan["superseded_assignments"][0]["end"], len(source))
+
+    def test_stale_ai_narration_cleanup_fails_closed_when_exact_coverage_is_incomplete(self):
+        source = "The narrator describes the current scene. Uncovered legacy source remains."
+        covered = "The narrator describes the current scene."
+        document = {
+            "schema_version": 1,
+            "info": {"Series Name": "Silver Archive", "Book Title": "The Silver Archive",
+                     "Chapter ID": "chapter-001", "Chapter Revision": "revision-001"},
+            "characters": [], "_active_chapter_text": source,
+            "dialogue_rows": [{
+                "Passage ID": "ps-narration", "Chapter ID": "chapter-001",
+                "Chapter Revision (Reference)": "revision-001", "Passage Type": "Narration",
+                "Dialogue Text": covered, "GPT Assigned Character": "Narrator",
+                "Start (Reference)": 0, "End (Reference)": len(covered),
+            }],
+        }
+        passages = [{
+            "passage_id": "ps-narration", "chapter_id": "chapter-001", "chapter_number": 1,
+            "chapter_title": "The Opening", "chapter_revision": "revision-001",
+            "start": 0, "end": len(covered), "text": covered, "kind": "narration",
+            "source": "automatic_non_dialogue",
+        }]
+        stale = {"start": 0, "end": len(source), "text": "obsolete saved AI text",
+                 "speaker": "Legacy AI speaker", "source": "ai"}
+        plan = plan_character_workbook_import(
+            document, series="Silver Archive", book_title="The Silver Archive",
+            registry_rows=[], project_characters=[], chapter_id="chapter-001",
+            chapter_revision="revision-001", current_passages=passages,
+            current_assignments=[stale],
         )
         self.assertFalse(plan["ready"])
         self.assertEqual(plan["superseded_assignments"], [])
-        self.assertTrue(any("does not match the exact active chapter source" in issue for issue in plan["issues"]))
+        self.assertTrue(any("not fully covered by exact current source passages" in issue for issue in plan["issues"]))
 
     def test_manual_and_unknown_source_assignments_are_never_retired_as_stale_ai(self):
         source = "The narrator describes the quiet room."
