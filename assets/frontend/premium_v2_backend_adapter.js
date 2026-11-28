@@ -4676,12 +4676,36 @@
       ? preview.unmatched_workbook_rows : [];
     const partialSummary = preview?.partial_summary && typeof preview.partial_summary === 'object'
       ? preview.partial_summary : {};
-    const canPartialImport = preview?.partial_ready === true && Boolean(String(preview?.token || '').trim());
+    const assignmentDiagnostics = preview?.assignment_diagnostics && typeof preview.assignment_diagnostics === 'object'
+      ? preview.assignment_diagnostics : {};
+    const verifiedAssignments = Number(assignmentDiagnostics.verified_dialogue_assignments ?? partialSummary.dialogue_assignments ?? 0);
+    const gptSpeakerRows = Number(assignmentDiagnostics.dialogue_rows_with_gpt_speakers || 0);
+    const mappedSpeakerRows = Number(assignmentDiagnostics.speaker_rows_exactly_mapped || 0);
+    const unmappedSpeakerRows = Number(assignmentDiagnostics.speaker_rows_unmapped || 0);
+    const workbookDialogueRows = Number(assignmentDiagnostics.dialogue_rows || 0);
+    const registerEntries = Number(assignmentDiagnostics.character_register_entries ?? partialSummary.characters ?? 0);
+    const canPartialImport = preview?.partial_ready === true && verifiedAssignments > 0 && Boolean(String(preview?.token || '').trim());
     const partialImportButton = canPartialImport
       ? '<button type="button" class="btn" data-workbook-import-partial>Import verified entries · ' +
         Number(partialSummary.characters || 0) + ' identities · ' +
         Number(partialSummary.dialogue_assignments || 0) + ' assignments</button>'
       : '';
+    const assignmentDiagnosticsMessage = gptSpeakerRows === 0
+      ? 'The workbook was opened, but the Dialogue Assignment sheet contains no GPT speaker names. ' +
+        registerEntries + ' Character Register entries do not assign dialogue. No character-only partial import will be offered.'
+      : verifiedAssignments === 0
+        ? 'The workbook contains ' + gptSpeakerRows + ' dialogue rows with GPT speaker names, but none passed the source, identity and confidence checks for assignment. ' +
+          'The Character Register has ' + registerEntries + ' entries; those entries alone cannot assign passages.'
+        : 'The workbook contains ' + workbookDialogueRows + ' dialogue rows; GPT speaker names were found in ' + gptSpeakerRows +
+          ', exact source mapping passed for ' + mappedSpeakerRows + ', and ' + verifiedAssignments +
+          ' dialogue assignments are ready to save. Character Register entries: ' + registerEntries + '.';
+    const assignmentDiagnosticsHtml = '<div class="ryu-workbook-review-result"><b>Workbook → speaker assignment check</b><p>' +
+      esc(assignmentDiagnosticsMessage) + '</p><p>Dialogue rows: ' + workbookDialogueRows +
+      ' · GPT speaker rows: ' + gptSpeakerRows +
+      ' · Exact source-mapped speaker rows: ' + mappedSpeakerRows +
+      ' · Unmapped speaker rows: ' + unmappedSpeakerRows +
+      ' · Verified assignments: ' + verifiedAssignments +
+      ' · Character Register entries: ' + registerEntries + '</p></div>';
     const unmatchedWorkbookHtml = unmatchedWorkbookRows.length
       ? '<details class="ryu-workbook-issues" open><summary>GPT workbook rows needing source reconciliation (' +
         Number(unmatchedWorkbookRows.length) + (preview.unmatched_workbook_rows_truncated ? '+' : '') + ')</summary><ol>' +
@@ -4798,8 +4822,9 @@
         '</details>'
       : '';
     const content =
+      assignmentDiagnosticsHtml +
       (canPartialImport
-        ? '<p><b>Some workbook rows need review, but verified entries can still be imported.</b> Preflight found ' +
+        ? '<p><b>Some workbook rows need review, but verified dialogue assignments can still be imported.</b> Preflight found ' +
           Number(preview.issue_count || issues.length) +
           ' unresolved item(s). Import verified Character Register identities and exact source-matched assignments now; conflicting, stale or unmatched rows will remain unchanged and be reported.</p>'
         : '<p><b>The workbook was not imported.</b> Preflight found ' + Number(preview.issue_count || issues.length) +
