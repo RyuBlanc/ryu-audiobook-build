@@ -1428,6 +1428,10 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
         _clean(row.get("GPT Assigned Character"))
         or _clean(row.get("GPT Assigned Characters (JSON)"))
         or _clean(row.get("GPT Confidence (0–1)"))
+        or (
+            "actual live dialogue" in _clean(row.get("Evidence / Notes (GPT)")).casefold()
+            and "routed to third person fallback" in _clean(row.get("Evidence / Notes (GPT)")).casefold()
+        )
         for row in (document.get("dialogue_rows") or [])
         if isinstance(row, dict) and _clean(row.get("Passage Type")).casefold() == "dialogue"
     ) or bool(document.get("dialogue_split_corrections"))
@@ -1845,6 +1849,8 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             return []
         evidence = _clean(row.get("Evidence / Notes (GPT)")).casefold()
         if "structural split required" in evidence:
+            return []
+        if "actual live dialogue" not in evidence or "routed to third person fallback" not in evidence:
             return []
         return ["Third Person"]
 
@@ -2380,6 +2386,14 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                     issues.append(
                         "Dialogue passage %s is marked STRUCTURAL SPLIT REQUIRED but has no valid, exact-source-matched "
                         "Dialogue Split Corrections. Complete the split rows; the parent passage was not assigned to Third Person."
+                        % pid
+                    )
+                    continue
+                if "actual live dialogue" not in evidence or "routed to third person fallback" not in evidence:
+                    passage_excerpt = re.sub(r"\s+", " ", str(current.get("text") or "")).strip()[:120]
+                    issues.append(
+                        "Dialogue passage %s has no speaker assignment and no row-specific GPT evidence that it is an unidentified live utterance. "
+                        "Assign a source-supported character or explicitly mark the actual unidentified dialogue as Third Person."
                         % pid
                     )
                     continue

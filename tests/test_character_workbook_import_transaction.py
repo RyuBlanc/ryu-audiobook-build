@@ -1086,6 +1086,10 @@ class CharacterWorkbookImportTransactionTests(unittest.TestCase):
                         sheet = ET.fromstring(data)
                         # Rows 2 and 4 are the two dialogue passages in the complete-book export.
                         # GPT writes the speaker and evidence on the actual Dialogue Assignment rows.
+                        set_inline_cell(
+                            sheet, 2, "O2",
+                            "Actual live dialogue; no reliable personal or recurring-role identity established from the full scene; routed to Third Person fallback.",
+                        )
                         for row_number, speaker, confidence, evidence in (
                             (4, "Captain Mira", "0.96", "The continuing exchange and action beat identify Mira as the speaker."),
                         ):

@@ -1452,6 +1452,10 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                         row = root.find(".//%srow[@r='2']" % ns)
                         confidence = ET.SubElement(row, ns + "c", {"r": "H2"})
                         ET.SubElement(confidence, ns + "v").text = "0.97"
+                        set_inline_cell(
+                            root, 4, "O4",
+                            "Actual live dialogue; no reliable personal or recurring-role identity established from the full scene; routed to Third Person fallback.",
+                        )
                         data = ET.tostring(root, encoding="utf-8", xml_declaration=True)
                     elif item.filename == sheet_targets["Character Register"]:
                         root = ET.fromstring(data)
@@ -2028,6 +2032,11 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             chorus["GPT Multi-Speaker Mode"] = "chorus"
             chorus["GPT Confidence (0–1)"] = "0.98"
             chorus["Evidence / Notes (GPT)"] = "The exact scene says Mira and Kousuke speak simultaneously."
+            unidentified = next(row for row in document["dialogue_rows"] if row["Passage ID"] == "p2-dialogue")
+            unidentified["Evidence / Notes (GPT)"] = (
+                "Actual live dialogue; no reliable personal or recurring-role identity established "
+                "from the full scene; routed to Third Person fallback."
+            )
             manual = dict(chapters[0]["current_passages"][0])
             chapters[0]["current_assignments"] = [{
                 "start": manual["start"], "end": manual["end"], "text": manual["text"],
@@ -2047,6 +2056,36 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             self.assertEqual(imported["manual_saved_speakers"], ["Mira"])
             self.assertEqual(imported["outsourced_speakers"], ["Kousuke Takioto"])
             self.assertEqual(imported["visual_source"], "outsourced")
+
+    def test_blank_dialogue_without_row_specific_unidentified_evidence_is_not_third_person(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _path, chapters, _passages, document = self._complete_book_fixture(Path(tmp))
+            document["characters"] = [{
+                "full_name": "Mira", "aliases": ["Captain Mira"],
+                "version": "", "notes": "Confirmed from the full narrative.",
+                "included_in_book": True,
+            }]
+            for row in document["dialogue_rows"]:
+                if row["Passage ID"] == "p1-dialogue":
+                    row["GPT Assigned Character"] = "Mira"
+                    row["GPT Confidence (0–1)"] = "0.97"
+            plan = plan_complete_book_character_workbook_import(
+                document, series="Silver Archive", book_title="The Silver Archive",
+                registry_rows=[], project_characters=[], current_chapters=chapters,
+            )
+            self.assertFalse(plan["ready"])
+            self.assertEqual(
+                [(row["passage_id"], row["speaker"]) for row in plan["assignments"]],
+                [("p1-dialogue", "Mira")],
+            )
+            self.assertFalse(any(
+                row["passage_id"] == "p2-dialogue" and row["speaker"] == "Third Person"
+                for row in plan["assignments"]
+            ))
+            self.assertTrue(any(
+                "row-specific GPT evidence" in issue and "p2-dialogue" in issue
+                for issue in plan["issues"]
+            ))
 
     def test_complete_book_partial_import_keeps_confirmed_chapter_when_another_dialogue_is_unresolved(self):
         with tempfile.TemporaryDirectory() as tmp:
