@@ -1820,7 +1820,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                     document, metadata=metadata, chapters=changed, passages=passages,
                 )
 
-    def test_complete_book_import_blocks_any_dialogue_without_a_character(self):
+    def test_complete_book_partial_import_keeps_confirmed_chapter_when_another_dialogue_is_unresolved(self):
         with tempfile.TemporaryDirectory() as tmp:
             _path, chapters, _passages, document = self._complete_book_fixture(Path(tmp))
             document["characters"] = [{
@@ -1831,16 +1831,21 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 if row["Passage ID"] == "p1-dialogue":
                     row["GPT Assigned Character"] = "Mira"
                     row["GPT Confidence (0–1)"] = "0.97"
-            # p2-dialogue is deliberately left blank. Import must not silently
-            # accept the first chapter while omitting this second-chapter line.
+            # p2-dialogue is deliberately blank. The plan remains not-ready for a
+            # full import, but p1 is safe to include when the user selects the
+            # explicit partial-import action.
             plan = plan_complete_book_character_workbook_import(
                 document, series="Silver Archive", book_title="The Silver Archive",
                 registry_rows=[], project_characters=[], current_chapters=chapters,
             )
             self.assertFalse(plan["ready"])
-            self.assertEqual(plan["assignments"], [])
-            self.assertTrue(all(not chapter["assignments"] for chapter in plan["chapter_assignments"]))
-            self.assertEqual(plan["summary"]["dialogue_assignments"], 0)
+            self.assertTrue(plan["partial_ready"])
+            self.assertEqual([row["passage_id"] for row in plan["assignments"]], ["p1-dialogue"])
+            self.assertEqual(
+                [row["passage_id"] for chapter in plan["chapter_assignments"] for row in chapter["assignments"]],
+                ["p1-dialogue"],
+            )
+            self.assertEqual(plan["summary"]["dialogue_assignments"], 1)
             self.assertTrue(any(
                 "has no confirmed character assignment" in issue and "p2-dialogue" in issue
                 for issue in plan["issues"]
@@ -2434,6 +2439,92 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
         self.assertIn("global third person fallback voice", parsed["speaker_roles"][0]["Application Routing"].casefold())
         self.assertEqual(parsed["source_correction_history"][0]["User-Approved Source Text"], "“Hello, Mira!”")
 
+
+
+    def test_partial_import_plan_retains_verified_rows_when_other_dialogue_is_unresolved(self):
+        source = '“Mira, listen!” “Rina, wait!”'
+        first = '“Mira, listen!”'
+        second = '“Rina, wait!”'
+        first_start = source.index(first)
+        second_start = source.index(second)
+        revision = "revision-partial-001"
+        document = {
+            "schema_version": 1,
+            "info": {
+                "Series Name": "Silver Archive", "Book Title": "The Silver Archive",
+                "Chapter ID": "chapter-001", "Chapter Revision": revision,
+            },
+            "_active_chapter_text": source,
+            "characters": [{
+                "full_name": "Mira", "aliases": [], "version": "",
+                "notes": "Confirmed Character Register identity.", "included_in_book": True,
+            }],
+            "dialogue_rows": [
+                {
+                    "Passage ID": "ps-mira", "Chapter ID": "chapter-001",
+                    "Chapter Revision (Reference)": revision, "Passage Type": "Dialogue",
+                    "Dialogue Text": first, "GPT Assigned Character": "Mira",
+                    "GPT Confidence (0–1)": "0.99",
+                    "Start (Reference)": first_start, "End (Reference)": first_start + len(first),
+                },
+                {
+                    "Passage ID": "retired-unmatched", "Chapter ID": "chapter-001",
+                    "Chapter Revision (Reference)": revision, "Passage Type": "Dialogue",
+                    "Dialogue Text": "old unrelated wording", "GPT Assigned Character": "Mira",
+                    "GPT Confidence (0–1)": "0.91",
+                    "Start (Reference)": 100, "End (Reference)": 120,
+                },
+            ],
+        }
+        passages = [
+            {
+                "passage_id": "ps-mira", "chapter_id": "chapter-001", "chapter_number": 1,
+                "chapter_title": "The Opening", "chapter_revision": revision,
+                "start": first_start, "end": first_start + len(first), "text": first,
+                "kind": "character_dialogue", "assignment_state": "pending",
+            },
+            {
+                "passage_id": "ps-rina", "chapter_id": "chapter-001", "chapter_number": 1,
+                "chapter_title": "The Opening", "chapter_revision": revision,
+                "start": second_start, "end": second_start + len(second), "text": second,
+                "kind": "character_dialogue", "assignment_state": "pending",
+            },
+        ]
+        plan = plan_character_workbook_import(
+            document, series="Silver Archive", book_title="The Silver Archive",
+            registry_rows=[], project_characters=[], chapter_id="chapter-001",
+            chapter_revision=revision, current_passages=passages, current_assignments=[],
+        )
+        self.assertFalse(plan["ready"], plan["issues"])
+        self.assertTrue(plan["partial_ready"])
+        self.assertEqual([row["passage_id"] for row in plan["assignments"]], ["ps-mira"])
+        self.assertEqual([row["canonical_name"] for row in plan["characters"]], ["Mira"])
+        self.assertGreaterEqual(plan["partial_summary"]["skipped_issues"], 1)
+
+    def test_complete_book_partial_plan_keeps_verified_chapter_assignments(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _path, chapters, _passages, document = self._complete_book_fixture(Path(tmp))
+            document["characters"] = [{
+                "full_name": "Mira", "aliases": ["Captain Mira"], "version": "",
+                "notes": "Confirmed in the book.", "included_in_book": True,
+            }]
+            for row in document["dialogue_rows"]:
+                if row["Passage ID"] == "p1-dialogue":
+                    row["GPT Assigned Character"] = "Mira"
+                    row["GPT Confidence (0–1)"] = "0.98"
+                elif row["Passage ID"] == "p2-dialogue":
+                    row["GPT Assigned Character"] = "Mira"
+                    row["GPT Confidence (0–1)"] = "0.97"
+                    row["Dialogue Text"] = "This is no longer the active source span."
+            plan = plan_complete_book_character_workbook_import(
+                document, series="Silver Archive", book_title="The Silver Archive",
+                registry_rows=[], project_characters=[], current_chapters=chapters,
+            )
+            self.assertFalse(plan["ready"], plan["issues"])
+            self.assertTrue(plan["partial_ready"])
+            self.assertIn("p1-dialogue", [row["passage_id"] for row in plan["assignments"]])
+            self.assertNotIn("p2-dialogue", [row["passage_id"] for row in plan["assignments"]])
+            self.assertEqual(plan["summary"]["dialogue_assignments"], 1)
 
 if __name__ == "__main__":
     unittest.main()

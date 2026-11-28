@@ -4216,7 +4216,7 @@
         assignmentPresent:Boolean(assignment),
         assignmentSeries:String(assignment?.series || ''),
         assignmentSource:assignment
-          ? (String(assignment.source || 'manual').trim().toLowerCase() === 'ai' ? 'ai' : (String(assignment.source || '').trim().toLowerCase() === 'outsourced' ? 'outsourced' : 'manual'))
+          ? (String(assignment.visual_source || assignment.source || 'manual').trim().toLowerCase() === 'ai' ? 'ai' : (String(assignment.visual_source || assignment.source || '').trim().toLowerCase() === 'outsourced' ? 'outsourced' : 'manual'))
           : '',
         suggestions:suggestions.length ? suggestions : fallback
       });
@@ -4674,6 +4674,14 @@
     const issues = Array.isArray(preview?.issues) ? preview.issues : [];
     const unmatchedWorkbookRows = Array.isArray(preview?.unmatched_workbook_rows)
       ? preview.unmatched_workbook_rows : [];
+    const partialSummary = preview?.partial_summary && typeof preview.partial_summary === 'object'
+      ? preview.partial_summary : {};
+    const canPartialImport = preview?.partial_ready === true && Boolean(String(preview?.token || '').trim());
+    const partialImportButton = canPartialImport
+      ? '<button type="button" class="btn" data-workbook-import-partial>Import verified entries · ' +
+        Number(partialSummary.characters || 0) + ' identities · ' +
+        Number(partialSummary.dialogue_assignments || 0) + ' assignments</button>'
+      : '';
     const unmatchedWorkbookHtml = unmatchedWorkbookRows.length
       ? '<details class="ryu-workbook-issues" open><summary>GPT workbook rows needing source reconciliation (' +
         Number(unmatchedWorkbookRows.length) + (preview.unmatched_workbook_rows_truncated ? '+' : '') + ')</summary><ol>' +
@@ -4705,6 +4713,20 @@
     const cards = reviewItems.map((item,index) => {
       const isNarration = String(item.passage_type || '').toLowerCase() === 'narration';
       const canAssign = item.can_manual_assign === true && !isNarration && options.length > 0;
+      const confirmableSpeakers = Array.isArray(item.confirmable_speakers) ? item.confirmable_speakers : [];
+      const canConfirmSpeakerSet = item.can_confirm_speaker_set === true && confirmableSpeakers.length > 1;
+      const speakerSetHtml = canConfirmSpeakerSet
+        ? '<div class="ryu-workbook-field"><b>Confirm GPT multi-speaker set</b>' +
+          '<p class="ryu-workbook-review-result">The current passage text shown above will be used. Existing manual speakers stay locked; you can remove an unconfirmed GPT suggestion before saving.</p>' +
+          confirmableSpeakers.map((speaker,speakerIndex) =>
+            '<label style="display:flex;align-items:center;gap:8px;margin:7px 0"><input type="checkbox" data-workbook-review-speaker-set="' + index +
+            '" data-speaker-index="' + speakerIndex + '" checked' +
+            (speaker.protected ? ' disabled' : '') + '>' +
+            esc(speaker.canonical_name) + (speaker.protected ? ' · saved manual · protected' : ' · GPT proposed') +
+            '</label>'
+          ).join('') +
+          '<button type="button" class="btn small secondary" data-workbook-review-confirm-speakers="' + index + '">Confirm speaker set · preserve manual speakers</button></div>'
+        : '';
       const optionHtml = options.map((option,optionIndex) =>
         '<option value="' + optionIndex + '">' + esc(option.canonical_name) + ' · ' + esc(option.series) +
         (option.reserved_placeholder ? ' · reserved unidentified speaker; user confirmation required' : '') +
@@ -4732,15 +4754,17 @@
         (after ? '<p class="ryu-workbook-context"><b>After</b>\n' + esc(after) + '</p>' : '') +
         current + workbookNames + oldWorkbookNames +
         (reasons ? '<ul>' + reasons + '</ul>' : '') +
-        (canAssign
-          ? '<div class="ryu-workbook-field"><label for="ryuWorkbookSpeaker' + index + '"><b>Confirm this speaker from saved character identities</b></label>' +
-            '<select id="ryuWorkbookSpeaker' + index + '" data-workbook-review-speaker="' + index + '"><option value="">Choose a character…</option>' + optionHtml + '</select>' +
-            '<button type="button" class="btn small secondary" data-workbook-review-assign="' + index + '">Save manual assignment</button></div>'
-          : (isNarration
-            ? '<p class="ryu-workbook-review-result">This source passage is classified as narration. It must remain Narrator; review the passage classification rather than assigning a character here.</p>'
-            : (item.can_manual_assign && !options.length
-              ? '<p class="ryu-workbook-review-result">No saved series character identity is available yet. Create or add the confirmed identity in Character Studio / Character Library, then recheck this same workbook.</p>'
-              : '<p class="ryu-workbook-review-result">This row has an existing workbook or saved identity conflict. It is protected from automatic replacement; resolve that conflict in Character Studio.</p>'))) +
+        (canConfirmSpeakerSet
+          ? speakerSetHtml + '<p class="ryu-workbook-review-result">This speaker merge uses the current passage offsets and active source text. The older GPT wording correction remains unapplied until separately source-matched.</p>'
+          : (canAssign
+            ? '<div class="ryu-workbook-field"><label for="ryuWorkbookSpeaker' + index + '"><b>Confirm this speaker from saved character identities</b></label>' +
+              '<select id="ryuWorkbookSpeaker' + index + '" data-workbook-review-speaker="' + index + '"><option value="">Choose a character…</option>' + optionHtml + '</select>' +
+              '<button type="button" class="btn small secondary" data-workbook-review-assign="' + index + '">Save manual assignment</button></div>'
+            : (isNarration
+              ? '<p class="ryu-workbook-review-result">This source passage is classified as narration. It must remain Narrator; review the passage classification rather than assigning a character here.</p>'
+              : (item.can_manual_assign && !options.length
+                ? '<p class="ryu-workbook-review-result">No saved series character identity is available yet. Create or add the confirmed identity in Character Studio / Character Library, then recheck this same workbook.</p>'
+                : '<p class="ryu-workbook-review-result">This row has an existing workbook or saved identity conflict. It is protected from automatic replacement; resolve that conflict in Character Studio.</p>')))) +
         '<p class="ryu-workbook-review-result" data-workbook-review-result="' + index + '" aria-live="polite"></p>' +
       '</article>';
     }).join('');
@@ -4774,8 +4798,12 @@
         '</details>'
       : '';
     const content =
-      '<p><b>The workbook was not imported.</b> Preflight found ' + Number(preview.issue_count || issues.length) +
-      ' issue(s). No changes were committed. Review each passage below; context is taken from the active book, not inferred from the workbook alone.</p>' +
+      (canPartialImport
+        ? '<p><b>Some workbook rows need review, but verified entries can still be imported.</b> Preflight found ' +
+          Number(preview.issue_count || issues.length) +
+          ' unresolved item(s). Import verified Character Register identities and exact source-matched assignments now; conflicting, stale or unmatched rows will remain unchanged and be reported.</p>'
+        : '<p><b>The workbook was not imported.</b> Preflight found ' + Number(preview.issue_count || issues.length) +
+          ' issue(s). No changes were committed. Review each passage below; context is taken from the active book, not inferred from the workbook alone.</p>') +
       (reviewItems.length
         ? '<div class="ryu-workbook-review-list">' + cards + '</div>'
         : (unmatchedWorkbookRows.length
@@ -4791,6 +4819,7 @@
       'Review unresolved speaker attribution',
       content,
       '<button type="button" class="btn secondary" data-workbook-dialog-close>Done</button>' +
+      partialImportButton +
       '<button type="button" class="btn" data-workbook-review-retry>Recheck the same workbook</button>'
     );
     overlay.querySelectorAll('[data-workbook-review-speaker]').forEach(select => {
@@ -4807,6 +4836,136 @@
       });
     });
     overlay.addEventListener('click', async event => {
+      const partialButton = event.target?.closest?.('[data-workbook-import-partial]');
+      if (partialButton) {
+        const safe = preview.partial_summary || {};
+        const prompt =
+          'Import only the verified entries from this workbook?\n\n' +
+          'Character identities to merge/create: ' + Number(safe.characters || 0) + '\n' +
+          'Exact dialogue assignments to add: ' + Number(safe.dialogue_assignments || 0) + '\n' +
+          'Source-verified stale AI records to retire: ' + Number(safe.stale_assignments_to_retire || 0) + '\n' +
+          'Source-verified wording corrections: ' + Number(safe.text_corrections || 0) + '\n' +
+          'Unresolved items to leave unchanged: ' + Number(safe.skipped_issues || preview.issue_count || 0) +
+          '\n\nManual and unknown-source assignments remain protected. Unmatched source rows and their GPT suggestions are not applied. The safe subset is saved as one rollback-protected transaction. Continue?';
+        closeCharacterWorkbookDialog();
+        if (!await confirmCharacterWorkbookImport(prompt)) {
+          showCharacterWorkbookPreflightDialog(preview);
+          return;
+        }
+        try {
+          const result = await call('character.workbook.import.commit', {
+            token:String(preview.token || ''), allow_partial:true
+          });
+          await refreshChapters();
+          await refreshCharacters();
+          await refreshCharacterLibrary();
+          await refreshCharacterDialogueSuggestions();
+          renderCharacterStudioLive();
+          renderDialogueReview();
+          const skipped = Number(result.skipped_issue_count || 0);
+          const confirmation =
+            'Verified workbook entries imported' +
+            (result.scope === 'book'
+              ? ' across ' + Number(result.chapter_count || 0) + ' chapters'
+              : ' into Chapter ' + Number(result.chapter_number || 0)) +
+            ' · ' + Number(result.characters_merged || 0) + ' identities merged · ' +
+            Number(result.characters_created || 0) + ' new identities · ' +
+            Number(result.dialogue_assignments || 0) + ' dialogue assignments added. ' +
+            skipped + ' unresolved item(s) were skipped and left unchanged. Existing manual assignments and voice profiles were preserved.';
+          message(confirmation);
+          const skippedLines = (Array.isArray(result.skipped_issues) ? result.skipped_issues : [])
+            .slice(0, 40).map((issue,index) => (index + 1) + '. ' + String(issue)).join('\n');
+          const detail = confirmation + (skippedLines
+            ? '\n\nSkipped items (first ' + Math.min(40, skipped) + '):\n' + skippedLines
+            : '') + (result.skipped_issues_truncated ? '\n\nAdditional skipped issues remain unchanged.' : '');
+          showCharacterWorkbookMessageDialog('Verified entries imported', detail);
+        } catch (error) {
+          showCharacterWorkbookMessageDialog(
+            'Partial import was not completed',
+            (error?.message || String(error)) + '\n\nNo partial success is being claimed. Reopen the workbook review and check the latest report.'
+          );
+        }
+        return;
+      }
+
+      const mergeSpeakerButton = event.target?.closest?.('[data-workbook-review-confirm-speakers]');
+      if (mergeSpeakerButton) {
+        const index = Number(mergeSpeakerButton.getAttribute('data-workbook-review-confirm-speakers'));
+        const item = reviewItems[index];
+        const result = overlay.querySelector('[data-workbook-review-result="' + index + '"]');
+        const candidates = Array.isArray(item?.confirmable_speakers) ? item.confirmable_speakers : [];
+        const checked = [...overlay.querySelectorAll('[data-workbook-review-speaker-set="' + index + '"]:checked')];
+        const selected = checked.map(node => candidates[Number(node.getAttribute('data-speaker-index'))]).filter(Boolean);
+        const protectedNames = Array.isArray(item?.existing_speakers) ? item.existing_speakers : [];
+        const selectedKeys = new Set(selected.map(row => String(row.canonical_name || '').trim().toLowerCase()));
+        const missingProtected = protectedNames.filter(name => {
+          const key = String(name || '').trim().toLowerCase();
+          return !selectedKeys.has(key) && !selected.some(row =>
+            (Array.isArray(row.aliases) ? row.aliases : []).some(alias => String(alias || '').trim().toLowerCase() === key)
+          );
+        });
+        if (!item || item.existing_assignment_source !== 'manual' || missingProtected.length || selected.length <= protectedNames.length) {
+          if (result) result.textContent = missingProtected.length
+            ? 'Every existing manual speaker must remain selected.'
+            : 'Keep all saved manual speakers and select at least one additional confirmed GPT speaker.';
+          return;
+        }
+        mergeSpeakerButton.disabled = true;
+        mergeSpeakerButton.textContent = 'Saving speaker set…';
+        if (result) result.textContent = 'Validating the active passage and preserving saved manual speakers…';
+        try {
+          const resolvedSpeakers = [];
+          for (const speaker of selected) {
+            if (speaker.reserved_placeholder || String(speaker.canonical_name).trim().toLowerCase() === 'third person') {
+              resolvedSpeakers.push('Third Person');
+              continue;
+            }
+            const character = await ensureCharacterInActiveProject(
+              speaker.canonical_name, speaker.series || activeCharacterProjectSeries(),
+              speaker.voice_profile || '', speaker.aliases || []
+            );
+            const canonical = characterCanonical(character);
+            if (canonical && !resolvedSpeakers.some(name => name.toLowerCase() === canonical.toLowerCase())) {
+              resolvedSpeakers.push(canonical);
+            }
+          }
+          if (resolvedSpeakers.length <= protectedNames.length) {
+            throw new Error('No additional speaker was resolved. Existing speakers were left unchanged.');
+          }
+          await call('chapter.dialogue.assign', {
+            dialogue_text:String(item.text || ''),
+            speakers:resolvedSpeakers,
+            series:String(selected[0]?.series || activeCharacterProjectSeries()),
+            chapter_number:Number(item.chapter_number),
+            start:Number(item.start),
+            end:Number(item.end),
+            passage_id:String(item.passage_id || ''),
+            chapter_revision:String(item.chapter_revision || ''),
+            mode:resolvedSpeakers.length > 1 ? 'chorus' : 'single',
+            source:'manual',
+            confidence:1.0,
+            preserve_existing_manual:true,
+            visual_source:'outsourced'
+          });
+          await refreshChapters();
+          await refreshCharacters();
+          await refreshCharacterLibrary();
+          await refreshCharacterDialogueSuggestions();
+          renderCharacterStudioLive();
+          renderDialogueReview();
+          closeCharacterWorkbookDialog();
+          message('Saved the confirmed multi-speaker assignment. Existing manual speakers were preserved; the GPT-added speakers use the established white outsourced styling.');
+          if (String(preview.path || '').trim()) {
+            await importCompletedCharacterWorkbook(String(preview.path));
+          }
+        } catch (error) {
+          mergeSpeakerButton.disabled = false;
+          mergeSpeakerButton.textContent = 'Confirm speaker set · preserve manual speakers';
+          if (result) result.textContent = error?.message || String(error);
+        }
+        return;
+      }
+
       const assignButton = event.target?.closest?.('[data-workbook-review-assign]');
       if (assignButton) {
         const index = Number(assignButton.getAttribute('data-workbook-review-assign'));

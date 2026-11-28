@@ -2066,13 +2066,63 @@ class PremiumV2Bridge(QObject):
                     )
             elif overlapping:
                 raise ValueError("The selected passage overlaps another saved speaker assignment. Edit or remove the existing assignment first.")
-            base = next((dict(item) for item in existing if isinstance(item, dict)
-                         and item.get("start") == start and item.get("end") == end),
-                        {"start": start, "end": end, "text": exact_text, "source": assignment_source})
-            base.update({"start": start, "end": end, "text": exact_text, "source": assignment_source})
+            exact_existing = next((dict(item) for item in existing if isinstance(item, dict)
+                                   and item.get("start") == start and item.get("end") == end), None)
+            preserve_existing_manual = payload.get("preserve_existing_manual") is True
+            visual_source = str(payload.get("visual_source") or "").strip().casefold()
+            if preserve_existing_manual:
+                if assignment_source != "manual" or not isinstance(exact_existing, dict):
+                    raise ValueError("Only an exact saved manual assignment can be extended while preserving its speakers.")
+                existing_source = str(exact_existing.get("source") or "manual").strip().casefold()
+                if existing_source != "manual":
+                    raise ValueError("The existing assignment is not a confirmed manual record and cannot be merged through this action.")
+                existing_speakers = exact_existing.get("speakers")
+                if not isinstance(existing_speakers, (list, tuple)):
+                    existing_speakers = [exact_existing.get("speaker")] if exact_existing.get("speaker") else []
+                protected_speakers_raw = list(dict.fromkeys(
+                    str(value).strip() for value in existing_speakers if str(value or "").strip()
+                ))
+                protected_speakers = [
+                    canonical_by_name.get(value.casefold(), value)
+                    for value in protected_speakers_raw
+                ]
+                requested_keys = {str(value).strip().casefold() for value in speakers}
+                missing_protected = [value for value in protected_speakers if value.casefold() not in requested_keys]
+                if not protected_speakers or missing_protected:
+                    raise ValueError(
+                        "The proposed speaker set must retain every existing manual speaker: "
+                        + ", ".join(protected_speakers_raw)
+                    )
+                added_speakers = [
+                    value for value in speakers
+                    if str(value).strip().casefold() not in {item.casefold() for item in protected_speakers}
+                ]
+                if not added_speakers:
+                    raise ValueError("Choose at least one additional confirmed speaker; the saved manual speakers are already present.")
+                base = exact_existing
+                base.update({"start": start, "end": end, "text": exact_text, "source": "manual"})
+            else:
+                protected_speakers_raw = []
+                protected_speakers = []
+                added_speakers = []
+                base = exact_existing or {
+                    "start": start, "end": end, "text": exact_text, "source": assignment_source
+                }
+                base.update({"start": start, "end": end, "text": exact_text, "source": assignment_source})
             normalized = normalize_assignment(base, speakers, mode)
             assignment_series = requested_series or default_series
-            normalized.update({"source": assignment_source, "confidence": assignment_confidence, "series": assignment_series})
+            normalized.update({
+                "source": "manual" if preserve_existing_manual else assignment_source,
+                "confidence": assignment_confidence,
+                "series": assignment_series,
+            })
+            if preserve_existing_manual:
+                normalized["manual_speakers"] = protected_speakers_raw
+                normalized["outsourced_speakers"] = added_speakers
+                if visual_source == "outsourced":
+                    normalized["visual_source"] = "outsourced"
+            elif visual_source == "outsourced" and assignment_source == "outsourced":
+                normalized["visual_source"] = "outsourced"
             if any(str(name).strip().casefold() == "third person" for name in speakers):
                 normalized["third_person_pending"] = True
                 normalized["speaker_identity_status"] = "needs_user_identification"
@@ -6051,11 +6101,39 @@ class PremiumV2Bridge(QObject):
                             continue
                         exact_saved.append(saved)
                     existing_speakers = []
+                    existing_assignment_source = ""
                     if len(exact_saved) == 1:
+                        existing_assignment_source = str(exact_saved[0].get("source") or "manual").strip().casefold()
                         existing = exact_saved[0].get("speakers")
                         if not isinstance(existing, (list, tuple)):
                             existing = [exact_saved[0].get("speaker")] if exact_saved[0].get("speaker") else []
                         existing_speakers = [str(value).strip() for value in existing if str(value).strip()]
+                    same_span_unmatched_rows = []
+                    active_chapter_id = str(active.get("chapter_id") or passage.get("chapter_id") or "").strip()
+                    for stale_row in overlapping_workbook_rows:
+                        stale_id = str(stale_row.get("Passage ID") or "").strip()
+                        stale_chapter = str(stale_row.get("Chapter ID") or "").strip()
+                        try:
+                            raw_start = float(stale_row.get("Start (Reference)"))
+                            raw_end = float(stale_row.get("End (Reference)"))
+                            stale_start, stale_end = int(raw_start), int(raw_end)
+                            if raw_start != stale_start or raw_end != stale_end:
+                                continue
+                        except (TypeError, ValueError, OverflowError):
+                            continue
+                        if (
+                            stale_id == passage_id and stale_chapter == active_chapter_id
+                            and stale_start == start and stale_end == end
+                            and source_id_counts.get(stale_id) == 1
+                            and str(stale_row.get("Passage Type") or "Dialogue").strip().casefold() == "dialogue"
+                        ):
+                            same_span_unmatched_rows.append(stale_row)
+                    same_span_unmatched_speakers = []
+                    if len(same_span_unmatched_rows) == 1:
+                        try:
+                            same_span_unmatched_speakers = _workbook_speaker_names(same_span_unmatched_rows[0])
+                        except ValueError:
+                            same_span_unmatched_speakers = []
                     issue_reasons = [
                         issue for issue in review_issues
                         if passage_id.casefold() in issue.casefold()
@@ -6093,7 +6171,10 @@ class PremiumV2Bridge(QObject):
                         "rebased_from_passage_id": rebased_from_id,
                         "unmatched_workbook_speakers": unmatched_workbook_speakers,
                         "unmatched_workbook_passage_ids": unmatched_workbook_ids,
+                        "same_span_unmatched_speaker_row": len(same_span_unmatched_rows) == 1,
+                        "same_span_unmatched_speakers": same_span_unmatched_speakers,
                         "existing_speakers": existing_speakers,
+                        "existing_assignment_source": existing_assignment_source,
                         "can_manual_assign": (
                             not is_narration and not workbook_speakers and not existing_speakers
                         ),
@@ -6141,6 +6222,69 @@ class PremiumV2Bridge(QObject):
                     "reserved_placeholder": True,
                 })
             character_options.sort(key=lambda row: (row["series"].casefold(), row["canonical_name"].casefold()))
+            # Offer an explicit speaker-set merge only for a unique source row
+            # with the same chapter, Passage ID and exact offsets. This may be
+            # shown even when its wording differs: the active passage text is
+            # displayed, and the user must confirm the names before saving.
+            for review_item in review_items:
+                review_item["can_confirm_speaker_set"] = False
+                review_item["confirmable_speakers"] = []
+                if (
+                    review_item.get("passage_type") != "Dialogue"
+                    or review_item.get("existing_assignment_source") != "manual"
+                    or not review_item.get("existing_speakers")
+                    or not review_item.get("same_span_unmatched_speaker_row")
+                    or not review_item.get("same_span_unmatched_speakers")
+                ):
+                    continue
+                resolved = []
+                resolution_failed = False
+                protected_keys = {str(name).strip().casefold() for name in review_item["existing_speakers"]}
+                for raw_name in review_item["same_span_unmatched_speakers"]:
+                    raw_key = str(raw_name or "").strip().casefold()
+                    matches = [
+                        option for option in character_options
+                        if (
+                            str(option.get("canonical_name") or "").strip().casefold() == raw_key
+                            or raw_key in {str(alias or "").strip().casefold() for alias in (option.get("aliases") or [])}
+                        )
+                    ]
+                    if raw_key == "third person":
+                        matches = [option for option in character_options if option.get("reserved_placeholder")]
+                    if len(matches) != 1:
+                        resolution_failed = True
+                        break
+                    option = matches[0]
+                    canonical = str(option.get("canonical_name") or "").strip()
+                    if not canonical:
+                        resolution_failed = True
+                        break
+                    if not any(str(item.get("canonical_name") or "").casefold() == canonical.casefold() for item in resolved):
+                        resolved.append({
+                            "canonical_name": canonical,
+                            "series": str(option.get("series") or review_series),
+                            "voice_profile": str(option.get("voice_profile") or ""),
+                            "aliases": list(option.get("aliases") or []),
+                            "reserved_placeholder": bool(option.get("reserved_placeholder")),
+                            "protected": canonical.casefold() in protected_keys
+                                or any(str(alias).strip().casefold() in protected_keys for alias in (option.get("aliases") or [])),
+                        })
+                if resolution_failed:
+                    continue
+                resolved_keys = {str(item.get("canonical_name") or "").casefold() for item in resolved}
+                manual_missing = [
+                    name for name in review_item["existing_speakers"]
+                    if str(name).strip().casefold() not in resolved_keys
+                    and not any(
+                        str(alias).strip().casefold() == str(name).strip().casefold()
+                        for item in resolved for alias in (item.get("aliases") or [])
+                    )
+                ]
+                protected_count = sum(1 for item in resolved if item.get("protected"))
+                if manual_missing or len(resolved) <= protected_count:
+                    continue
+                review_item["confirmable_speakers"] = resolved
+                review_item["can_confirm_speaker_set"] = True
             review_items.sort(key=lambda row: (
                 int(row.get("chapter_number") or 0),
                 int(row.get("start") or 0),
@@ -6199,8 +6343,30 @@ class PremiumV2Bridge(QObject):
                         "is preserved for review only and has not been applied."
                     ),
                 })
+            partial_token = ""
+            if plan.get("partial_ready"):
+                partial_token = uuid.uuid4().hex
+                sessions = getattr(self, "_character_workbook_import_sessions", None)
+                if not isinstance(sessions, dict):
+                    sessions = {}
+                    self._character_workbook_import_sessions = sessions
+                sessions.clear()
+                sessions[partial_token] = {
+                    "path": str(Path(selected_path).expanduser().resolve()),
+                    "sha256": document["sha256"],
+                    "project_folder": str(Path(project.folder).resolve()),
+                    "export_id": str(document["info"].get("Export ID") or ""),
+                    "chapter_number": int(chapter.number) if chapter is not None else None,
+                    "scope": plan.get("scope", "chapter"),
+                    "book_revision": str(plan.get("book_revision") or ""),
+                    "plan_sha256": character_workbook_plan_fingerprint(plan),
+                    "partial_allowed": True,
+                }
             return {
                 "cancelled": False, "ready": False,
+                "partial_ready": bool(plan.get("partial_ready")),
+                "token": partial_token,
+                "partial_summary": dict(plan.get("partial_summary") or {}),
                 "path": str(Path(selected_path).expanduser().resolve()),
                 "issues": review_issues[:1000],
                 "issue_count": len(review_issues),
@@ -6232,6 +6398,7 @@ class PremiumV2Bridge(QObject):
             "scope": plan.get("scope", "chapter"),
             "book_revision": str(plan.get("book_revision") or ""),
             "plan_sha256": character_workbook_plan_fingerprint(plan),
+            "partial_allowed": False,
         }
         assignment_groups: dict[str, dict[str, Any]] = {}
         for assignment in plan.get("assignments") or []:
@@ -6317,8 +6484,14 @@ class PremiumV2Bridge(QObject):
             if document["sha256"] != session.get("sha256"):
                 raise ValueError("The workbook changed after preview. Import it again to review the latest contents.")
             state, series, chapter, plan = self._character_workbook_import_plan(project, document)
-            if not plan["ready"]:
-                raise ValueError("Import preflight no longer passes: " + " ".join(plan["issues"][:5]))
+            if not plan["ready"] and not (
+                payload.get("allow_partial") is True
+                and session.get("partial_allowed") is True
+                and plan.get("partial_ready") is True
+            ):
+                raise ValueError(
+                    "Import preflight has unresolved rows. Review the report and explicitly choose Import verified entries."
+                )
             if str(document["info"].get("Export ID") or "") != session.get("export_id"):
                 raise ValueError("The workbook identity changed after preview. Import it again.")
             if not session.get("plan_sha256") or character_workbook_plan_fingerprint(plan) != session.get("plan_sha256"):
@@ -6750,6 +6923,10 @@ class PremiumV2Bridge(QObject):
                 "passage_reclassifications": len(plan.get("passage_reclassifications") or []),
                 "third_person_assignments": int(plan["summary"].get("third_person_assignments") or 0),
                 "aliases_merged": int(plan["summary"]["aliases_to_merge"]),
+                "partial": not bool(plan.get("ready")),
+                "skipped_issue_count": len(plan.get("issues") or []),
+                "skipped_issues": list(plan.get("issues") or [])[:200],
+                "skipped_issues_truncated": len(plan.get("issues") or []) > 200,
             }
 
     def _character_analysis_status(self, _payload: dict[str, Any]) -> dict[str, Any]:

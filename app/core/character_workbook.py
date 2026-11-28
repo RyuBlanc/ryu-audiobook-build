@@ -2360,8 +2360,22 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             "series": active_series, "confidence": confidence,
         })
     unique_issues = list(dict.fromkeys(issues))
+    partial_summary = {
+        "characters": len(planned),
+        "dialogue_assignments": len(assignments),
+        "stale_assignments_to_retire": len(superseded_assignments),
+        "text_corrections": len(text_corrections),
+        "passage_reclassifications": len(passage_reclassifications),
+        "skipped_issues": len(unique_issues),
+    }
+    partial_ready = bool(
+        planned or assignments or superseded_assignments
+        or text_corrections or passage_reclassifications
+    )
     return {
         "ready": not unique_issues,
+        "partial_ready": partial_ready,
+        "partial_summary": partial_summary,
         "issues": unique_issues,
         "characters": planned,
         "assignments": assignments,
@@ -2532,11 +2546,19 @@ def plan_complete_book_character_workbook_import(
         chapter_plans.append(chapter_entry)
 
     issues = list(dict.fromkeys(issues))
-    # A complete-book import is one atomic operation. Do not expose a partial
-    # set of accepted dialogue rows when any chapter has an unresolved issue.
-    if issues:
+    # An inconsistent book-wide identity merge plan is a hard boundary: do not
+    # apply assignments or retire stale records derived from different cast plans.
+    identity_plan_conflict = any(
+        "character merge plan changed between chapters" in issue.casefold()
+        for issue in issues
+    )
+    if identity_plan_conflict:
+        identity_plan = []
+        superseded_assignments = []
         for chapter in chapter_plans:
             chapter["assignments"] = []
+    # Otherwise keep each independently source-verified row. Unresolved rows
+    # remain issues and will be skipped only after explicit partial-import consent.
     assignments = [
         assignment
         for chapter in chapter_plans
@@ -2546,6 +2568,18 @@ def plan_complete_book_character_workbook_import(
         {key: value for key, value in row.items() if key != "assignments"}
         for row in chapter_plans
     ]
+    partial_summary = {
+        "characters": len(identity_plan),
+        "dialogue_assignments": len(assignments),
+        "stale_assignments_to_retire": len(superseded_assignments),
+        "text_corrections": len(text_corrections),
+        "passage_reclassifications": len(passage_reclassifications),
+        "skipped_issues": len(issues),
+    }
+    partial_ready = bool(
+        identity_plan or assignments or superseded_assignments
+        or text_corrections or passage_reclassifications
+    )
     summary = {
         "matched_characters": sum(row.get("action") == "merge" for row in identity_plan),
         "new_characters": sum(row.get("action") == "create" for row in identity_plan),
@@ -2564,6 +2598,8 @@ def plan_complete_book_character_workbook_import(
     }
     return {
         "ready": not issues,
+        "partial_ready": partial_ready,
+        "partial_summary": partial_summary,
         "issues": issues,
         "scope": "book",
         "book_revision": current_revision,
@@ -2587,7 +2623,7 @@ def character_workbook_plan_fingerprint(plan: dict) -> str:
         raise ValueError("A valid character workbook plan is required.")
     reviewed = {
         key: plan.get(key)
-        for key in ("ready", "issues", "scope", "book_revision", "chapters", "chapter_assignments", "characters", "assignments", "superseded_assignments", "passage_rebases", "passage_mappings", "passage_reclassifications", "text_corrections", "summary")
+        for key in ("ready", "partial_ready", "partial_summary", "issues", "scope", "book_revision", "chapters", "chapter_assignments", "characters", "assignments", "superseded_assignments", "passage_rebases", "passage_mappings", "passage_reclassifications", "text_corrections", "summary")
     }
     try:
         encoded = json.dumps(

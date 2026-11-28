@@ -918,5 +918,116 @@ class CharacterWorkbookImportTransactionTests(unittest.TestCase):
 
 
 
+
+    def test_manual_assignment_can_add_gpt_speaker_without_removing_existing_manual_speaker(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-manual-speaker-union-") as tmp:
+            folder = Path(tmp)
+            source = '““Huh…?!”'
+            revision = "revision-chorus-001"
+            start, end = 0, len(source)
+            manual = {
+                "start": start, "end": end, "text": source,
+                "speaker": "Nanami", "speakers": ["Nanami"], "source": "manual",
+                "series": "Silver Archive", "confidence": 1.0,
+                "passage_id": "ps-chorus", "chapter_revision": revision,
+            }
+            chapter = SimpleNamespace(
+                number=5, title="Stunningly Beautiful Maid Nanami",
+                chapter_id="chapter-005", text=source, dialogue_assignments=[manual],
+            )
+            project = SimpleNamespace(folder=folder, title="The Silver Archive",
+                                      chapters=[chapter], save=Mock())
+            state = {
+                "characters": [
+                    {"name": "Nanami", "series": "Silver Archive", "aliases": []},
+                    {"name": "Kousuke Takioto", "series": "Silver Archive", "aliases": []},
+                ],
+                "character_dialogue_suggestions": [],
+            }
+            passage_index = {"passages": [{
+                "passage_id": "ps-chorus", "chapter_id": "chapter-005",
+                "chapter_revision": revision, "start": start, "end": end, "text": source,
+            }]}
+
+            class _Bridge:
+                _chapter_dialogue_assign = host.PremiumV2Bridge._chapter_dialogue_assign
+
+                def __init__(self):
+                    self._character_review_state_lock = threading.RLock()
+
+                def _active_project(self):
+                    return project
+
+                def _project_series_name(self, _project, _state=None):
+                    return "Silver Archive"
+
+                def _now(self):
+                    return "2026-11-28T08:00:00+00:00"
+
+            bridge = _Bridge()
+            with (
+                patch.object(host, "load_state", side_effect=[state, state]),
+                patch.object(host, "save_state") as save_project_state,
+                patch("app.chapters.passage_index.load_or_build_passage_index", return_value=passage_index),
+                patch("app.chapters.character_learning.record_assignment_feedback"),
+            ):
+                result = bridge._chapter_dialogue_assign({
+                    "dialogue_text": source, "speakers": ["Nanami", "Kousuke Takioto"],
+                    "series": "Silver Archive", "chapter_number": 5,
+                    "start": start, "end": end, "passage_id": "ps-chorus",
+                    "chapter_revision": revision, "mode": "chorus", "source": "manual",
+                    "confidence": 1.0, "preserve_existing_manual": True, "visual_source": "outsourced",
+                })
+            self.assertTrue(result["saved"])
+            saved = chapter.dialogue_assignments[0]
+            self.assertEqual(saved["source"], "manual")
+            self.assertEqual(saved["speakers"], ["Nanami", "Kousuke Takioto"])
+            self.assertEqual(saved["manual_speakers"], ["Nanami"])
+            self.assertEqual(saved["outsourced_speakers"], ["Kousuke Takioto"])
+            self.assertEqual(saved["visual_source"], "outsourced")
+            self.assertEqual(saved["multi_speaker_mode"], "chorus")
+            project.save.assert_called_once_with()
+            save_project_state.assert_called_once()
+
+    def test_partial_commit_imports_safe_entries_and_reports_skipped_issues(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-workbook-partial-commit-") as tmp:
+            folder = Path(tmp)
+            bridge, project, chapter, state, plan, document = self._fixture(folder)
+            plan["ready"] = False
+            plan["partial_ready"] = True
+            plan["partial_summary"] = {"characters": 1, "dialogue_assignments": 1, "skipped_issues": 2}
+            plan["issues"] = ["One unmatched row was skipped.", "One stale span was preserved."]
+            session = bridge._character_workbook_import_sessions["preview-token"]
+            session["partial_allowed"] = True
+            session["plan_sha256"] = character_workbook_plan_fingerprint(plan)
+            library = folder / "character-library.json"
+            library.write_text(json.dumps({"version": 1, "active": [], "deleted": []}), encoding="utf-8")
+
+            def save_project():
+                (folder / "project.json").write_text("project saved", encoding="utf-8")
+                (folder / "chapters.json").write_text("chapters saved", encoding="utf-8")
+
+            project.save = Mock(side_effect=save_project)
+
+            def save_project_state(project_folder, payload):
+                (Path(project_folder) / "state.json").write_text(
+                    json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8"
+                )
+
+            with (
+                patch.object(host, "reusable_character_library_path", return_value=library),
+                patch.object(host, "read_character_workbook", return_value=document),
+                patch.object(host, "save_state", side_effect=save_project_state),
+            ):
+                result = bridge._character_workbook_import_commit({
+                    "token": "preview-token", "allow_partial": True,
+                })
+            self.assertTrue(result["imported"])
+            self.assertTrue(result["partial"])
+            self.assertEqual(result["skipped_issue_count"], 2)
+            self.assertEqual(len(result["skipped_issues"]), 2)
+            self.assertEqual(result["dialogue_assignments"], 1)
+            self.assertEqual(chapter.dialogue_assignments[0]["speaker"], "Mira")
+
 if __name__ == "__main__":
     unittest.main()
