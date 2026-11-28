@@ -6136,6 +6136,25 @@ class PremiumV2Bridge(QObject):
                             same_span_unmatched_speakers = _workbook_speaker_names(same_span_unmatched_rows[0])
                         except ValueError:
                             same_span_unmatched_speakers = []
+                    # An exact-mapped workbook row can also conflict with an existing
+                    # manual speaker set. The earlier review path only exposed
+                    # multi-speaker confirmation for unmatched rows, leaving this
+                    # valid, exact source case with no safe confirmation action.
+                    mapped_exact_speaker_row = bool(
+                        isinstance(workbook_row, dict)
+                        and source_workbook_id == passage_id
+                        and source_id_counts.get(source_workbook_id) == 1
+                        and str(workbook_row.get("Chapter ID") or "").strip() == active_chapter_id
+                        and str(workbook_row.get("Passage Type") or "").strip().casefold() == "dialogue"
+                        and str(workbook_row.get("Dialogue Text") or "") == passage_text
+                        and int(float(workbook_row.get("Start (Reference)"))) == start
+                        and int(float(workbook_row.get("End (Reference)"))) == end
+                    )
+                    confirmable_speaker_names = (
+                        same_span_unmatched_speakers
+                        if len(same_span_unmatched_rows) == 1
+                        else (list(workbook_speakers) if mapped_exact_speaker_row else [])
+                    )
                     issue_reasons = [
                         issue for issue in review_issues
                         if passage_id.casefold() in issue.casefold()
@@ -6175,6 +6194,8 @@ class PremiumV2Bridge(QObject):
                         "unmatched_workbook_passage_ids": unmatched_workbook_ids,
                         "same_span_unmatched_speaker_row": len(same_span_unmatched_rows) == 1,
                         "same_span_unmatched_speakers": same_span_unmatched_speakers,
+                        "mapped_exact_speaker_row": mapped_exact_speaker_row,
+                        "confirmable_speaker_names": confirmable_speaker_names,
                         "existing_speakers": existing_speakers,
                         "existing_assignment_source": existing_assignment_source,
                         "can_manual_assign": (
@@ -6235,14 +6256,17 @@ class PremiumV2Bridge(QObject):
                     review_item.get("passage_type") != "Dialogue"
                     or review_item.get("existing_assignment_source") != "manual"
                     or not review_item.get("existing_speakers")
-                    or not review_item.get("same_span_unmatched_speaker_row")
-                    or not review_item.get("same_span_unmatched_speakers")
+                    or not (
+                        review_item.get("same_span_unmatched_speaker_row")
+                        or review_item.get("mapped_exact_speaker_row")
+                    )
+                    or not review_item.get("confirmable_speaker_names")
                 ):
                     continue
                 resolved = []
                 resolution_failed = False
                 protected_keys = {str(name).strip().casefold() for name in review_item["existing_speakers"]}
-                for raw_name in review_item["same_span_unmatched_speakers"]:
+                for raw_name in review_item["confirmable_speaker_names"]:
                     raw_key = str(raw_name or "").strip().casefold()
                     matches = [
                         option for option in character_options
