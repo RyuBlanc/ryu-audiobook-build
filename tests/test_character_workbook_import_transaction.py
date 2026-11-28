@@ -560,6 +560,63 @@ class CharacterWorkbookImportTransactionTests(unittest.TestCase):
             self.assertEqual(original.read_bytes(), original_bytes)
             self.assertEqual(list(folder.iterdir()), [original])
 
+    def test_workbook_refresh_uses_project_source_correction_history(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-workbook-refresh-history-") as tmp:
+            folder = Path(tmp)
+            original = folder / "completed.xlsx"
+            original.write_bytes(b"completed workbook")
+            refreshed_path = folder / "completed_Refreshed.xlsx"
+            history = [{
+                "chapter_id": "chapter-001", "chapter_number": 1,
+                "chapter_title": "The Arrival", "passage_id": "old-passage-id",
+                "source_text": "“Helo, Mira!”", "approved_text": "“Hello, Mira!”",
+                "reason": "Corrected transcription.", "applied_at": "2026-11-26T21:00:00+05:30",
+            }]
+            state = {
+                "author": "", "publisher": "", "language": "", "genre": "",
+                "year": "", "series_volume": "",
+                "character_workbook_source_correction_history": history,
+            }
+            chapter = SimpleNamespace(
+                number=1, title="The Arrival", chapter_id="chapter-001",
+                text="“Mira, listen!”", dialogue_assignments=[],
+            )
+            project = SimpleNamespace(folder=folder, title="The Silver Archive", chapters=[chapter])
+            book_chapters = [{
+                "chapter_id": "chapter-001", "chapter_number": 1,
+                "chapter_title": "The Arrival", "chapter_revision": "revision-001",
+                "text": chapter.text, "current_passages": [], "current_assignments": [],
+            }]
+            captured = {}
+
+            class _RefreshBridge:
+                _character_workbook_refresh_after_segmentation = (
+                    host.PremiumV2Bridge._character_workbook_refresh_after_segmentation
+                )
+                def _character_workbook_book_snapshot(self, _project):
+                    return state, "Silver Archive", book_chapters
+                def _character_library_bootstrap(self):
+                    return None
+                def _character_workbook_dialog_parent(self):
+                    return None
+
+            def capture_refresh_metadata(_document, *, metadata, chapters, passages):
+                captured.update(metadata)
+                return b"refreshed workbook bytes", {"gpt_assignments_carried": 0}
+
+            bridge = _RefreshBridge()
+            with (
+                patch.object(host, "list_reusable_characters", return_value=[]),
+                patch.object(host, "refresh_complete_book_character_workbook_bytes", side_effect=capture_refresh_metadata),
+                patch.object(host.QFileDialog, "getSaveFileName", return_value=(str(refreshed_path), "")),
+            ):
+                result = bridge._character_workbook_refresh_after_segmentation(
+                    project, {"schema_version": 2, "characters": [], "source_correction_history": []}, str(original)
+                )
+            self.assertTrue(result["refreshed"])
+            self.assertEqual(captured["source_correction_history"], history)
+            self.assertEqual(refreshed_path.read_bytes(), b"refreshed workbook bytes")
+
     def test_import_preview_routes_segmentation_mismatch_to_safe_workbook_refresh(self):
         class _RefreshPreviewBridge:
             _character_workbook_import_preview = host.PremiumV2Bridge._character_workbook_import_preview
@@ -1030,7 +1087,6 @@ class CharacterWorkbookImportTransactionTests(unittest.TestCase):
                         # Rows 2 and 4 are the two dialogue passages in the complete-book export.
                         # GPT writes the speaker and evidence on the actual Dialogue Assignment rows.
                         for row_number, speaker, confidence, evidence in (
-                            (2, "Mira", "0.98", "The first-person response is addressed to Mira; surrounding narration identifies Mira as the speaker."),
                             (4, "Captain Mira", "0.96", "The continuing exchange and action beat identify Mira as the speaker."),
                         ):
                             set_inline_cell(sheet, row_number, "G%d" % row_number, speaker)
@@ -1062,11 +1118,12 @@ class CharacterWorkbookImportTransactionTests(unittest.TestCase):
             self.assertEqual(
                 [(row["chapter_id"], row["passage_id"], row["speaker"]) for row in plan["assignments"]],
                 [
-                    ("chapter-001", "p1-dialogue", "Mira"),
+                    ("chapter-001", "p1-dialogue", "Third Person"),
                     ("chapter-002", "p2-dialogue", "Mira"),
                 ],
             )
             self.assertEqual(plan["summary"]["dialogue_assignments"], 2)
+            self.assertEqual(plan["summary"]["third_person_assignments"], 1)
 
             first_live = SimpleNamespace(
                 number=1, title="The Arrival", chapter_id="chapter-001",
@@ -1133,14 +1190,15 @@ class CharacterWorkbookImportTransactionTests(unittest.TestCase):
             self.assertEqual(result["dialogue_assignments"], 2)
             self.assertEqual(len(first_live.dialogue_assignments), 1)
             self.assertEqual(len(second_live.dialogue_assignments), 1)
-            self.assertEqual(first_live.dialogue_assignments[0]["speaker"], "Mira")
+            self.assertEqual(first_live.dialogue_assignments[0]["speaker"], "Third Person")
+            self.assertTrue(first_live.dialogue_assignments[0]["third_person_pending"])
             self.assertEqual(second_live.dialogue_assignments[0]["speaker"], "Mira")
             self.assertEqual(first_live.dialogue_assignments[0]["source"], "outsourced")
             self.assertEqual(second_live.dialogue_assignments[0]["source"], "outsourced")
             saved_chapters = json.loads((folder / "chapters.json").read_text(encoding="utf-8"))
             self.assertEqual(
                 [row["dialogue_assignments"][0]["speaker"] for row in saved_chapters],
-                ["Mira", "Mira"],
+                ["Third Person", "Mira"],
             )
             self.assertEqual(len(state["characters"]), 1)
             self.assertEqual(

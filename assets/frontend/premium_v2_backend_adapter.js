@@ -5210,7 +5210,6 @@
       Number(result.saved_assignments_replaced || 0) + ' stale AI/outsourced assignments replaced · ' +
       Number(result.text_corrections_applied || 0) + ' GPT source-text corrections applied. Existing voice profiles and manual assignments were preserved.';
     message(confirmation);
-    showCharacterWorkbookMessageDialog('Workbook imported successfully', confirmation);
   }
 
   function renderCharacterStudioLive() {
@@ -10470,7 +10469,7 @@ function renderProductionMetadataGate(active) {
       '',
       'IMPORTANT: REVIEW REQUIRED means a previous answer was not carried across a changed or newly split passage. It does not mean the speaker is unknown. GPT must use the complete scene and book context to identify each new turn.',
       'Never edit Passage IDs, chapter references, dialogue text, offsets, or revisions. If one row contains multiple different speakers, GPT must flag STRUCTURAL SPLIT REQUIRED instead of guessing or changing workbook rows.',
-      'Only genuinely ambiguous speakers should remain blank; those rows correctly block import until resolved.'
+      'For any actual live Dialogue turn whose speaker cannot be identified from the full scene, use Third Person. The app also safely routes an exact-source-matched blank single-turn Dialogue row to Third Person. Leave a parent row blank only when it contains multiple distinct turns and you mark STRUCTURAL SPLIT REQUIRED with the separate turn rows in Dialogue Split Corrections. Manual or unknown-source conflicts and source mismatches still require review.'
     ].join('\n');
   }
 

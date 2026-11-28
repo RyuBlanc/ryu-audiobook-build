@@ -30,6 +30,49 @@ def _clean(value): return unicodedata.normalize("NFC", str(value or "")).strip()
 def _key(value): return _clean(value).casefold()
 
 
+def _normalize_source_correction_history(*sources):
+    """Normalize application-state and worksheet-header correction records without dropping history."""
+    normalized, seen = [], set()
+    field_aliases = {
+        "chapter_id": ("chapter_id", "Chapter ID"),
+        "chapter_number": ("chapter_number", "Chapter Number"),
+        "chapter_title": ("chapter_title", "Chapter Title"),
+        "passage_id": ("passage_id", "Source Passage ID (Before Correction)", "Passage ID"),
+        "source_text": ("source_text", "Original Source Text"),
+        "approved_text": ("approved_text", "User-Approved Source Text"),
+        "reason": ("reason", "Correction Reason"),
+        "applied_at": ("applied_at", "Applied At"),
+    }
+    for source in sources:
+        if not isinstance(source, (list, tuple)):
+            continue
+        for record in source:
+            if not isinstance(record, dict):
+                continue
+            item = {}
+            for target, aliases in field_aliases.items():
+                item[target] = next(
+                    (record.get(key) for key in aliases if record.get(key) not in (None, "")),
+                    "",
+                )
+            item["source_text"] = str(item["source_text"] or "")
+            item["approved_text"] = str(item["approved_text"] or "")
+            if not item["source_text"] or not item["approved_text"] or item["source_text"] == item["approved_text"]:
+                continue
+            fingerprint = tuple(
+                _clean(item.get(key))
+                for key in (
+                    "chapter_id", "chapter_number", "chapter_title", "passage_id",
+                    "source_text", "approved_text", "reason", "applied_at",
+                )
+            )
+            if fingerprint in seen:
+                continue
+            seen.add(fingerprint)
+            normalized.append(item)
+    return normalized[-5000:]
+
+
 def _normalize_workbook_confidence(value):
     """Normalize decimal and percentage-style GPT confidence to the 0..1 scale."""
     raw = _clean(value)
@@ -388,11 +431,11 @@ def complete_book_gpt_prompt() -> str:
         "For each identifiable speaker, use the exact canonical Full Name from Character Register. If the same person already exists in Series Character Reference, reuse that canonical identity and preserve its known aliases; do not create a duplicate.",
         "",
         "RESERVED SYSTEM ROLE — THIRD PERSON",
-        "Use the exact canonical speaker value 'Third Person' only when the text clearly contains an actual spoken dialogue turn by an unidentified background bystander, standby, extra, or crowd member, and no reliable personal name or consistently identifiable recurring role can be established from whole-book context.",
+        "Use the exact canonical speaker value 'Third Person' for any actual spoken Dialogue turn whose speaker cannot be reliably identified from the passage and whole-book context. This includes anonymous bystanders, extras, crowds, off-screen speakers, and genuinely unattributed one-off utterances when no stable recurring role can be established.",
         "Do not invent one-off names such as 'Unnamed Male Onlooker 1' or 'Unnamed Female Student 2' for anonymous background speakers. Use 'Third Person' for those unknown live speakers instead. A recurring, text-supported role such as a consistently identifiable classroom teacher or desk clerk may retain its stable role identity.",
         "'Third Person' is a reserved application role, not a real character identity: do not add it to Character Register, do not give it aliases or an age/version, and do not assign it a character-specific voice. The application routes it to the user's global Third Person voice profile and marks it for later user identification.",
         "Never use 'Third Person' for narration, internal thoughts, free-indirect narration, reported or remembered quotations, quoted references, sleep sounds, sound effects, or any passage that is not an actual spoken turn. Use Narrator for narration and reported/internal material.",
-        "When assigning 'Third Person', record in Evidence / Notes (GPT): 'Unidentified background speaker; routed to Third Person fallback; user identification required.' Do not guess a personal name.",
+        "When assigning 'Third Person', record in Evidence / Notes (GPT): 'Actual live dialogue; no reliable personal or recurring-role identity established from the full scene; routed to Third Person fallback.' Do not guess a personal name.",
         "If a real character appears in this book but is missing from Character Register, add a row with a source-supported canonical name, confirmed aliases, useful notes, and Included in This Book? = YES. Do not add characters merely mentioned in metadata or chapter titles.",
         "A nickname, title, surname, honorific, or spelling variant is an alias only when the book confirms it refers to the same person. Do not turn an addressee or descriptive phrase into a character.",
         "If the source gives no personal name but consistently identifies a speaker by a role (for example, an unnamed classroom teacher), use a clear role identity such as 'Unnamed Classroom Teacher'. State in Character Notes that this is an unnamed role, not a supplied personal name, and reuse it only when the text supports the same individual.",
@@ -401,14 +444,14 @@ def complete_book_gpt_prompt() -> str:
         "Keep rows marked Included in This Book? = NO as NO. Do not remove existing Character Register identities, aliases, notes, or future-volume entries.",
         "",
         "FILL THE WORKBOOK — THE DIALOGUE ASSIGNMENT SHEET IS THE REQUIRED OUTPUT",
-        "A populated Character Register is only a list of character identities. It does NOT assign any dialogue. You must fill the GPT Assigned Character cell (and, for true same-word multi-speaker delivery, GPT Assigned Characters (JSON)) on the corresponding Dialogue Assignment row itself. Do not return a workbook in which Character Register is populated but Dialogue Assignment speaker cells are blank unless the source genuinely cannot identify those speakers.",
+        "A populated Character Register is only a list of character identities. It does NOT assign any dialogue. You must fill the GPT Assigned Character cell (and, for true same-word multi-speaker delivery, GPT Assigned Characters (JSON)) on the corresponding Dialogue Assignment row itself. Never leave a single-turn actual Dialogue row blank: use the best-supported canonical identity, or use the reserved 'Third Person' role when no reliable identity can be established. The app also routes an exactly source-matched blank single-turn Dialogue row to Third Person as a safety fallback. Leave a parent row blank only when it contains multiple distinct turns and you mark STRUCTURAL SPLIT REQUIRED and provide the turn-by-turn corrections in Dialogue Split Corrections.",
         "Before returning the .xlsx, count the Dialogue Assignment rows whose Passage Type is Dialogue, the rows you filled with a speaker, and the rows you deliberately left unresolved. State those counts in your completion summary. Do not claim speaker assignments were completed merely because the Character Register was filled.",
         "For every Dialogue row with a supported speaker, fill GPT Assigned Character with the first canonical Full Name, GPT Assigned Characters (JSON) with a JSON array of every character who speaks those exact same words, GPT Multi-Speaker Mode when more than one character is assigned, GPT Confidence (0–1) with a numeric value from 0.75 to 1.00, and Evidence / Notes (GPT) with a concise source-based reason.",
         "For an actual but unidentified background speaker, use 'Third Person' exactly as defined above. It is valid in the speaker fields without being listed in Character Register; do not create a fake character record for it.",
         'Use one JSON array cell, for example ["Rias Gremory", "Akeno Himejima"]; do not create one column per character. JSON is preferred to comma-separated names because it safely preserves commas inside names. For simultaneous same-word delivery use chorus (the default); use sequential only when the exact same line should be repeated once per character; use alternating only when specifically supported by the scene.',
         "A chorus is one dialogue passage with multiple speakers, not multiple split corrections. Assign all clearly identified simultaneous speakers to the same row.",
         "Calibrate confidence: 0.95–1.00 for explicit attribution; 0.85–0.94 for clear action-beat or strong scene evidence; 0.75–0.84 for a strong contextual inference with no credible competing speaker. Do not use low confidence to disguise a guess.",
-        "If whole-book context still cannot establish a defensible speaker, leave speaker cells blank and explain why. Do not invent a person, guess from an honorific, or use Narrator to bypass unresolved speech. Such rows require human review and block import.",
+        "If whole-book context still cannot establish a defensible personal or recurring-role identity for one actual live dialogue turn, assign 'Third Person'; do not leave it blank, invent a person, guess from an honorific, or use Narrator to bypass unresolved speech. Blank assignment cells are reserved for a multi-turn parent passage marked STRUCTURAL SPLIT REQUIRED with the individual turns entered in Dialogue Split Corrections. Invalid or incomplete structural splits still require review.",
         "Evidence should identify the chapter and actual clue (speech tag, action beat, response pattern, or prior identity reference). Distinguish direct evidence from contextual inference.",
         "Do not overwrite a clearly confirmed existing manual assignment. If workbook evidence and a manual assignment conflict, explain the conflict and leave the row for human review.",
         "",
@@ -665,13 +708,9 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
         "Source Passage ID (Before Correction)", "Original Source Text",
         "User-Approved Source Text", "Correction Reason", "Applied At",
     ]]
-    for record in metadata.get("source_correction_history") or []:
-        if not isinstance(record, dict):
-            continue
+    for record in _normalize_source_correction_history(metadata.get("source_correction_history")):
         source_value = str(record.get("source_text") or "")
         approved_value = str(record.get("approved_text") or "")
-        if not source_value or not approved_value or source_value == approved_value:
-            continue
         source_correction_rows.append([
             _clean(record.get("chapter_id")),
             record.get("chapter_number", ""),
@@ -703,11 +742,11 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
         ["Series Volume", _clean(metadata.get("series_volume"))],
         ["Book Revision", book_revision],
         ["Exported At (UTC)", datetime.now(timezone.utc).isoformat(timespec="seconds")],
-        ["GPT Prompt Version", "2.3"],
+        ["GPT Prompt Version", "2.4"],
         ["Instructions",
          "This is a COMPLETE-BOOK workbook. Start with the GPT Prompt tab: it contains the full ready-to-copy task prompt and explains how to analyze every chapter, resolve newly split dialogue turns, assign canonical identities, calibrate confidence, and preserve source references. " 
          "A REVIEW REQUIRED note means an old answer was not copied across a changed passage; it does not mean the speaker is unknowable. Use the full Chapter Context to re-identify each changed turn independently. " 
-         "Use GPT Assigned Characters (JSON) for multiple characters speaking the same words together. Use Dialogue Split Corrections for a genuinely merged passage containing different consecutive turns. Use GPT Proposed Source Text and GPT Text Correction Reason for dialogue-line or Narrator-paragraph wording corrections; the app applies proposals only after explicit user confirmation. Use the reserved Third Person identity only for actual speech by an unidentified background speaker, never for narration or reported speech. Use Source Correction History as read-only examples of corrections the user already accepted; preserve it and do not reuse an old correction unless the current passage independently supports the same fix. Do not alter original passage rows or reference columns; return a new workbook copy. Unresolved speakers must remain explicit and will block import until confirmed."],
+         "Use GPT Assigned Characters (JSON) for multiple characters speaking the same words together. Use Dialogue Split Corrections for a genuinely merged passage containing different consecutive turns. Use GPT Proposed Source Text and GPT Text Correction Reason for dialogue-line or Narrator-paragraph wording corrections; the app applies proposals only after explicit user confirmation. For any actual live Dialogue turn whose speaker cannot be reliably identified from the full scene and book, use the reserved Third Person value; never use it for narration, internal thought, or reported speech. Do not leave a single-turn actual Dialogue row blank. A blank parent row is valid only when you mark STRUCTURAL SPLIT REQUIRED and complete its exact subturn rows in Dialogue Split Corrections. The app routes an exact-source-matched blank single-turn Dialogue row to Third Person as a safety fallback. Use Source Correction History as read-only examples of corrections the user already accepted; preserve it and do not reuse an old correction unless the current passage independently supports the same fix. Do not alter original passage rows or reference columns; return a new workbook copy. Invalid structural splits, manual conflicts and source mismatches still require review."],
     ]
 
     split_headers = [
@@ -748,7 +787,7 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
         ("Character Register", characters, [34] + [24] * alias_column_count + [26,48,24], set(range(1, alias_column_count + 5))),
         ("Speaker Roles", [
             ["Role Type", "Canonical Value", "Use When", "Do Not Use When", "Application Routing", "Follow-up"],
-            ["Reserved unidentified speaker", "Third Person", "An actual spoken dialogue turn by an unidentified background bystander, standby, extra, or crowd member when no reliable personal or recurring role identity can be established.", "Narration, internal thought, reported or remembered quotations, quoted references, sleep sounds, or sound effects.", "Uses the user's global Third Person fallback voice; it is not a Character Register member and has no character-specific voice.", "User may replace the placeholder with a confirmed identity later."],
+            ["Reserved unidentified speaker", "Third Person", "Any actual spoken dialogue turn whose speaker cannot be reliably identified from the exact passage and whole-book context, including anonymous background, off-screen, crowd or genuinely unattributed one-off speakers.", "Narration, internal thought, reported or remembered quotations, quoted references, sleep sounds, or sound effects.", "Uses the user's global Third Person fallback voice; it is not a Character Register member and has no character-specific voice.", "User may replace the placeholder with a confirmed identity later."],
             ["Narration", "Narrator", "Narrative paragraphs, internal thought, free-indirect style, and reported speech that is not a live dialogue turn.", "A person actively speaking words as a dialogue turn.", "Uses the book/series narrator voice.", "No character identity is created."],
             ["Known speaker", "Canonical Character Register name", "The speaker is identified by source text or clear whole-book context.", "Do not infer the speaker from an addressee's name or proximity alone.", "Uses the saved character voice profile when one is assigned.", "Preserve canonical name and aliases."],
         ], [30,26,72,66,70,56], set(range(1,7))),
@@ -991,7 +1030,10 @@ def refresh_complete_book_character_workbook_bytes(
         if 0 <= rel_start < rel_end <= len(parent_text) and str(correction.get("Exact Source Text") or "") == parent_text[rel_start:rel_end]:
             safe_split_corrections.append(dict(correction))
     refreshed_metadata["dialogue_split_corrections"] = safe_split_corrections
-    refreshed_metadata["source_correction_history"] = list(document.get("source_correction_history") or [])
+    refreshed_metadata["source_correction_history"] = _normalize_source_correction_history(
+        document.get("source_correction_history") or [],
+        (metadata or {}).get("source_correction_history") or [],
+    )
     unresolved_dialogue = 0
     for row in refreshed_passages:
         if _key(row.get("kind")) == "narration":
@@ -1132,8 +1174,21 @@ def read_character_workbook(path):
     if workbook_version == 2:
         if info.get("Export Scope") != "complete_book":
             raise ValueError("Version 2 Character Studio workbooks must use the complete-book export scope.")
-        if not {"Chapter Register", "Series Character Reference"}.issubset(sheets):
-            raise ValueError("The complete-book workbook is missing its Chapter Register or Series Character Reference sheet.")
+        required_complete_book_sheets = {"Chapter Register", "Series Character Reference", "Source Correction History"}
+        if not required_complete_book_sheets.issubset(sheets):
+            raise ValueError(
+                "The complete-book workbook is missing its Chapter Register, Series Character Reference, "
+                "or Source Correction History sheet. Restore the exported sheets or export a fresh workbook; "
+                "correction history will not be silently discarded."
+            )
+        history_headers = {_clean(value) for value in (sheets["Source Correction History"][0] if sheets["Source Correction History"] else [])}
+        required_history_headers = {
+            "Chapter ID", "Chapter Number", "Chapter Title",
+            "Source Passage ID (Before Correction)", "Original Source Text",
+            "User-Approved Source Text", "Correction Reason", "Applied At",
+        }
+        if not required_history_headers.issubset(history_headers):
+            raise ValueError("The Source Correction History sheet is missing required history columns; restore the exported headers before importing.")
         reference_headers = {_clean(value) for value in (sheets["Series Character Reference"][0] if sheets["Series Character Reference"] else [])}
         if not {"Canonical Character", "Known Alias", "Identity Base Name", "Version / Age Variant"}.issubset(reference_headers):
             raise ValueError("The Series Character Reference is missing its canonical-name or alias columns.")
@@ -1364,6 +1419,10 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                                    deleted_registry_rows=None, book_title=""):
     """Preflight name/alias merges and exact source-passage assignments without writing."""
     info = document.get("info") or {}
+    allow_unknown_dialogue_fallback = (
+        int(document.get("schema_version") or 0) == 2
+        and _clean(info.get("Export Scope")) == "complete_book"
+    )
     active_series = _clean(series)
     if not active_series: raise ValueError("The active project must belong to a series before import.")
     if _key(info.get("Series Name")) != _key(active_series):
@@ -1756,6 +1815,27 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                 "end": int(current.get("end", -1)),
             })
 
+    def mapped_workbook_speaker_names(row):
+        """Return explicit names or a validated fallback/split marker for exact-mapped rows."""
+        try:
+            names = _workbook_speaker_names(row)
+        except ValueError:
+            return []
+        if names:
+            return names
+        source_id = _clean(row.get("Passage ID"))
+        current_id = workbook_source_to_current.get(source_id, "")
+        if current_id and current_id in split_parent_ids:
+            return ["__confirmed_structural_split__"]
+        if not allow_unknown_dialogue_fallback:
+            return []
+        if _clean(row.get("Passage Type")).casefold() != "dialogue":
+            return []
+        evidence = _clean(row.get("Evidence / Notes (GPT)")).casefold()
+        if "structural split required" in evidence:
+            return []
+        return ["Third Person"]
+
     # A current dialogue passage may be absent from an older workbook after
     # resegmentation. Preserve an exact manual assignment, but never silently
     # accept an unassigned new passage or a stale AI-only assignment.
@@ -1986,6 +2066,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             issues.append("Passage %s: %s" % (pid, exc))
             continue
         assigned = assigned_names[0] if assigned_names else ""
+        auto_third_person = False
         # If the active source index has safely reclassified an unchanged,
         # unassigned Dialogue row as Narration, keep the active Narrator
         # classification and do not reject the entire workbook. Never discard
@@ -2093,7 +2174,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                     workbook_speakers = []
                     if isinstance(workbook_row, dict):
                         try:
-                            workbook_speakers = _workbook_speaker_names(workbook_row)
+                            workbook_speakers = mapped_workbook_speaker_names(workbook_row)
                         except ValueError:
                             workbook_speakers = []
                     exact_saved = exact_saved_assignment_for_passage(impacted)
@@ -2220,7 +2301,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                 workbook_speakers = []
                 if isinstance(workbook_row, dict):
                     try:
-                        workbook_speakers = _workbook_speaker_names(workbook_row)
+                        workbook_speakers = mapped_workbook_speaker_names(workbook_row)
                     except ValueError:
                         workbook_speakers = []
                 exact_saved = exact_saved_assignment_for_passage(impacted)
@@ -2266,7 +2347,36 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             continue
 
         if not assigned_names:
-            if not old_names:
+            old_source_for_blank = _clean(old.get("source") or "manual").casefold()
+            if (
+                allow_unknown_dialogue_fallback
+                and workbook_type == "dialogue"
+                and (
+                    (not old and not old_names)
+                    or old_source_for_blank in {"ai", "outsourced"}
+                )
+            ):
+                evidence = _clean(row.get("Evidence / Notes (GPT)")).casefold()
+                if "structural split required" in evidence:
+                    issues.append(
+                        "Dialogue passage %s is marked STRUCTURAL SPLIT REQUIRED but has no valid, exact-source-matched "
+                        "Dialogue Split Corrections. Complete the split rows; the parent passage was not assigned to Third Person."
+                        % pid
+                    )
+                    continue
+                if old and old_source_for_blank in {"ai", "outsourced"}:
+                    superseded_assignments.setdefault((start, end, old_source_for_blank), {
+                        "chapter_id": _clean(chapter_id),
+                        "start": start,
+                        "end": end,
+                        "source": old_source_for_blank,
+                        "speakers": old_names,
+                        "text": str(old.get("text") or current.get("text") or ""),
+                    })
+                assigned_names = ["Third Person"]
+                assigned = "Third Person"
+                auto_third_person = True
+            elif not old_names:
                 passage_excerpt = re.sub(r"\s+", " ", str(current.get("text") or "")).strip()[:120]
                 issues.append(
                     "Dialogue passage %s in Chapter %s (%s) has no confirmed character assignment: %s. "
@@ -2275,19 +2385,20 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                        _clean(current.get("chapter_title")), passage_excerpt)
                 )
                 continue
-            old_identity_keys, unresolved_old_names = set(), []
-            for old_name in old_names:
-                if _key(old_name) == "third person":
-                    old_identity_keys.add("third person|reserved")
-                    continue
-                old_matches = token_map.get(_key(old_name), set())
-                if len(old_matches) != 1:
-                    unresolved_old_names.append(old_name)
-                else:
-                    old_identity_keys.update(old_matches)
-            if unresolved_old_names or not old_identity_keys:
-                issues.append("Existing assignment for dialogue passage %s is missing or ambiguous (%s). Resolve it before importing." % (pid, " + ".join(old_names)))
-            continue
+            else:
+                old_identity_keys, unresolved_old_names = set(), []
+                for old_name in old_names:
+                    if _key(old_name) == "third person":
+                        old_identity_keys.add("third person|reserved")
+                        continue
+                    old_matches = token_map.get(_key(old_name), set())
+                    if len(old_matches) != 1:
+                        unresolved_old_names.append(old_name)
+                    else:
+                        old_identity_keys.update(old_matches)
+                if unresolved_old_names or not old_identity_keys:
+                    issues.append("Existing assignment for dialogue passage %s is missing or ambiguous (%s). Resolve it before importing." % (pid, " + ".join(old_names)))
+                continue
 
         if any(_key(name) == "narrator" for name in assigned_names):
             issues.append("Narrator cannot be assigned to dialogue.")
@@ -2350,17 +2461,22 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                 "source": old_source, "speakers": old_names, "text": str(old.get("text") or ""),
             })
         raw_confidence = _clean(row.get("GPT Confidence (0–1)"))
-        if not raw_confidence:
+        if not raw_confidence and auto_third_person:
+            # This is confidence in the safe unidentified-speaker classification,
+            # not a guessed personal attribution.
+            confidence = 0.75
+        elif not raw_confidence:
             issues.append("Passage %s requires an explicit GPT Confidence value from 0.0 to 1.0; blank confidence is not accepted." % pid)
             continue
-        try:
-            confidence = _normalize_workbook_confidence(raw_confidence)
-        except (TypeError, ValueError, OverflowError) as exc:
-            issues.append(
-                "Passage %s has invalid GPT Confidence (%s); use a decimal from 0.0 to 1.0 or a percentage from 0 to 100."
-                % (pid, exc)
-            )
-            continue
+        else:
+            try:
+                confidence = _normalize_workbook_confidence(raw_confidence)
+            except (TypeError, ValueError, OverflowError) as exc:
+                issues.append(
+                    "Passage %s has invalid GPT Confidence (%s); use a decimal from 0.0 to 1.0 or a percentage from 0 to 100."
+                    % (pid, exc)
+                )
+                continue
         assignments.append({
             "passage_id": pid, "chapter_id": chapter_id,
             "chapter_revision": _clean(current.get("chapter_revision")) or _clean(chapter_revision),
@@ -2398,6 +2514,10 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             "new_characters": sum(x["action"] == "create" for x in planned),
             "aliases_to_merge": sum(len(x.get("aliases_to_add", [])) for x in planned),
             "dialogue_assignments": len(assignments),
+            "third_person_assignments": sum(
+                1 for row in assignments
+                if any(_key(name) == "third person" for name in row.get("speakers", []))
+            ),
             "characters_in_register": len(planned),
             "unresolved_dialogue_passages": sum("no confirmed character assignment" in issue for issue in unique_issues),
             "saved_assignments_replaced": len(superseded_assignments),
@@ -2679,6 +2799,10 @@ def character_workbook_assignment_diagnostics(document: dict, plan: dict | None 
         "speaker_rows_exactly_mapped": len(mapped_speaker_rows),
         "speaker_rows_unmapped": max(0, len(speaker_rows) - len(mapped_speaker_rows)),
         "verified_dialogue_assignments": len(assignments),
+        "third_person_assignments": sum(
+            1 for row in assignments
+            if any(_key(name) == "third person" for name in row.get("speakers", []))
+        ),
         "character_register_entries": len(document.get("characters") or []),
         "source_mismatch_issue_count": source_mismatch_issues,
         "preflight_issue_count": len(issues),

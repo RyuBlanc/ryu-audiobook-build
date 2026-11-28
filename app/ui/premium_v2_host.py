@@ -5668,7 +5668,7 @@ class PremiumV2Bridge(QObject):
         if clipboard is None:
             raise RuntimeError("The system clipboard is unavailable. Open a complete-book workbook and copy the prompt from its GPT Prompt sheet.")
         clipboard.setText(prompt)
-        return {"copied": True, "prompt_version": "2.3", "characters": len(prompt)}
+        return {"copied": True, "prompt_version": "2.4", "characters": len(prompt)}
 
     def _character_workbook_export(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Export a complete-book GPT workbook, retaining chapter export compatibility."""
@@ -5855,6 +5855,7 @@ class PremiumV2Bridge(QObject):
             "series_name": series,
             "series_volume": str(state.get("series_volume") or ""),
             "series_character_reference": series_character_reference,
+            "source_correction_history": list(state.get("character_workbook_source_correction_history") or [])[-5000:],
         }
         workbook_bytes, summary = refresh_complete_book_character_workbook_bytes(
             document,

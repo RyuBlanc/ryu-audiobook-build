@@ -55,7 +55,7 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
             response = json.loads(bridge.dispatch("character.workbook.prompt.copy", "{}"))
         self.assertTrue(response.get("success"), response)
         self.assertTrue(response["data"]["copied"])
-        self.assertEqual(response["data"]["prompt_version"], "2.3")
+        self.assertEqual(response["data"]["prompt_version"], "2.4")
         clipboard.setText.assert_called_once_with(host.complete_book_gpt_prompt())
 
     def test_workbook_manual_assignment_endpoint_accepts_sequential_multi_voice_mode(self):
@@ -197,6 +197,7 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn("async function importCompletedCharacterWorkbook(selectedPath = '')", self.adapter)
         self.assertIn("function installCharacterWorkbookAssignButton()", self.adapter)
         self.assertIn("assignButton.textContent = 'Assign the GPT characters'", self.adapter)
+        self.assertNotIn("showCharacterWorkbookMessageDialog('Workbook imported successfully'", self.adapter)
         self.assertIn("data-workbook-confirm>Assign the GPT characters</button>", self.adapter)
         self.assertIn("function installCharacterWorkbookHelpButton()", self.adapter)
         self.assertIn("characterWorkbookHelpText()", self.adapter)

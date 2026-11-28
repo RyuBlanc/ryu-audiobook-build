@@ -779,6 +779,33 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             self.assertTrue(preserved["ready"], preserved["issues"])
             self.assertEqual(preserved["assignments"], [])
 
+    def test_complete_book_blank_dialogue_does_not_replace_empty_manual_assignment_with_third_person(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _path, chapters, _passages, document = self._complete_book_fixture(Path(tmp))
+            target = next(row for row in chapters[1]["current_passages"] if row["passage_id"] == "p2-dialogue")
+            target_assignment = {
+                "start": target["start"], "end": target["end"], "text": target["text"],
+                "speakers": [], "source": "manual", "series": "Silver Archive",
+            }
+            chapters[1]["current_assignments"] = [target_assignment]
+            plan = plan_complete_book_character_workbook_import(
+                document,
+                series="Silver Archive",
+                book_title="The Silver Archive",
+                registry_rows=[],
+                project_characters=[],
+                current_chapters=chapters,
+            )
+            self.assertFalse(plan["ready"])
+            self.assertFalse(any(
+                row["passage_id"] == "p2-dialogue" and row["speaker"] == "Third Person"
+                for row in plan["assignments"]
+            ))
+            self.assertTrue(any(
+                "has no confirmed character assignment" in issue and "p2-dialogue" in issue
+                for issue in plan["issues"]
+            ))
+
     def test_import_plan_requires_explicit_gpt_confidence_for_new_assignments(self):
         with tempfile.TemporaryDirectory() as tmp:
             path, _text, passages = self._export(Path(tmp))
@@ -1282,6 +1309,42 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
         document = read_character_workbook(path)
         return path, chapters, all_passages, document
 
+    def test_complete_book_v2_reader_rejects_missing_source_correction_history_sheet(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original, _chapters, _passages, _document = self._complete_book_fixture(Path(tmp))
+            damaged = Path(tmp) / "missing-history.xlsx"
+            main_ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+            rel_ns = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+            package_ns = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+            with ZipFile(original, "r") as source, ZipFile(damaged, "w", ZIP_DEFLATED) as target:
+                workbook_xml = ET.fromstring(source.read("xl/workbook.xml"))
+                relationships_xml = ET.fromstring(source.read("xl/_rels/workbook.xml.rels"))
+                history_sheet = next(
+                    sheet for sheet in workbook_xml.findall(".//" + main_ns + "sheet")
+                    if sheet.get("name") == "Source Correction History"
+                )
+                relationship_id = history_sheet.get(rel_ns + "id")
+                relationship = next(
+                    item for item in relationships_xml.findall(package_ns + "Relationship")
+                    if item.get("Id") == relationship_id
+                )
+                history_target = relationship.get("Target").lstrip("/")
+                if not history_target.startswith("xl/"):
+                    history_target = "xl/" + history_target
+                workbook_xml.find(".//" + main_ns + "sheets").remove(history_sheet)
+                relationships_xml.remove(relationship)
+                for item in source.infolist():
+                    if item.filename == history_target:
+                        continue
+                    data = source.read(item.filename)
+                    if item.filename == "xl/workbook.xml":
+                        data = ET.tostring(workbook_xml, encoding="utf-8", xml_declaration=True)
+                    elif item.filename == "xl/_rels/workbook.xml.rels":
+                        data = ET.tostring(relationships_xml, encoding="utf-8", xml_declaration=True)
+                    target.writestr(item, data)
+            with self.assertRaisesRegex(ValueError, "Source Correction History"):
+                read_character_workbook(damaged)
+
     def test_complete_book_v2_exports_all_chapters_context_passages_and_separate_series_reference(self):
         with tempfile.TemporaryDirectory() as tmp:
             path, chapters, passages, document = self._complete_book_fixture(Path(tmp))
@@ -1332,7 +1395,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             self.assertEqual(document["info"]["Publication Year"], "2024")
             self.assertEqual(document["info"]["Series Volume"], "Volume 2")
             self.assertIn("GPT Prompt", document["info"]["Instructions"])
-            self.assertEqual(document["info"]["GPT Prompt Version"], "2.3")
+            self.assertEqual(document["info"]["GPT Prompt Version"], "2.4")
             self.assertEqual(len(document["chapter_references"]), 2)
             self.assertEqual(len(document["dialogue_rows"]), len(passages))
             self.assertEqual(document["chapter_references"][0]["chapter_number"], 1)
@@ -1413,7 +1476,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             self.assertEqual(parsed["dialogue_rows"][0]["GPT Confidence (0–1)"], "0.97")
 
             # Exercise the real export -> GPT-edited XLSX -> reader -> planner path.
-            # Only the first dialogue row was filled; the second remains unresolved.
+            # The first dialogue row is named; the exact-matched unidentified second row routes to Third Person.
             plan = plan_complete_book_character_workbook_import(
                 parsed,
                 series="Silver Archive",
@@ -1423,15 +1486,20 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 current_chapters=chapters,
             )
             diagnostics = character_workbook_assignment_diagnostics(parsed, plan)
-            self.assertFalse(plan["ready"])
+            self.assertTrue(plan["ready"], plan["issues"])
             self.assertEqual(
                 [(row["chapter_id"], row["passage_id"], row["speaker"]) for row in plan["assignments"]],
-                [("chapter-001", "p1-dialogue", "Mira")],
+                [
+                    ("chapter-001", "p1-dialogue", "Mira"),
+                    ("chapter-002", "p2-dialogue", "Third Person"),
+                ],
             )
             self.assertEqual(diagnostics["dialogue_rows"], 2)
             self.assertEqual(diagnostics["dialogue_rows_with_gpt_speakers"], 1)
             self.assertEqual(diagnostics["speaker_rows_exactly_mapped"], 1)
-            self.assertEqual(diagnostics["verified_dialogue_assignments"], 1)
+            self.assertEqual(diagnostics["verified_dialogue_assignments"], 2)
+            self.assertEqual(diagnostics["third_person_assignments"], 1)
+            self.assertEqual(plan["summary"]["third_person_assignments"], 1)
             self.assertEqual(diagnostics["character_register_entries"], 2)
 
 
@@ -1870,6 +1938,36 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             self.assertEqual(summary["character_register_entries_preserved"], 2)
             self.assertEqual(original_path.read_bytes(), original_bytes)
 
+    def test_refresh_preserves_source_correction_history_with_excel_header_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _path, chapters, passages, document = self._complete_book_fixture(Path(tmp))
+            document["source_correction_history"] = [{
+                "Chapter ID": "chapter-001",
+                "Chapter Number": "1",
+                "Chapter Title": "The Arrival",
+                "Source Passage ID (Before Correction)": "old-passage-id",
+                "Original Source Text": "“Helo, Mira!”",
+                "User-Approved Source Text": "“Hello, Mira!”",
+                "Correction Reason": "Corrected an obvious transcription error.",
+                "Applied At": "2026-11-26T21:00:00+05:30",
+            }]
+            metadata = {
+                "project_title": document["info"]["Book Title"],
+                "series_name": document["info"]["Series Name"],
+                "series_character_reference": document["series_character_reference"],
+            }
+            workbook_bytes, _summary = refresh_complete_book_character_workbook_bytes(
+                document, metadata=metadata, chapters=chapters, passages=passages,
+            )
+            refreshed_path = Path(tmp) / "history-preserved.xlsx"
+            refreshed_path.write_bytes(workbook_bytes)
+            refreshed = read_character_workbook(refreshed_path)
+            self.assertEqual(len(refreshed["source_correction_history"]), 1)
+            record = refreshed["source_correction_history"][0]
+            self.assertEqual(record["Original Source Text"], "“Helo, Mira!”")
+            self.assertEqual(record["User-Approved Source Text"], "“Hello, Mira!”")
+            self.assertEqual(record["Correction Reason"], "Corrected an obvious transcription error.")
+
     def test_refresh_refuses_to_transfer_gpt_assignments_when_chapter_text_changed(self):
         with tempfile.TemporaryDirectory() as tmp:
             _path, chapters, passages, document = self._complete_book_fixture(Path(tmp))
@@ -1921,9 +2019,10 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 if row["Passage ID"] == "p1-dialogue":
                     row["GPT Assigned Character"] = "Mira"
                     row["GPT Confidence (0–1)"] = "0.97"
-            # p2-dialogue is deliberately blank. The plan remains not-ready for a
-            # full import, but p1 is safe to include when the user selects the
-            # explicit partial-import action.
+            # p2-dialogue is deliberately marked as a merged multi-turn parent
+            # without valid split rows. It remains a real review issue instead of
+            # being mistaken for an unidentified single-turn speaker.
+            next(row for row in document["dialogue_rows"] if row["Passage ID"] == "p2-dialogue")["Evidence / Notes (GPT)"] = "STRUCTURAL SPLIT REQUIRED: two different speakers in this parent passage."
             plan = plan_complete_book_character_workbook_import(
                 document, series="Silver Archive", book_title="The Silver Archive",
                 registry_rows=[], project_characters=[], current_chapters=chapters,
@@ -1937,7 +2036,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             )
             self.assertEqual(plan["summary"]["dialogue_assignments"], 1)
             self.assertTrue(any(
-                "has no confirmed character assignment" in issue and "p2-dialogue" in issue
+                "STRUCTURAL SPLIT REQUIRED" in issue and "p2-dialogue" in issue
                 for issue in plan["issues"]
             ))
 
