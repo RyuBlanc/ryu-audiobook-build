@@ -2313,7 +2313,10 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                     continue
                 if (
                     not stale_ai_assignment_source_matches(saved_start, saved_end, saved_source)
-                    and not stale_ai_span_has_complete_current_coverage(saved_start, saved_end, impacted_passages)
+                    and (
+                        not impacted_dialogue
+                        or not stale_ai_span_has_complete_current_coverage(saved_start, saved_end, impacted_passages)
+                    )
                 ):
                     issues.append(
                         "Stale AI/outsourced assignment at %s:%s is not fully covered by exact current source passages. "
@@ -2465,7 +2468,10 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                 continue
             if (
                 not stale_ai_assignment_source_matches(saved_start, saved_end, saved_source)
-                and not stale_ai_span_has_complete_current_coverage(saved_start, saved_end, impacted_passages)
+                and (
+                    not impacted_dialogue
+                    or not stale_ai_span_has_complete_current_coverage(saved_start, saved_end, impacted_passages)
+                )
             ):
                 issues.append(
                     "Stale AI/outsourced assignment at %s:%s is not fully covered by exact current source passages. "

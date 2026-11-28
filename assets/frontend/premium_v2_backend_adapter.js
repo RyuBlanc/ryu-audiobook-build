@@ -6147,7 +6147,8 @@
           (characterRecoverySelection.has(String(c.id)) ? 'checked' : '') + '>' +
         '<div class="character-recovery-copy"><b title="' + esc(c.name) + '">' + esc(c.name) + '</b>' +
           '<div class="muted" title="' + esc(librarySeriesName(c) || 'Unassigned series') + '">' + esc(librarySeriesName(c) || 'Unassigned series') + ' · ' + esc(c.voice || 'Unassigned') + '</div>' +
-          '<div class="muted" title="' + esc((c.aliases || []).join(', ') || 'No aliases') + '">' + esc((c.aliases || []).join(', ') || 'No aliases') + '</div></div>' +
+          '<div class="muted" title="' + esc((c.aliases || []).join(', ') || 'No aliases') + '">' + esc((c.aliases || []).join(', ') || 'No aliases') + '</div>' +
+          '<div class="muted" title="' + esc(c.deletion_reason || 'Recovery item') + '">' + esc(c.deletion_reason || 'Moved to Recovery') + (c.deleted_at ? ' · ' + esc(c.deleted_at) : '') + '</div></div>' +
         '<button type="button" class="btn small secondary" data-restore-character="' + esc(c.id) + '">Restore</button>' +
       '</article>'
     ).join('') || '<div class="card" style="padding:18px"><b>The Recovery Bin is empty</b><p class="muted">Characters you delete from the reusable library will appear here.</p></div>';

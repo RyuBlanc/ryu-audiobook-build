@@ -16,6 +16,7 @@ from app.core.character_library import (
     purge_deleted_characters_many,
 )
 from app.core.paths import library_root as real_library_root
+from app.chapters.characters import is_likely_character_name
 from app.core.project import Project, delete_project
 from app.core.project_history import load_deleted_project_records
 from app.core.state import save_state
@@ -448,4 +449,32 @@ class CharacterLibraryDuplicateRecoveryTests(unittest.TestCase):
             self.assertIn("Lady Ludivine", active[0]["aliases"])
             self.assertEqual(active[0]["voice_name"], "Saved Qwen Ludivine Voice")
             self.assertEqual(active[0]["notes"], "Active user notes")
+            self.assertEqual(list_deleted_characters(path=store), [])
+
+
+class TrustedLongCharacterNameCleanupTests(unittest.TestCase):
+    def test_cleanup_keeps_trusted_multiparticle_name_and_alias_in_active_library(self):
+        name = "Ludivine Marie-Ange de la Tréfle"
+        self.assertFalse(is_likely_character_name(name))
+        self.assertTrue(is_likely_character_name(name, trusted=True))
+        self.assertFalse(is_likely_character_name("The", trusted=True))
+        with tempfile.TemporaryDirectory(prefix="ryu-character-long-name-") as tmp:
+            store = Path(tmp) / "character-library.json"
+            store.write_text(json.dumps({
+                "version": 1,
+                "active": [{
+                    "id": "ludivine-profile", "series": "Silver Archive",
+                    "primary_name": name, "aliases": ["Dame de la Tréfle"],
+                    "voice_name": "Saved Qwen Ludivine Voice", "manual_aliases": True,
+                }],
+                "deleted": [],
+            }, ensure_ascii=False), encoding="utf-8")
+
+            result = prune_invalid_character_records("Silver Archive", path=store)
+
+            self.assertEqual(result["removed"], 0)
+            self.assertEqual(result["aliases_removed"], 0)
+            active = list_characters(series="Silver Archive", path=store)
+            self.assertEqual([row["primary_name"] for row in active], [name])
+            self.assertIn("Dame de la Tréfle", active[0]["aliases"])
             self.assertEqual(list_deleted_characters(path=store), [])

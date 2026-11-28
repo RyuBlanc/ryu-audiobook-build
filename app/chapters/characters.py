@@ -876,11 +876,11 @@ _EXPLICIT_SPEAKER_NAME_PREFIXES = {
 
 
 def is_likely_character_name(value: str, *, trusted: bool = False, explicit: bool = False) -> bool:
-    """Reject English prose and function words even when AI attribution is explicit.
+    """Reject prose/function words while preserving confirmed full character names.
 
-    Explicit attribution can resolve limited title/name ambiguity (for example,
-    "Captain Mira"), but it cannot turn a sentence starter or descriptor into a
-    person. Trusted identities still cannot be articles, pronouns or interjections.
+    Trusted Library identities may contain more than three words and lowercase
+    name particles (for example, "Ludivine Marie-Ange de la Tréfle"). Hard
+    function words, prose starters and non-person descriptors are still rejected.
     """
     cleaned = _clean_name(str(value or "").strip())
     if not cleaned or len(cleaned) > 80:
@@ -890,9 +890,7 @@ def is_likely_character_name(value: str, *, trusted: bool = False, explicit: boo
         for part in cleaned.split()
     ]
     words = [part for part in words if part]
-    if not 1 <= len(words) <= 3:
-        return False
-    if not all(word and (word[0].isupper() or not word[0].isascii()) for word in words):
+    if not words:
         return False
     lowered = [part.casefold() for part in words]
     if any(word in _HARD_NON_CHARACTER_WORDS for word in lowered):
@@ -905,14 +903,20 @@ def is_likely_character_name(value: str, *, trusted: bool = False, explicit: boo
         for word in lowered
     ):
         return False
-    if len(words) > 1 and (lowered[0].endswith("ing") or lowered[0].endswith("ed")):
-        return False
-
     from app.tts.pronunciation_suggester import is_common_english_phrase
     if is_common_english_phrase(cleaned) and not trusted:
         return False
     if trusted:
         return True
+
+    # Keep strict shape heuristics for untrusted AI detections only. A trusted
+    # Library identity may contain lowercase particles and more than three words.
+    if not 1 <= len(words) <= 3:
+        return False
+    if not all(word and (word[0].isupper() or not word[0].isascii()) for word in words):
+        return False
+    if len(words) > 1 and (lowered[0].endswith("ing") or lowered[0].endswith("ed")):
+        return False
 
     title_prefix_override = bool(
         explicit

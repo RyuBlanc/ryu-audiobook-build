@@ -8348,6 +8348,8 @@ class PremiumV2Bridge(QObject):
             "source_project_folder": str(record.get("source_project_folder") or ""),
             "source_project_title": str(record.get("source_project_title") or ""),
             "updated_at": str(record.get("updated_at") or ""),
+            "deleted_at": str(record.get("deleted_at") or ""),
+            "deletion_reason": str(record.get("deletion_reason") or ""),
             "imported_from_workbook": bool(record.get("imported_from_workbook")),
             "character_origin": "outsourced" if record.get("imported_from_workbook") else "",
         }

@@ -68,3 +68,13 @@ class CharacterRecoveryRestoreFeedbackTests(unittest.TestCase):
         self.assertIn("feedback.textContent = reason", adapter)
         self.assertIn("call('character_library.restore'", adapter)
         self.assertIn('merged = bool(record.pop("_merged_from_recovery", False))', host)
+
+
+class CharacterRecoveryAuditDetailsTests(unittest.TestCase):
+    def test_recovery_rows_expose_stored_reason_and_timestamp(self):
+        host = HOST.read_text(encoding="utf-8")
+        adapter = ADAPTER.read_text(encoding="utf-8")
+        self.assertIn('"deletion_reason": str(record.get("deletion_reason") or "")', host)
+        self.assertIn('"deleted_at": str(record.get("deleted_at") or "")', host)
+        self.assertIn("esc(c.deletion_reason || 'Moved to Recovery')", adapter)
+        self.assertIn("esc(c.deleted_at)", adapter)
