@@ -4654,9 +4654,9 @@
         resolve(value);
       };
       const overlay = openCharacterWorkbookDialog(
-        'Confirm workbook import',
-        '<p>Review the complete plan below. Only confirmed assignments will be saved; existing manual assignments and voice profiles stay protected.</p><pre>' + esc(promptText) + '</pre>',
-        '<button type="button" class="btn secondary" data-workbook-cancel>Cancel</button><button type="button" class="btn" data-workbook-confirm>Confirm import</button>'
+        'Assign GPT characters across the book',
+        '<p>Review the verified book-wide speaker assignments and Character Register changes below. Choose Assign the GPT characters to save the source-matched dialogue speakers across all chapters. Existing manual assignments and voice profiles stay protected.</p><pre>' + esc(promptText) + '</pre>',
+        '<button type="button" class="btn secondary" data-workbook-cancel>Cancel</button><button type="button" class="btn" data-workbook-confirm>Assign the GPT characters</button>'
       );
       overlay.addEventListener('click', event => {
         if (event.target?.closest?.('[data-workbook-confirm]')) finish(true);
@@ -4686,13 +4686,13 @@
     const registerEntries = Number(assignmentDiagnostics.character_register_entries ?? partialSummary.characters ?? 0);
     const canPartialImport = preview?.partial_ready === true && verifiedAssignments > 0 && Boolean(String(preview?.token || '').trim());
     const partialImportButton = canPartialImport
-      ? '<button type="button" class="btn" data-workbook-import-partial>Import verified entries · ' +
-        Number(partialSummary.characters || 0) + ' identities · ' +
-        Number(partialSummary.dialogue_assignments || 0) + ' assignments</button>'
+      ? '<button type="button" class="btn" data-workbook-import-partial>Assign the GPT characters · ' +
+        Number(partialSummary.dialogue_assignments || 0) + ' verified assignments · ' +
+        Number(partialSummary.characters || 0) + ' identities</button>'
       : '';
     const assignmentDiagnosticsMessage = gptSpeakerRows === 0
-      ? 'The workbook was opened, but the Dialogue Assignment sheet contains no GPT speaker names. ' +
-        registerEntries + ' Character Register entries do not assign dialogue. No character-only partial import will be offered.'
+      ? 'The Excel workbook was read successfully, but its Dialogue Assignment sheet contains zero GPT Assigned Character values. ' +
+        registerEntries + ' Character Register entries are only a cast list; they do not assign dialogue. GPT has not filled the speaker cells, so there are zero dialogue assignments to save. Return the workbook to GPT and fill GPT Assigned Character on each supported Dialogue row (and GPT Assigned Characters (JSON) for simultaneous speakers). Do not only populate Character Register.'
       : verifiedAssignments === 0
         ? 'The workbook contains ' + gptSpeakerRows + ' dialogue rows with GPT speaker names, but none passed the source, identity and confidence checks for assignment. ' +
           'The Character Register has ' + registerEntries + ' entries; those entries alone cannot assign passages.'
@@ -4889,7 +4889,7 @@
           renderDialogueReview();
           const skipped = Number(result.skipped_issue_count || 0);
           const confirmation =
-            'Verified workbook entries imported' +
+            'Verified GPT characters assigned' +
             (result.scope === 'book'
               ? ' across ' + Number(result.chapter_count || 0) + ' chapters'
               : ' into Chapter ' + Number(result.chapter_number || 0)) +
@@ -5167,8 +5167,15 @@
       'Chapter ' + Number(row.chapter_number || 0) + ' · ' + String(row.chapter_title || 'Untitled') +
       ' · ' + String(row.passage_id || '') + ' Dialogue → Narration (exact source span)'
     );
-    const prompt = 'Import the completed GPT workbook into Series "' + preview.series +
-      '" · ' + importScope + '?\n\n' +
+    const assignmentDiagnostics = preview.assignment_diagnostics || {};
+    const assignmentCheck =
+      'Dialogue rows in workbook: ' + Number(assignmentDiagnostics.dialogue_rows || 0) + '\n' +
+      'Rows with GPT speaker values: ' + Number(assignmentDiagnostics.dialogue_rows_with_gpt_speakers || 0) + '\n' +
+      'Speaker rows mapped to exact source passages: ' + Number(assignmentDiagnostics.speaker_rows_exactly_mapped || 0) + '\n' +
+      'Verified dialogue assignments to save: ' + Number(assignmentDiagnostics.verified_dialogue_assignments || summary.dialogue_assignments || 0) + '\n' +
+      'Character Register identities: ' + Number(assignmentDiagnostics.character_register_entries || summary.characters_in_register || 0);
+    const prompt = 'Assign the GPT characters in Series "' + preview.series +
+      '" · ' + importScope + '?\n\n' + assignmentCheck + '\n\n' +
       'Existing characters to merge: ' + Number(summary.matched_characters || 0) + '\n' +
       'New series characters: ' + Number(summary.new_characters || 0) + '\n' +
       'Aliases to reconcile: ' + Number(summary.aliases_to_merge || 0) + '\n' +
@@ -5196,7 +5203,7 @@
       ? ' across ' + Number(result.chapter_count || 0) + ' chapters (' +
         Number(result.chapters_updated || 0) + ' chapters received assignments)'
       : ' into Chapter ' + Number(result.chapter_number || 0);
-    const confirmation = 'Workbook imported into the Series Character Library' + importedScope + ' · ' +
+    const confirmation = 'GPT characters assigned to the Series Character Library and novel' + importedScope + ' · ' +
       result.characters_merged + ' identities merged · ' + result.characters_created +
       ' new identities · ' + result.aliases_merged + ' aliases reconciled · ' +
       result.dialogue_assignments + ' dialogue assignments added · ' +
@@ -10430,6 +10437,14 @@ function renderProductionMetadataGate(active) {
     }
     await previewSavedVoice(profile, String(selected.text || ''), current.name, {routeCharacterCast:false});
   }
+  function installCharacterWorkbookAssignButton() {
+    const assignButton = $('importCharacterWorkbook');
+    if (!assignButton) return;
+    assignButton.textContent = 'Assign the GPT characters';
+    assignButton.title = 'Select a completed complete-book GPT workbook and assign every verified dialogue speaker across the active book.';
+    assignButton.setAttribute('aria-label', 'Assign the GPT characters across the active book from a completed workbook');
+  }
+
   function installCharacterWorkbookHelpButton() {
     const exportButton = $('exportCharacterWorkbook');
     if (!exportButton || $('characterWorkbookHelp')) return;
@@ -10450,7 +10465,8 @@ function renderProductionMetadataGate(active) {
       '1. Export the complete-book workbook. It opens on the GPT Prompt tab.',
       '2. Click this i button to copy the full GPT task prompt to the clipboard. This also works with an older refreshed workbook that does not have a GPT Prompt tab.',
       '3. Upload the entire exported or refreshed workbook to ChatGPT and paste the copied prompt. Ask GPT to return a completed .xlsx copy. Keep the workbook and all Chapter Context sheets attached.',
-      '4. Import the completed copy and inspect the preview before confirming.',
+      '4. Before returning the file, check the Dialogue Assignment sheet: the GPT Assigned Character column must contain the speaker for every supported Dialogue row. Filling Character Register alone does not assign any lines.',
+      '5. Import the completed copy and press Assign the GPT characters after the source and identity checks pass.',
       '',
       'IMPORTANT: REVIEW REQUIRED means a previous answer was not carried across a changed or newly split passage. It does not mean the speaker is unknown. GPT must use the complete scene and book context to identify each new turn.',
       'Never edit Passage IDs, chapter references, dialogue text, offsets, or revisions. If one row contains multiple different speakers, GPT must flag STRUCTURAL SPLIT REQUIRED instead of guessing or changing workbook rows.',
@@ -10461,6 +10477,7 @@ function renderProductionMetadataGate(active) {
   function installCharacterStudioHandlers() {
     if (characterStudioCaptureBound) return;
     characterStudioCaptureBound = true;
+    installCharacterWorkbookAssignButton();
     installCharacterWorkbookHelpButton();
     document.addEventListener('input', event => {
       const target = event.target;

@@ -8,9 +8,16 @@ import threading
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+from zipfile import ZIP_DEFLATED, ZipFile
+from xml.etree import ElementTree as ET
 
 from app.core.character_library import list_characters
-from app.core.character_workbook import character_workbook_plan_fingerprint
+from app.core.character_workbook import (
+    character_workbook_plan_fingerprint,
+    create_complete_book_character_workbook_bytes,
+    plan_complete_book_character_workbook_import,
+    read_character_workbook,
+)
 from app.ui import premium_v2_host as host
 
 
@@ -918,6 +925,228 @@ class CharacterWorkbookImportTransactionTests(unittest.TestCase):
 
 
 
+
+
+    def test_real_exported_gpt_workbook_assigns_dialogue_across_every_chapter(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-workbook-real-roundtrip-") as tmp:
+            folder = Path(tmp)
+            first_dialogue = "“Mira, listen!”"
+            second_dialogue = "“Captain Mira, wait!”"
+            first_text = first_dialogue + "\nThe corridor was silent."
+            second_text = second_dialogue + "\nShe turned back."
+
+            def make_passage(passage_id, chapter_id, number, title, revision, source, text, kind):
+                start = text.index(source)
+                return {
+                    "passage_id": passage_id,
+                    "chapter_id": chapter_id,
+                    "chapter_number": number,
+                    "chapter_title": title,
+                    "chapter_revision": revision,
+                    "start": start,
+                    "end": start + len(source),
+                    "text": source,
+                    "kind": kind,
+                    "speakers": [],
+                }
+
+            first_passages = [
+                make_passage("p1-dialogue", "chapter-001", 1, "The Arrival", "revision-001",
+                             first_dialogue, first_text, "character_dialogue"),
+                make_passage("p1-narration", "chapter-001", 1, "The Arrival", "revision-001",
+                             "The corridor was silent.", first_text, "narration"),
+            ]
+            second_passages = [
+                make_passage("p2-dialogue", "chapter-002", 2, "The Warning", "revision-002",
+                             second_dialogue, second_text, "character_dialogue"),
+                make_passage("p2-narration", "chapter-002", 2, "The Warning", "revision-002",
+                             "She turned back.", second_text, "narration"),
+            ]
+            source_chapters = [
+                {
+                    "chapter_id": "chapter-001", "chapter_number": 1,
+                    "chapter_title": "The Arrival", "chapter_revision": "revision-001",
+                    "text": first_text, "current_passages": first_passages,
+                    "current_assignments": [],
+                },
+                {
+                    "chapter_id": "chapter-002", "chapter_number": 2,
+                    "chapter_title": "The Warning", "chapter_revision": "revision-002",
+                    "text": second_text, "current_passages": second_passages,
+                    "current_assignments": [],
+                },
+            ]
+            all_passages = [*first_passages, *second_passages]
+            metadata = {
+                "project_title": "The Silver Archive",
+                "series_name": "Silver Archive",
+                "series_character_reference": [],
+            }
+            exported_path = folder / "Ryu_Character_Workbook_Export.xlsx"
+            exported_path.write_bytes(
+                create_complete_book_character_workbook_bytes(metadata, source_chapters, all_passages)
+            )
+            completed_path = folder / "Ryu_Character_Workbook_GPT_Completed.xlsx"
+            main_ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+            rel_ns = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+            package_ns = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+
+            def set_inline_cell(root, row_number, reference, value):
+                row = root.find(".//%srow[@r='%s']" % (main_ns, row_number))
+                if row is None:
+                    sheet_data = root.find(".//%ssheetData" % main_ns)
+                    row = ET.SubElement(sheet_data, main_ns + "row", {"r": str(row_number)})
+                cell = next(
+                    (item for item in row.findall("%sc" % main_ns) if item.get("r") == reference),
+                    None,
+                )
+                if cell is None:
+                    cell = ET.SubElement(row, main_ns + "c", {"r": reference})
+                else:
+                    cell.clear()
+                    cell.set("r", reference)
+                cell.set("t", "inlineStr")
+                inline = ET.SubElement(cell, main_ns + "is")
+                ET.SubElement(inline, main_ns + "t").text = value
+
+            with ZipFile(exported_path, "r") as source, ZipFile(completed_path, "w", ZIP_DEFLATED) as target:
+                workbook_xml = ET.fromstring(source.read("xl/workbook.xml"))
+                relationships_xml = ET.fromstring(source.read("xl/_rels/workbook.xml.rels"))
+                relationships = {
+                    item.get("Id"): item.get("Target")
+                    for item in relationships_xml.findall(package_ns + "Relationship")
+                }
+                sheet_targets = {}
+                for sheet in workbook_xml.findall(".//%ssheet" % main_ns):
+                    target_name = relationships[sheet.get(rel_ns + "id")].lstrip("/")
+                    if not target_name.startswith("xl/"):
+                        target_name = "xl/" + target_name
+                    sheet_targets[sheet.get("name")] = target_name
+
+                for item in source.infolist():
+                    data = source.read(item.filename)
+                    if item.filename == sheet_targets["Dialogue Assignment"]:
+                        sheet = ET.fromstring(data)
+                        # Rows 2 and 4 are the two dialogue passages in the complete-book export.
+                        # GPT writes the speaker and evidence on the actual Dialogue Assignment rows.
+                        for row_number, speaker, confidence, evidence in (
+                            (2, "Mira", "0.98", "The first-person response is addressed to Mira; surrounding narration identifies Mira as the speaker."),
+                            (4, "Captain Mira", "0.96", "The continuing exchange and action beat identify Mira as the speaker."),
+                        ):
+                            set_inline_cell(sheet, row_number, "G%d" % row_number, speaker)
+                            set_inline_cell(sheet, row_number, "H%d" % row_number, confidence)
+                            set_inline_cell(sheet, row_number, "O%d" % row_number, evidence)
+                        data = ET.tostring(sheet, encoding="utf-8", xml_declaration=True)
+                    elif item.filename == sheet_targets["Character Register"]:
+                        sheet = ET.fromstring(data)
+                        set_inline_cell(sheet, 2, "A2", "Mira")
+                        set_inline_cell(sheet, 2, "B2", "Captain Mira")
+                        set_inline_cell(sheet, 2, "AH2", "YES")
+                        data = ET.tostring(sheet, encoding="utf-8", xml_declaration=True)
+                    target.writestr(item, data)
+
+            # Exercise the real XLSX reader and complete-book planner, not a handcrafted plan.
+            document = read_character_workbook(completed_path)
+            self.assertEqual(len(document["dialogue_rows"]), 4)
+            self.assertEqual(document["characters"][0]["full_name"], "Mira")
+            self.assertEqual(document["characters"][0]["aliases"], ["Captain Mira"])
+            plan = plan_complete_book_character_workbook_import(
+                document,
+                series="Silver Archive",
+                book_title="The Silver Archive",
+                registry_rows=[],
+                project_characters=[],
+                current_chapters=source_chapters,
+            )
+            self.assertTrue(plan["ready"], plan["issues"])
+            self.assertEqual(
+                [(row["chapter_id"], row["passage_id"], row["speaker"]) for row in plan["assignments"]],
+                [
+                    ("chapter-001", "p1-dialogue", "Mira"),
+                    ("chapter-002", "p2-dialogue", "Mira"),
+                ],
+            )
+            self.assertEqual(plan["summary"]["dialogue_assignments"], 2)
+
+            first_live = SimpleNamespace(
+                number=1, title="The Arrival", chapter_id="chapter-001",
+                text=first_text, dialogue_assignments=[],
+            )
+            second_live = SimpleNamespace(
+                number=2, title="The Warning", chapter_id="chapter-002",
+                text=second_text, dialogue_assignments=[],
+            )
+            project = SimpleNamespace(
+                folder=folder, title="The Silver Archive",
+                chapters=[first_live, second_live],
+            )
+            state = {"characters": [], "modified_at": ""}
+            session = {
+                "path": str(completed_path.resolve()),
+                "sha256": document["sha256"],
+                "project_folder": str(folder.resolve()),
+                "export_id": str(document["info"]["Export ID"]),
+                "chapter_number": None,
+                "scope": "book",
+                "book_revision": plan["book_revision"],
+                "plan_sha256": character_workbook_plan_fingerprint(plan),
+                "partial_allowed": False,
+            }
+            bridge = _WorkbookCommitBridge(project, first_live, state, plan, session)
+            library = folder / "character-library.json"
+            library.write_text(
+                json.dumps({"version": 1, "active": [], "deleted": []}),
+                encoding="utf-8",
+            )
+
+            def save_project():
+                (folder / "project.json").write_text("project saved", encoding="utf-8")
+                (folder / "chapters.json").write_text(
+                    json.dumps([
+                        {
+                            "chapter_id": chapter.chapter_id,
+                            "dialogue_assignments": chapter.dialogue_assignments,
+                        }
+                        for chapter in project.chapters
+                    ], ensure_ascii=False),
+                    encoding="utf-8",
+                )
+
+            project.save = Mock(side_effect=save_project)
+
+            def save_project_state(project_folder, payload):
+                (Path(project_folder) / "state.json").write_text(
+                    json.dumps(payload, ensure_ascii=False, sort_keys=True),
+                    encoding="utf-8",
+                )
+
+            with (
+                patch.object(host, "reusable_character_library_path", return_value=library),
+                patch.object(host, "save_state", side_effect=save_project_state),
+            ):
+                result = bridge._character_workbook_import_commit({"token": "preview-token"})
+
+            self.assertTrue(result["imported"])
+            self.assertEqual(result["scope"], "book")
+            self.assertEqual(result["chapter_count"], 2)
+            self.assertEqual(result["chapters_updated"], 2)
+            self.assertEqual(result["dialogue_assignments"], 2)
+            self.assertEqual(len(first_live.dialogue_assignments), 1)
+            self.assertEqual(len(second_live.dialogue_assignments), 1)
+            self.assertEqual(first_live.dialogue_assignments[0]["speaker"], "Mira")
+            self.assertEqual(second_live.dialogue_assignments[0]["speaker"], "Mira")
+            self.assertEqual(first_live.dialogue_assignments[0]["source"], "outsourced")
+            self.assertEqual(second_live.dialogue_assignments[0]["source"], "outsourced")
+            saved_chapters = json.loads((folder / "chapters.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                [row["dialogue_assignments"][0]["speaker"] for row in saved_chapters],
+                ["Mira", "Mira"],
+            )
+            self.assertEqual(len(state["characters"]), 1)
+            self.assertEqual(
+                state["characters"][0]["character_library_id"],
+                list_characters(series="Silver Archive", path=library)[0]["id"],
+            )
 
     def test_manual_assignment_can_add_gpt_speaker_without_removing_existing_manual_speaker(self):
         with tempfile.TemporaryDirectory(prefix="ryu-manual-speaker-union-") as tmp:
