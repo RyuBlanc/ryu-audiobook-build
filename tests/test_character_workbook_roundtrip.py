@@ -2011,14 +2011,17 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
     def test_complete_book_gpt_chorus_extends_manual_speakers_without_replacing_them(self):
         with tempfile.TemporaryDirectory() as tmp:
             _path, chapters, _passages, document = self._complete_book_fixture(Path(tmp))
-            mira = dict(document["characters"][0])
-            kousuke = dict(mira)
-            kousuke.update({
-                "full_name": "Kousuke Takioto", "aliases": [],
-                "notes": "Identified in the full-scene dialogue context.",
+            mira = {
+                "full_name": "Mira", "aliases": ["Captain Mira", "Mira-sama"],
+                "version": "", "notes": "Existing series identity.",
                 "included_in_book": True,
-            })
-            document["characters"].append(kousuke)
+            }
+            kousuke = {
+                "full_name": "Kousuke Takioto", "aliases": [],
+                "version": "", "notes": "Identified in the full-scene dialogue context.",
+                "included_in_book": True,
+            }
+            document["characters"] = [mira, kousuke]
             chorus = next(row for row in document["dialogue_rows"] if row["Passage ID"] == "p1-dialogue")
             chorus["GPT Assigned Character"] = "Mira"
             chorus["GPT Assigned Characters (JSON)"] = '["Mira", "Kousuke Takioto"]'
