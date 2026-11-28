@@ -4654,9 +4654,9 @@
         resolve(value);
       };
       const overlay = openCharacterWorkbookDialog(
-        'Confirm workbook import',
-        '<p>Review the complete plan below. Only confirmed assignments will be saved; existing manual assignments and voice profiles stay protected.</p><pre>' + esc(promptText) + '</pre>',
-        '<button type="button" class="btn secondary" data-workbook-cancel>Cancel</button><button type="button" class="btn" data-workbook-confirm>Confirm import</button>'
+        'Assign GPT characters across the book',
+        '<p>Review the verified book-wide speaker assignments and Character Register changes below. Choose Assign the GPT characters to save the source-matched dialogue speakers across all chapters. Existing manual assignments and voice profiles stay protected.</p><pre>' + esc(promptText) + '</pre>',
+        '<button type="button" class="btn secondary" data-workbook-cancel>Cancel</button><button type="button" class="btn" data-workbook-confirm>Assign the GPT characters</button>'
       );
       overlay.addEventListener('click', event => {
         if (event.target?.closest?.('[data-workbook-confirm]')) finish(true);
@@ -4676,12 +4676,48 @@
       ? preview.unmatched_workbook_rows : [];
     const partialSummary = preview?.partial_summary && typeof preview.partial_summary === 'object'
       ? preview.partial_summary : {};
-    const canPartialImport = preview?.partial_ready === true && Boolean(String(preview?.token || '').trim());
+    const assignmentDiagnostics = preview?.assignment_diagnostics && typeof preview.assignment_diagnostics === 'object'
+      ? preview.assignment_diagnostics : {};
+    const verifiedAssignments = Number(assignmentDiagnostics.verified_dialogue_assignments ?? partialSummary.dialogue_assignments ?? 0);
+    const proposedNarrationReclassifications = Number(assignmentDiagnostics.proposed_narration_reclassifications || partialSummary.narration_reclassifications || 0);
+    const verifiedNarrationReclassifications = Number(assignmentDiagnostics.verified_narration_reclassifications || partialSummary.narration_reclassifications || 0);
+    const gptSpeakerRows = Number(assignmentDiagnostics.dialogue_rows_with_gpt_speakers || 0);
+    const mappedSpeakerRows = Number(assignmentDiagnostics.speaker_rows_exactly_mapped || 0);
+    const unmappedSpeakerRows = Number(assignmentDiagnostics.speaker_rows_unmapped || 0);
+    const workbookDialogueRows = Number(assignmentDiagnostics.dialogue_rows || 0);
+    const registerEntries = Number(assignmentDiagnostics.character_register_entries ?? partialSummary.characters ?? 0);
+    const canPartialImport = preview?.partial_ready === true &&
+      (verifiedAssignments > 0 || verifiedNarrationReclassifications > 0) &&
+      Boolean(String(preview?.token || '').trim());
     const partialImportButton = canPartialImport
-      ? '<button type="button" class="btn" data-workbook-import-partial>Import verified entries · ' +
-        Number(partialSummary.characters || 0) + ' identities · ' +
-        Number(partialSummary.dialogue_assignments || 0) + ' assignments</button>'
+      ? '<button type="button" class="btn" data-workbook-import-partial>Assign the GPT characters · ' +
+        Number(partialSummary.dialogue_assignments || 0) + ' speaker assignments · ' +
+        Number(partialSummary.narration_reclassifications || 0) + ' narration reclassifications · ' +
+        Number(partialSummary.characters || 0) + ' identities</button>'
       : '';
+    const assignmentDiagnosticsMessage = gptSpeakerRows === 0 && proposedNarrationReclassifications === 0
+      ? 'The Excel workbook was read successfully, but its Dialogue Assignment sheet contains zero GPT speaker assignments or Narration classification proposals. ' +
+        registerEntries + ' Character Register entries are only a cast list; they do not assign dialogue. Return the workbook to GPT and fill GPT Assigned Character on each actual spoken Dialogue row, or propose Narration for a source-verified non-spoken row. Do not only populate Character Register.'
+      : verifiedAssignments === 0 && verifiedNarrationReclassifications > 0
+        ? 'No character speaker assignments are being applied, but ' + verifiedNarrationReclassifications +
+          ' exact-source Dialogue rows are explicitly classified as Narration. These rows will be saved as Narrator, not Third Person or a new character. Character Register entries: ' + registerEntries + '.'
+        : verifiedAssignments === 0 && proposedNarrationReclassifications > 0 && verifiedNarrationReclassifications === 0
+          ? 'The workbook contains ' + proposedNarrationReclassifications + ' proposed Dialogue → Narration classifications, but none passed exact-source, Narrator-role and evidence validation. Those passages will remain unchanged until corrected.'
+          : verifiedAssignments === 0
+            ? 'The workbook contains ' + gptSpeakerRows + ' dialogue rows with GPT speaker names, but none passed the source, identity and confidence checks for assignment. ' +
+              'The Character Register has ' + registerEntries + ' entries; those entries alone cannot assign passages.'
+            : 'The workbook contains ' + workbookDialogueRows + ' dialogue rows; GPT speaker names were found in ' + gptSpeakerRows +
+            ', exact source mapping passed for ' + mappedSpeakerRows + ', and ' + verifiedAssignments +
+            ' actual speaker assignments are ready to save, with ' + verifiedNarrationReclassifications +
+            ' verified Dialogue → Narration reclassifications. Character Register entries: ' + registerEntries + '.';
+    const assignmentDiagnosticsHtml = '<div class="ryu-workbook-review-result"><b>Workbook → speaker assignment check</b><p>' +
+      esc(assignmentDiagnosticsMessage) + '</p><p>Dialogue rows: ' + workbookDialogueRows +
+      ' · GPT speaker rows: ' + gptSpeakerRows +
+      ' · Exact source-mapped speaker rows: ' + mappedSpeakerRows +
+      ' · Unmapped speaker rows: ' + unmappedSpeakerRows +
+      ' · Verified speaker assignments: ' + verifiedAssignments +
+      ' · Verified Narration reclassifications: ' + verifiedNarrationReclassifications +
+      ' · Character Register entries: ' + registerEntries + '</p></div>';
     const unmatchedWorkbookHtml = unmatchedWorkbookRows.length
       ? '<details class="ryu-workbook-issues" open><summary>GPT workbook rows needing source reconciliation (' +
         Number(unmatchedWorkbookRows.length) + (preview.unmatched_workbook_rows_truncated ? '+' : '') + ')</summary><ol>' +
@@ -4798,8 +4834,9 @@
         '</details>'
       : '';
     const content =
+      assignmentDiagnosticsHtml +
       (canPartialImport
-        ? '<p><b>Some workbook rows need review, but verified entries can still be imported.</b> Preflight found ' +
+        ? '<p><b>Some workbook rows need review, but verified dialogue assignments can still be imported.</b> Preflight found ' +
           Number(preview.issue_count || issues.length) +
           ' unresolved item(s). Import verified Character Register identities and exact source-matched assignments now; conflicting, stale or unmatched rows will remain unchanged and be reported.</p>'
         : '<p><b>The workbook was not imported.</b> Preflight found ' + Number(preview.issue_count || issues.length) +
@@ -4842,7 +4879,8 @@
         const prompt =
           'Import only the verified entries from this workbook?\n\n' +
           'Character identities to merge/create: ' + Number(safe.characters || 0) + '\n' +
-          'Exact dialogue assignments to add: ' + Number(safe.dialogue_assignments || 0) + '\n' +
+          'Exact dialogue speaker assignments to add: ' + Number(safe.dialogue_assignments || 0) + '\n' +
+          'Source-verified Dialogue → Narration reclassifications: ' + Number(safe.narration_reclassifications || 0) + '\n' +
           'Source-verified stale AI records to retire: ' + Number(safe.stale_assignments_to_retire || 0) + '\n' +
           'Source-verified wording corrections: ' + Number(safe.text_corrections || 0) + '\n' +
           'Unresolved items to leave unchanged: ' + Number(safe.skipped_issues || preview.issue_count || 0) +
@@ -4864,13 +4902,14 @@
           renderDialogueReview();
           const skipped = Number(result.skipped_issue_count || 0);
           const confirmation =
-            'Verified workbook entries imported' +
+            'Verified GPT characters assigned' +
             (result.scope === 'book'
               ? ' across ' + Number(result.chapter_count || 0) + ' chapters'
               : ' into Chapter ' + Number(result.chapter_number || 0)) +
             ' · ' + Number(result.characters_merged || 0) + ' identities merged · ' +
             Number(result.characters_created || 0) + ' new identities · ' +
-            Number(result.dialogue_assignments || 0) + ' dialogue assignments added. ' +
+            Number(result.dialogue_assignments || 0) + ' dialogue speaker assignments added · ' +
+            Number(result.narration_reclassifications || 0) + ' Dialogue → Narration reclassifications applied. ' +
             skipped + ' unresolved item(s) were skipped and left unchanged. Existing manual assignments and voice profiles were preserved.';
           message(confirmation);
           const skippedLines = (Array.isArray(result.skipped_issues) ? result.skipped_issues : [])
@@ -4913,6 +4952,7 @@
         mergeSpeakerButton.disabled = true;
         mergeSpeakerButton.textContent = 'Saving speaker set…';
         if (result) result.textContent = 'Validating the active passage and preserving saved manual speakers…';
+        let speakerAssignmentSaved = false;
         try {
           const resolvedSpeakers = [];
           for (const speaker of selected) {
@@ -4947,6 +4987,7 @@
             preserve_existing_manual:true,
             visual_source:'outsourced'
           });
+          speakerAssignmentSaved = true;
           await refreshChapters();
           await refreshCharacters();
           await refreshCharacterLibrary();
@@ -4959,9 +5000,20 @@
             await importCompletedCharacterWorkbook(String(preview.path));
           }
         } catch (error) {
-          mergeSpeakerButton.disabled = false;
-          mergeSpeakerButton.textContent = 'Confirm speaker set · preserve manual speakers';
-          if (result) result.textContent = error?.message || String(error);
+          const reason = error?.message || String(error);
+          if (speakerAssignmentSaved) {
+            mergeSpeakerButton.disabled = true;
+            mergeSpeakerButton.textContent = 'Speaker assignment saved · workbook recheck required';
+            const detail = 'The confirmed speaker assignment was saved to the exact passage, but the remaining refresh or workbook recheck did not complete. ' +
+              reason + '\\n\\nThe saved manual assignment remains protected. Recheck the same workbook before continuing.';
+            message(detail, true);
+            showCharacterWorkbookMessageDialog('Speaker saved; workbook recheck needs attention', detail);
+          } else {
+            mergeSpeakerButton.disabled = false;
+            mergeSpeakerButton.textContent = 'Confirm speaker set · preserve manual speakers';
+            if (result) result.textContent = reason;
+            message(reason, true);
+          }
         }
         return;
       }
@@ -5035,7 +5087,13 @@
         retry.disabled = true;
         retry.textContent = 'Rechecking…';
         closeCharacterWorkbookDialog();
-        await importCompletedCharacterWorkbook(String(preview.path));
+        try {
+          await importCompletedCharacterWorkbook(String(preview.path));
+        } catch (error) {
+          const reason = error?.message || String(error);
+          message(reason, true);
+          showCharacterWorkbookMessageDialog('Workbook recheck failed', reason + '\\n\\nNo workbook changes were committed by this recheck. Reopen the completed workbook and review the latest preflight report.');
+        }
       }
     });
     return overlay;
@@ -5140,10 +5198,19 @@
     const reclassifications = Array.isArray(preview.passage_reclassifications) ? preview.passage_reclassifications : [];
     const reclassificationLines = reclassifications.map(row =>
       'Chapter ' + Number(row.chapter_number || 0) + ' · ' + String(row.chapter_title || 'Untitled') +
-      ' · ' + String(row.passage_id || '') + ' Dialogue → Narration (exact source span)'
+      ' · ' + String(row.passage_id || '') + ' Dialogue → Narration (exact source span)' +
+      (String(row.reason || '').trim() ? '\\nReason: ' + String(row.reason).trim() : '')
     );
-    const prompt = 'Import the completed GPT workbook into Series "' + preview.series +
-      '" · ' + importScope + '?\n\n' +
+    const assignmentDiagnostics = preview.assignment_diagnostics || {};
+    const assignmentCheck =
+      'Dialogue rows in workbook: ' + Number(assignmentDiagnostics.dialogue_rows || 0) + '\n' +
+      'Rows with GPT speaker values: ' + Number(assignmentDiagnostics.dialogue_rows_with_gpt_speakers || 0) + '\n' +
+      'Speaker rows mapped to exact source passages: ' + Number(assignmentDiagnostics.speaker_rows_exactly_mapped || 0) + '\n' +
+      'Verified dialogue speaker assignments to save: ' + Number(assignmentDiagnostics.verified_dialogue_assignments || summary.dialogue_assignments || 0) + '\n' +
+      'Verified Dialogue → Narration reclassifications to save: ' + Number(assignmentDiagnostics.verified_narration_reclassifications || summary.narration_reclassifications || 0) + '\n' +
+      'Character Register identities: ' + Number(assignmentDiagnostics.character_register_entries || summary.characters_in_register || 0);
+    const prompt = 'Assign the GPT characters in Series "' + preview.series +
+      '" · ' + importScope + '?\n\n' + assignmentCheck + '\n\n' +
       'Existing characters to merge: ' + Number(summary.matched_characters || 0) + '\n' +
       'New series characters: ' + Number(summary.new_characters || 0) + '\n' +
       'Aliases to reconcile: ' + Number(summary.aliases_to_merge || 0) + '\n' +
@@ -5171,14 +5238,14 @@
       ? ' across ' + Number(result.chapter_count || 0) + ' chapters (' +
         Number(result.chapters_updated || 0) + ' chapters received assignments)'
       : ' into Chapter ' + Number(result.chapter_number || 0);
-    const confirmation = 'Workbook imported into the Series Character Library' + importedScope + ' · ' +
+    const confirmation = 'GPT characters assigned to the Series Character Library and novel' + importedScope + ' · ' +
       result.characters_merged + ' identities merged · ' + result.characters_created +
       ' new identities · ' + result.aliases_merged + ' aliases reconciled · ' +
-      result.dialogue_assignments + ' dialogue assignments added · ' +
+      result.dialogue_assignments + ' dialogue speaker assignments added · ' +
+      Number(result.narration_reclassifications || 0) + ' Dialogue → Narration reclassifications applied · ' +
       Number(result.saved_assignments_replaced || 0) + ' stale AI/outsourced assignments replaced · ' +
       Number(result.text_corrections_applied || 0) + ' GPT source-text corrections applied. Existing voice profiles and manual assignments were preserved.';
     message(confirmation);
-    showCharacterWorkbookMessageDialog('Workbook imported successfully', confirmation);
   }
 
   function renderCharacterStudioLive() {
@@ -5938,6 +6005,15 @@
       voice.disabled = voice.options.length <= 1;
     }
   }
+  function showCharacterRecoveryError(error) {
+    const reason = error?.message || String(error);
+    const feedback = $('characterRecoveryMessage');
+    if (feedback) {
+      feedback.textContent = reason;
+      feedback.style.display = 'block';
+    }
+    message(reason, true);
+  }
   function ensureCharacterRecoveryButton() {
     if ($('openCharacterRecoveryBin')) return;
     const importButton = $('importCharacterLibrary');
@@ -5959,7 +6035,7 @@
     modal = document.createElement('div');
     modal.id = 'characterRecoveryModal';
     modal.style.cssText = 'display:none;position:fixed;inset:0;z-index:100000;background:rgba(4,7,12,.82);backdrop-filter:blur(7px);align-items:center;justify-content:center;padding:22px;box-sizing:border-box;';
-    modal.innerHTML = '<div role="dialog" aria-modal="true" aria-labelledby="characterRecoveryTitle" style="width:min(820px,96vw);max-height:84vh;overflow:auto;background:#10141d;border:1px solid #343b49;border-radius:16px;padding:22px;box-shadow:0 24px 80px rgba(0,0,0,.5);color:#f4f5f8"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><h2 id="characterRecoveryTitle" style="margin:0">Character Recovery Bin</h2><p class="muted" style="margin:6px 0 0">Restore deleted reusable characters or permanently clear unwanted entries. Clearing cannot be undone.</p></div><button type="button" class="btn small secondary" data-close-character-recovery>Close</button></div><div id="characterRecoveryToolbar"><span id="characterRecoverySelectedCount" class="muted">0 selected</span><button type="button" class="btn small secondary" data-select-all-deleted-characters>Select All</button><button type="button" class="btn small ghost" data-clear-deleted-selection>Clear Selection</button><button type="button" class="btn small danger" data-purge-selected-characters disabled>Clear Selected</button><button type="button" class="btn small danger" data-purge-all-characters disabled>Clear All</button></div><div id="characterRecoveryItems" style="display:grid;gap:10px;margin-top:12px"></div></div>';
+    modal.innerHTML = '<div role="dialog" aria-modal="true" aria-labelledby="characterRecoveryTitle" style="width:min(820px,96vw);max-height:84vh;overflow:auto;background:#10141d;border:1px solid #343b49;border-radius:16px;padding:22px;box-shadow:0 24px 80px rgba(0,0,0,.5);color:#f4f5f8"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><h2 id="characterRecoveryTitle" style="margin:0">Character Recovery Bin</h2><p class="muted" style="margin:6px 0 0">Restore deleted reusable characters or permanently clear unwanted entries. Clearing cannot be undone.</p></div><button type="button" class="btn small secondary" data-close-character-recovery>Close</button></div><div id="characterRecoveryMessage" role="alert" aria-live="polite" style="display:none;margin-top:12px;padding:10px 12px;border:1px solid #70434a;background:rgba(120,32,44,.14);border-radius:8px;color:#ffd8dc"></div><div id="characterRecoveryToolbar"><span id="characterRecoverySelectedCount" class="muted">0 selected</span><button type="button" class="btn small secondary" data-select-all-deleted-characters>Select All</button><button type="button" class="btn small ghost" data-clear-deleted-selection>Clear Selection</button><button type="button" class="btn small danger" data-purge-selected-characters disabled>Clear Selected</button><button type="button" class="btn small danger" data-purge-all-characters disabled>Clear All</button></div><div id="characterRecoveryItems" style="display:grid;gap:10px;margin-top:12px"></div></div>';
     modal.addEventListener('click', async event => {
       if (event.target === modal || event.target.closest('[data-close-character-recovery]')) {
         modal.style.display = 'none';
@@ -5969,13 +6045,21 @@
       if (selectAllDeleted) {
         for (const row of libraryDeletedCharacters) characterRecoverySelection.add(String(row.id || ''));
         updateCharacterRecoverySelectionControls();
-        await openCharacterRecoveryBin();
+        try {
+          await openCharacterRecoveryBin();
+        } catch (error) {
+          showCharacterRecoveryError(error);
+        }
         return;
       }
       const clearDeletedSelection = event.target.closest('[data-clear-deleted-selection]');
       if (clearDeletedSelection) {
         characterRecoverySelection.clear();
-        await openCharacterRecoveryBin();
+        try {
+          await openCharacterRecoveryBin();
+        } catch (error) {
+          showCharacterRecoveryError(error);
+        }
         return;
       }
       const purgeSelected = event.target.closest('[data-purge-selected-characters]');
@@ -5991,14 +6075,21 @@
       const restore = event.target.closest('[data-restore-character]');
       if (!restore) return;
       restore.disabled = true;
+      const feedback = $('characterRecoveryMessage');
+      if (feedback) {
+        feedback.textContent = '';
+        feedback.style.display = 'none';
+      }
       try {
         const record = libraryDeletedCharacters.find(item => String(item.id) === restore.dataset.restoreCharacter);
-        await call('character_library.restore', {id:restore.dataset.restoreCharacter});
+        const result = await call('character_library.restore', {id:restore.dataset.restoreCharacter});
         await refreshCharacterIdentityViews();
-        message('Restored ' + (record?.name || 'character') + ' to the reusable Character Library.');
+        message(result?.merged
+          ? 'Recovered ' + (record?.name || 'character') + ' by merging it into the existing canonical Library identity. Its active voice assignment was preserved.'
+          : 'Restored ' + (record?.name || 'character') + ' to the reusable Character Library.');
         await openCharacterRecoveryBin();
       } catch (error) {
-        message(error?.message || String(error), true);
+        showCharacterRecoveryError(error);
       } finally {
         restore.disabled = false;
       }
@@ -6063,6 +6154,8 @@
       await refreshCharacterIdentityViews();
       await openCharacterRecoveryBin();
       message('Permanently cleared ' + Number(result?.purged || ids.length) + ' character record(s) from Recovery.');
+    } catch (error) {
+      showCharacterRecoveryError(error);
     } finally {
       updateCharacterRecoverySelectionControls();
     }
@@ -6070,6 +6163,11 @@
 
   async function openCharacterRecoveryBin() {
     const modal = ensureCharacterRecoveryModal();
+    const feedback = $('characterRecoveryMessage');
+    if (feedback) {
+      feedback.textContent = '';
+      feedback.style.display = 'none';
+    }
     libraryDeletedCharacters = await call('character_library.deleted.list');
     const validDeletedIds = new Set(libraryDeletedCharacters.map(row => String(row.id || '')));
     for (const selectedId of [...characterRecoverySelection]) {
@@ -6082,7 +6180,8 @@
           (characterRecoverySelection.has(String(c.id)) ? 'checked' : '') + '>' +
         '<div class="character-recovery-copy"><b title="' + esc(c.name) + '">' + esc(c.name) + '</b>' +
           '<div class="muted" title="' + esc(librarySeriesName(c) || 'Unassigned series') + '">' + esc(librarySeriesName(c) || 'Unassigned series') + ' · ' + esc(c.voice || 'Unassigned') + '</div>' +
-          '<div class="muted" title="' + esc((c.aliases || []).join(', ') || 'No aliases') + '">' + esc((c.aliases || []).join(', ') || 'No aliases') + '</div></div>' +
+          '<div class="muted" title="' + esc((c.aliases || []).join(', ') || 'No aliases') + '">' + esc((c.aliases || []).join(', ') || 'No aliases') + '</div>' +
+          '<div class="muted" title="' + esc(c.deletion_reason || 'Recovery item') + '">' + esc(c.deletion_reason || 'Moved to Recovery') + (c.deleted_at ? ' · ' + esc(c.deleted_at) : '') + '</div></div>' +
         '<button type="button" class="btn small secondary" data-restore-character="' + esc(c.id) + '">Restore</button>' +
       '</article>'
     ).join('') || '<div class="card" style="padding:18px"><b>The Recovery Bin is empty</b><p class="muted">Characters you delete from the reusable library will appear here.</p></div>';
@@ -10405,6 +10504,14 @@ function renderProductionMetadataGate(active) {
     }
     await previewSavedVoice(profile, String(selected.text || ''), current.name, {routeCharacterCast:false});
   }
+  function installCharacterWorkbookAssignButton() {
+    const assignButton = $('importCharacterWorkbook');
+    if (!assignButton) return;
+    assignButton.textContent = 'Assign the GPT characters';
+    assignButton.title = 'Select a completed complete-book GPT workbook and assign every verified dialogue speaker across the active book.';
+    assignButton.setAttribute('aria-label', 'Assign the GPT characters across the active book from a completed workbook');
+  }
+
   function installCharacterWorkbookHelpButton() {
     const exportButton = $('exportCharacterWorkbook');
     if (!exportButton || $('characterWorkbookHelp')) return;
@@ -10425,17 +10532,19 @@ function renderProductionMetadataGate(active) {
       '1. Export the complete-book workbook. It opens on the GPT Prompt tab.',
       '2. Click this i button to copy the full GPT task prompt to the clipboard. This also works with an older refreshed workbook that does not have a GPT Prompt tab.',
       '3. Upload the entire exported or refreshed workbook to ChatGPT and paste the copied prompt. Ask GPT to return a completed .xlsx copy. Keep the workbook and all Chapter Context sheets attached.',
-      '4. Import the completed copy and inspect the preview before confirming.',
+      '4. Before returning the file, check the Dialogue Assignment sheet: the GPT Assigned Character column must contain the speaker for every supported Dialogue row. Filling Character Register alone does not assign any lines.',
+      '5. Import the completed copy and press Assign the GPT characters after the source and identity checks pass.',
       '',
       'IMPORTANT: REVIEW REQUIRED means a previous answer was not carried across a changed or newly split passage. It does not mean the speaker is unknown. GPT must use the complete scene and book context to identify each new turn.',
       'Never edit Passage IDs, chapter references, dialogue text, offsets, or revisions. If one row contains multiple different speakers, GPT must flag STRUCTURAL SPLIT REQUIRED instead of guessing or changing workbook rows.',
-      'Only genuinely ambiguous speakers should remain blank; those rows correctly block import until resolved.'
+      'For any actual live Dialogue turn whose speaker cannot be identified from the full scene, use Third Person. The app also safely routes an exact-source-matched blank single-turn Dialogue row to Third Person. Leave a parent row blank only when it contains multiple distinct turns and you mark STRUCTURAL SPLIT REQUIRED with the separate turn rows in Dialogue Split Corrections. Manual or unknown-source conflicts and source mismatches still require review.'
     ].join('\n');
   }
 
   function installCharacterStudioHandlers() {
     if (characterStudioCaptureBound) return;
     characterStudioCaptureBound = true;
+    installCharacterWorkbookAssignButton();
     installCharacterWorkbookHelpButton();
     document.addEventListener('input', event => {
       const target = event.target;

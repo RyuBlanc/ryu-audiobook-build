@@ -721,17 +721,64 @@ def restore_character(record_id: str, path: Path | None = None) -> dict:
         and restoring_tokens.intersection(_identity_tokens(item))
     ]
     if conflicts:
+        # A Recovery Bin duplicate can be reconciled without creating a second
+        # canonical identity when exactly one active record has the same primary
+        # name and version. Keep the active ID and assigned voice stable.
+        exact_matches = [
+            item for item in conflicts
+            if _identity_key(item.get("primary_name") or item.get("name"))
+                == _identity_key(record.get("primary_name") or record.get("name"))
+            and _identity_key(item.get("identity_variant")) == _identity_key(record.get("identity_variant"))
+        ]
+        if len(conflicts) == 1 and len(exact_matches) == 1:
+            active_record = exact_matches[0]
+            primary = str(active_record.get("primary_name") or active_record.get("name") or "").strip()
+            active_aliases = active_record.get("aliases") or []
+            recovered_aliases = record.get("aliases") or []
+            if isinstance(active_aliases, str):
+                active_aliases = [active_aliases]
+            if isinstance(recovered_aliases, str):
+                recovered_aliases = [recovered_aliases]
+            active_record["aliases"] = _clean_names(
+                [*active_aliases, *recovered_aliases], primary
+            )
+            for field in ("short", "notes", "dialogue_sample", "pronunciation",
+                          "source_project_folder", "source_project_title",
+                          "identity_base_name", "character_library_id"):
+                if not str(active_record.get(field) or "").strip() and str(record.get(field) or "").strip():
+                    active_record[field] = record[field]
+            if not str(active_record.get("voice_name") or active_record.get("voice") or "").strip():
+                active_record["voice_name"] = record.get("voice_name") or record.get("voice")
+            if not str(active_record.get("dialogue_sample_source") or "").strip():
+                active_record["dialogue_sample_source"] = record.get("dialogue_sample_source")
+            active_record["line_count"] = max(
+                _safe_count(active_record.get("line_count", 0)),
+                _safe_count(record.get("line_count", 0)),
+            )
+            active_record["chapter_count"] = max(
+                _safe_count(active_record.get("chapter_count", 0)),
+                _safe_count(record.get("chapter_count", 0)),
+            )
+            for flag in ("user_created", "manual", "manual_aliases", "imported_from_workbook"):
+                active_record[flag] = bool(active_record.get(flag) or record.get(flag))
+            active_record["updated_at"] = _timestamp()
+            store["deleted"].pop(index)
+            _write_store(store, target)
+            restored = dict(active_record)
+            restored["_merged_from_recovery"] = True
+            return restored
+
         conflict_names = sorted({
             str(item.get("primary_name") or item.get("name") or "Unnamed character").strip()
             for item in conflicts
         })
         raise ValueError(
             "Cannot restore this character because one or more names or aliases are already in use "
-            "by an active character in this series (%s). Resolve the identity conflict first." %
-            ", ".join(conflict_names[:4])
+            "by a different active character in this series (%s). The Recovery Bin record was kept."
+            % ", ".join(conflict_names[:4])
         )
 
-    # Do not remove the Recovery Bin record until every collision check passes.
+    # No collision: move the original record back to the active registry.
     record = store["deleted"].pop(index)
     record.pop("deleted_at", None)
     record["updated_at"] = _timestamp()

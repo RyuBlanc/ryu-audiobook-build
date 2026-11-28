@@ -57,3 +57,38 @@ class CharacterLibraryBulkUiContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CharacterRecoveryRestoreFeedbackTests(unittest.TestCase):
+    def test_recovery_restore_errors_are_visible_inside_the_open_modal(self):
+        root = Path(__file__).resolve().parents[1]
+        adapter = (root / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        host = (root / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn('id="characterRecoveryMessage" role="alert"', adapter)
+        self.assertIn("feedback.textContent = reason", adapter)
+        self.assertIn("call('character_library.restore'", adapter)
+        self.assertIn('merged = bool(record.pop("_merged_from_recovery", False))', host)
+
+    def test_recovery_restore_button_calls_backend_and_refreshes_both_views(self):
+        root = Path(__file__).resolve().parents[1]
+        adapter = (root / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        host = (root / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn("modal.addEventListener('click', async event =>", adapter)
+        self.assertIn("const restore = event.target.closest('[data-restore-character]');", adapter)
+        self.assertIn("await call('character_library.restore', {id:restore.dataset.restoreCharacter})", adapter)
+        self.assertIn("await refreshCharacterIdentityViews();", adapter)
+        self.assertIn("await openCharacterRecoveryBin();", adapter)
+        self.assertIn("feedback.textContent = reason", adapter)
+        self.assertIn('"character_library.restore": self._character_library_restore', host)
+        self.assertIn('"character_library.restore": True', host)
+        self.assertIn("record = restore_reusable_character(row_id)", host)
+
+
+class CharacterRecoveryAuditDetailsTests(unittest.TestCase):
+    def test_recovery_rows_expose_stored_reason_and_timestamp(self):
+        host = HOST.read_text(encoding="utf-8")
+        adapter = ADAPTER.read_text(encoding="utf-8")
+        self.assertIn('"deletion_reason": str(record.get("deletion_reason") or "")', host)
+        self.assertIn('"deleted_at": str(record.get("deleted_at") or "")', host)
+        self.assertIn("esc(c.deletion_reason || 'Moved to Recovery')", adapter)
+        self.assertIn("esc(c.deleted_at)", adapter)

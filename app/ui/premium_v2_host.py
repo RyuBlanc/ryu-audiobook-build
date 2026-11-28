@@ -83,6 +83,7 @@ from app.core.character_workbook import (
     character_workbook_plan_fingerprint,
     complete_book_gpt_prompt,
     _workbook_speaker_names,
+    character_workbook_assignment_diagnostics,
 )
 from app.production_metadata import missing_required_metadata_fields, normalize_metadata_text
 from app.version import APP_NAME, full_version
@@ -5667,7 +5668,7 @@ class PremiumV2Bridge(QObject):
         if clipboard is None:
             raise RuntimeError("The system clipboard is unavailable. Open a complete-book workbook and copy the prompt from its GPT Prompt sheet.")
         clipboard.setText(prompt)
-        return {"copied": True, "prompt_version": "2.2", "characters": len(prompt)}
+        return {"copied": True, "prompt_version": "2.5", "characters": len(prompt)}
 
     def _character_workbook_export(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Export a complete-book GPT workbook, retaining chapter export compatibility."""
@@ -5854,6 +5855,7 @@ class PremiumV2Bridge(QObject):
             "series_name": series,
             "series_volume": str(state.get("series_volume") or ""),
             "series_character_reference": series_character_reference,
+            "source_correction_history": list(state.get("character_workbook_source_correction_history") or [])[-5000:],
         }
         workbook_bytes, summary = refresh_complete_book_character_workbook_bytes(
             document,
@@ -5957,6 +5959,7 @@ class PremiumV2Bridge(QObject):
                     project, document, selected_path
                 )
             raise
+        assignment_diagnostics = character_workbook_assignment_diagnostics(document, plan)
         if not plan["ready"]:
             if int(document.get("schema_version") or 0) == 2:
                 review_state, review_series, review_chapters = self._character_workbook_book_snapshot(project)
@@ -6134,6 +6137,25 @@ class PremiumV2Bridge(QObject):
                             same_span_unmatched_speakers = _workbook_speaker_names(same_span_unmatched_rows[0])
                         except ValueError:
                             same_span_unmatched_speakers = []
+                    # An exact-mapped workbook row can also conflict with an existing
+                    # manual speaker set. The earlier review path only exposed
+                    # multi-speaker confirmation for unmatched rows, leaving this
+                    # valid, exact source case with no safe confirmation action.
+                    mapped_exact_speaker_row = bool(
+                        isinstance(workbook_row, dict)
+                        and source_workbook_id == passage_id
+                        and source_id_counts.get(source_workbook_id) == 1
+                        and str(workbook_row.get("Chapter ID") or "").strip() == active_chapter_id
+                        and str(workbook_row.get("Passage Type") or "").strip().casefold() == "dialogue"
+                        and str(workbook_row.get("Dialogue Text") or "") == passage_text
+                        and int(float(workbook_row.get("Start (Reference)"))) == start
+                        and int(float(workbook_row.get("End (Reference)"))) == end
+                    )
+                    confirmable_speaker_names = (
+                        same_span_unmatched_speakers
+                        if len(same_span_unmatched_rows) == 1
+                        else (list(workbook_speakers) if mapped_exact_speaker_row else [])
+                    )
                     issue_reasons = [
                         issue for issue in review_issues
                         if passage_id.casefold() in issue.casefold()
@@ -6173,6 +6195,8 @@ class PremiumV2Bridge(QObject):
                         "unmatched_workbook_passage_ids": unmatched_workbook_ids,
                         "same_span_unmatched_speaker_row": len(same_span_unmatched_rows) == 1,
                         "same_span_unmatched_speakers": same_span_unmatched_speakers,
+                        "mapped_exact_speaker_row": mapped_exact_speaker_row,
+                        "confirmable_speaker_names": confirmable_speaker_names,
                         "existing_speakers": existing_speakers,
                         "existing_assignment_source": existing_assignment_source,
                         "can_manual_assign": (
@@ -6233,14 +6257,17 @@ class PremiumV2Bridge(QObject):
                     review_item.get("passage_type") != "Dialogue"
                     or review_item.get("existing_assignment_source") != "manual"
                     or not review_item.get("existing_speakers")
-                    or not review_item.get("same_span_unmatched_speaker_row")
-                    or not review_item.get("same_span_unmatched_speakers")
+                    or not (
+                        review_item.get("same_span_unmatched_speaker_row")
+                        or review_item.get("mapped_exact_speaker_row")
+                    )
+                    or not review_item.get("confirmable_speaker_names")
                 ):
                     continue
                 resolved = []
                 resolution_failed = False
                 protected_keys = {str(name).strip().casefold() for name in review_item["existing_speakers"]}
-                for raw_name in review_item["same_span_unmatched_speakers"]:
+                for raw_name in review_item["confirmable_speaker_names"]:
                     raw_key = str(raw_name or "").strip().casefold()
                     matches = [
                         option for option in character_options
@@ -6367,6 +6394,7 @@ class PremiumV2Bridge(QObject):
                 "partial_ready": bool(plan.get("partial_ready")),
                 "token": partial_token,
                 "partial_summary": dict(plan.get("partial_summary") or {}),
+                "assignment_diagnostics": assignment_diagnostics,
                 "path": str(Path(selected_path).expanduser().resolve()),
                 "issues": review_issues[:1000],
                 "issue_count": len(review_issues),
@@ -6400,8 +6428,17 @@ class PremiumV2Bridge(QObject):
             "plan_sha256": character_workbook_plan_fingerprint(plan),
             "partial_allowed": False,
         }
+        def is_narrator_only_assignment(assignment: dict[str, Any]) -> bool:
+            raw = assignment.get("speakers")
+            if not isinstance(raw, (list, tuple)):
+                raw = [assignment.get("speaker")] if assignment.get("speaker") else []
+            names = [str(value).strip() for value in raw if str(value or "").strip()]
+            return bool(names) and all(name.casefold() == "narrator" for name in names)
+
         assignment_groups: dict[str, dict[str, Any]] = {}
         for assignment in plan.get("assignments") or []:
+            if is_narrator_only_assignment(assignment):
+                continue
             raw_speakers = assignment.get("speakers")
             if not isinstance(raw_speakers, (list, tuple)):
                 raw_speakers = [assignment.get("speaker")] if assignment.get("speaker") else []
@@ -6426,7 +6463,10 @@ class PremiumV2Bridge(QObject):
                 "chapter_number": int(row.get("chapter_number") or 0),
                 "chapter_title": str(row.get("chapter_title") or ""),
                 "passage_count": int(row.get("passage_count") or 0),
-                "assignment_count": len(row.get("assignments") or []),
+                "assignment_count": sum(
+                    1 for assignment in (row.get("assignments") or [])
+                    if not is_narrator_only_assignment(assignment)
+                ),
             }
             for row in plan.get("chapter_assignments", [])
         ]
@@ -6435,7 +6475,10 @@ class PremiumV2Bridge(QObject):
                 "chapter_number": int(chapter.number),
                 "chapter_title": str(chapter.title or ""),
                 "passage_count": len(document.get("dialogue_rows") or []),
-                "assignment_count": len(plan.get("assignments") or []),
+                "assignment_count": sum(
+                    1 for assignment in (plan.get("assignments") or [])
+                    if not is_narrator_only_assignment(assignment)
+                ),
             }]
         return {
             "cancelled": False, "ready": True, "token": token,
@@ -6446,6 +6489,7 @@ class PremiumV2Bridge(QObject):
             "chapter_number": int(chapter.number) if chapter is not None else None,
             "chapter_count": len(plan.get("chapters") or []) or 1,
             "summary": plan["summary"],
+            "assignment_diagnostics": assignment_diagnostics,
             "chapters": chapter_preview,
             "assignment_summary": assignment_summary,
             "character_plan_total": len(plan.get("characters") or []),
@@ -6815,12 +6859,42 @@ class PremiumV2Bridge(QObject):
                                 )
                             ]
                         assignments_by_chapter[chapter_id] = existing_assignments
-                    base = {"start": start, "end": end, "text": exact, "source": "outsourced"}
                     imported_speakers = imported_row.get("speakers") or [str(imported_row["speaker"])]
                     imported_mode = str(imported_row.get("multi_speaker_mode") or ("chorus" if len(imported_speakers) > 1 else "single"))
+                    existing_rows = assignments_by_chapter[chapter_id]
+                    preserve_manual = bool(imported_row.get("preserve_existing_manual"))
+                    exact_existing = None
+                    required_saved = []
+                    if preserve_manual:
+                        exact_rows = [
+                            row for row in existing_rows
+                            if isinstance(row, dict)
+                            and int(row.get("start", -1)) == start
+                            and int(row.get("end", -1)) == end
+                        ]
+                        if len(exact_rows) != 1:
+                            raise ValueError("The manual speaker assignment changed before import. No changes were retained.")
+                        exact_existing = dict(exact_rows[0])
+                        if str(exact_existing.get("source") or "manual").strip().casefold() != "manual":
+                            raise ValueError("The saved speaker assignment is no longer a manual record. No changes were retained.")
+                        existing_speakers = exact_existing.get("speakers")
+                        if not isinstance(existing_speakers, (list, tuple)):
+                            existing_speakers = [exact_existing.get("speaker")] if exact_existing.get("speaker") else []
+                        existing_keys = {str(name).strip().casefold() for name in existing_speakers if str(name or "").strip()}
+                        required_saved = [
+                            str(name).strip()
+                            for name in (imported_row.get("manual_saved_speakers") or [])
+                            if str(name or "").strip()
+                        ]
+                        if not required_saved or any(name.casefold() not in existing_keys for name in required_saved):
+                            raise ValueError("The imported speaker set no longer contains every saved manual speaker. No changes were retained.")
+                        base = dict(exact_existing)
+                        base.update({"start": start, "end": end, "text": exact, "source": "manual"})
+                    else:
+                        base = {"start": start, "end": end, "text": exact, "source": "outsourced"}
                     normalized = normalize_assignment(base, [str(name) for name in imported_speakers], imported_mode)
                     normalized.update({
-                        "source": "outsourced", "confidence": float(imported_row["confidence"]),
+                        "source": "manual" if preserve_manual else "outsourced", "confidence": float(imported_row["confidence"]),
                         "series": series,
                         **{
                             key: imported_row[key]
@@ -6834,6 +6908,12 @@ class PremiumV2Bridge(QObject):
                             if key in imported_row and not (chapter_corrections and key in {"passage_id", "chapter_revision"})
                         },
                     })
+                    if preserve_manual:
+                        normalized["manual_speakers"] = list(
+                            exact_existing.get("manual_speakers") or imported_row.get("manual_speakers") or required_saved
+                        )
+                        normalized["outsourced_speakers"] = list(imported_row.get("outsourced_speakers") or [])
+                        normalized["visual_source"] = "outsourced"
                     if any(str(name).strip().casefold() == "third person" for name in imported_speakers):
                         normalized["third_person_pending"] = True
                         normalized["speaker_identity_status"] = "needs_user_identification"
@@ -6917,7 +6997,15 @@ class PremiumV2Bridge(QObject):
                 "chapters_updated": len(assignments_by_chapter),
                 "characters_merged": int(plan["summary"]["matched_characters"]),
                 "characters_created": int(plan["summary"]["new_characters"]),
-                "dialogue_assignments": len(plan["assignments"]),
+                "dialogue_assignments": sum(
+                    1 for row in (plan.get("assignments") or [])
+                    if not all(
+                        str(name).strip().casefold() == "narrator"
+                        for name in (row.get("speakers") or [row.get("speaker")])
+                        if str(name or "").strip()
+                    )
+                ),
+                "narration_reclassifications": len(plan.get("passage_reclassifications") or []),
                 "saved_assignments_replaced": len(plan.get("superseded_assignments") or []),
                 "text_corrections_applied": text_corrections_applied,
                 "passage_reclassifications": len(plan.get("passage_reclassifications") or []),
@@ -8260,6 +8348,8 @@ class PremiumV2Bridge(QObject):
             "source_project_folder": str(record.get("source_project_folder") or ""),
             "source_project_title": str(record.get("source_project_title") or ""),
             "updated_at": str(record.get("updated_at") or ""),
+            "deleted_at": str(record.get("deleted_at") or ""),
+            "deletion_reason": str(record.get("deletion_reason") or ""),
             "imported_from_workbook": bool(record.get("imported_from_workbook")),
             "character_origin": "outsourced" if record.get("imported_from_workbook") else "",
         }
@@ -8899,7 +8989,9 @@ class PremiumV2Bridge(QObject):
         if not row_id:
             raise ValueError("Choose a deleted character to restore.")
         record = restore_reusable_character(row_id)
-        return {"restored": True, "character": self._character_library_ui_record(record),
+        merged = bool(record.pop("_merged_from_recovery", False))
+        return {"restored": True, "merged": merged,
+                "character": self._character_library_ui_record(record),
                 "count": len(list_reusable_characters())}
 
     @_serialize_character_identity_state
