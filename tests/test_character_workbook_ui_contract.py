@@ -469,6 +469,139 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
             self.assertIs(open_dialog.call_args.args[0], window)
             self.assertIsInstance(open_dialog.call_args.args[0], QMainWindow)
 
+    def test_exact_mapped_workbook_chorus_can_be_confirmed_while_preserving_saved_manual_speaker(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-workbook-exact-chorus-") as temp:
+            source = Path(temp) / "GPT_Completed_Book.xlsx"
+            source.write_bytes(b"workbook-fixture")
+            passage_text = "“Huh?!”"
+            chapter_text = "0123456789" + passage_text + " trailing context"
+            passage = {
+                "passage_id": "passage-chorus-5",
+                "chapter_id": "chapter-005",
+                "chapter_revision": "revision-5",
+                "kind": "dialogue",
+                "start": 10,
+                "end": 10 + len(passage_text),
+                "text": passage_text,
+            }
+            saved_manual = {
+                "passage_id": passage["passage_id"],
+                "chapter_revision": passage["chapter_revision"],
+                "start": passage["start"],
+                "end": passage["end"],
+                "text": passage_text,
+                "source": "manual",
+                "speaker": "Nanami",
+                "speakers": ["Nanami"],
+                "multi_speaker_mode": "single",
+            }
+            workbook_row = {
+                "Passage ID": passage["passage_id"],
+                "Chapter ID": passage["chapter_id"],
+                "Chapter Number": "5",
+                "Chapter Title": "Chapter 5",
+                "Passage Type": "Dialogue",
+                "Dialogue Text": passage_text,
+                "GPT Assigned Character": "Kousuke Takioto",
+                "GPT Assigned Characters (JSON)": '["Kousuke Takioto","Nanami"]',
+                "GPT Multi-Speaker Mode": "chorus",
+                "GPT Confidence (0–1)": "0.96",
+                "Start (Reference)": "10",
+                "End (Reference)": str(10 + len(passage_text)),
+                "Chapter Revision (Reference)": "revision-5",
+            }
+            document = {
+                "sha256": "fixture-sha256",
+                "schema_version": 2,
+                "info": {"Export ID": "fixture-export-id"},
+                "characters": [],
+                "dialogue_rows": [workbook_row],
+            }
+            mapping = {
+                "workbook_passage_id": passage["passage_id"],
+                "current_passage_id": passage["passage_id"],
+                "chapter_id": passage["chapter_id"],
+                "start": passage["start"],
+                "end": passage["end"],
+                "text": passage_text,
+            }
+            plan = {
+                "ready": False,
+                "partial_ready": False,
+                "issues": ["Passage %s conflicts with a saved manual speaker set." % passage["passage_id"]],
+                "summary": {
+                    "matched_characters": 1, "new_characters": 1,
+                    "aliases_to_merge": 0, "dialogue_assignments": 0,
+                    "new_characters": 1,
+                },
+                "partial_summary": {"characters": 2, "dialogue_assignments": 0},
+                "assignments": [],
+                "characters": [
+                    {"canonical_name": "Nanami", "aliases": [], "identity_variant": "", "action": "merge"},
+                    {"canonical_name": "Kousuke Takioto", "aliases": [], "identity_variant": "", "action": "create"},
+                ],
+                "passage_mappings": [mapping],
+                "superseded_assignments": [],
+                "text_corrections": [],
+                "passage_reclassifications": [],
+                "scope": "book",
+                "book_revision": "book-revision-5",
+                "chapters": [{"chapter_id": passage["chapter_id"]}],
+                "chapter_assignments": [],
+            }
+            active_chapter = {
+                "chapter_id": passage["chapter_id"],
+                "chapter_number": 5,
+                "chapter_title": "Chapter 5",
+                "chapter_revision": "revision-5",
+                "text": chapter_text,
+                "current_passages": [passage],
+                "current_assignments": [saved_manual],
+            }
+            state = {"characters": []}
+            project = SimpleNamespace(folder=Path(temp), title="Workbook Test", chapters=[])
+            chapter = SimpleNamespace(number=5, title="Chapter 5")
+            window = QMainWindow()
+            self.addCleanup(window.close)
+            bridge = host.PremiumV2Bridge(window)
+            self.addCleanup(bridge.deleteLater)
+            bridge._active_project = lambda: project
+            bridge._character_workbook_import_plan = lambda _project, _document: (
+                state, "Test Series", chapter, plan
+            )
+            bridge._character_workbook_book_snapshot = lambda _project: (
+                state, "Test Series", [active_chapter]
+            )
+            with (
+                patch.object(
+                    host.QFileDialog, "getOpenFileName",
+                    return_value=(str(source), "Excel Workbook (*.xlsx)"),
+                ),
+                patch.object(host, "read_character_workbook", return_value=document),
+                patch.object(host, "list_reusable_characters", return_value=[]),
+            ):
+                response = json.loads(
+                    bridge.dispatch("character.workbook.import.preview", "{}")
+                )
+
+            self.assertTrue(response.get("success"), response)
+            review_items = response["data"]["review_items"]
+            self.assertEqual(len(review_items), 1)
+            item = review_items[0]
+            self.assertTrue(item["mapped_exact_speaker_row"])
+            self.assertEqual(item["existing_speakers"], ["Nanami"])
+            self.assertTrue(item["can_confirm_speaker_set"])
+            self.assertEqual(
+                [speaker["canonical_name"] for speaker in item["confirmable_speakers"]],
+                ["Kousuke Takioto", "Nanami"],
+            )
+            protected = {
+                speaker["canonical_name"]: speaker["protected"]
+                for speaker in item["confirmable_speakers"]
+            }
+            self.assertTrue(protected["Nanami"])
+            self.assertFalse(protected["Kousuke Takioto"])
+
     def test_workbook_dialog_parent_falls_back_to_none_for_non_widget_parent(self):
         owner = object()
         bridge_like = SimpleNamespace(parent=lambda: owner)
