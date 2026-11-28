@@ -94,7 +94,7 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn("Assign the GPT characters", self.adapter)
         self.assertIn("verifiedAssignments > 0", self.adapter)
         self.assertIn("Workbook → speaker assignment check", self.adapter)
-        self.assertIn("No character-only partial import will be offered", self.adapter)
+        self.assertIn("Character Register entries are only a cast list; they do not assign dialogue.", self.adapter)
         self.assertIn("character_workbook_assignment_diagnostics(document, plan)", self.host)
         self.assertIn('"assignment_diagnostics": assignment_diagnostics', self.host)
         self.assertIn("def character_workbook_assignment_diagnostics(", self.workbook)
