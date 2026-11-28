@@ -990,6 +990,48 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 ],
             )
 
+    def test_import_plan_rebases_reused_passage_id_by_unique_exact_source_span(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, _text, passages = self._export(Path(tmp))
+            document = read_character_workbook(path)
+            document["characters"] = [{
+                "full_name": "Mira", "aliases": [], "version": "", "notes": "",
+            }]
+            dialogue_row = document["dialogue_rows"][1]
+            dialogue_row["GPT Assigned Character"] = "Mira"
+            dialogue_row["GPT Confidence (0–1)"] = "0.97"
+
+            # The old dialogue ID has been reused for a different current span.
+            # The original dialogue's exact text and offsets still identify one
+            # current passage, now with a regenerated ID.
+            reused_id_on_wrong_span = dict(passages[0])
+            reused_id_on_wrong_span["passage_id"] = dialogue_row["Passage ID"]
+            exact_dialogue_with_new_id = dict(passages[1])
+            exact_dialogue_with_new_id["passage_id"] = "ps_dialogue_current"
+
+            plan = plan_character_workbook_import(
+                document,
+                series="Silver Archive",
+                registry_rows=[],
+                project_characters=[],
+                chapter_id="chapter-001",
+                chapter_revision="revision-abc",
+                current_passages=[reused_id_on_wrong_span, exact_dialogue_with_new_id],
+                current_assignments=[],
+            )
+
+            self.assertTrue(plan["ready"], plan["issues"])
+            self.assertEqual(
+                [(row["passage_id"], row["speaker"]) for row in plan["assignments"]],
+                [("ps_dialogue_current", "Mira")],
+            )
+            rebases = {
+                (row["workbook_passage_id"], row["current_passage_id"])
+                for row in plan["passage_rebases"]
+            }
+            self.assertIn(("ps_dialogue", "ps_dialogue_current"), rebases)
+            self.assertEqual(len(plan["passage_mappings"]), 2)
+
     def test_import_plan_preserves_exact_manual_assignment_when_passage_id_is_reissued(self):
         with tempfile.TemporaryDirectory() as tmp:
             path, _text, passages = self._export(Path(tmp))
