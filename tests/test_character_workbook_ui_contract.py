@@ -55,7 +55,7 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
             response = json.loads(bridge.dispatch("character.workbook.prompt.copy", "{}"))
         self.assertTrue(response.get("success"), response)
         self.assertTrue(response["data"]["copied"])
-        self.assertEqual(response["data"]["prompt_version"], "2.2")
+        self.assertEqual(response["data"]["prompt_version"], "2.3")
         clipboard.setText.assert_called_once_with(host.complete_book_gpt_prompt())
 
     def test_workbook_manual_assignment_endpoint_accepts_sequential_multi_voice_mode(self):
@@ -92,6 +92,13 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn("data-workbook-review-assign", self.adapter)
         self.assertIn("data-workbook-import-partial", self.adapter)
         self.assertIn("Import verified entries", self.adapter)
+        self.assertIn("verifiedAssignments > 0", self.adapter)
+        self.assertIn("Workbook → speaker assignment check", self.adapter)
+        self.assertIn("No character-only partial import will be offered", self.adapter)
+        self.assertIn("character_workbook_assignment_diagnostics(document, plan)", self.host)
+        self.assertIn('"assignment_diagnostics": assignment_diagnostics', self.host)
+        self.assertIn("def character_workbook_assignment_diagnostics(", self.workbook)
+        self.assertIn("partial_ready = bool(assignments)", self.workbook)
         self.assertIn("data-workbook-review-confirm-speakers", self.adapter)
         self.assertIn("data-workbook-review-speaker-set", self.adapter)
         self.assertIn("preserve_existing_manual", self.adapter)
