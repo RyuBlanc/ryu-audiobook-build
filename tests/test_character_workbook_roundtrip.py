@@ -20,6 +20,7 @@ from app.core.character_workbook import (
     character_workbook_plan_fingerprint,
     character_workbook_assignment_diagnostics,
     _normalize_workbook_confidence,
+    _workbook_speaker_names,
     complete_book_gpt_prompt,
 )
 
@@ -2994,3 +2995,122 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StageFRealWorkbookRegressionTests(unittest.TestCase):
+    def _document_and_passages(self, source, passages_text, *, scalar_first=None, json_speakers=None):
+        revision = "revision-stage-f-regression"
+        rows, passages = [], []
+        characters = [
+            {"full_name": "Mira Laurent", "aliases": ["Mira"], "version": "", "notes": "", "included_in_book": True},
+            {"full_name": "Rina Vale", "aliases": ["Rina"], "version": "", "notes": "", "included_in_book": True},
+        ]
+        cursor = 0
+        for index, text in enumerate(passages_text, 1):
+            start = source.index(text, cursor)
+            end = start + len(text)
+            cursor = end
+            passage_id = "ps-stage-f-%d" % index
+            rows.append({
+                "Passage ID": passage_id, "Chapter ID": "chapter-001",
+                "Chapter Revision (Reference)": revision, "Passage Type": "Dialogue",
+                "Dialogue Text": text,
+                "GPT Assigned Character": scalar_first if index == 1 and scalar_first is not None else ("Mira Laurent" if index == 1 else "Rina Vale"),
+                "GPT Assigned Characters (JSON)": json_speakers if index == 1 and json_speakers is not None else "",
+                "GPT Multi-Speaker Mode": "chorus" if index == 1 and json_speakers else "single",
+                "GPT Confidence (0–1)": "0.97",
+                "Start (Reference)": start, "End (Reference)": end,
+            })
+            passages.append({
+                "passage_id": passage_id, "chapter_id": "chapter-001",
+                "chapter_number": 1, "chapter_title": "Regression",
+                "chapter_revision": revision, "start": start, "end": end,
+                "text": text, "kind": "character_dialogue",
+            })
+        document = {
+            "schema_version": 1,
+            "info": {
+                "Series Name": "Silver Archive", "Book Title": "The Silver Archive",
+                "Chapter ID": "chapter-001", "Chapter Revision": revision,
+            },
+            "_active_chapter_text": source,
+            "characters": characters,
+            "dialogue_rows": rows,
+        }
+        return document, passages, revision
+
+    def test_single_speaker_alias_and_json_canonical_name_resolve_to_same_identity(self):
+        source = "“I am here.”"
+        document, passages, revision = self._document_and_passages(
+            source, [source], scalar_first="Mira", json_speakers='["Mira Laurent", "Rina Vale"]'
+        )
+        plan = plan_character_workbook_import(
+            document, series="Silver Archive", book_title="The Silver Archive",
+            registry_rows=[], project_characters=[], chapter_id="chapter-001",
+            chapter_revision=revision, current_passages=passages, current_assignments=[],
+        )
+        self.assertTrue(plan["ready"], plan["issues"])
+        self.assertEqual(plan["assignments"][0]["speakers"], ["Mira Laurent", "Rina Vale"])
+
+    def test_scalar_and_json_names_for_different_characters_remain_rejected(self):
+        source = "“I am here.”"
+        document, passages, revision = self._document_and_passages(
+            source, [source], scalar_first="Mira", json_speakers='["Rina Vale", "Mira Laurent"]'
+        )
+        plan = plan_character_workbook_import(
+            document, series="Silver Archive", book_title="The Silver Archive",
+            registry_rows=[], project_characters=[], chapter_id="chapter-001",
+            chapter_revision=revision, current_passages=passages, current_assignments=[],
+        )
+        self.assertFalse(plan["ready"])
+        self.assertEqual(plan["assignments"], [])
+        self.assertTrue(any("same canonical character" in issue for issue in plan["issues"]))
+
+    def test_parser_defers_scalar_json_agreement_until_character_aliases_are_available(self):
+        row = {
+            "GPT Assigned Character": "Captain Mira",
+            "GPT Assigned Characters (JSON)": '["Mira Laurent", "Rina Vale"]',
+        }
+        self.assertEqual(_workbook_speaker_names(row), ["Mira Laurent", "Rina Vale"])
+        token_map = {
+            "captain mira": {"mira laurent|"},
+            "mira laurent": {"mira laurent|"},
+            "rina vale": {"rina vale|"},
+        }
+        self.assertEqual(_workbook_speaker_names(row, token_map=token_map), ["Mira Laurent", "Rina Vale"])
+
+    def test_stale_ai_span_can_be_retired_when_exact_current_passages_cover_it(self):
+        first, second = "“Mira.”", "“Rina.”"
+        source = first + " \n " + second
+        document, passages, revision = self._document_and_passages(source, [first, second])
+        stale = {
+            "start": 0, "end": len(source), "text": "old pre-segmentation source",
+            "speaker": "Legacy AI", "speakers": ["Legacy AI"], "source": "ai",
+        }
+        plan = plan_character_workbook_import(
+            document, series="Silver Archive", book_title="The Silver Archive",
+            registry_rows=[], project_characters=[], chapter_id="chapter-001",
+            chapter_revision=revision, current_passages=passages, current_assignments=[stale],
+        )
+        self.assertTrue(plan["ready"], plan["issues"])
+        self.assertEqual(len(plan["superseded_assignments"]), 1)
+        self.assertEqual(len(plan["assignments"]), 2)
+        self.assertEqual([row["speaker"] for row in plan["assignments"]], ["Mira Laurent", "Rina Vale"])
+
+    def test_stale_ai_span_with_uncovered_source_text_is_still_preserved(self):
+        first, second = "“Mira.”", "“Rina.”"
+        source = first + " spoken gap " + second
+        document, passages, revision = self._document_and_passages(source, [first, second])
+        passages = passages[:1]
+        stale = {
+            "start": 0, "end": len(source), "text": "old pre-segmentation source",
+            "speaker": "Legacy AI", "speakers": ["Legacy AI"], "source": "ai",
+        }
+        plan = plan_character_workbook_import(
+            document, series="Silver Archive", book_title="The Silver Archive",
+            registry_rows=[], project_characters=[], chapter_id="chapter-001",
+            chapter_revision=revision, current_passages=passages, current_assignments=[stale],
+        )
+        self.assertFalse(plan["ready"])
+        self.assertEqual(plan["superseded_assignments"], [])
+        self.assertTrue(any("not fully covered by exact current source passages" in issue for issue in plan["issues"]))

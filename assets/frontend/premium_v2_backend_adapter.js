@@ -6007,7 +6007,7 @@
     modal = document.createElement('div');
     modal.id = 'characterRecoveryModal';
     modal.style.cssText = 'display:none;position:fixed;inset:0;z-index:100000;background:rgba(4,7,12,.82);backdrop-filter:blur(7px);align-items:center;justify-content:center;padding:22px;box-sizing:border-box;';
-    modal.innerHTML = '<div role="dialog" aria-modal="true" aria-labelledby="characterRecoveryTitle" style="width:min(820px,96vw);max-height:84vh;overflow:auto;background:#10141d;border:1px solid #343b49;border-radius:16px;padding:22px;box-shadow:0 24px 80px rgba(0,0,0,.5);color:#f4f5f8"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><h2 id="characterRecoveryTitle" style="margin:0">Character Recovery Bin</h2><p class="muted" style="margin:6px 0 0">Restore deleted reusable characters or permanently clear unwanted entries. Clearing cannot be undone.</p></div><button type="button" class="btn small secondary" data-close-character-recovery>Close</button></div><div id="characterRecoveryToolbar"><span id="characterRecoverySelectedCount" class="muted">0 selected</span><button type="button" class="btn small secondary" data-select-all-deleted-characters>Select All</button><button type="button" class="btn small ghost" data-clear-deleted-selection>Clear Selection</button><button type="button" class="btn small danger" data-purge-selected-characters disabled>Clear Selected</button><button type="button" class="btn small danger" data-purge-all-characters disabled>Clear All</button></div><div id="characterRecoveryItems" style="display:grid;gap:10px;margin-top:12px"></div></div>';
+    modal.innerHTML = '<div role="dialog" aria-modal="true" aria-labelledby="characterRecoveryTitle" style="width:min(820px,96vw);max-height:84vh;overflow:auto;background:#10141d;border:1px solid #343b49;border-radius:16px;padding:22px;box-shadow:0 24px 80px rgba(0,0,0,.5);color:#f4f5f8"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><h2 id="characterRecoveryTitle" style="margin:0">Character Recovery Bin</h2><p class="muted" style="margin:6px 0 0">Restore deleted reusable characters or permanently clear unwanted entries. Clearing cannot be undone.</p></div><button type="button" class="btn small secondary" data-close-character-recovery>Close</button></div><div id="characterRecoveryMessage" role="alert" aria-live="polite" style="display:none;margin-top:12px;padding:10px 12px;border:1px solid #70434a;background:rgba(120,32,44,.14);border-radius:8px;color:#ffd8dc"></div><div id="characterRecoveryToolbar"><span id="characterRecoverySelectedCount" class="muted">0 selected</span><button type="button" class="btn small secondary" data-select-all-deleted-characters>Select All</button><button type="button" class="btn small ghost" data-clear-deleted-selection>Clear Selection</button><button type="button" class="btn small danger" data-purge-selected-characters disabled>Clear Selected</button><button type="button" class="btn small danger" data-purge-all-characters disabled>Clear All</button></div><div id="characterRecoveryItems" style="display:grid;gap:10px;margin-top:12px"></div></div>';
     modal.addEventListener('click', async event => {
       if (event.target === modal || event.target.closest('[data-close-character-recovery]')) {
         modal.style.display = 'none';
@@ -6039,14 +6039,26 @@
       const restore = event.target.closest('[data-restore-character]');
       if (!restore) return;
       restore.disabled = true;
+      const feedback = $('characterRecoveryMessage');
+      if (feedback) {
+        feedback.textContent = '';
+        feedback.style.display = 'none';
+      }
       try {
         const record = libraryDeletedCharacters.find(item => String(item.id) === restore.dataset.restoreCharacter);
-        await call('character_library.restore', {id:restore.dataset.restoreCharacter});
+        const result = await call('character_library.restore', {id:restore.dataset.restoreCharacter});
         await refreshCharacterIdentityViews();
-        message('Restored ' + (record?.name || 'character') + ' to the reusable Character Library.');
+        message(result?.merged
+          ? 'Recovered ' + (record?.name || 'character') + ' by merging it into the existing canonical Library identity. Its active voice assignment was preserved.'
+          : 'Restored ' + (record?.name || 'character') + ' to the reusable Character Library.');
         await openCharacterRecoveryBin();
       } catch (error) {
-        message(error?.message || String(error), true);
+        const reason = error?.message || String(error);
+        if (feedback) {
+          feedback.textContent = reason;
+          feedback.style.display = 'block';
+        }
+        message(reason, true);
       } finally {
         restore.disabled = false;
       }
@@ -6118,6 +6130,11 @@
 
   async function openCharacterRecoveryBin() {
     const modal = ensureCharacterRecoveryModal();
+    const feedback = $('characterRecoveryMessage');
+    if (feedback) {
+      feedback.textContent = '';
+      feedback.style.display = 'none';
+    }
     libraryDeletedCharacters = await call('character_library.deleted.list');
     const validDeletedIds = new Set(libraryDeletedCharacters.map(row => String(row.id || '')));
     for (const selectedId of [...characterRecoverySelection]) {

@@ -93,8 +93,8 @@ def _normalize_workbook_confidence(value):
     return confidence
 
 
-def _workbook_speaker_names(row):
-    """Read a legacy single speaker or a JSON/comma-separated list of canonical names."""
+def _workbook_speaker_names(row, token_map=None):
+    """Read speaker names and, when supplied, validate scalar/JSON agreement by canonical identity."""
     raw_json = str(row.get("GPT Assigned Characters (JSON)") or "").strip()
     single = _clean(row.get("GPT Assigned Character"))
     if raw_json:
@@ -114,8 +114,21 @@ def _workbook_speaker_names(row):
             name = _clean(value)
             if name.casefold() not in {item.casefold() for item in names}:
                 names.append(name)
-        if names and single and single.casefold() != names[0].casefold():
-            raise ValueError("GPT Assigned Character must match the first name in GPT Assigned Characters (JSON).")
+        if names and single and _key(single) != _key(names[0]) and token_map is not None:
+            def resolved_identity(value):
+                if _key(value) == "third person":
+                    return "__reserved_third_person__"
+                matches = token_map.get(_key(value), set())
+                return next(iter(matches)) if len(matches) == 1 else None
+
+            single_identity = resolved_identity(single)
+            first_identity = resolved_identity(names[0])
+            if single_identity is None or first_identity is None or single_identity != first_identity:
+                raise ValueError(
+                    "GPT Assigned Character and the first GPT Assigned Characters (JSON) entry "
+                    "must resolve to the same canonical character. A registered alias and its "
+                    "canonical name are accepted; different or ambiguous identities are not."
+                )
         return names or ([single] if single else [])
     return [single] if single else []
 
@@ -1701,6 +1714,39 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                 return False
         return True
 
+    def stale_ai_span_has_complete_current_coverage(start, end, impacted_passages):
+        """Prove that current, source-exact passages cover a legacy AI span before retiring it."""
+        if not active_chapter_text or start < 0 or end <= start or end > len(active_chapter_text):
+            return False
+        intervals = []
+        for item in impacted_passages or []:
+            if not isinstance(item, dict):
+                return False
+            try:
+                item_start = int(item.get("start", -1))
+                item_end = int(item.get("end", -1))
+            except (TypeError, ValueError, OverflowError):
+                return False
+            if item_start < 0 or item_end <= item_start or item_end > len(active_chapter_text):
+                return False
+            item_text = str(item.get("text") or "")
+            if not item_text or active_chapter_text[item_start:item_end] != item_text:
+                return False
+            overlap_start = max(start, item_start)
+            overlap_end = min(end, item_end)
+            if overlap_start < overlap_end:
+                intervals.append((overlap_start, overlap_end))
+        if not intervals:
+            return False
+        cursor = start
+        for interval_start, interval_end in sorted(intervals):
+            if interval_start > cursor and active_chapter_text[cursor:interval_start].strip():
+                return False
+            cursor = max(cursor, interval_end)
+            if cursor >= end:
+                return True
+        return cursor < end and not active_chapter_text[cursor:end].strip()
+
     def claim_stale_assignment_review(start, end, source):
         """Review one stale span once even when several current passages overlap it."""
         key = (start, end, source)
@@ -1807,7 +1853,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
         if current is None:
             unmatched_workbook_rows.append(row)
             try:
-                assigned_names = _workbook_speaker_names(row)
+                assigned_names = _workbook_speaker_names(row, token_map=token_map)
             except ValueError:
                 assigned_names = []
             has_source_text_proposal = bool(
@@ -1853,7 +1899,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
     def mapped_workbook_speaker_names(row):
         """Return explicit names or a validated fallback/split marker for exact-mapped rows."""
         try:
-            names = _workbook_speaker_names(row)
+            names = _workbook_speaker_names(row, token_map=token_map)
         except ValueError:
             return []
         if names:
@@ -1902,7 +1948,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
 
     def resolve_workbook_names(raw_row, label):
         try:
-            names = _workbook_speaker_names(raw_row)
+            names = _workbook_speaker_names(raw_row, token_map=token_map)
         except ValueError as exc:
             issues.append("%s: %s" % (label, exc))
             return []
@@ -1972,7 +2018,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             issues.append("Dialogue Split Corrections parent '%s' has changed source offsets." % parent_id)
             continue
         try:
-            if _workbook_speaker_names(parent_row):
+            if _workbook_speaker_names(parent_row, token_map=token_map):
                 issues.append("Parent passage '%s' cannot have a whole-passage speaker and subturn corrections at the same time." % parent_id)
                 continue
         except ValueError as exc:
@@ -2103,7 +2149,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             and workbook_type == "dialogue"
         )
         try:
-            assigned_names = _workbook_speaker_names(row)
+            assigned_names = _workbook_speaker_names(row, token_map=token_map)
         except ValueError as exc:
             issues.append("Passage %s: %s" % (pid, exc))
             continue
@@ -2215,13 +2261,10 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
 
                 if not claim_stale_assignment_review(saved_start, saved_end, saved_source):
                     continue
-                if not stale_ai_assignment_source_matches(saved_start, saved_end, saved_source):
-                    issues.append(
-                        "Stale AI/outsourced assignment at %s:%s does not match the exact active chapter source. "
-                        "It was preserved; refresh the source review before importing."
-                        % (saved_start, saved_end)
-                    )
-                    continue
+                # A stale AI/outsourced span may be retired only after its
+                # complete range is covered by current source-exact passages and
+                # every impacted Dialogue passage has a verified identity below.
+                # A stale stored snippet alone is not a reason to block safe rebasing.
 
                 # A stale AI/outsourced span may be retired when every current
                 # passage it touches is Narration. If it also touches Dialogue,
@@ -2265,6 +2308,16 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                     issues.append(
                         "Stale AI/outsourced assignment at %s:%s no longer maps to a current source passage. "
                         "It was preserved; refresh the workbook and source review."
+                        % (saved_start, saved_end)
+                    )
+                    continue
+                if (
+                    not stale_ai_assignment_source_matches(saved_start, saved_end, saved_source)
+                    and not stale_ai_span_has_complete_current_coverage(saved_start, saved_end, impacted_passages)
+                ):
+                    issues.append(
+                        "Stale AI/outsourced assignment at %s:%s is not fully covered by exact current source passages. "
+                        "It was preserved; resolve the source mapping before importing."
                         % (saved_start, saved_end)
                     )
                     continue
@@ -2371,14 +2424,6 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                 continue
             if not claim_stale_assignment_review(saved_start, saved_end, saved_source):
                 continue
-            if not stale_ai_assignment_source_matches(saved_start, saved_end, saved_source):
-                issues.append(
-                    "Stale AI/outsourced assignment at %s:%s does not match the exact active chapter source. "
-                    "It was preserved; refresh the source review before importing."
-                    % (saved_start, saved_end)
-                )
-                overlap_blocked = True
-                continue
             impacted_passages = [
                 item for item in current_passages
                 if isinstance(item, dict)
@@ -2414,6 +2459,17 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                 issues.append(
                     "Stale AI/outsourced assignment at %s:%s no longer maps to a current source passage. "
                     "It was preserved; refresh the workbook and source review."
+                    % (saved_start, saved_end)
+                )
+                overlap_blocked = True
+                continue
+            if (
+                not stale_ai_assignment_source_matches(saved_start, saved_end, saved_source)
+                and not stale_ai_span_has_complete_current_coverage(saved_start, saved_end, impacted_passages)
+            ):
+                issues.append(
+                    "Stale AI/outsourced assignment at %s:%s is not fully covered by exact current source passages. "
+                    "It was preserved; resolve the source mapping before importing."
                     % (saved_start, saved_end)
                 )
                 overlap_blocked = True

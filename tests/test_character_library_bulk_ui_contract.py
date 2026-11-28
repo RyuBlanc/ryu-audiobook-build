@@ -57,3 +57,14 @@ class CharacterLibraryBulkUiContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CharacterRecoveryRestoreFeedbackTests(unittest.TestCase):
+    def test_recovery_restore_errors_are_visible_inside_the_open_modal(self):
+        root = Path(__file__).resolve().parents[1]
+        adapter = (root / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        host = (root / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn('id="characterRecoveryMessage" role="alert"', adapter)
+        self.assertIn("feedback.textContent = reason", adapter)
+        self.assertIn("call('character_library.restore'", adapter)
+        self.assertIn('merged = bool(record.pop("_merged_from_recovery", False))', host)

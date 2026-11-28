@@ -416,3 +416,36 @@ class ProjectDeletionHistoryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CharacterLibraryDuplicateRecoveryTests(unittest.TestCase):
+    def test_restore_merges_exact_duplicate_without_replacing_active_id_or_voice(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-character-restore-duplicate-") as tmp:
+            store = Path(tmp) / "character-library.json"
+            store.write_text(json.dumps({
+                "version": 1,
+                "active": [{
+                    "id": "active-ludivine", "series": "Silver Archive",
+                    "primary_name": "Ludivine Marie-Ange de la Tréfle",
+                    "aliases": ["Ludivine"], "identity_variant": "",
+                    "voice_name": "Saved Qwen Ludivine Voice", "notes": "Active user notes",
+                }],
+                "deleted": [{
+                    "id": "recovery-ludivine", "series": "Silver Archive",
+                    "primary_name": "Ludivine Marie-Ange de la Tréfle",
+                    "aliases": ["Lady Ludivine"], "identity_variant": "",
+                    "voice_name": "Older Recovery Voice", "notes": "Recovery notes",
+                    "deleted_at": "2026-11-20T10:00:00+00:00",
+                }],
+            }, ensure_ascii=False), encoding="utf-8")
+
+            restored = restore_character("recovery-ludivine", path=store)
+
+            self.assertTrue(restored.get("_merged_from_recovery"))
+            active = list_characters(series="Silver Archive", path=store)
+            self.assertEqual(len(active), 1)
+            self.assertEqual(active[0]["id"], "active-ludivine")
+            self.assertIn("Lady Ludivine", active[0]["aliases"])
+            self.assertEqual(active[0]["voice_name"], "Saved Qwen Ludivine Voice")
+            self.assertEqual(active[0]["notes"], "Active user notes")
+            self.assertEqual(list_deleted_characters(path=store), [])

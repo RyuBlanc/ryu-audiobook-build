@@ -8987,7 +8987,9 @@ class PremiumV2Bridge(QObject):
         if not row_id:
             raise ValueError("Choose a deleted character to restore.")
         record = restore_reusable_character(row_id)
-        return {"restored": True, "character": self._character_library_ui_record(record),
+        merged = bool(record.pop("_merged_from_recovery", False))
+        return {"restored": True, "merged": merged,
+                "character": self._character_library_ui_record(record),
                 "count": len(list_reusable_characters())}
 
     @_serialize_character_identity_state
