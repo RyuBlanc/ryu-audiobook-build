@@ -18,6 +18,7 @@ from app.core.character_workbook import (
     plan_complete_book_character_workbook_import,
     read_character_workbook,
     character_workbook_plan_fingerprint,
+    character_workbook_assignment_diagnostics,
     _normalize_workbook_confidence,
     complete_book_gpt_prompt,
 )
@@ -1302,7 +1303,7 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
 
     def test_complete_book_reader_parses_gpt_character_names_aliases_and_book_inclusion_flag(self):
         with tempfile.TemporaryDirectory() as tmp:
-            original, _chapters, _passages, _document = self._complete_book_fixture(Path(tmp))
+            original, chapters, _passages, _document = self._complete_book_fixture(Path(tmp))
             edited = Path(tmp) / "gpt-filled-book.xlsx"
             ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 
@@ -1368,6 +1369,28 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             self.assertFalse(parsed["characters"][1]["included_in_book"])
             self.assertEqual(parsed["dialogue_rows"][0]["GPT Assigned Character"], "Mira")
             self.assertEqual(parsed["dialogue_rows"][0]["GPT Confidence (0–1)"], "0.97")
+
+            # Exercise the real export -> GPT-edited XLSX -> reader -> planner path.
+            # Only the first dialogue row was filled; the second remains unresolved.
+            plan = plan_complete_book_character_workbook_import(
+                parsed,
+                series="Silver Archive",
+                book_title="The Silver Archive",
+                registry_rows=[],
+                project_characters=[],
+                current_chapters=chapters,
+            )
+            diagnostics = character_workbook_assignment_diagnostics(parsed, plan)
+            self.assertFalse(plan["ready"])
+            self.assertEqual(
+                [(row["chapter_id"], row["passage_id"], row["speaker"]) for row in plan["assignments"]],
+                [("chapter-001", "p1-dialogue", "Mira")],
+            )
+            self.assertEqual(diagnostics["dialogue_rows"], 2)
+            self.assertEqual(diagnostics["dialogue_rows_with_gpt_speakers"], 1)
+            self.assertEqual(diagnostics["speaker_rows_exactly_mapped"], 1)
+            self.assertEqual(diagnostics["verified_dialogue_assignments"], 1)
+            self.assertEqual(diagnostics["character_register_entries"], 2)
 
 
     def test_complete_book_import_plans_cross_chapter_assignments_and_series_merge(self):
@@ -1819,6 +1842,31 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
                 refresh_complete_book_character_workbook_bytes(
                     document, metadata=metadata, chapters=changed, passages=passages,
                 )
+
+    def test_partial_import_is_blocked_when_only_character_register_rows_are_filled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _path, chapters, _passages, document = self._complete_book_fixture(Path(tmp))
+            document["characters"] = [{
+                "full_name": "Mira", "aliases": ["Captain Mira"], "version": "",
+                "notes": "Character Register was filled, but no dialogue speaker cells were filled.",
+                "included_in_book": True,
+            }]
+            plan = plan_complete_book_character_workbook_import(
+                document,
+                series="Silver Archive",
+                book_title="The Silver Archive",
+                registry_rows=[],
+                project_characters=[],
+                current_chapters=chapters,
+            )
+            diagnostics = character_workbook_assignment_diagnostics(document, plan)
+            self.assertFalse(plan["ready"])
+            self.assertFalse(plan["partial_ready"])
+            self.assertEqual(plan["assignments"], [])
+            self.assertEqual(plan["summary"]["new_characters"], 1)
+            self.assertEqual(diagnostics["dialogue_rows_with_gpt_speakers"], 0)
+            self.assertEqual(diagnostics["verified_dialogue_assignments"], 0)
+            self.assertEqual(diagnostics["character_register_entries"], 1)
 
     def test_complete_book_partial_import_keeps_confirmed_chapter_when_another_dialogue_is_unresolved(self):
         with tempfile.TemporaryDirectory() as tmp:
