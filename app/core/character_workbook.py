@@ -400,7 +400,9 @@ def complete_book_gpt_prompt() -> str:
         "Keep younger/older or otherwise distinct voice identities separate only when the source supports genuinely different identity versions. Use Version / Age Variant and preserve the base identity; do not merge distinct versions.",
         "Keep rows marked Included in This Book? = NO as NO. Do not remove existing Character Register identities, aliases, notes, or future-volume entries.",
         "",
-        "FILL THE WORKBOOK",
+        "FILL THE WORKBOOK — THE DIALOGUE ASSIGNMENT SHEET IS THE REQUIRED OUTPUT",
+        "A populated Character Register is only a list of character identities. It does NOT assign any dialogue. You must fill the GPT Assigned Character cell (and, for true same-word multi-speaker delivery, GPT Assigned Characters (JSON)) on the corresponding Dialogue Assignment row itself. Do not return a workbook in which Character Register is populated but Dialogue Assignment speaker cells are blank unless the source genuinely cannot identify those speakers.",
+        "Before returning the .xlsx, count the Dialogue Assignment rows whose Passage Type is Dialogue, the rows you filled with a speaker, and the rows you deliberately left unresolved. State those counts in your completion summary. Do not claim speaker assignments were completed merely because the Character Register was filled.",
         "For every Dialogue row with a supported speaker, fill GPT Assigned Character with the first canonical Full Name, GPT Assigned Characters (JSON) with a JSON array of every character who speaks those exact same words, GPT Multi-Speaker Mode when more than one character is assigned, GPT Confidence (0–1) with a numeric value from 0.75 to 1.00, and Evidence / Notes (GPT) with a concise source-based reason.",
         "For an actual but unidentified background speaker, use 'Third Person' exactly as defined above. It is valid in the speaker fields without being listed in Character Register; do not create a fake character record for it.",
         'Use one JSON array cell, for example ["Rias Gremory", "Akeno Himejima"]; do not create one column per character. JSON is preferred to comma-separated names because it safely preserves commas inside names. For simultaneous same-word delivery use chorus (the default); use sequential only when the exact same line should be repeated once per character; use alternating only when specifically supported by the scene.',
@@ -701,7 +703,7 @@ def create_complete_book_character_workbook_bytes(metadata, chapters, passages):
         ["Series Volume", _clean(metadata.get("series_volume"))],
         ["Book Revision", book_revision],
         ["Exported At (UTC)", datetime.now(timezone.utc).isoformat(timespec="seconds")],
-        ["GPT Prompt Version", "2.2"],
+        ["GPT Prompt Version", "2.3"],
         ["Instructions",
          "This is a COMPLETE-BOOK workbook. Start with the GPT Prompt tab: it contains the full ready-to-copy task prompt and explains how to analyze every chapter, resolve newly split dialogue turns, assign canonical identities, calibrate confidence, and preserve source references. " 
          "A REVIEW REQUIRED note means an old answer was not copied across a changed passage; it does not mean the speaker is unknowable. Use the full Chapter Context to re-identify each changed turn independently. " 
@@ -2371,10 +2373,9 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
         "passage_reclassifications": len(passage_reclassifications),
         "skipped_issues": len(unique_issues),
     }
-    partial_ready = bool(
-        planned or assignments or superseded_assignments
-        or text_corrections or passage_reclassifications
-    )
+    # A partial import must include a source-verified dialogue assignment.
+    # Character Register entries alone must never be presented as an assignment import.
+    partial_ready = bool(assignments)
     return {
         "ready": not unique_issues,
         "partial_ready": partial_ready,
@@ -2579,10 +2580,9 @@ def plan_complete_book_character_workbook_import(
         "passage_reclassifications": len(passage_reclassifications),
         "skipped_issues": len(issues),
     }
-    partial_ready = bool(
-        identity_plan or assignments or superseded_assignments
-        or text_corrections or passage_reclassifications
-    )
+    # Do not offer a partial commit that only adds Character Register rows or
+    # source corrections while the dialogue assignments remain unresolved.
+    partial_ready = bool(assignments)
     summary = {
         "matched_characters": sum(row.get("action") == "merge" for row in identity_plan),
         "new_characters": sum(row.get("action") == "create" for row in identity_plan),
@@ -2618,6 +2618,66 @@ def plan_complete_book_character_workbook_import(
         "summary": summary,
     }
 
+
+
+def character_workbook_assignment_diagnostics(document: dict, plan: dict | None = None) -> dict:
+    """Explain what the workbook contains and how many speaker rows passed import checks."""
+    if not isinstance(document, dict):
+        document = {}
+    if not isinstance(plan, dict):
+        plan = {}
+    rows = [row for row in (document.get("dialogue_rows") or []) if isinstance(row, dict)]
+    dialogue_rows = [
+        row for row in rows
+        if _clean(row.get("Passage Type")).casefold() == "dialogue"
+    ]
+    speaker_rows = []
+    invalid_speaker_rows = 0
+    json_speaker_rows = 0
+    confidence_rows = 0
+    for row in dialogue_rows:
+        if _clean(row.get("GPT Assigned Characters (JSON)")):
+            json_speaker_rows += 1
+        if _clean(row.get("GPT Confidence (0–1)")):
+            confidence_rows += 1
+        try:
+            names = _workbook_speaker_names(row)
+        except ValueError:
+            invalid_speaker_rows += 1
+            continue
+        if names:
+            speaker_rows.append(row)
+    mapped_ids = {
+        _clean(mapping.get("workbook_passage_id"))
+        for mapping in (plan.get("passage_mappings") or [])
+        if isinstance(mapping, dict) and _clean(mapping.get("workbook_passage_id"))
+    }
+    mapped_speaker_rows = [
+        row for row in speaker_rows
+        if _clean(row.get("Passage ID")) in mapped_ids
+    ]
+    issues = [str(value) for value in (plan.get("issues") or [])]
+    source_mismatch_issues = sum(
+        1 for issue in issues
+        if "could not be safely matched" in issue.casefold()
+        or "does not match the active chapter" in issue.casefold()
+        or "no current passage has the same exact source text" in issue.casefold()
+        or "references a different chapter revision" in issue.casefold()
+    )
+    assignments = list(plan.get("assignments") or [])
+    return {
+        "dialogue_rows": len(dialogue_rows),
+        "dialogue_rows_with_gpt_speakers": len(speaker_rows),
+        "dialogue_rows_with_json_speakers": json_speaker_rows,
+        "dialogue_rows_with_confidence": confidence_rows,
+        "dialogue_rows_with_invalid_speaker_data": invalid_speaker_rows,
+        "speaker_rows_exactly_mapped": len(mapped_speaker_rows),
+        "speaker_rows_unmapped": max(0, len(speaker_rows) - len(mapped_speaker_rows)),
+        "verified_dialogue_assignments": len(assignments),
+        "character_register_entries": len(document.get("characters") or []),
+        "source_mismatch_issue_count": source_mismatch_issues,
+        "preflight_issue_count": len(issues),
+    }
 
 
 def character_workbook_plan_fingerprint(plan: dict) -> str:
