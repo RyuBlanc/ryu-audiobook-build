@@ -1423,6 +1423,14 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
         int(document.get("schema_version") or 0) == 2
         and _clean(info.get("Export Scope")) == "complete_book"
     )
+    # Character Register edits alone are never proof that GPT reviewed dialogue.
+    has_gpt_dialogue_output = any(
+        _clean(row.get("GPT Assigned Character"))
+        or _clean(row.get("GPT Assigned Characters (JSON)"))
+        or _clean(row.get("GPT Confidence (0–1)"))
+        for row in (document.get("dialogue_rows") or [])
+        if isinstance(row, dict) and _clean(row.get("Passage Type")).casefold() == "dialogue"
+    ) or bool(document.get("dialogue_split_corrections"))
     active_series = _clean(series)
     if not active_series: raise ValueError("The active project must belong to a series before import.")
     if _key(info.get("Series Name")) != _key(active_series):
@@ -1825,9 +1833,13 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             return names
         source_id = _clean(row.get("Passage ID"))
         current_id = workbook_source_to_current.get(source_id, "")
-        if current_id and current_id in split_parent_ids:
+        # A stale or ambiguous source row must never be re-admitted by ID or
+        # reclassified as Third Person after exact-span mapping failed.
+        if not current_id:
+            return []
+        if current_id in split_parent_ids:
             return ["__confirmed_structural_split__"]
-        if not allow_unknown_dialogue_fallback:
+        if not allow_unknown_dialogue_fallback or not has_gpt_dialogue_output:
             return []
         if _clean(row.get("Passage Type")).casefold() != "dialogue":
             return []
@@ -2348,8 +2360,15 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
 
         if not assigned_names:
             old_source_for_blank = _clean(old.get("source") or "manual").casefold()
+            source_id_for_fallback = _clean(row.get("Passage ID"))
+            maps_exactly_to_current_passage = (
+                bool(source_id_for_fallback)
+                and workbook_source_to_current.get(source_id_for_fallback) == pid
+            )
             if (
                 allow_unknown_dialogue_fallback
+                and has_gpt_dialogue_output
+                and maps_exactly_to_current_passage
                 and workbook_type == "dialogue"
                 and (
                     (not old and not old_names)
@@ -2450,16 +2469,55 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             continue
         old_source = _clean(old.get("source") or "manual").casefold()
         old_mode = _clean(old.get("multi_speaker_mode")).casefold() or ("chorus" if len(old_names) > 1 else "single")
+        preserve_existing_manual = False
+        manual_speakers_to_preserve = []
+        manual_saved_speakers = []
+        outsourced_speakers_to_add = []
         if old_names and not unresolved_old_names and old_keys == incoming_keys and old_mode == multi_mode:
             continue
         if old_names:
-            if old_source not in {"ai", "outsourced"}:
+            if (
+                old_source == "manual"
+                and not unresolved_old_names
+                and bool(old_keys)
+                and old_keys < incoming_keys
+            ):
+                # Additive GPT attribution is safe only when every existing manual
+                # identity remains in the incoming set and all added names resolve.
+                preserve_existing_manual = True
+                manual_speakers_to_preserve = [
+                    identities[key]["canonical_name"]
+                    for key in old_keys
+                    if key in identities
+                ]
+                manual_saved_speakers = list(old_names)
+                for incoming_name in canonical_speakers:
+                    if _key(incoming_name) == "third person":
+                        incoming_key = "third person|reserved"
+                    else:
+                        matches = token_map.get(_key(incoming_name), set())
+                        incoming_key = next(iter(matches)) if len(matches) == 1 else ""
+                    if incoming_key and incoming_key not in old_keys:
+                        outsourced_speakers_to_add.append(incoming_name)
+                if (
+                    not manual_speakers_to_preserve
+                    or len(manual_speakers_to_preserve) != len(old_keys)
+                    or not outsourced_speakers_to_add
+                ):
+                    issues.append(
+                        "Passage %s has a manual speaker set that cannot be safely extended. "
+                        "Every existing manual identity must be retained and each added GPT speaker must resolve uniquely."
+                        % pid
+                    )
+                    continue
+            elif old_source not in {"ai", "outsourced"}:
                 issues.append("Passage %s already has a different saved %s speaker set (%s). Resolve the manual or unknown-source assignment before import." % (pid, old_source or "manual", " + ".join(old_names)))
                 continue
-            superseded_assignments.setdefault((start, end, old_source), {
-                "chapter_id": _clean(chapter_id), "start": start, "end": end,
-                "source": old_source, "speakers": old_names, "text": str(old.get("text") or ""),
-            })
+            else:
+                superseded_assignments.setdefault((start, end, old_source), {
+                    "chapter_id": _clean(chapter_id), "start": start, "end": end,
+                    "source": old_source, "speakers": old_names, "text": str(old.get("text") or ""),
+                })
         raw_confidence = _clean(row.get("GPT Confidence (0–1)"))
         if not raw_confidence and auto_third_person:
             # This is confidence in the safe unidentified-speaker classification,
@@ -2477,14 +2535,23 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                     % (pid, exc)
                 )
                 continue
-        assignments.append({
+        assignment_record = {
             "passage_id": pid, "chapter_id": chapter_id,
             "chapter_revision": _clean(current.get("chapter_revision")) or _clean(chapter_revision),
             "start": start, "end": end,
             "text": str(current.get("text") or ""), "speaker": canonical_speakers[0],
             "speakers": canonical_speakers, "multi_speaker_mode": multi_mode,
             "series": active_series, "confidence": confidence,
-        })
+        }
+        if preserve_existing_manual:
+            assignment_record.update({
+                "preserve_existing_manual": True,
+                "manual_speakers": manual_speakers_to_preserve,
+                "manual_saved_speakers": manual_saved_speakers,
+                "outsourced_speakers": outsourced_speakers_to_add,
+                "visual_source": "outsourced",
+            })
+        assignments.append(assignment_record)
     unique_issues = list(dict.fromkeys(issues))
     partial_summary = {
         "characters": len(planned),

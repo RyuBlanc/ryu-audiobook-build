@@ -2008,6 +2008,43 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             self.assertEqual(diagnostics["verified_dialogue_assignments"], 0)
             self.assertEqual(diagnostics["character_register_entries"], 1)
 
+    def test_complete_book_gpt_chorus_extends_manual_speakers_without_replacing_them(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _path, chapters, _passages, document = self._complete_book_fixture(Path(tmp))
+            mira = dict(document["characters"][0])
+            kousuke = dict(mira)
+            kousuke.update({
+                "full_name": "Kousuke Takioto", "aliases": [],
+                "notes": "Identified in the full-scene dialogue context.",
+                "included_in_book": True,
+            })
+            document["characters"].append(kousuke)
+            chorus = next(row for row in document["dialogue_rows"] if row["Passage ID"] == "p1-dialogue")
+            chorus["GPT Assigned Character"] = "Mira"
+            chorus["GPT Assigned Characters (JSON)"] = '["Mira", "Kousuke Takioto"]'
+            chorus["GPT Multi-Speaker Mode"] = "chorus"
+            chorus["GPT Confidence (0–1)"] = "0.98"
+            chorus["Evidence / Notes (GPT)"] = "The exact scene says Mira and Kousuke speak simultaneously."
+            manual = dict(chapters[0]["current_passages"][0])
+            chapters[0]["current_assignments"] = [{
+                "start": manual["start"], "end": manual["end"], "text": manual["text"],
+                "speaker": "Mira", "speakers": ["Mira"], "source": "manual",
+                "series": "Silver Archive", "voice_profile_id": "saved-mira-profile",
+            }]
+            plan = plan_complete_book_character_workbook_import(
+                document, series="Silver Archive", book_title="The Silver Archive",
+                registry_rows=[], project_characters=[], current_chapters=chapters,
+            )
+            self.assertTrue(plan["ready"], plan["issues"])
+            imported = next(row for row in plan["assignments"] if row["passage_id"] == "p1-dialogue")
+            self.assertEqual(imported["speakers"], ["Mira", "Kousuke Takioto"])
+            self.assertEqual(imported["multi_speaker_mode"], "chorus")
+            self.assertTrue(imported["preserve_existing_manual"])
+            self.assertEqual(imported["manual_speakers"], ["Mira"])
+            self.assertEqual(imported["manual_saved_speakers"], ["Mira"])
+            self.assertEqual(imported["outsourced_speakers"], ["Kousuke Takioto"])
+            self.assertEqual(imported["visual_source"], "outsourced")
+
     def test_complete_book_partial_import_keeps_confirmed_chapter_when_another_dialogue_is_unresolved(self):
         with tempfile.TemporaryDirectory() as tmp:
             _path, chapters, _passages, document = self._complete_book_fixture(Path(tmp))

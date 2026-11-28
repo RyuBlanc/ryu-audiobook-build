@@ -624,7 +624,7 @@ class CharacterWorkbookUiContractTests(unittest.TestCase):
         self.assertIn("#exportCharacterWorkbook, #importCharacterWorkbook", self.adapter)
         self.assertIn("Workbook export failed.", self.adapter)
         self.assertIn("Workbook import failed.", self.adapter)
-        self.assertIn("showCharacterWorkbookMessageDialog('Workbook imported successfully', confirmation)", self.adapter)
+        self.assertNotIn("showCharacterWorkbookMessageDialog('Workbook imported successfully'", self.adapter)
         self.assertNotIn("window.alert(confirmation)", self.adapter)
         self.assertIn("Complete-book workbook saved", self.adapter)
         self.assertIn("character.workbook.import.preview", self.adapter)

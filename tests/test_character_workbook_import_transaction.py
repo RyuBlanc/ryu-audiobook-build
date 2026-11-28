@@ -1276,6 +1276,69 @@ class CharacterWorkbookImportTransactionTests(unittest.TestCase):
             project.save.assert_called_once_with()
             save_project_state.assert_called_once()
 
+    def test_import_commit_adds_gpt_speaker_to_manual_assignment_without_losing_saved_voice(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-workbook-manual-speaker-union-") as tmp:
+            folder = Path(tmp)
+            bridge, project, chapter, state, plan, document = self._fixture(folder)
+            line = chapter.text
+            chapter.dialogue_assignments = [{
+                "start": 0, "end": len(line), "text": line,
+                "speaker": "Mira", "speakers": ["Mira"], "source": "manual",
+                "series": "Silver Archive", "confidence": 1.0,
+                "passage_id": "passage-001", "chapter_revision": "revision-1",
+                "voice_profile_id": "saved-mira-profile", "voice_override": "Mira Studio",
+            }]
+            plan["characters"].append({
+                "canonical_name": "Kousuke Takioto", "identity_base_name": "Kousuke Takioto",
+                "identity_variant": "", "aliases": [], "aliases_to_add": [],
+                "notes": "Source-supported simultaneous speaker.", "library_id": "",
+                "existing_voice_name": "", "action": "create", "series": "Silver Archive",
+            })
+            plan["assignments"][0].update({
+                "speaker": "Mira", "speakers": ["Mira", "Kousuke Takioto"],
+                "multi_speaker_mode": "chorus", "preserve_existing_manual": True,
+                "manual_speakers": ["Mira"], "manual_saved_speakers": ["Mira"],
+                "outsourced_speakers": ["Kousuke Takioto"], "visual_source": "outsourced",
+            })
+            plan["summary"].update({"new_characters": 2, "dialogue_assignments": 1})
+            bridge._character_workbook_import_sessions["preview-token"]["plan_sha256"] = (
+                character_workbook_plan_fingerprint(plan)
+            )
+            library = folder / "character-library.json"
+            library.write_text(json.dumps({"version": 1, "active": [], "deleted": []}), encoding="utf-8")
+
+            def save_project():
+                (folder / "project.json").write_text("project saved", encoding="utf-8")
+                (folder / "chapters.json").write_text(json.dumps(chapter.dialogue_assignments), encoding="utf-8")
+
+            project.save = Mock(side_effect=save_project)
+
+            def save_project_state(project_folder, payload):
+                (Path(project_folder) / "state.json").write_text(
+                    json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8"
+                )
+
+            with (
+                patch.object(host, "reusable_character_library_path", return_value=library),
+                patch.object(host, "read_character_workbook", return_value=document),
+                patch.object(host, "save_state", side_effect=save_project_state),
+            ):
+                result = bridge._character_workbook_import_commit({"token": "preview-token"})
+
+            self.assertTrue(result["imported"])
+            self.assertEqual(len(chapter.dialogue_assignments), 1)
+            saved = chapter.dialogue_assignments[0]
+            self.assertEqual(saved["speakers"], ["Mira", "Kousuke Takioto"])
+            self.assertEqual(saved["source"], "manual")
+            self.assertEqual(saved["manual_speakers"], ["Mira"])
+            self.assertEqual(saved["outsourced_speakers"], ["Kousuke Takioto"])
+            self.assertEqual(saved["visual_source"], "outsourced")
+            self.assertEqual(saved["multi_speaker_mode"], "chorus")
+            self.assertEqual(saved["voice_profile_id"], "saved-mira-profile")
+            self.assertEqual(saved["voice_override"], "Mira Studio")
+            self.assertEqual(saved["passage_id"], "passage-001")
+            self.assertEqual(saved["chapter_revision"], "revision-1")
+
     def test_partial_commit_imports_safe_entries_and_reports_skipped_issues(self):
         with tempfile.TemporaryDirectory(prefix="ryu-workbook-partial-commit-") as tmp:
             folder = Path(tmp)

@@ -6844,12 +6844,42 @@ class PremiumV2Bridge(QObject):
                                 )
                             ]
                         assignments_by_chapter[chapter_id] = existing_assignments
-                    base = {"start": start, "end": end, "text": exact, "source": "outsourced"}
                     imported_speakers = imported_row.get("speakers") or [str(imported_row["speaker"])]
                     imported_mode = str(imported_row.get("multi_speaker_mode") or ("chorus" if len(imported_speakers) > 1 else "single"))
+                    existing_rows = assignments_by_chapter[chapter_id]
+                    preserve_manual = bool(imported_row.get("preserve_existing_manual"))
+                    exact_existing = None
+                    required_saved = []
+                    if preserve_manual:
+                        exact_rows = [
+                            row for row in existing_rows
+                            if isinstance(row, dict)
+                            and int(row.get("start", -1)) == start
+                            and int(row.get("end", -1)) == end
+                        ]
+                        if len(exact_rows) != 1:
+                            raise ValueError("The manual speaker assignment changed before import. No changes were retained.")
+                        exact_existing = dict(exact_rows[0])
+                        if str(exact_existing.get("source") or "manual").strip().casefold() != "manual":
+                            raise ValueError("The saved speaker assignment is no longer a manual record. No changes were retained.")
+                        existing_speakers = exact_existing.get("speakers")
+                        if not isinstance(existing_speakers, (list, tuple)):
+                            existing_speakers = [exact_existing.get("speaker")] if exact_existing.get("speaker") else []
+                        existing_keys = {str(name).strip().casefold() for name in existing_speakers if str(name or "").strip()}
+                        required_saved = [
+                            str(name).strip()
+                            for name in (imported_row.get("manual_saved_speakers") or [])
+                            if str(name or "").strip()
+                        ]
+                        if not required_saved or any(name.casefold() not in existing_keys for name in required_saved):
+                            raise ValueError("The imported speaker set no longer contains every saved manual speaker. No changes were retained.")
+                        base = dict(exact_existing)
+                        base.update({"start": start, "end": end, "text": exact, "source": "manual"})
+                    else:
+                        base = {"start": start, "end": end, "text": exact, "source": "outsourced"}
                     normalized = normalize_assignment(base, [str(name) for name in imported_speakers], imported_mode)
                     normalized.update({
-                        "source": "outsourced", "confidence": float(imported_row["confidence"]),
+                        "source": "manual" if preserve_manual else "outsourced", "confidence": float(imported_row["confidence"]),
                         "series": series,
                         **{
                             key: imported_row[key]
@@ -6863,6 +6893,12 @@ class PremiumV2Bridge(QObject):
                             if key in imported_row and not (chapter_corrections and key in {"passage_id", "chapter_revision"})
                         },
                     })
+                    if preserve_manual:
+                        normalized["manual_speakers"] = list(
+                            exact_existing.get("manual_speakers") or imported_row.get("manual_speakers") or required_saved
+                        )
+                        normalized["outsourced_speakers"] = list(imported_row.get("outsourced_speakers") or [])
+                        normalized["visual_source"] = "outsourced"
                     if any(str(name).strip().casefold() == "third person" for name in imported_speakers):
                         normalized["third_person_pending"] = True
                         normalized["speaker_identity_status"] = "needs_user_identification"
