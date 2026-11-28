@@ -110,7 +110,11 @@ class CharacterStudioButtonWiringTests(unittest.TestCase):
         ):
             self.assertIn("call('" + command + "'", block)
         self.assertIn("showCharacterRecoveryError(error)", block)
-        self.assertIn("feedback.textContent = reason", block)
+        error_start = self.adapter.index("function showCharacterRecoveryError(error)")
+        error_end = self.adapter.index("function ensureCharacterRecoveryButton()", error_start)
+        error_helper = self.adapter[error_start:error_end]
+        self.assertIn("feedback.textContent = reason", error_helper)
+        self.assertIn("feedback.style.display = 'block'", error_helper)
         for command, handler in {
             "character_library.deleted.list": "_character_library_deleted_list",
             "character_library.restore": "_character_library_restore",
@@ -126,13 +130,17 @@ class CharacterStudioButtonWiringTests(unittest.TestCase):
         end = self.adapter.index("async function exportSelectedCharacterWorkbook()", start)
         block = self.adapter[start:end]
         for selector in (
-            "[data-workbook-dialog-close]",
             "[data-workbook-import-partial]",
             "[data-workbook-review-confirm-speakers]",
             "[data-workbook-review-assign]",
             "[data-workbook-review-retry]",
         ):
             self.assertIn(selector, block)
+        dialog_start = self.adapter.index("function openCharacterWorkbookDialog(")
+        dialog_end = self.adapter.index("function showCharacterWorkbookMessageDialog(", dialog_start)
+        shared_dialog = self.adapter[dialog_start:dialog_end]
+        self.assertIn("[data-workbook-dialog-close]", shared_dialog)
+        self.assertIn("closeCharacterWorkbookDialog()", shared_dialog)
         self.assertIn("call('character.workbook.import.commit'", block)
         self.assertIn("allow_partial:true", block)
         self.assertIn("call('chapter.dialogue.assign'", block)
