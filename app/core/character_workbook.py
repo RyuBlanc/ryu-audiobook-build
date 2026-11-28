@@ -1424,7 +1424,7 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
         and _clean(info.get("Export Scope")) == "complete_book"
     )
     # Character Register edits alone are never proof that GPT reviewed dialogue.
-    has_gpt_dialogue_output = any(
+    has_gpt_dialogue_output = bool(document.get("_book_has_gpt_dialogue_output")) or any(
         _clean(row.get("GPT Assigned Character"))
         or _clean(row.get("GPT Assigned Characters (JSON)"))
         or _clean(row.get("GPT Confidence (0–1)"))
@@ -2658,6 +2658,20 @@ def plan_complete_book_character_workbook_import(
             raise ValueError("A Dialogue Split Corrections row references an unknown chapter.")
         split_rows_by_chapter[chapter_id].append(row)
 
+    # Compute workbook coverage once before chapter scoping. A GPT response in
+    # Chapter 4 must be visible to Chapter 1 when the app decides whether other
+    # exact-mapped rows are intentional unidentified-speaker fallbacks.
+    book_has_gpt_dialogue_output = any(
+        _clean(row.get("GPT Assigned Character"))
+        or _clean(row.get("GPT Assigned Characters (JSON)"))
+        or _clean(row.get("GPT Confidence (0–1)"))
+        or (
+            "actual live dialogue" in _clean(row.get("Evidence / Notes (GPT)")).casefold()
+            and "routed to third person fallback" in _clean(row.get("Evidence / Notes (GPT)")).casefold()
+        )
+        for row in (document.get("dialogue_rows") or [])
+        if isinstance(row, dict) and _clean(row.get("Passage Type")).casefold() == "dialogue"
+    ) or bool(document.get("dialogue_split_corrections"))
     chapter_plans, issues = [], []
     superseded_assignments = []
     passage_rebases = []
@@ -2697,6 +2711,7 @@ def plan_complete_book_character_workbook_import(
             "dialogue_rows": rows_by_chapter[chapter_id],
             "dialogue_split_corrections": split_rows_by_chapter[chapter_id],
             "_active_chapter_text": active_text,
+            "_book_has_gpt_dialogue_output": book_has_gpt_dialogue_output,
         })
         plan = plan_character_workbook_import(
             chapter_document,
