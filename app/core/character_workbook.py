@@ -1678,7 +1678,10 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
                 exact_current = False
             if exact_current:
                 return current, ""
-            return None, "has a current Passage ID but its source text or offsets do not match"
+            # Passage IDs may be reused by a refreshed classifier. Do not trust
+            # that ID when its current row points at another source span; continue
+            # to the exact chapter/text/offset lookup below and rebase only if it
+            # identifies one unique current passage.
 
         candidates = current_by_span_text.get((start_ref, end_ref, source_text), [])
         candidates = [
@@ -1693,6 +1696,8 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             return current, "rebased"
         if len(candidates) > 1:
             return None, "matches more than one current passage at the same source offsets; automatic rebasing is ambiguous"
+        if current is not None:
+            return None, "has a current Passage ID for a different source span and no unique exact source-text/offset match exists"
         return None, "no current passage has the same exact source text and offsets"
 
     seen_source_ids = set()
