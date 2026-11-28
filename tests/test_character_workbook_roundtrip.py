@@ -2524,6 +2524,14 @@ class CharacterWorkbookRoundTripTests(unittest.TestCase):
             self.assertTrue(plan["partial_ready"])
             self.assertIn("p1-dialogue", [row["passage_id"] for row in plan["assignments"]])
             self.assertNotIn("p2-dialogue", [row["passage_id"] for row in plan["assignments"]])
+            self.assertTrue(any(
+                "does not match the active chapter's exact source text at its recorded offsets" in issue
+                for issue in plan["issues"]
+            ))
+            self.assertNotIn(
+                ("p2-dialogue", "p2-dialogue"),
+                [(row["workbook_passage_id"], row["current_passage_id"]) for row in plan["passage_mappings"]],
+            )
             self.assertEqual(plan["summary"]["dialogue_assignments"], 1)
 
 if __name__ == "__main__":

@@ -1949,7 +1949,10 @@ def plan_character_workbook_import(document, *, series, registry_rows, project_c
             issues.append("The workbook contains an invalid dialogue row.")
             continue
         source_pid = _clean(row.get("Passage ID"))
-        pid = workbook_source_to_current.get(source_pid, source_pid if source_pid in by_id else "")
+        # Do not fall back to Passage ID alone. A row may carry a current-looking
+        # ID while failing its exact chapter/revision/offset/source-text match.
+        # Only rows admitted by resolve_workbook_passage() may create assignments.
+        pid = workbook_source_to_current.get(source_pid, "")
         if not pid:
             # The mapping failure is recorded during the preflight pass above.
             continue
